@@ -1,0 +1,188 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "enterprise-data-lake"
+version = "0.1.0"
+description = "Enterprise Data Lake Extraction Platform — metadata-driven, connector-based ingestion"
+readme = "README.md"
+requires-python = ">=3.14"
+license = { text = "Proprietary" }
+dependencies = [
+    "pydantic>=2.7,<3.0",
+    "boto3>=1.34,<2.0",
+    "botocore>=1.34,<2.0",
+    "structlog>=24.4,<26.0",
+    "python-dateutil>=2.9,<3.0",
+    "requests>=2.32,<3.0",
+    "pyarrow>=16.0,<19.0",
+    "pymysql>=1.1,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-cov>=5.0",
+    "pytest-mock>=3.14",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "bandit[toml]>=1.7",
+    "pip-audit>=2.7",
+    "moto[s3,dynamodb,sqs,secretsmanager,stepfunctions,glue]>=5.0",
+    "boto3-stubs[s3,dynamodb,secretsmanager,cloudwatch,xray,sns,stepfunctions,glue]>=1.34",
+    "requests-mock>=1.12",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "contracts",
+    "connector_runtime",
+    "schema_management",
+    "watermark_management",
+    "observability",
+    "orchestration",
+    "transformation",
+    "entity_resolution",
+    "governance",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff — linting + formatting
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming (enforces class/method naming conventions)
+    "S",    # flake8-bandit security rules
+    "B",    # flake8-bugbear
+    "C90",  # mccabe complexity
+    "UP",   # pyupgrade (modern Python idioms)
+    "ANN",  # flake8-annotations (enforce type hints)
+    "T20",  # no print statements in production code
+    "RUF",  # ruff-specific rules
+]
+ignore = ["ANN401"]  # Any is legitimately needed for boto3 clients, pyarrow tables, and dynamic record dicts
+
+[tool.ruff.lint.per-file-ignores]
+"*/tests/*" = ["S101", "ANN", "T20", "S608"]  # assert, annotations, print, and SQL-in-test-fixture allowed in tests
+"scripts/*" = ["T20", "ANN", "S603", "S607"]  # CLI scripts: print, annotations, subprocess allowed
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "contracts",
+    "connector_runtime",
+    "schema_management",
+    "watermark_management",
+    "observability",
+    "orchestration",
+    "transformation",
+    "entity_resolution",
+    "governance",
+]
+
+# ---------------------------------------------------------------------------
+# Mypy — static type checking (strict mode)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.14"
+strict = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+no_implicit_reexport = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["moto.*", "boto3.*", "botocore.*", "pyarrow.*", "pymysql.*", "requests_mock.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["mypy_boto3_scheduler.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Test files use **dict unpacking patterns (e.g. Model(**self._base())) that
+# mypy cannot statically verify without full generic inference of dict values.
+# Disabling arg-type in tests avoids false positives without compromising
+# production type coverage.
+module = [
+    "*.tests.*",
+    "connector_runtime.tests.*",
+    "connector_runtime.tests.salesforce.*",
+    "connector_runtime.tests.netsuite.*",
+    "connector_runtime.tests.mysql_rds.*",
+    "contracts.tests.*",
+    "observability.tests.*",
+    "schema_management.tests.*",
+    "watermark_management.tests.*",
+    "orchestration.tests.*",
+    "transformation.tests.*",
+    "entity_resolution.tests.*",
+    "governance.tests.*",
+]
+disallow_untyped_defs = false
+check_untyped_defs = false
+warn_return_any = false
+disable_error_code = ["arg-type", "attr-defined", "type-arg", "unused-ignore", "no-untyped-call"]
+
+# ---------------------------------------------------------------------------
+# Bandit — security SAST
+# ---------------------------------------------------------------------------
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "dist"]
+# No skips: all checks are active. Suppressions require inline # nosec with justification.
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = [
+    "connector_runtime/tests",
+    "connector_runtime/tests/salesforce",
+    "connector_runtime/tests/netsuite",
+    "connector_runtime/tests/mysql_rds",
+    "schema_management/tests",
+    "watermark_management/tests",
+    "observability/tests",
+    "contracts/tests",
+    "orchestration/tests",
+    "transformation/tests",
+    "entity_resolution/tests",
+    "governance/tests",
+]
+addopts = "--cov --cov-report=term-missing --cov-fail-under=80 -v"
+
+[tool.coverage.run]
+branch = true
+source = [
+    "connector_runtime",
+    "schema_management",
+    "watermark_management",
+    "observability",
+    "contracts",
+    "orchestration",
+    "transformation",
+    "entity_resolution",
+    "governance",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@abc.abstractmethod",
+    "\\.\\.\\.",
+]

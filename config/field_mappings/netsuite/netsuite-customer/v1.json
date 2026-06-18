@@ -1,0 +1,121 @@
+{
+  "source_id": "netsuite",
+  "entity_id": "netsuite-customer",
+  "mapping_version": "v1",
+  "rules": [
+    {
+      "source_fields": ["internalid"],
+      "canonical_field": "customer_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["entityid"],
+      "canonical_field": "entity_ref",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["companyname"],
+      "canonical_field": "company_name",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["firstname", "lastname"],
+      "canonical_field": "full_name",
+      "transformation": "concat",
+      "transformation_params": { "separator": " " },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["firstname"],
+      "canonical_field": "first_name",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["lastname"],
+      "canonical_field": "last_name",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["email"],
+      "canonical_field": "email_address",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["phone"],
+      "canonical_field": "phone_number",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["subsidiary"],
+      "canonical_field": "subsidiary",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["currency"],
+      "canonical_field": "currency_code",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["creditlimit"],
+      "canonical_field": "credit_limit",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["balance"],
+      "canonical_field": "outstanding_balance",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["isactive"],
+      "canonical_field": "is_active",
+      "transformation": "cast",
+      "transformation_params": { "type": "boolean" },
+      "missing_field_behavior": "use_default",
+      "default_value": "true"
+    },
+    {
+      "source_fields": ["datecreated"],
+      "canonical_field": "created_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%d",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["lastmodifieddate"],
+      "canonical_field": "last_modified_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%S%z",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    }
+  ]
+}

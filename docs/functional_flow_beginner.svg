@@ -1,0 +1,180 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 1980" font-family="Segoe UI, Arial, sans-serif">
+
+  <!-- Background -->
+  <rect width="960" height="1980" fill="#f8f9fb"/>
+
+  <!-- Title -->
+  <text x="480" y="38" text-anchor="middle" font-size="22" font-weight="bold" fill="#1a1a2e">How the Data Lake Works</text>
+  <text x="480" y="60" text-anchor="middle" font-size="13" fill="#6b7280">A beginner-friendly step-by-step walkthrough</text>
+
+  <!-- BIG IDEA -->
+  <rect x="60" y="78" width="840" height="88" rx="14" fill="#1e293b"/>
+  <text x="480" y="106" text-anchor="middle" font-size="14" font-weight="bold" fill="#f1f5f9">The Big Idea</text>
+  <text x="480" y="126" text-anchor="middle" font-size="12" fill="#94a3b8">Your company has data in Salesforce, NetSuite and MySQL. This platform automatically</text>
+  <text x="480" y="144" text-anchor="middle" font-size="12" fill="#94a3b8">copies it into AWS every night, cleans it up, and makes it ready for reports and ML.</text>
+
+  <line x1="480" y1="166" x2="480" y2="191" stroke="#94a3b8" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- STEP 1 y=196 h=178 -->
+  <rect x="60" y="196" width="840" height="178" rx="14" fill="#fff7ed" stroke="#fb923c" stroke-width="2"/>
+  <circle cx="100" cy="285" r="24" fill="#fb923c"/>
+  <text x="100" y="291" text-anchor="middle" font-size="15" font-weight="bold" fill="white">1</text>
+  <text x="135" y="224" font-size="14" font-weight="bold" fill="#c2410c">Schedule Trigger — Every Night at 2 AM</text>
+  <text x="135" y="246" font-size="11.5" fill="#7c3541">AWS EventBridge Scheduler fires a cron job for each entity</text>
+  <text x="135" y="263" font-size="11.5" fill="#7c3541">(like a digital alarm clock). It tells Step Functions:</text>
+  <text x="135" y="280" font-size="11.5" fill="#7c3541">"Time to extract Salesforce Accounts!"</text>
+  <text x="135" y="301" font-size="10.5" fill="#9a4826">Code: orchestration/event_bridge/</text>
+  <text x="135" y="317" font-size="10.5" fill="#9a4826">Config: infrastructure/modules/orchestration/</text>
+  <text x="135" y="333" font-size="10.5" fill="#9a4826">Run: trigger_extraction.py --create-schedule</text>
+  <rect x="592" y="213" width="278" height="118" rx="8" fill="#ffedd5" stroke="#fb923c" stroke-width="1.2"/>
+  <text x="731" y="235" text-anchor="middle" font-size="11" font-weight="bold" fill="#c2410c">One Schedule Per Entity</text>
+  <text x="731" y="254" text-anchor="middle" font-size="10" fill="#7c3541">salesforce-account  02:00 UTC</text>
+  <text x="731" y="271" text-anchor="middle" font-size="10" fill="#7c3541">salesforce-contact  02:15 UTC</text>
+  <text x="731" y="288" text-anchor="middle" font-size="10" fill="#7c3541">netsuite-customer   03:00 UTC</text>
+  <text x="731" y="305" text-anchor="middle" font-size="10" fill="#7c3541">mysql-rds-orders    04:00 UTC</text>
+
+  <line x1="480" y1="374" x2="480" y2="399" stroke="#94a3b8" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- STEP 2 y=404 h=172 -->
+  <rect x="60" y="404" width="840" height="172" rx="14" fill="#fefce8" stroke="#eab308" stroke-width="2"/>
+  <circle cx="100" cy="490" r="24" fill="#eab308"/>
+  <text x="100" y="496" text-anchor="middle" font-size="15" font-weight="bold" fill="white">2</text>
+  <text x="135" y="432" font-size="14" font-weight="bold" fill="#92400e">Step Functions — The Workflow Manager</text>
+  <text x="135" y="454" font-size="11.5" fill="#78350f">AWS Step Functions acts like a project manager.</text>
+  <text x="135" y="471" font-size="11.5" fill="#78350f">It calls the extraction Lambda, watches the result,</text>
+  <text x="135" y="488" font-size="11.5" fill="#78350f">and retries automatically if it fails.</text>
+  <text x="135" y="509" font-size="10.5" fill="#92400e">Code: orchestration/step_functions/</text>
+  <text x="135" y="525" font-size="10.5" fill="#92400e">      extraction_workflow.py</text>
+  <text x="135" y="541" font-size="10.5" fill="#92400e">Config: infrastructure/modules/orchestration/</text>
+  <rect x="592" y="421" width="278" height="122" rx="8" fill="#fef9c3" stroke="#eab308" stroke-width="1.2"/>
+  <text x="731" y="443" text-anchor="middle" font-size="11" font-weight="bold" fill="#92400e">Retry Logic Built-In</text>
+  <text x="731" y="463" text-anchor="middle" font-size="10" fill="#78350f">1st failure: wait 30 sec, retry</text>
+  <text x="731" y="480" text-anchor="middle" font-size="10" fill="#78350f">2nd failure: wait 2 min, retry</text>
+  <text x="731" y="497" text-anchor="middle" font-size="10" fill="#78350f">3rd failure: Dead-Letter Queue</text>
+  <text x="731" y="514" text-anchor="middle" font-size="10" fill="#78350f">            + alert ops team</text>
+
+  <line x1="480" y1="576" x2="480" y2="601" stroke="#94a3b8" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- STEP 3 y=606 h=168 -->
+  <rect x="60" y="606" width="840" height="168" rx="14" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <circle cx="100" cy="690" r="24" fill="#22c55e"/>
+  <text x="100" y="696" text-anchor="middle" font-size="15" font-weight="bold" fill="white">3</text>
+  <text x="135" y="634" font-size="14" font-weight="bold" fill="#15803d">Load Configuration — What to Extract?</text>
+  <text x="135" y="656" font-size="11.5" fill="#14532d">Lambda reads the entity config from DynamoDB.</text>
+  <text x="135" y="673" font-size="11.5" fill="#14532d">This tells the extractor: load type, which field</text>
+  <text x="135" y="690" font-size="11.5" fill="#14532d">to use as timestamp, and output format (Parquet).</text>
+  <text x="135" y="711" font-size="10.5" fill="#166534">Code: connector_runtime/configuration_repository/</text>
+  <text x="135" y="727" font-size="10.5" fill="#166534">      configuration_repository.py</text>
+  <text x="135" y="743" font-size="10.5" fill="#166534">Setup: seed_entity_config.py --environment dev</text>
+  <rect x="592" y="623" width="278" height="118" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.2"/>
+  <text x="731" y="645" text-anchor="middle" font-size="11" font-weight="bold" fill="#15803d">Entity Config Fields</text>
+  <text x="731" y="664" text-anchor="middle" font-size="10" fill="#14532d">load_type: incremental</text>
+  <text x="731" y="681" text-anchor="middle" font-size="10" fill="#14532d">watermark_field: SystemModstamp</text>
+  <text x="731" y="698" text-anchor="middle" font-size="10" fill="#14532d">extraction_window_days: 1</text>
+  <text x="731" y="715" text-anchor="middle" font-size="10" fill="#14532d">exclude_fields: [IsDeleted]</text>
+
+  <line x1="480" y1="774" x2="480" y2="799" stroke="#94a3b8" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- STEP 4 y=804 h=186 -->
+  <rect x="60" y="804" width="840" height="186" rx="14" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <circle cx="100" cy="897" r="24" fill="#3b82f6"/>
+  <text x="100" y="903" text-anchor="middle" font-size="15" font-weight="bold" fill="white">4</text>
+  <text x="135" y="832" font-size="14" font-weight="bold" fill="#1d4ed8">Watermark Check — Where Did We Last Stop?</text>
+  <text x="135" y="854" font-size="11.5" fill="#1e3a8a">Lambda reads the watermark from DynamoDB — a</text>
+  <text x="135" y="871" font-size="11.5" fill="#1e3a8a">timestamp bookmark of the last successful run.</text>
+  <text x="135" y="888" font-size="11.5" fill="#1e3a8a">Only records changed AFTER that time are pulled.</text>
+  <text x="135" y="909" font-size="10.5" fill="#1d4ed8">Code: watermark_management/watermark_repository/</text>
+  <text x="135" y="925" font-size="10.5" fill="#1d4ed8">      watermark_repository.py</text>
+  <text x="135" y="945" font-size="10.5" fill="#1d4ed8" font-style="italic">Note: Full-load entities re-extract all records each</text>
+  <text x="135" y="961" font-size="10.5" fill="#1d4ed8" font-style="italic">run and do not use a watermark.</text>
+  <rect x="592" y="821" width="278" height="122" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="731" y="843" text-anchor="middle" font-size="11" font-weight="bold" fill="#1d4ed8">Example Watermark</text>
+  <text x="731" y="863" text-anchor="middle" font-size="10" fill="#1e3a8a">last run: 2026-06-14 02:00 UTC</text>
+  <text x="731" y="880" text-anchor="middle" font-size="10" fill="#1e3a8a">this run: 2026-06-15 02:00 UTC</text>
+  <text x="731" y="897" text-anchor="middle" font-size="10" fill="#1e3a8a">extract records changed in window</text>
+  <text x="731" y="914" text-anchor="middle" font-size="10" fill="#1e3a8a">+ 1 hr overlap for late arrivals</text>
+
+  <line x1="480" y1="990" x2="480" y2="1015" stroke="#94a3b8" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- STEP 5 y=1020 h=196 -->
+  <rect x="60" y="1020" width="840" height="196" rx="14" fill="#fdf4ff" stroke="#a855f7" stroke-width="2"/>
+  <circle cx="100" cy="1118" r="24" fill="#a855f7"/>
+  <text x="100" y="1124" text-anchor="middle" font-size="15" font-weight="bold" fill="white">5</text>
+  <text x="135" y="1048" font-size="14" font-weight="bold" fill="#7e22ce">Data Extraction — Pull Records from Source</text>
+  <text x="135" y="1070" font-size="11.5" fill="#581c87">The correct adapter (Salesforce / NetSuite / MySQL)</text>
+  <text x="135" y="1087" font-size="11.5" fill="#581c87">connects to the source, builds a query for the</text>
+  <text x="135" y="1104" font-size="11.5" fill="#581c87">watermark window, and streams records in batches.</text>
+  <text x="135" y="1121" font-size="11.5" fill="#581c87">Credentials are fetched live from Secrets Manager.</text>
+  <text x="135" y="1142" font-size="10.5" fill="#7e22ce">Code: connector_runtime/adapters/</text>
+  <text x="135" y="1158" font-size="10.5" fill="#7e22ce">      (salesforce / netsuite / mysql_rds)</text>
+  <text x="135" y="1174" font-size="10.5" fill="#7e22ce">Creds: aws secretsmanager put-secret-value</text>
+  <text x="135" y="1190" font-size="10.5" fill="#7e22ce">       --secret-id dev/sources/salesforce/credentials</text>
+  <rect x="592" y="1037" width="278" height="132" rx="8" fill="#f3e8ff" stroke="#a855f7" stroke-width="1.2"/>
+  <text x="731" y="1059" text-anchor="middle" font-size="11" font-weight="bold" fill="#7e22ce">Streaming (Memory-Safe)</text>
+  <text x="731" y="1079" text-anchor="middle" font-size="10" fill="#581c87">Records flow in pages of 2 000</text>
+  <text x="731" y="1096" text-anchor="middle" font-size="10" fill="#581c87">Each page converted to Parquet</text>
+  <text x="731" y="1113" text-anchor="middle" font-size="10" fill="#581c87">Parquet buffer written to S3 raw</text>
+  <text x="731" y="1130" text-anchor="middle" font-size="10" fill="#581c87">Never loads all records in RAM</text>
+  <text x="731" y="1147" text-anchor="middle" font-size="10" fill="#581c87">Handles millions of records safely</text>
+
+  <line x1="480" y1="1216" x2="480" y2="1241" stroke="#94a3b8" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- STEP 6 y=1246 h=140 -->
+  <rect x="60" y="1246" width="840" height="140" rx="14" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <circle cx="100" cy="1316" r="24" fill="#16a34a"/>
+  <text x="100" y="1322" text-anchor="middle" font-size="15" font-weight="bold" fill="white">6</text>
+  <text x="135" y="1274" font-size="14" font-weight="bold" fill="#15803d">Raw Layer — Preserve the Original Data</text>
+  <text x="135" y="1296" font-size="11.5" fill="#14532d">Parquet files land in S3 Raw at a date-partitioned path. This is the</text>
+  <text x="135" y="1313" font-size="11.5" fill="#14532d">"vault" — WORM-locked 30 days, exact bytes from source preserved.</text>
+  <text x="135" y="1334" font-size="10.5" fill="#166534">Code: connector_runtime/adapters/salesforce/salesforce_raw_layer_writer.py</text>
+  <text x="135" y="1350" font-size="10.5" fill="#166534">S3: s3://dev-edl-raw/salesforce/salesforce-account/2026/06/15/run-xxx.parquet</text>
+
+  <line x1="480" y1="1386" x2="480" y2="1411" stroke="#94a3b8" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- STEP 7 y=1416 h=162 -->
+  <rect x="60" y="1416" width="840" height="162" rx="14" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+  <circle cx="100" cy="1497" r="24" fill="#f97316"/>
+  <text x="100" y="1503" text-anchor="middle" font-size="15" font-weight="bold" fill="white">7</text>
+  <text x="135" y="1444" font-size="14" font-weight="bold" fill="#c2410c">Schema Drift Check — Did the Source Change?</text>
+  <text x="135" y="1466" font-size="11.5" fill="#7c3541">The platform snapshots the field structure (schema) and compares it to</text>
+  <text x="135" y="1483" font-size="11.5" fill="#7c3541">the previous run. If a field was REMOVED or its TYPE changed, that is</text>
+  <text x="135" y="1500" font-size="11.5" fill="#7c3541">BREAKING drift — transformation pauses and ops is alerted.</text>
+  <text x="135" y="1521" font-size="10.5" fill="#c2410c">Code: schema_management/drift_evaluation/drift_evaluator.py</text>
+  <text x="135" y="1537" font-size="10.5" fill="#c2410c">Types: NO_DRIFT  NON_BREAKING (new field)  POTENTIALLY_BREAKING (precision)</text>
+  <text x="135" y="1553" font-size="10.5" fill="#c2410c">       BREAKING (field removed or type changed)</text>
+
+  <line x1="480" y1="1578" x2="480" y2="1603" stroke="#94a3b8" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- STEP 8 y=1608 h=180 -->
+  <rect x="60" y="1608" width="840" height="180" rx="14" fill="#fdf4ff" stroke="#7c3aed" stroke-width="2"/>
+  <circle cx="100" cy="1698" r="24" fill="#7c3aed"/>
+  <text x="100" y="1704" text-anchor="middle" font-size="15" font-weight="bold" fill="white">8</text>
+  <text x="135" y="1636" font-size="14" font-weight="bold" fill="#5b21b6">Transformation — Clean, Rename, Validate</text>
+  <text x="135" y="1658" font-size="11.5" fill="#3b0764">Reads raw Parquet, applies field mapping rules (e.g. rename</text>
+  <text x="135" y="1675" font-size="11.5" fill="#3b0764">"Account_Name__c" to "account_name"), runs quality checks</text>
+  <text x="135" y="1692" font-size="11.5" fill="#3b0764">(nulls, ranges, regex), masks PII fields, then writes canonical</text>
+  <text x="135" y="1709" font-size="11.5" fill="#3b0764">Parquet to the Curated Layer (clean, analysis-ready data).</text>
+  <text x="135" y="1730" font-size="10.5" fill="#5b21b6">Code: transformation/transformation_pipeline.py</text>
+  <text x="135" y="1746" font-size="10.5" fill="#5b21b6">      transformation/field_mapping/</text>
+  <text x="135" y="1762" font-size="10.5" fill="#5b21b6">Mapping: s3://dev-edl-mapping-config/field-mappings/{src}/{entity}/latest.json</text>
+
+  <line x1="480" y1="1788" x2="480" y2="1813" stroke="#94a3b8" stroke-width="2" marker-end="url(#ag)"/>
+
+  <!-- STEP 9 y=1818 h=162 -->
+  <rect x="60" y="1818" width="840" height="162" rx="14" fill="#fff1f2" stroke="#f43f5e" stroke-width="2"/>
+  <circle cx="100" cy="1889" r="24" fill="#f43f5e"/>
+  <text x="100" y="1895" text-anchor="middle" font-size="15" font-weight="bold" fill="white">9</text>
+  <text x="135" y="1846" font-size="14" font-weight="bold" fill="#be123c">Serving — Ready for Business Use</text>
+  <text x="135" y="1868" font-size="11.5" fill="#881337">Curated Parquet is queryable via Amazon Athena (SQL on S3). Entity Resolution</text>
+  <text x="135" y="1885" font-size="11.5" fill="#881337">matches company and person records across sources into golden records using</text>
+  <text x="135" y="1902" font-size="11.5" fill="#881337">config-driven rules loaded at runtime from S3 (ResolutionConfigRegistry).</text>
+  <text x="135" y="1923" font-size="10.5" fill="#be123c">Code: entity_resolution/resolution_config/resolution_config_registry.py</text>
+  <text x="135" y="1939" font-size="10.5" fill="#be123c">      entity_resolution/canonical_record_publisher/  |  serving_store_loader.py</text>
+
+  <defs>
+    <marker id="ag" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+</svg>

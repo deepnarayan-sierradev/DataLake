@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Production Incident Runbook</title>
+  <style>
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #e2e8f0;
+  --accent: #0f766e;
+  --code-bg: #f1f5f9;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+}
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(15, 23, 42, 0.95);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
+.file { font-size: 12px; opacity: 0.9; }
+main {
+  max-width: 1100px;
+  margin: 24px auto 48px;
+  padding: 0 20px;
+}
+article {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
+}
+h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
+h1 { margin-top: 0; font-size: 2rem; }
+h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
+h3 { font-size: 1.2rem; }
+p, li { color: var(--text); line-height: 1.65; }
+ul, ol { padding-left: 1.25rem; }
+code {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre {
+  background: #0b1020;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  overflow-x: auto;
+  border: 1px solid #1e293b;
+}
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.7em 1em;
+  border-left: 4px solid var(--accent);
+  background: #f0fdfa;
+  color: var(--muted);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.95rem;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
+.toc {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  margin-bottom: 1rem;
+}
+.footer {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 14px;
+}
+@media (max-width: 760px) {
+  article { padding: 18px; border-radius: 10px; }
+  .header-inner { padding: 10px 14px; }
+  main { margin-top: 16px; padding: 0 12px; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand">Enterprise Data Lake Documentation</div>
+      <div class="file">PRODUCTION_INCIDENT_RUNBOOK.md</div>
+    </div>
+  </header>
+  <main>
+    <article>
+<h1 id="production-incident-runbook">Production Incident Runbook</h1>
+<p><strong>For:</strong> On-call engineers, operations team, support<br>
+<strong>Purpose:</strong> Quick response guide for common incidents<br>
+<strong>Last updated:</strong> 2026-06-17</p>
+<hr>
+<h2 id="quick-alert-reference">Quick Alert Reference</h2>
+<h3 id="alert-priority-matrix">Alert Priority Matrix</h3>
+<table>
+<thead>
+<tr>
+<th>Alert</th>
+<th>Severity</th>
+<th>Response time</th>
+<th>Escalate to</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Extraction Failure</strong></td>
+<td>🔴 High</td>
+<td>15 min</td>
+<td>Data platform lead</td>
+<td>Investigate source connectivity; check DynamoDB config</td>
+</tr>
+<tr>
+<td><strong>Quality Blocking Violation</strong></td>
+<td>🟡 Medium</td>
+<td>30 min</td>
+<td>Data quality team</td>
+<td>Review quality report; decide on config change</td>
+</tr>
+<tr>
+<td><strong>Schema Breaking Drift</strong></td>
+<td>🟡 Medium</td>
+<td>60 min</td>
+<td>Data governance</td>
+<td>Manual schema review; document change; approve transformation</td>
+</tr>
+<tr>
+<td><strong>Watermark Lag &gt; 26 hrs</strong></td>
+<td>🟡 Medium</td>
+<td>60 min</td>
+<td>Data platform lead</td>
+<td>Check extraction completion; manually advance if verified safe</td>
+</tr>
+<tr>
+<td><strong>DLQ Message Age &gt; 4 hrs</strong></td>
+<td>🟡 Medium</td>
+<td>30 min</td>
+<td>Platform engineer</td>
+<td>Check replay mechanism; trigger replay if safe</td>
+</tr>
+<tr>
+<td><strong>Lambda Timeout</strong></td>
+<td>🟡 Medium</td>
+<td>30 min</td>
+<td>Platform engineer</td>
+<td>Analyze performance logs; increase timeout or scale extraction</td>
+</tr>
+<tr>
+<td><strong>S3 Upload Failure</strong></td>
+<td>🔴 High</td>
+<td>5 min</td>
+<td>AWS support (if quota exceeded)</td>
+<td>Check S3 bucket permissions; verify KMS key access</td>
+</tr>
+<tr>
+<td><strong>Watermark Advancement Blocked</strong></td>
+<td>🟡 Medium</td>
+<td>15 min</td>
+<td>Database engineer</td>
+<td>Check DynamoDB write throttling; verify optimistic lock logic</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="runbooks-by-scenario">Runbooks by Scenario</h2>
+<hr>
+<h2 id="scenario-1-extraction-failure-alert">SCENARIO 1: Extraction Failure Alert</h2>
+<p><strong>Alert name:</strong> <code>ExtractionFailureAlert</code><br>
+<strong>Severity:</strong> High<br>
+<strong>Typical root cause:</strong> Source API temporarily unavailable, network connectivity issue, or auth failure</p>
+<h3 id="step-1-gather-information-2-min">Step 1: Gather Information (2 min)</h3>
+<pre><code class="language-bash"># Get the specific failure from CloudWatch Logs
+aws logs tail /aws/lambda/extraction --follow
+
+# Check the failed execution in Step Functions
+aws stepfunctions describe-execution \
+  --execution-arn &lt;ARN_from_alert&gt; \
+  --query 'output'
+
+# Examine DynamoDB config to understand what entity failed
+aws dynamodb get-item \
+  --table-name prod-entity-extraction-config \
+  --key '{&quot;source_id&quot;:{&quot;S&quot;:&quot;salesforce&quot;},&quot;entity_id&quot;:{&quot;S&quot;:&quot;salesforce-account&quot;}}'
+</code></pre>
+<h3 id="step-2-diagnosis-3-min">Step 2: Diagnosis (3 min)</h3>
+<p><strong>Check network connectivity:</strong></p>
+<pre><code class="language-bash"># Verify Lambda can reach Secrets Manager
+aws secretsmanager get-secret-value \
+  --secret-id prod/sources/salesforce/credentials \
+  --query 'SecretString' | grep instance_url
+
+# Verify Lambda can reach source API
+curl -I https://YOUR_SALESFORCE_INSTANCE.salesforce.com/services/oauth2/token
+</code></pre>
+<p><strong>Check credentials expiration:</strong></p>
+<pre><code class="language-bash"># Salesforce OAuth token expiry
+aws secretsmanager get-secret-value \
+  --secret-id prod/sources/salesforce/credentials \
+  --query 'SecretString' | jq .client_id
+
+# Has credential been rotated recently?
+aws secretsmanager describe-secret \
+  --secret-id prod/sources/salesforce/credentials \
+  --query 'RotationRules'
+</code></pre>
+<p><strong>Check source system status:</strong><br>
+- <strong>Salesforce:</strong> Check https://status.salesforce.com/ (Bulk API 2.0 or REST API down?)<br>
+- <strong>NetSuite:</strong> Check https://netsuite.status.io/ (REST API down?)<br>
+- <strong>MySQL RDS:</strong> Check AWS RDS dashboard (instance available? CPU/memory normal?)</p>
+<h3 id="step-3-resolution">Step 3: Resolution</h3>
+<p><strong>If source API is temporarily down:</strong></p>
+<pre><code>Action: Wait 15 minutes, manually trigger re-run
+aws stepfunctions start-execution \
+  --state-machine-arn &lt;STATE_MACHINE_ARN&gt; \
+  --input '{&quot;source_id&quot;:&quot;salesforce&quot;,&quot;entity_id&quot;:&quot;salesforce-account&quot;,&quot;environment&quot;:&quot;prod&quot;}'
+</code></pre>
+<p><strong>If credentials are stale/expired:</strong></p>
+<pre><code class="language-bash"># Immediately rotate the credential
+aws secretsmanager rotate-secret \
+  --secret-id prod/sources/salesforce/credentials \
+  --rotation-lambda-arn &lt;ROTATION_LAMBDA_ARN&gt; \
+  --rotation-rules AutomaticallyAfterDays=90
+
+# Manually update new OAuth token
+aws secretsmanager put-secret-value \
+  --secret-id prod/sources/salesforce/credentials \
+  --secret-string '{&quot;instance_url&quot;:&quot;...&quot;,&quot;client_id&quot;:&quot;NEW_ID&quot;,&quot;client_secret&quot;:&quot;NEW_SECRET&quot;}'
+
+# Trigger re-run
+aws stepfunctions start-execution \
+  --state-machine-arn &lt;STATE_MACHINE_ARN&gt; \
+  --input '{&quot;source_id&quot;:&quot;salesforce&quot;,&quot;entity_id&quot;:&quot;salesforce-account&quot;,&quot;environment&quot;:&quot;prod&quot;}'
+</code></pre>
+<p><strong>If network is unreachable:</strong></p>
+<pre><code>Action: Check VPC security group rules allow outbound to source
+aws ec2 describe-security-groups --group-ids &lt;LAMBDA_SG&gt; | grep -A 5 IpPermissionsEgress
+Verify: Outbound HTTPS (443) allowed to source IP/domain
+If missing: Add rule via Terraform or AWS console
+</code></pre>
+<h3 id="step-4-post-incident">Step 4: Post-Incident</h3>
+<ul>
+<li>[ ] Document root cause in incident tracker</li>
+<li>[ ] If credential issue: add calendar reminder for next rotation date</li>
+<li>[ ] If network issue: add monitoring for source connectivity</li>
+<li>[ ] Notify data team: extraction was delayed but will complete in next scheduled window</li>
+</ul>
+<hr>
+<h2 id="scenario-2-quality-blocking-violation">SCENARIO 2: Quality Blocking Violation</h2>
+<p><strong>Alert name:</strong> <code>QualityBlockingViolationAlert</code><br>
+<strong>Severity:</strong> Medium<br>
+<strong>Typical root cause:</strong> Source data changed; quality policy needs update; or bad data in source</p>
+<h3 id="step-1-gather-information-3-min">Step 1: Gather Information (3 min)</h3>
+<pre><code class="language-bash"># Get the quality report from S3
+aws s3 cp s3://prod-edl-analytics/quality_reports/salesforce-account/2026-06-17.json - | jq '.blocking_violations'
+
+# Count failed records
+jq '.summary.total_records_failed' &lt; 2026-06-17.json
+
+# What field failed?
+jq '.blocking_violations[] | {field: .field_name, check_type: .check_type, violation_count: .violation_count}' &lt; 2026-06-17.json
+</code></pre>
+<h3 id="step-2-investigation-510-min">Step 2: Investigation (5–10 min)</h3>
+<p><strong>Query the raw data to understand the issue:</strong></p>
+<pre><code class="language-sql">-- Run this in Athena against raw layer
+SELECT 
+  COUNT(*) as violation_count,
+  account_name,
+  NULL as account_name_is_null
+FROM `dev-edl-raw-layer`.`salesforce_account`
+WHERE account_name IS NULL
+  AND partition_date = '2026-06-17'
+GROUP BY account_name
+LIMIT 10;
+
+-- Or if it's a pattern violation (e.g., invalid email):
+SELECT 
+  email,
+  COUNT(*) as count
+FROM `dev-edl-raw-layer`.`salesforce_contact`
+WHERE email NOT LIKE '%@%.%'
+  AND partition_date = '2026-06-17'
+GROUP BY email
+LIMIT 10;
+</code></pre>
+<h3 id="step-3-decision-2-min">Step 3: Decision (2 min)</h3>
+<p><strong>Option A: Source data is genuinely bad (missing values, invalid formats)</strong></p>
+<pre><code>Action: Contact data owner in source system (Salesforce admin, NetSuite admin, etc.)
+Goal: Fix the source data; platform will pick it up on next run
+Example: &quot;500 Account records have null Name field (required in CRM)&quot; → Salesforce team investigates &amp; fixes
+Timeline: Wait for fix, then trigger manual re-run
+</code></pre>
+<p><strong>Option B: Quality policy is too strict</strong></p>
+<pre><code>Action: Update quality policy to match actual data
+Example: Email field had new valid format not covered by regex
+Timeline: Update S3 quality policy file, test in staging, deploy to prod
+</code></pre>
+<p><strong>Option C: This is expected data variance</strong></p>
+<pre><code>Action: Convert BLOCKING rule to WARNING (doesn't stop publication)
+Example: Order_amount NULL for cancelled orders is expected
+Timeline: Update policy, re-run transformation
+</code></pre>
+<h3 id="step-4-remediation">Step 4: Remediation</h3>
+<p><strong>Update quality policy (if Option B or C):</strong></p>
+<pre><code class="language-bash"># Download current policy
+aws s3 cp s3://prod-schema-snapshots/quality_policies/salesforce-account.json ./
+
+# Edit policy file: change blocking violation to WARNING or update regex pattern
+# Example: change email pattern from strict to permissive
+# vi salesforce-account.json
+
+# Verify syntax
+python -m json.tool salesforce-account.json
+
+# Upload updated policy
+aws s3 cp salesforce-account.json s3://prod-schema-snapshots/quality_policies/
+
+# Trigger transformation re-run with new policy
+aws lambda invoke \
+  --function-name transformation-pipeline \
+  --payload '{&quot;source_id&quot;:&quot;salesforce&quot;,&quot;entity_id&quot;:&quot;salesforce-account&quot;,&quot;environment&quot;:&quot;prod&quot;,&quot;run_id&quot;:&quot;&lt;RUN_ID&gt;&quot;}' \
+  response.json
+</code></pre>
+<h3 id="step-5-notification">Step 5: Notification</h3>
+<ul>
+<li>[ ] Document decision (which option chosen, who approved)</li>
+<li>[ ] Notify data quality team of policy change</li>
+<li>[ ] If source data issue: create ticket with data owner, set follow-up date</li>
+<li>[ ] Verify curated data published successfully on next re-run</li>
+</ul>
+<hr>
+<h2 id="scenario-3-schema-breaking-drift">SCENARIO 3: Schema Breaking Drift</h2>
+<p><strong>Alert name:</strong> <code>SchemaDriftAlert</code> (breaking severity)<br>
+<strong>Severity:</strong> Medium<br>
+<strong>Typical root cause:</strong> Source system schema changed (field removed, type changed, or made mandatory)</p>
+<h3 id="step-1-review-drift-report-2-min">Step 1: Review Drift Report (2 min)</h3>
+<pre><code class="language-bash"># Get the drift report from S3
+aws s3 cp s3://prod-schema-snapshots/drift_reports/salesforce-account/2026-06-17.json - | jq '.'
+
+# Example output:
+# {
+#   &quot;drift_classification&quot;: &quot;BREAKING&quot;,
+#   &quot;changes&quot;: [
+#     {
+#       &quot;field_name&quot;: &quot;LegacyAccountId__c&quot;,
+#       &quot;change_type&quot;: &quot;FIELD_REMOVED&quot;,
+#       &quot;previous_type&quot;: &quot;string&quot;,
+#       &quot;current_type&quot;: null
+#     }
+#   ]
+# }
+</code></pre>
+<h3 id="step-2-investigation-5-min">Step 2: Investigation (5 min)</h3>
+<p><strong>Verify the change in the source system:</strong></p>
+<pre><code class="language-bash"># For Salesforce: check field history
+# For NetSuite: check saved search for field availability
+# For MySQL: run DESCRIBE table statement
+
+# Example for MySQL:
+aws rds-data execute-statement \
+  --resource-arn &quot;arn:aws:rds:us-east-1:ACCOUNT_ID:db:prod-rds-instance&quot; \
+  --secret-arn &quot;arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:prod/sources/mysql-rds/credentials&quot; \
+  --sql &quot;DESCRIBE prod_schema.orders&quot;
+</code></pre>
+<h3 id="step-3-governance-review-515-min">Step 3: Governance Review (5–15 min)</h3>
+<p><strong>Convene data governance team:</strong></p>
+<ol>
+<li>
+<p>Is the removed/changed field critical for analytics?<br>
+   - If no: Approve transformation to proceed (ignore removed field)<br>
+   - If yes: Block transformation; require manual data reconciliation</p>
+</li>
+<li>
+<p>Update schema snapshot + field mapping to reflect change</p>
+</li>
+<li>
+<p>Document decision in audit trail</p>
+</li>
+</ol>
+<h3 id="step-4-remediation_1">Step 4: Remediation</h3>
+<p><strong>If field removal is non-critical:</strong></p>
+<pre><code class="language-bash"># Update schema snapshot to reflect new schema
+aws s3 cp s3://prod-schema-snapshots/schemas/salesforce-account/latest.json ./schema-latest.json
+
+# Update field mapping to exclude removed field
+aws s3 cp s3://prod-schema-snapshots/field_mappings/salesforce-account/v1.json ./mapping-v1.json
+# Edit: remove any reference to LegacyAccountId__c
+# Save as v2.json
+
+aws s3 cp ./mapping-v2.json s3://prod-schema-snapshots/field_mappings/salesforce-account/v2.json
+
+# Update entity config to reference new mapping version
+aws dynamodb update-item \
+  --table-name prod-entity-extraction-config \
+  --key '{&quot;source_id&quot;:{&quot;S&quot;:&quot;salesforce&quot;},&quot;entity_id&quot;:{&quot;S&quot;:&quot;salesforce-account&quot;}}' \
+  --attribute-updates '{&quot;field_mapping_version&quot;:{&quot;Value&quot;:{&quot;S&quot;:&quot;v2&quot;},&quot;Action&quot;:&quot;PUT&quot;}}'
+
+# Trigger transformation re-run
+aws lambda invoke \
+  --function-name transformation-pipeline \
+  --payload '{&quot;source_id&quot;:&quot;salesforce&quot;,&quot;entity_id&quot;:&quot;salesforce-account&quot;,&quot;environment&quot;:&quot;prod&quot;}' \
+  response.json
+</code></pre>
+<h3 id="step-5-notification_1">Step 5: Notification</h3>
+<ul>
+<li>[ ] Document schema change in data catalog / Glue</li>
+<li>[ ] Notify downstream analytics teams: "Salesforce Account field removed (non-critical); curated data updated"</li>
+<li>[ ] Schedule sync meeting with Salesforce admin to understand why field was removed (prevent future surprises)</li>
+</ul>
+<hr>
+<h2 id="scenario-4-watermark-lag-alert">SCENARIO 4: Watermark Lag Alert</h2>
+<p><strong>Alert name:</strong> <code>WatermarkLagAlert</code><br>
+<strong>Severity:</strong> Medium<br>
+<strong>Typical root cause:</strong> Extraction is running but slowly; incremental window is far behind current time</p>
+<h3 id="step-1-check-extraction-status-2-min">Step 1: Check Extraction Status (2 min)</h3>
+<pre><code class="language-bash"># Get latest extraction run for the entity
+aws dynamodb query \
+  --table-name prod-watermark-repository \
+  --key-condition-expression &quot;source_id = :source AND entity_id = :entity&quot; \
+  --expression-attribute-values '{&quot;:source&quot;:{&quot;S&quot;:&quot;salesforce&quot;},&quot;:entity&quot;:{&quot;S&quot;:&quot;salesforce-account&quot;}}' \
+  --sort-order Descending \
+  --limit 1
+
+# Example output:
+# {
+#   &quot;source_id&quot;: &quot;salesforce&quot;,
+#   &quot;entity_id&quot;: &quot;salesforce-account&quot;,
+#   &quot;last_successful_extraction_time&quot;: &quot;2026-06-16T02:00:00Z&quot;,
+#   &quot;watermark_value&quot;: &quot;2026-06-16T02:00:00Z&quot;,
+#   &quot;lag_seconds&quot;: 86400  # 24 hours
+# }
+</code></pre>
+<h3 id="step-2-diagnosis">Step 2: Diagnosis</h3>
+<p><strong>Check if extraction is still running:</strong></p>
+<pre><code class="language-bash"># Get the most recent execution
+aws stepfunctions list-executions \
+  --state-machine-arn &lt;STATE_MACHINE_ARN&gt; \
+  --status-filter RUNNING \
+  | jq '.executions[0]'
+
+# If running: check elapsed time
+# If &gt; 15 minutes: may be processing large volume
+
+# Get execution details
+aws stepfunctions describe-execution \
+  --execution-arn &lt;EXECUTION_ARN&gt; \
+  | jq '{status: .status, startDate: .startDate, stopDate: .stopDate}'
+
+# Check Lambda logs to see progress
+aws logs tail /aws/lambda/extraction --since 30m --follow
+</code></pre>
+<p><strong>If extraction failed:</strong></p>
+<pre><code class="language-bash"># Go to SCENARIO 1: Extraction Failure Alert
+</code></pre>
+<p><strong>If extraction is running but slow:</strong></p>
+<pre><code class="language-bash"># Check raw data write throughput
+aws s3api list-objects-v2 \
+  --bucket prod-raw-layer \
+  --prefix salesforce/salesforce-account/extraction_date=2026-06-17 \
+  --query 'Contents | length'
+
+# If hundreds of files: extraction is progressing (slow source API)
+# Expected time: 10–15 minutes for large entities (500k+ records)
+</code></pre>
+<h3 id="step-3-action">Step 3: Action</h3>
+<p><strong>If extraction is slow but progressing:</strong></p>
+<pre><code>Action: Wait another 30 minutes; monitor Lambda execution logs
+No action needed; this is expected for high-volume extractions
+</code></pre>
+<p><strong>If extraction is stuck (no new files created in 10 min):</strong></p>
+<pre><code class="language-bash"># Check if Lambda is hitting timeout
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/extraction \
+  --filter-pattern &quot;Task timed out&quot; \
+  --since 30m
+
+# If timeout found: increase Lambda timeout in terraform/environment/prod/main.tf
+# Lambda timeout: 15 minutes → consider 20 minutes for very large entities
+# Redeploy Lambda
+terraform apply -target=&quot;aws_lambda_function.extraction&quot; -var=&quot;extraction_timeout_sec=1200&quot;
+</code></pre>
+<hr>
+<h2 id="scenario-5-dlq-message-age-4-hours">SCENARIO 5: DLQ Message Age &gt; 4 Hours</h2>
+<p><strong>Alert name:</strong> <code>DLQMessageAgeAlert</code><br>
+<strong>Severity:</strong> Medium<br>
+<strong>Typical root cause:</strong> Failed run was queued but not manually replayed</p>
+<h3 id="step-1-check-dlq-contents-2-min">Step 1: Check DLQ Contents (2 min)</h3>
+<pre><code class="language-bash"># List messages in DLQ (SNS topic)
+aws sns list-subscriptions-by-topic \
+  --topic-arn &lt;DLQ_TOPIC_ARN&gt;
+
+# Get the message details
+aws sns receive-message \
+  --queue-url &lt;DLQ_QUEUE_URL&gt; \
+  | jq '.Messages[0]'
+
+# Example DLQ message:
+# {
+#   &quot;run_id&quot;: &quot;run-20260617-020045678-xyz&quot;,
+#   &quot;source_id&quot;: &quot;salesforce&quot;,
+#   &quot;entity_id&quot;: &quot;salesforce-account&quot;,
+#   &quot;failed_stage&quot;: &quot;EXTRACTION&quot;,
+#   &quot;error_message&quot;: &quot;Source API returned 429 (rate limit exceeded)&quot;,
+#   &quot;enqueued_at&quot;: &quot;2026-06-17T02:15:00Z&quot;
+# }
+</code></pre>
+<h3 id="step-2-decide-on-replay">Step 2: Decide on Replay</h3>
+<p><strong>Check if the issue is resolved:</strong></p>
+<pre><code class="language-bash"># If error was &quot;rate limit exceeded&quot;: Wait 1 hour, then replay
+# If error was &quot;credential invalid&quot;: Check if credential was rotated; if yes, replay
+# If error was &quot;network timeout&quot;: Check source status; if recovered, replay
+</code></pre>
+<h3 id="step-3-manual-replay">Step 3: Manual Replay</h3>
+<pre><code class="language-bash"># Use the RunReplayController to re-run the failed extraction
+aws lambda invoke \
+  --function-name run-replay-controller \
+  --payload '{
+    &quot;run_id&quot;:&quot;run-20260617-020045678-xyz&quot;,
+    &quot;source_id&quot;:&quot;salesforce&quot;,
+    &quot;entity_id&quot;:&quot;salesforce-account&quot;,
+    &quot;environment&quot;:&quot;prod&quot;
+  }' \
+  response.json
+
+# Monitor the replay
+aws logs tail /aws/lambda/extraction --since 1m --follow --filter-pattern &quot;run-20260617&quot;
+</code></pre>
+<h3 id="step-4-verification">Step 4: Verification</h3>
+<pre><code class="language-bash"># Check if replay completed successfully
+aws dynamodb query \
+  --table-name prod-run-audit-log \
+  --key-condition-expression &quot;run_id = :run_id&quot; \
+  --expression-attribute-values '{&quot;:run_id&quot;:{&quot;S&quot;:&quot;run-20260617-020045678-xyz&quot;}}' \
+  | jq '.Items[] | {stage: .stage, status: .status}'
+
+# Expected: all stages completed with status=SUCCESS
+</code></pre>
+<h3 id="step-5-documentation">Step 5: Documentation</h3>
+<ul>
+<li>[ ] Record replay in incident tracker</li>
+<li>[ ] Note root cause and resolution</li>
+<li>[ ] Alert threshold check: Is 4-hour DLQ age threshold still appropriate? Consider adjusting if frequent</li>
+</ul>
+<hr>
+<h2 id="scenario-6-lambda-out-of-memory-error">SCENARIO 6: Lambda Out-of-Memory Error</h2>
+<p><strong>Alert name:</strong> <code>LambdaOutOfMemoryAlert</code><br>
+<strong>Severity:</strong> High<br>
+<strong>Typical root cause:</strong> Entity extraction volume exceeds allocated Lambda memory</p>
+<h3 id="step-1-confirm-oom-1-min">Step 1: Confirm OOM (1 min)</h3>
+<pre><code class="language-bash"># Check Lambda logs for OOM error
+aws logs tail /aws/lambda/extraction --filter-pattern &quot;OutOfMemory&quot; --since 10m
+
+# Get Lambda memory configuration
+aws lambda get-function-configuration \
+  --function-name extraction-pipeline \
+  | jq '.MemorySize'
+
+# Typical: 512 MB (default)
+</code></pre>
+<h3 id="step-2-diagnosis_1">Step 2: Diagnosis</h3>
+<pre><code class="language-bash"># Check extraction volume for the entity that OOMed
+# Estimate: ~2 KB per record in memory (depends on field count)
+
+# If extracting 250k records: 250k × 2KB = 500 MB
+# If extracting 500k+ records: Will exceed 512 MB
+
+# Check how many records were attempted:
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/extraction \
+  --filter-pattern &quot;TotalRecordsExtracted&quot; \
+  | jq '.events[-1].message' | grep TotalRecordsExtracted
+</code></pre>
+<h3 id="step-3-resolution_1">Step 3: Resolution</h3>
+<p><strong>Option A: Increase Lambda memory</strong></p>
+<pre><code class="language-bash"># Edit Terraform
+# infrastructure/environments/prod/main.tf
+# module &quot;extraction_lambda&quot; {
+#   memory_size = 1024  # Increase from 512 to 1024 MB
+# }
+
+terraform plan -target=&quot;aws_lambda_function.extraction&quot;
+terraform apply -target=&quot;aws_lambda_function.extraction&quot;
+
+# Re-run extraction
+aws stepfunctions start-execution \
+  --state-machine-arn &lt;STATE_MACHINE_ARN&gt; \
+  --input '{&quot;source_id&quot;:&quot;salesforce&quot;,&quot;entity_id&quot;:&quot;salesforce-account&quot;,&quot;environment&quot;:&quot;prod&quot;}'
+</code></pre>
+<p><strong>Option B: Switch to ECS Fargate (for very large entities)</strong></p>
+<p>If entity exceeds 10M records/day, Lambda becomes impractical. Migrate to ECS:</p>
+<pre><code class="language-bash"># Add ECS task definition for this entity
+# Edit extraction config in DynamoDB:
+aws dynamodb update-item \
+  --table-name prod-entity-extraction-config \
+  --key '{&quot;source_id&quot;:{&quot;S&quot;:&quot;salesforce&quot;},&quot;entity_id&quot;:{&quot;S&quot;:&quot;salesforce-account&quot;}}' \
+  --attribute-updates '{&quot;compute_type&quot;:{&quot;Value&quot;:{&quot;S&quot;:&quot;ECS_FARGATE&quot;},&quot;Action&quot;:&quot;PUT&quot;}}'
+
+# Update Step Functions to route to ECS task instead of Lambda
+terraform apply -target=&quot;aws_ecs_task_definition.extraction&quot;
+</code></pre>
+<h3 id="step-4-long-term-monitoring">Step 4: Long-term Monitoring</h3>
+<ul>
+<li>[ ] Add CloudWatch alarm: "Lambda memory utilization &gt; 90%"</li>
+<li>[ ] Track record volume per entity; plan memory/compute upgrades ahead of growth</li>
+<li>[ ] For rapid-growth entities, consider scheduling migration to ECS proactively</li>
+</ul>
+<hr>
+<h2 id="scenario-7-deadletter-queue-configuration-issue">SCENARIO 7: Deadletter Queue Configuration Issue</h2>
+<p><strong>Alert name:</strong> Custom monitoring<br>
+<strong>Severity:</strong> Medium<br>
+<strong>Typical root cause:</strong> DLQ topic deleted, subscription removed, or permissions changed</p>
+<h3 id="recovery">Recovery</h3>
+<pre><code class="language-bash"># Verify DLQ topic exists
+aws sns list-topics | grep dlq
+
+# If not found: recreate from Terraform
+terraform apply -target=&quot;aws_sns_topic.pipeline_failure_dlq&quot;
+
+# Verify Step Functions can publish to DLQ
+aws sns get-topic-attributes \
+  --topic-arn &lt;DLQ_TOPIC_ARN&gt; \
+  | jq '.Attributes.Policy'
+
+# Verify email subscription is active
+aws sns list-subscriptions-by-topic \
+  --topic-arn &lt;DLQ_TOPIC_ARN&gt;
+
+# If subscription removed: re-add
+aws sns subscribe \
+  --topic-arn &lt;DLQ_TOPIC_ARN&gt; \
+  --protocol email \
+  --notification-endpoint ops-team@company.com
+</code></pre>
+<hr>
+<h2 id="escalation-matrix">Escalation Matrix</h2>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Escalate to</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Extraction failure (&gt; 3 consecutive retries)</td>
+<td>Data platform lead + AWS support</td>
+<td>After 2 hours unresolved</td>
+</tr>
+<tr>
+<td>Quality blocking violation (&gt; 50% of records)</td>
+<td>Chief Data Officer</td>
+<td>Immediate (data quality issue)</td>
+</tr>
+<tr>
+<td>Schema breaking drift</td>
+<td>Data governance + Chief Data Officer</td>
+<td>Within 1 hour</td>
+</tr>
+<tr>
+<td>Watermark lag (&gt; 48 hours)</td>
+<td>VP of Data + on-call engineer</td>
+<td>Immediate</td>
+</tr>
+<tr>
+<td>DLQ aging (&gt; 8 hours)</td>
+<td>VP of Operations</td>
+<td>Within 4 hours</td>
+</tr>
+<tr>
+<td>Network/VPC issue</td>
+<td>AWS support + infrastructure team</td>
+<td>Immediate</td>
+</tr>
+<tr>
+<td>Secrets rotation failed</td>
+<td>Security team + AWS support</td>
+<td>Immediate</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="post-incident-review-checklist">Post-Incident Review Checklist</h2>
+<p>After every production incident:</p>
+<ul>
+<li>[ ] Documented root cause in ticket system</li>
+<li>[ ] Identified contributing factors (monitoring gap, config error, source system issue)</li>
+<li>[ ] Proposed permanent fix (if applicable) or added monitoring (if detection gap)</li>
+<li>[ ] Created follow-up ticket if fix requires code change / deployment</li>
+<li>[ ] Notified all impacted teams (data team, analytics team, compliance if data quality issue)</li>
+<li>[ ] Added new runbook or updated existing if unclear</li>
+<li>[ ] Scheduled training for team on the incident resolution</li>
+<li>[ ] Updated SLOs if response time was insufficient</li>
+</ul>
+<hr>
+<p><strong>Last updated:</strong> 2026-06-17<br>
+<strong>Owner:</strong> Platform Engineering Lead<br>
+<strong>Review cycle:</strong> Monthly (or after major incident)</p>
+      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
+    </article>
+  </main>
+</body>
+</html>

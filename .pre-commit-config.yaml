@@ -1,0 +1,75 @@
+repos:
+  # ─── Python formatting and linting ─────────────────────────────────────────
+  # Pinned to full commit SHA (supply-chain hardening — OWASP A08).
+  # To update: run `pre-commit autoupdate` and replace the rev with the new
+  # tag's commit SHA obtained from the GitHub releases page.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 1dc9eb131c2ea4816c708e4d85820d2cc8542683  # v0.5.0
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        name: "ruff — lint and auto-fix"
+      - id: ruff-format
+        name: "ruff — format"
+
+  # ─── General file hygiene ───────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 2c9f875913ee60ca25ce70243dc24d5b6415598c  # v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: detect-private-key
+        name: "detect private keys — block credential leakage"
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, staging, --branch, prod]
+        name: "protect main/staging/prod branches"
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # ─── Security SAST ──────────────────────────────────────────────────────────
+  - repo: https://github.com/PyCQA/bandit
+    rev: 691f465b4bac758ea1d6dfa9b57d3881a12954fd  # 1.7.9
+    hooks:
+      - id: bandit
+        name: "bandit — Python security scan"
+        args: [-c, pyproject.toml]
+        exclude: ^.*/tests/.*$
+
+  # ─── Terraform formatting and validation ───────────────────────────────────
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: f86126395b31dd359ef9bcd8436d63feef7191d7  # v1.92.0
+    hooks:
+      - id: terraform_fmt
+        name: "terraform fmt"
+      - id: terraform_validate
+        name: "terraform validate"
+        args:
+          - --args=-no-color
+      - id: checkov
+        name: "checkov — IaC security scan"
+        args:
+          - --args=--framework=terraform
+          - --args=--compact
+          - --args=--soft-fail=false
+
+  # ─── Secrets detection ──────────────────────────────────────────────────────
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: 01886c8a910c64595c47f186ca1ffc0b77fa5458  # v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: "detect-secrets — block credential leakage"
+        args: [--baseline, .secrets.baseline]
+        exclude: >
+          (?x)^(
+            .*/tests/.*|
+            .*\.tfstate.*|
+            .*\.lock\.hcl
+          )$

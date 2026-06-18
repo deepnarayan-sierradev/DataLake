@@ -1,0 +1,27 @@
+# CODEOWNERS — Enterprise Data Lake Platform
+# Each changed path requires review from the designated owner(s).
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# ── Default owner for all files not matched below ────────────────────────────
+*                                   @your-github-org/edl-platform-team
+
+# ── Infrastructure — requires infrastructure + security review ────────────────
+infrastructure/                     @your-github-org/edl-infrastructure @your-github-org/edl-security
+
+# ── IAM — requires security team review on all changes ───────────────────────
+infrastructure/modules/iam/         @your-github-org/edl-security
+
+# ── Secrets module — security team mandatory ─────────────────────────────────
+infrastructure/modules/secrets/     @your-github-org/edl-security
+
+# ── CI/CD workflows — platform + security review ─────────────────────────────
+.github/                            @your-github-org/edl-infrastructure @your-github-org/edl-security
+
+# ── Contracts — any change requires architecture review ──────────────────────
+contracts/                          @your-github-org/edl-architecture
+
+# ── Connector interfaces — architecture sign-off required ────────────────────
+connector_runtime/interfaces/       @your-github-org/edl-architecture
+
+# ── Production environment — highest protection ──────────────────────────────
+infrastructure/environments/prod/   @your-github-org/edl-infrastructure @your-github-org/edl-security @your-github-org/edl-architecture

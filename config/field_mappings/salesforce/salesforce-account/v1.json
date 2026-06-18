@@ -1,0 +1,100 @@
+{
+  "source_id": "salesforce",
+  "entity_id": "salesforce-account",
+  "mapping_version": "v1",
+  "rules": [
+    {
+      "source_fields": ["Id"],
+      "canonical_field": "account_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["Name"],
+      "canonical_field": "account_name",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["Type"],
+      "canonical_field": "account_type",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["Industry"],
+      "canonical_field": "industry",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["AnnualRevenue"],
+      "canonical_field": "annual_revenue",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["NumberOfEmployees"],
+      "canonical_field": "employee_count",
+      "transformation": "cast",
+      "transformation_params": { "type": "integer" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["BillingCountry"],
+      "canonical_field": "billing_country",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["BillingState"],
+      "canonical_field": "billing_state",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["OwnerId"],
+      "canonical_field": "owner_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["CreatedDate"],
+      "canonical_field": "created_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%S.%f%z",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["LastModifiedDate"],
+      "canonical_field": "last_modified_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%S.%f%z",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["IsActive"],
+      "canonical_field": "is_active",
+      "transformation": "cast",
+      "transformation_params": { "type": "boolean" },
+      "missing_field_behavior": "use_default",
+      "default_value": "true"
+    }
+  ]
+}

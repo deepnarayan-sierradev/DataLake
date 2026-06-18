@@ -1,0 +1,114 @@
+name: Deploy — Staging (Requires Approval)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: "Type 'deploy-staging' to confirm"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  validate-confirmation:
+    name: "Validate Deployment Confirmation"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation input
+        run: |
+          if [[ "${{ github.event.inputs.confirm_deploy }}" != "deploy-staging" ]]; then
+            echo "ERROR: Confirmation input must be 'deploy-staging'. Aborting."
+            exit 1
+          fi
+
+  terraform-plan-staging:
+    name: "Terraform Plan — Staging"
+    runs-on: ubuntu-latest
+    needs: validate-confirmation
+    environment: staging
+    outputs:
+      plan_exitcode: ${{ steps.plan.outputs.exitcode }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.8"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_CICD_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-Plan-Staging-${{ github.run_id }}
+
+      - name: Terraform init
+        working-directory: infrastructure/environments/staging
+        run: terraform init
+
+      - name: Terraform plan
+        id: plan
+        working-directory: infrastructure/environments/staging
+        run: |
+          terraform plan \
+            -var="github_org=${{ vars.GITHUB_ORG }}" \
+            -var="github_repo=${{ github.event.repository.name }}" \
+            -var="alert_email=${{ vars.OPS_ALERT_EMAIL }}" \
+            -out=tfplan \
+            -detailed-exitcode
+        continue-on-error: true
+
+      - name: Upload plan artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-tfplan
+          path: infrastructure/environments/staging/tfplan
+          retention-days: 7
+
+      - name: Fail on plan error
+        if: steps.plan.outputs.exitcode == '1'
+        run: exit 1
+
+  terraform-apply-staging:
+    name: "Terraform Apply — Staging (Manual Approval Required)"
+    runs-on: ubuntu-latest
+    needs: terraform-plan-staging
+    if: needs.terraform-plan-staging.outputs.plan_exitcode == '2'
+    # 'staging-apply' environment has required reviewer(s) configured in GitHub
+    environment: staging-apply
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.8"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_CICD_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-Apply-Staging-${{ github.run_id }}
+
+      - name: Terraform init
+        working-directory: infrastructure/environments/staging
+        run: terraform init
+
+      - name: Download plan artefact
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-tfplan
+          path: infrastructure/environments/staging/
+
+      - name: Terraform apply
+        working-directory: infrastructure/environments/staging
+        run: terraform apply -auto-approve tfplan

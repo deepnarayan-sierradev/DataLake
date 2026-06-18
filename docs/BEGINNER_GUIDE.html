@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Enterprise Data Lake Platform — Beginner&#x27;s Guide</title>
+  <style>
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #e2e8f0;
+  --accent: #0f766e;
+  --code-bg: #f1f5f9;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+}
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(15, 23, 42, 0.95);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
+.file { font-size: 12px; opacity: 0.9; }
+main {
+  max-width: 1100px;
+  margin: 24px auto 48px;
+  padding: 0 20px;
+}
+article {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
+}
+h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
+h1 { margin-top: 0; font-size: 2rem; }
+h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
+h3 { font-size: 1.2rem; }
+p, li { color: var(--text); line-height: 1.65; }
+ul, ol { padding-left: 1.25rem; }
+code {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre {
+  background: #0b1020;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  overflow-x: auto;
+  border: 1px solid #1e293b;
+}
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.7em 1em;
+  border-left: 4px solid var(--accent);
+  background: #f0fdfa;
+  color: var(--muted);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.95rem;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
+.toc {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  margin-bottom: 1rem;
+}
+.footer {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 14px;
+}
+@media (max-width: 760px) {
+  article { padding: 18px; border-radius: 10px; }
+  .header-inner { padding: 10px 14px; }
+  main { margin-top: 16px; padding: 0 12px; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand">Enterprise Data Lake Documentation</div>
+      <div class="file">BEGINNER_GUIDE.md</div>
+    </div>
+  </header>
+  <main>
+    <article>
+<h1 id="enterprise-data-lake-platform-beginners-guide">Enterprise Data Lake Platform — Beginner's Guide</h1>
+<p><strong>Audience:</strong> New developers, QA engineers, or anyone wanting to understand what this platform does and how it works — no prior AWS experience assumed.</p>
+<hr>
+<h2 id="the-problem-this-platform-solves">The Problem This Platform Solves</h2>
+<p>Your company stores business data in three completely different systems:</p>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>What's in it</th>
+<th>API type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Salesforce</strong></td>
+<td>Customers, contacts, opportunities</td>
+<td>REST / SOQL</td>
+</tr>
+<tr>
+<td><strong>NetSuite ERP</strong></td>
+<td>Financials, invoices, vendors</td>
+<td>REST</td>
+</tr>
+<tr>
+<td><strong>MySQL RDS</strong></td>
+<td>Orders, transactions, inventory</td>
+<td>SQL</td>
+</tr>
+</tbody>
+</table>
+<p>Getting data out of all three for reporting or machine learning requires:<br>
+- Different credentials and APIs for each system<br>
+- Manual scripts that break when the source schema changes<br>
+- No history — you lose yesterday's data once today runs<br>
+- No quality checks — bad data silently reaches dashboards</p>
+<p><strong>This platform automates all of it</strong> — safely, incrementally, every night — and stores clean, versioned, auditable copies in AWS that anyone can query with standard SQL.</p>
+<hr>
+<h2 id="visual-diagrams">Visual Diagrams</h2>
+<table>
+<thead>
+<tr>
+<th>Diagram</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="architecture_diagram.svg">docs/architecture_diagram.svg</a></td>
+<td>Full AWS architecture — all zones, modules, data flow arrows</td>
+</tr>
+<tr>
+<td><a href="functional_flow_beginner.svg">docs/functional_flow_beginner.svg</a></td>
+<td>9-step beginner walkthrough with code + config references</td>
+</tr>
+<tr>
+<td><a href="../architecture/enterprise_data_lake_architecture.svg">architecture/enterprise_data_lake_architecture.svg</a></td>
+<td>Original detailed architecture diagram</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="step-by-step-how-one-extraction-run-works">Step-by-Step: How One Extraction Run Works</h2>
+<h3 id="step-1-schedule-trigger-every-night-at-2-am">Step 1 — Schedule Trigger (Every Night at 2 AM)</h3>
+<p>AWS <strong>EventBridge Scheduler</strong> fires a cron job — like a digital alarm clock — for each entity. There is one schedule per entity, staggered to avoid hitting the source systems at the same time.</p>
+<pre><code>salesforce-account  →  02:00 UTC daily
+salesforce-contact  →  02:15 UTC daily
+netsuite-customer   →  03:00 UTC daily
+mysql-rds-orders    →  04:00 UTC daily
+</code></pre>
+<p>EventBridge sends a message to Step Functions saying: <em>"Time to run extraction for <code>salesforce / salesforce-account</code>."</em></p>
+<p><strong>Code:</strong> <code>orchestration/event_bridge/</code><br>
+<strong>Configure schedules:</strong> <code>python scripts/trigger_extraction.py --create-schedule</code><br>
+<strong>Infrastructure:</strong> <code>infrastructure/modules/orchestration/</code></p>
+<hr>
+<h3 id="step-2-step-functions-the-workflow-manager">Step 2 — Step Functions (The Workflow Manager)</h3>
+<p>AWS <strong>Step Functions</strong> receives the trigger and acts like a project manager. It calls the extraction Lambda function and watches the result.</p>
+<p><strong>If the Lambda fails</strong> (e.g. Salesforce API is temporarily slow), Step Functions automatically retries:</p>
+<pre><code>1st failure  →  wait 30 seconds  →  retry
+2nd failure  →  wait 2 minutes   →  retry
+3rd failure  →  send to Dead-Letter Queue (DLQ) + alert ops team
+</code></pre>
+<p>The retry logic is built into the Step Functions state machine — no code changes needed to adjust retry behaviour.</p>
+<p><strong>Code:</strong> <code>orchestration/step_functions/extraction_workflow.py</code><br>
+<strong>Infrastructure:</strong> <code>infrastructure/modules/orchestration/</code></p>
+<hr>
+<h3 id="step-3-load-configuration-what-should-i-extract">Step 3 — Load Configuration ("What Should I Extract?")</h3>
+<p>The Lambda function starts by reading the entity's configuration record from <strong>DynamoDB</strong>. This config tells the extractor exactly what to do:</p>
+<pre><code class="language-python">{
+    &quot;source_id&quot;:             &quot;salesforce&quot;,
+    &quot;entity_id&quot;:             &quot;salesforce-account&quot;,
+    &quot;load_type&quot;:             &quot;incremental&quot;,    # or &quot;full&quot;
+    &quot;watermark_field&quot;:       &quot;SystemModstamp&quot;, # timestamp field on the source
+    &quot;extraction_window_days&quot;: 1,               # max window per run
+    &quot;watermark_overlap_hours&quot;: 1,              # catch late-arriving records
+    &quot;field_mode&quot;:            &quot;all&quot;,            # extract all fields
+    &quot;exclude_fields&quot;:        [&quot;IsDeleted&quot;],    # always skip these
+    &quot;output_format&quot;:         &quot;parquet&quot;,
+    &quot;active&quot;:                True
+}
+</code></pre>
+<p><strong>Code:</strong> <code>connector_runtime/configuration_repository/configuration_repository.py</code><br>
+<strong>Set up configs:</strong> <code>python scripts/seed_entity_config.py --environment dev</code></p>
+<hr>
+<h3 id="step-4-watermark-check-where-did-we-last-stop">Step 4 — Watermark Check ("Where Did We Last Stop?")</h3>
+<p>For incremental entities, the platform needs to know: <em>what's already been extracted?</em></p>
+<p>The <strong>Watermark</strong> is a timestamp bookmark stored in DynamoDB. It records the upper bound of the last fully successful extraction run. Only records with a <code>SystemModstamp</code> newer than the watermark are pulled this run — this is called <strong>delta sync</strong>.</p>
+<pre><code>Last run completed:    2026-06-14 02:00 UTC  (stored as watermark)
+This run window:       2026-06-14 01:00 UTC  →  2026-06-15 02:00 UTC
+                       (1 hr overlap to catch records with delayed timestamps)
+</code></pre>
+<p>If extraction fails partway through, the watermark is <strong>not advanced</strong> — the next run replays the same window, ensuring no records are skipped.</p>
+<blockquote>
+<p><strong>Full-load entities</strong> (e.g. <code>salesforce-account</code> in default config) re-extract everything on each run and don't use a watermark.</p>
+</blockquote>
+<p><strong>Code:</strong> <code>watermark_management/watermark_repository/watermark_repository.py</code></p>
+<hr>
+<h3 id="step-5-data-extraction-pull-records-from-source">Step 5 — Data Extraction ("Pull Records from Source")</h3>
+<p>The Lambda selects the correct <strong>adapter</strong> based on <code>source_id</code> and calls it to extract records.</p>
+<p>Each adapter implements the same interface (<code>ConnectorInterface</code>) with these steps:<br>
+1. Fetch credentials live from <strong>AWS Secrets Manager</strong> (never stored in code)<br>
+2. Discover queryable fields from the source's metadata API (no hardcoded field lists)<br>
+3. Build a query for the watermark window (SOQL / REST query / SQL <code>WHERE updated_at &gt; ?</code>)<br>
+4. Stream records in pages of ~2,000 records at a time</p>
+<blockquote>
+<p><strong>Why streaming?</strong> Loading 500,000 records into memory at once would crash Lambda. Streaming processes each page, converts it to Parquet, writes it to S3, then discards it — so memory stays flat regardless of dataset size.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Query language</th>
+<th>Adapter location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Salesforce</td>
+<td>SOQL (<code>SELECT ... FROM Account WHERE SystemModstamp &gt; ...</code>)</td>
+<td><code>connector_runtime/adapters/salesforce/</code></td>
+</tr>
+<tr>
+<td>NetSuite</td>
+<td>REST API with filter params</td>
+<td><code>connector_runtime/adapters/netsuite/</code></td>
+</tr>
+<tr>
+<td>MySQL RDS</td>
+<td>SQL (<code>SELECT ... WHERE updated_at &gt; ?</code>)</td>
+<td><code>connector_runtime/adapters/mysql_rds/</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Code:</strong> <code>connector_runtime/adapters/</code><br>
+<strong>Credential format:</strong> see <a href="DEPLOYMENT_GUIDE.md#step-61--populate-source-credentials-in-secrets-manager">docs/DEPLOYMENT_GUIDE.md — Step 6.1</a><br>
+<strong>Set credentials (all connectors):</strong><br>
+- <code>aws secretsmanager put-secret-value --secret-id dev/sources/salesforce/credentials ...</code><br>
+- <code>aws secretsmanager put-secret-value --secret-id dev/sources/netsuite/credentials ...</code><br>
+- <code>aws secretsmanager put-secret-value --secret-id dev/sources/mysql-rds/credentials ...</code></p>
+<p><strong>How to run Salesforce now (both ways):</strong></p>
+<ol>
+<li>True local execution (runs handler on your laptop, uses real AWS + Salesforce):</li>
+</ol>
+<pre><code class="language-bash">source .venv/bin/activate
+export AWS_ACCESS_KEY_ID=YOUR_DEV_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=YOUR_DEV_SECRET_KEY
+export AWS_REGION=us-east-1
+export RAW_S3_BUCKET=dev-raw-layer
+export SCHEMA_SNAPSHOT_S3_BUCKET=dev-schema-snapshots
+aws sts get-caller-identity
+aws secretsmanager describe-secret --secret-id dev/sources/salesforce/credentials
+python -c &quot;from connector_runtime.extraction_pipeline_handler import lambda_handler; event={'source_id':'salesforce','entity_id':'salesforce-account','environment':'dev','connector_params':{'object_name':'Account'},'is_replay':False}; print(lambda_handler(event, None))&quot;
+</code></pre>
+<ol start="2">
+<li>AWS-backed execution (trigger from local; extraction runs in deployed Lambda):</li>
+</ol>
+<pre><code class="language-bash">source .venv/bin/activate
+export AWS_PROFILE=dev
+export AWS_REGION=us-east-1
+aws sts get-caller-identity
+python scripts/trigger_extraction.py \
+  --source-id salesforce \
+  --entity-id salesforce-account \
+  --environment dev \
+  --region us-east-1 \
+  --param object_name=Account
+</code></pre>
+<p>For fuller troubleshooting and preflight details, see <a href="LOCAL_DEV_SETUP.md#7-run-salesforce-connector-locally-two-ways">docs/LOCAL_DEV_SETUP.md</a>.</p>
+<hr>
+<h3 id="step-6-raw-layer-the-vault">Step 6 — Raw Layer ("The Vault")</h3>
+<p>Extracted records are written as <strong>Parquet files</strong> to the S3 Raw Layer. This layer is the permanent, unmodified copy of what the source sent.</p>
+<pre><code>s3://dev-edl-raw/
+└── salesforce/
+    └── salesforce-account/
+        └── 2026/
+            └── 06/
+                └── 15/
+                    └── run-20260615-020012345678-a3f9c1d2.parquet
+</code></pre>
+<p><strong>Key properties of the Raw Layer:</strong><br>
+- <strong>WORM-locked for 30 days</strong> — files cannot be overwritten or deleted (S3 Object Lock)<br>
+- <strong>KMS-encrypted</strong> at rest with a dedicated CMK<br>
+- <strong>Immutable</strong> — transformations never modify raw files; they read and produce new files<br>
+- <strong>7-year retention</strong> for audit and compliance</p>
+<blockquote>
+<p><strong>Why Parquet?</strong> Parquet is a columnar format that compresses well (often 10× smaller than CSV) and is natively supported by Athena, Spark, and pandas.</p>
+</blockquote>
+<p><strong>Code:</strong> <code>connector_runtime/adapters/salesforce/salesforce_raw_layer_writer.py</code></p>
+<hr>
+<h3 id="step-7-schema-drift-check-did-the-source-change-its-structure">Step 7 — Schema Drift Check ("Did the Source Change Its Structure?")</h3>
+<p>After writing raw data, the platform takes a <strong>schema snapshot</strong> — a JSON record of every field name and type seen this run — and compares it to the snapshot from the previous run.</p>
+<p>If the source system's team made changes (e.g. renamed a field, changed a number to a string), this detects it immediately.</p>
+<p><strong>Drift classification:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Classification</th>
+<th>Example</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NO_DRIFT</code></td>
+<td>Schema identical to last run</td>
+<td>Proceed normally</td>
+</tr>
+<tr>
+<td><code>NON_BREAKING</code></td>
+<td>New optional field added</td>
+<td>Proceed + alert downstream teams</td>
+</tr>
+<tr>
+<td><code>POTENTIALLY_BREAKING</code></td>
+<td>Field precision changed (INT→BIGINT)</td>
+<td>Proceed + alert downstream teams</td>
+</tr>
+<tr>
+<td><code>BREAKING</code></td>
+<td>Field removed, or type changed (string→number)</td>
+<td><strong>Transformation paused</strong> + ops alerted</td>
+</tr>
+</tbody>
+</table>
+<p>When drift is <code>BREAKING</code>, raw data is still written (it can be replayed later), but the transformation step is halted until an engineer reviews and approves the change.</p>
+<p><strong>Code:</strong> <code>schema_management/drift_evaluation/drift_evaluator.py</code><br>
+<strong>Snapshots stored at:</strong> <code>s3://dev-edl-schema-snapshots/{source}/{entity}/{run_id}/</code></p>
+<hr>
+<h3 id="step-8-transformation-clean-rename-validate">Step 8 — Transformation ("Clean, Rename, Validate")</h3>
+<p>A second Lambda pipeline reads raw Parquet files and produces clean, canonical data:</p>
+<p><strong>Sub-step 8a — Field Mapping</strong><br>
+Source fields are renamed to canonical business names using rules loaded from S3:</p>
+<pre><code class="language-json">{ &quot;source_fields&quot;: [&quot;Account_Name__c&quot;], &quot;canonical_field&quot;: &quot;account_name&quot;, &quot;transformation&quot;: &quot;rename&quot; }
+{ &quot;source_fields&quot;: [&quot;AnnualRevenue&quot;],   &quot;canonical_field&quot;: &quot;annual_revenue_usd&quot;, &quot;transformation&quot;: &quot;cast&quot;,
+  &quot;transformation_params&quot;: { &quot;type&quot;: &quot;decimal&quot; } }
+{ &quot;source_fields&quot;: [&quot;FirstName&quot;, &quot;LastName&quot;], &quot;canonical_field&quot;: &quot;full_name&quot;, &quot;transformation&quot;: &quot;concat&quot;,
+  &quot;transformation_params&quot;: { &quot;separator&quot;: &quot; &quot; } }
+</code></pre>
+<p>Available transformations: <code>rename</code> · <code>cast</code> · <code>concat</code> · <code>date_format</code> · <code>mask</code></p>
+<p><strong>Sub-step 8b — Quality Evaluation</strong><br>
+Each record is checked against quality rules: required fields present, values in valid ranges, regex patterns (e.g. email format), referential integrity. Records failing a <code>RAISE_ERROR</code> rule are quarantined (not written to curated layer).</p>
+<p><strong>Sub-step 8c — PII Masking</strong><br>
+Fields classified as sensitive (e.g. SSN, credit card) are masked before writing to the curated layer. Classification is defined in <code>governance/data_classification_policy.py</code>.</p>
+<p><strong>Sub-step 8d — Curated Layer Write</strong><br>
+Canonical records are written as Parquet to the Curated Layer (<code>s3://dev-edl-curated/</code>). A lineage record is written to S3 Governance, and the Glue Data Catalog is updated so Athena can query the new data immediately.</p>
+<p><strong>Code:</strong> <code>transformation/transformation_pipeline.py</code><br>
+<strong>Field mapping location:</strong> <code>s3://dev-edl-mapping-config/field-mappings/{source}/{entity}/latest.json</code><br>
+<strong>How to publish a mapping:</strong> see <a href="DEPLOYMENT_GUIDE.md#7-field-mapping-configuration--where-and-how">docs/DEPLOYMENT_GUIDE.md — Section 7</a></p>
+<hr>
+<h3 id="step-9-serving-ready-for-business-use">Step 9 — Serving ("Ready for Business Use")</h3>
+<p>After the curated layer is updated:</p>
+<p><strong>Amazon Athena</strong> — BI tools and data analysts run standard SQL directly against S3 Parquet files. No database server to maintain; you pay only per query.</p>
+<pre><code class="language-sql">SELECT account_name, annual_revenue_usd
+FROM salesforce_account
+WHERE created_date &gt;= '2026-01-01'
+ORDER BY annual_revenue_usd DESC
+LIMIT 100;
+</code></pre>
+<p><strong>Entity Resolution</strong> — Records for the same real-world entity (e.g. the same customer appearing in Salesforce AND NetSuite) are matched and merged into a single <strong>golden record</strong> using the matching engine and survivorship policy.</p>
+<p>Two entity types are declared today:<br>
+- <strong><code>company</code></strong> — merges Salesforce Account + NetSuite Customer into <code>canonical/company/</code> in the analytics layer<br>
+- <strong><code>person</code></strong> — normalises Salesforce Contact into <code>canonical/person/</code></p>
+<p>Match rules (which fields determine a match, and with what threshold) and survivorship policies (which source wins per field, what the output schema contains) are <strong>declarative JSON configs</strong> — not hardcoded in Python. They live in <code>config/entity_resolution/</code> (Git) and are published to S3 before the pipeline runs. The <code>ResolutionConfigRegistry</code> loads them at runtime. Adding a new entity type or changing a rule is a config file change, not a code deployment.</p>
+<p><strong>Serving Store (RDS / DynamoDB, optional)</strong> — For use cases that require sub-second operational reads. Pre-aggregated or canonical records are loaded via upsert for predictable low-latency access by internal APIs and microservices. Not required if Athena query latency is acceptable for your consumers — BI tools and reporting should query the Analytics layer through Athena, not the Serving Store.</p>
+<p><strong>Downstream consumers:</strong><br>
+- BI tools (Tableau, Looker) via Athena JDBC driver<br>
+- ML pipelines (SageMaker) reading curated Parquet directly from S3<br>
+- Internal APIs reading from the Serving Store</p>
+<p><strong>Code:</strong> <code>transformation/athena_query_client.py</code> · <code>entity_resolution/</code> · <code>transformation/serving_store_loader.py</code></p>
+<hr>
+<h2 id="what-happens-when-something-goes-wrong">What Happens When Something Goes Wrong</h2>
+<h3 id="lambda-fails-transient-error-api-timeout-throttle">Lambda fails (transient error — API timeout, throttle)</h3>
+<p>Step Functions automatically retries with exponential backoff (up to 3 attempts). No manual action needed.</p>
+<h3 id="lambda-fails-3-times-persistent-error">Lambda fails 3 times (persistent error)</h3>
+<p>The failed run input is sent to the <strong>SQS Dead-Letter Queue (DLQ)</strong>. CloudWatch alarms fire and the ops team is emailed. Engineers inspect the DLQ message, fix the root cause, and replay by re-submitting the message to Step Functions with <code>is_replay: true</code>.</p>
+<h3 id="schema-breaking-drift-detected">Schema breaking drift detected</h3>
+<p>Transformation is automatically paused. An engineer reviews the drift report in S3, updates the field mapping rules, and re-triggers the transformation for the affected run.</p>
+<h3 id="a-past-run-needs-to-be-re-run">A past run needs to be re-run</h3>
+<p>Set <code>is_replay: true</code> and <code>replay_of_run_id: "run-xxx"</code> in the Step Functions input. The watermark is NOT advanced for replays — so re-running is always safe and idempotent.</p>
+<hr>
+<h2 id="querying-source-attribution-field-provenance">Querying Source Attribution (Field Provenance)</h2>
+<p>When you have a golden record with fields from multiple sources, you can instantly see which source won for each field — no S3 drilling needed.</p>
+<p><strong>Example: Company entity (Salesforce + NetSuite)</strong></p>
+<p>Every golden record includes a <code>field_provenance</code> JSON column documenting source attribution:</p>
+<pre><code class="language-sql">-- Athena: Query the Analytics Layer
+SELECT
+    golden_id,
+    full_name,
+    annual_revenue,
+    industry,
+    -- Extract source attribution for key fields
+    json_extract_scalar(field_provenance, '$.full_name') AS full_name_source,
+    json_extract_scalar(field_provenance, '$.annual_revenue') AS annual_revenue_source,
+    json_extract_scalar(field_provenance, '$.industry') AS industry_source,
+    json_extract_scalar(field_provenance, '$.credit_limit') AS credit_limit_source
+FROM canonical_company
+WHERE golden_id = 'acme-corp-001';
+</code></pre>
+<p><strong>Result:</strong></p>
+<pre><code>golden_id      | full_name  | annual_revenue | industry   | full_name_source | annual_revenue_source | industry_source | credit_limit_source
+acme-corp-001  | Acme Corp  | 5000000        | Technology | netsuite         | salesforce            | salesforce      | netsuite
+</code></pre>
+<p><strong>In the Serving Store (MySQL RDS):</strong></p>
+<pre><code class="language-sql">-- Same query, using MySQL JSON functions
+SELECT
+    golden_id,
+    full_name,
+    annual_revenue,
+    JSON_EXTRACT(field_provenance, '$.full_name') AS full_name_source,
+    JSON_EXTRACT(field_provenance, '$.annual_revenue') AS annual_revenue_source,
+    JSON_EXTRACT(field_provenance, '$.credit_limit') AS credit_limit_source
+FROM canonical_company
+WHERE golden_id = 'acme-corp-001';
+</code></pre>
+<p><strong>Audit: Which source won more fields?</strong></p>
+<pre><code class="language-sql">-- Count fields won by each source
+SELECT
+    golden_id,
+    full_name,
+    -- Salesforce wins
+    size(filter(map_values(field_provenance), x -&gt; x = 'salesforce')) AS salesforce_field_count,
+    -- NetSuite wins
+    size(filter(map_values(field_provenance), x -&gt; x = 'netsuite')) AS netsuite_field_count
+FROM canonical_company
+WHERE golden_id = 'acme-corp-001';
+</code></pre>
+<p><strong>Why this design:</strong><br>
+- ✅ <strong>No recomputation</strong> — survivorship logic runs once, not per query<br>
+- ✅ <strong>Instant answers</strong> — source attribution is queryable directly from Athena or Serving Store<br>
+- ✅ <strong>Audit-ready</strong> — full traceability without drilling into S3 governance files<br>
+- ✅ <strong>BI-friendly</strong> — dashboards can color-code fields by source, flag unusual winners</p>
+<hr>
+<h2 id="understanding-golden-record-structure">Understanding Golden Record Structure</h2>
+<p>Every golden record (entity-resolved canonical record) includes far more than just the 14 <code>output_fields</code> from the survivorship policy. Here's the complete schema:</p>
+<p><strong>Business fields (14 declared in survivorship policy):</strong><br>
+- full_name, email_address, phone_number, annual_revenue, employee_count, credit_limit, outstanding_balance, currency_code, billing_country, billing_state, industry, is_active, created_date, last_modified_date</p>
+<p><strong>System fields (automatically added for audit &amp; matching traceability):</strong><br>
+1. <strong><code>golden_id</code></strong> — Deterministic ID (hash of contributing records). Stable across re-runs, meaning the same matched set always produces the same ID.<br>
+2. <strong><code>contributing_source_records</code></strong> — Array of source record IDs that matched and merged into this golden record (e.g., <code>["sf-account-001", "ns-customer-042"]</code>).<br>
+3. <strong><code>survivorship_version</code></strong> — Policy version that was applied (e.g., <code>"v1"</code>). Enables audit trails when policies evolve.<br>
+4. <strong><code>match_run_id</code></strong> — Run ID of the entity resolution execution. Links the golden record back to match decisions and audit logs.<br>
+5. <strong><code>field_provenance</code></strong> — JSON map showing which source won each field: <code>{"full_name": "netsuite", "annual_revenue": "salesforce", ...}</code> (see <a href="#querying-source-attribution-field-provenance">Querying Source Attribution</a> above for query examples).</p>
+<p><strong>Total: 19 columns per golden record</strong> in the Parquet file.</p>
+<p><strong>Partition structure</strong> (part of S3 path, not individual columns):<br>
+- <code>golden_date=YYYY-MM-DD</code> — date the golden record was published<br>
+- <code>run_id={run_id}</code> — Step Functions execution ID</p>
+<p><strong>Query example in Athena:</strong></p>
+<pre><code class="language-sql">-- See the full record with system fields
+SELECT
+    golden_id,
+    full_name,
+    annual_revenue,
+    contributing_source_records,
+    survivorship_version,
+    match_run_id
+FROM canonical_company
+WHERE golden_id = 'acme-001';
+</code></pre>
+<hr>
+<h2 id="key-design-principles">Key Design Principles</h2>
+<table>
+<thead>
+<tr>
+<th>Principle</th>
+<th>What it means in practice</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Credentials never in code</strong></td>
+<td>All passwords and API keys live only in AWS Secrets Manager; Lambda fetches them at runtime</td>
+</tr>
+<tr>
+<td><strong>Raw data is immutable</strong></td>
+<td>The raw S3 layer is write-once — no transformation ever modifies the original copy</td>
+</tr>
+<tr>
+<td><strong>Memory-safe streaming</strong></td>
+<td>Records are never loaded all at once; they flow through in pages to support millions of records</td>
+</tr>
+<tr>
+<td><strong>Schema changes never break silently</strong></td>
+<td>Drift evaluator detects and classifies every structural change before it reaches downstream systems</td>
+</tr>
+<tr>
+<td><strong>Every run is fully auditable</strong></td>
+<td>A <code>PipelineStageContract</code> record is written to DynamoDB at every stage of every run</td>
+</tr>
+<tr>
+<td><strong>Replays are always safe</strong></td>
+<td>Watermarks only advance on success; failed or replayed runs never produce duplicate records</td>
+</tr>
+<tr>
+<td><strong>Infrastructure is code</strong></td>
+<td>100% Terraform — no manual AWS console clicks; every resource is versioned in git</td>
+</tr>
+<tr>
+<td><strong>Least-privilege access</strong></td>
+<td>Each Lambda role has IAM permissions only for the exact AWS resources it needs</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="module-map-where-to-find-what">Module Map (Where to Find What)</h2>
+<pre><code>connector_runtime/          ← extraction: adapters, config, watermark, run lifecycle
+  adapters/
+    salesforce/             ← Salesforce connector (SOQL + raw writer)
+    netsuite/               ← NetSuite connector (REST + raw writer)
+    mysql_rds/              ← MySQL connector (SQL + raw writer)
+  configuration_repository/ ← reads entity config from DynamoDB
+  run_lifecycle/            ← run_id generation, audit log, DLQ routing
+  registry.py               ← maps source_id strings to adapter classes
+
+watermark_management/       ← delta sync bookmarks (DynamoDB-backed)
+
+schema_management/          ← schema snapshots + drift detection
+  snapshot_repository/      ← store/load schema JSON in S3
+  drift_evaluation/         ← compare snapshots, classify changes
+
+transformation/             ← clean + enrich raw data
+  field_mapping/            ← rename/cast/concat rules (S3-backed JSON)
+  quality_evaluation/       ← null checks, range checks, regex
+  curated_layer_writer.py   ← write canonical Parquet to S3
+  transformation_pipeline.py← orchestrates all transformation steps
+
+entity_resolution/          ← golden record matching + merging
+  matching_engine/          ← deterministic + probabilistic field matching
+  resolution_config/        ← ResolutionConfigRegistry — S3-backed config loader
+  survivorship_policy.py    ← per-field winner rules + output schema projection
+  canonical_record_publisher/  ← write canonical (mastered) records to analytics S3
+
+governance/                 ← data catalog, lineage, classification
+  data_catalog_registration.py ← register datasets in Glue
+  lineage_record.py         ← write lineage events to S3
+  data_classification_policy.py ← PII field classification + masking
+  retention_policy_enforcer.py  ← enforce S3 lifecycle rules
+
+observability/              ← logging + metrics
+  structured_logger.py      ← JSON structured logs (scrubs PII/secrets)
+  metrics_emitter.py        ← CloudWatch custom metrics
+
+orchestration/              ← scheduling + workflow
+  event_bridge/             ← EventBridge schedule definitions
+  step_functions/           ← state machine + retry policy
+
+contracts/                  ← shared data contracts (Pydantic models)
+  entity_configuration_contract.py ← entity config shape
+  pipeline_stage_contract.py       ← run audit log shape
+  observability_contract.py        ← log event shape
+
+infrastructure/             ← all AWS infrastructure (Terraform)
+  environments/dev|staging|prod/
+  modules/kms|iam|storage|secrets|lambda_pipeline|orchestration|...
+
+scripts/
+  seed_entity_config.py     ← write entity configs to DynamoDB
+  trigger_extraction.py     ← manually trigger or schedule runs
+</code></pre>
+<hr>
+<h2 id="related-documentation">Related Documentation</h2>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>What it covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="DEPLOYMENT_GUIDE.md">docs/DEPLOYMENT_GUIDE.md</a></td>
+<td>Step-by-step instructions to deploy the platform to AWS</td>
+</tr>
+<tr>
+<td><a href="PLATFORM_FLOW.md">docs/PLATFORM_FLOW.md</a></td>
+<td>Deep technical flow with all 15 internal pipeline stages</td>
+</tr>
+<tr>
+<td><a href="EXECUTIVE_OVERVIEW.md">docs/EXECUTIVE_OVERVIEW.md</a></td>
+<td>Business outcomes, schedules, compliance — for leadership</td>
+</tr>
+<tr>
+<td><a href="../README.md">README.md</a></td>
+<td>Developer setup, commands reference</td>
+</tr>
+</tbody>
+</table>
+      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
+    </article>
+  </main>
+</body>
+</html>

@@ -1,0 +1,389 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1020" font-family="Segoe UI, Arial, sans-serif">
+  <!-- Background -->
+  <rect width="1400" height="1020" fill="#f8f9fb"/>
+
+  <!-- Title -->
+  <text x="700" y="38" text-anchor="middle" font-size="22" font-weight="bold" fill="#1a1a2e">Enterprise Data Lake Platform — Architecture</text>
+  <text x="700" y="58" text-anchor="middle" font-size="13" fill="#6b7280">AWS Cloud · Python 3.13 Lambda · Terraform · Parquet Storage</text>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- ZONE: EXTERNAL SOURCES -->
+  <!-- ════════════════════════════════════════════ -->
+  <rect x="20" y="80" width="200" height="310" rx="12" fill="#fff7ed" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="120" y="100" text-anchor="middle" font-size="11" font-weight="bold" fill="#c2410c">EXTERNAL SOURCES</text>
+
+  <!-- Salesforce -->
+  <rect x="40" y="110" width="160" height="70" rx="8" fill="#1a73e8"/>
+  <text x="120" y="133" text-anchor="middle" font-size="12" font-weight="bold" fill="white">Salesforce</text>
+  <text x="120" y="150" text-anchor="middle" font-size="10" fill="#cce0ff">CRM · REST / SOQL API</text>
+  <text x="120" y="165" text-anchor="middle" font-size="10" fill="#cce0ff">Accounts · Contacts</text>
+
+  <!-- NetSuite -->
+  <rect x="40" y="195" width="160" height="70" rx="8" fill="#7c3aed"/>
+  <text x="120" y="218" text-anchor="middle" font-size="12" font-weight="bold" fill="white">NetSuite ERP</text>
+  <text x="120" y="235" text-anchor="middle" font-size="10" fill="#e9d5ff">ERP · REST API</text>
+  <text x="120" y="250" text-anchor="middle" font-size="10" fill="#e9d5ff">Customers · Invoices</text>
+
+  <!-- MySQL RDS -->
+  <rect x="40" y="280" width="160" height="70" rx="8" fill="#0f766e"/>
+  <text x="120" y="303" text-anchor="middle" font-size="12" font-weight="bold" fill="white">MySQL RDS</text>
+  <text x="120" y="320" text-anchor="middle" font-size="10" fill="#ccfbf1">Relational DB</text>
+  <text x="120" y="335" text-anchor="middle" font-size="10" fill="#ccfbf1">Orders · Transactions</text>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- ZONE: ORCHESTRATION -->
+  <!-- ════════════════════════════════════════════ -->
+  <rect x="250" y="80" width="220" height="310" rx="12" fill="#fefce8" stroke="#eab308" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="360" y="100" text-anchor="middle" font-size="11" font-weight="bold" fill="#92400e">ORCHESTRATION</text>
+
+  <!-- EventBridge -->
+  <rect x="270" y="110" width="180" height="60" rx="8" fill="#ff9900" stroke="#e07b00" stroke-width="1"/>
+  <text x="360" y="134" text-anchor="middle" font-size="12" font-weight="bold" fill="white">EventBridge Scheduler</text>
+  <text x="360" y="152" text-anchor="middle" font-size="10" fill="#fff3cd">cron / rate schedules</text>
+
+  <!-- Step Functions -->
+  <rect x="270" y="185" width="180" height="60" rx="8" fill="#ff9900" stroke="#e07b00" stroke-width="1"/>
+  <text x="360" y="206" text-anchor="middle" font-size="12" font-weight="bold" fill="white">Step Functions</text>
+  <text x="360" y="224" text-anchor="middle" font-size="10" fill="#fff3cd">State machine · retry logic</text>
+
+  <!-- SQS DLQ -->
+  <rect x="270" y="260" width="180" height="60" rx="8" fill="#e05d00" stroke="#c04800" stroke-width="1"/>
+  <text x="360" y="281" text-anchor="middle" font-size="12" font-weight="bold" fill="white">SQS Dead-Letter Queue</text>
+  <text x="360" y="299" text-anchor="middle" font-size="10" fill="#ffe4cc">Failed run messages</text>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- ZONE: EXTRACTION RUNTIME (Lambda) -->
+  <!-- ════════════════════════════════════════════ -->
+  <rect x="500" y="80" width="280" height="540" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="640" y="100" text-anchor="middle" font-size="11" font-weight="bold" fill="#1d4ed8">EXTRACTION RUNTIME (Lambda)</text>
+
+  <!-- Lambda Handler box -->
+  <rect x="520" y="110" width="240" height="50" rx="8" fill="#2563eb"/>
+  <text x="640" y="130" text-anchor="middle" font-size="12" font-weight="bold" fill="white">lambda_handler()</text>
+  <text x="640" y="148" text-anchor="middle" font-size="10" fill="#bfdbfe">extraction_pipeline_handler.py</text>
+
+  <!-- ConnectorRegistry -->
+  <rect x="520" y="175" width="110" height="60" rx="7" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
+  <text x="575" y="197" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e40af">Connector</text>
+  <text x="575" y="212" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e40af">Registry</text>
+  <text x="575" y="227" text-anchor="middle" font-size="9" fill="#3b82f6">registry.py</text>
+
+  <!-- RunCoordinator -->
+  <rect x="650" y="175" width="110" height="60" rx="7" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
+  <text x="705" y="197" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e40af">Run</text>
+  <text x="705" y="212" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e40af">Coordinator</text>
+  <text x="705" y="227" text-anchor="middle" font-size="9" fill="#3b82f6">run_lifecycle.py</text>
+
+  <!-- ConfigRepository -->
+  <rect x="520" y="250" width="110" height="60" rx="7" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
+  <text x="575" y="272" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e40af">Config</text>
+  <text x="575" y="287" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e40af">Repository</text>
+  <text x="575" y="302" text-anchor="middle" font-size="9" fill="#3b82f6">configuration_repository.py</text>
+
+  <!-- WatermarkRepository -->
+  <rect x="650" y="250" width="110" height="60" rx="7" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
+  <text x="705" y="272" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e40af">Watermark</text>
+  <text x="705" y="287" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e40af">Repository</text>
+  <text x="705" y="302" text-anchor="middle" font-size="9" fill="#3b82f6">watermark_repository.py</text>
+
+  <!-- Adapters heading -->
+  <text x="640" y="332" text-anchor="middle" font-size="10" font-weight="bold" fill="#1d4ed8">ADAPTERS (ConnectorInterface)</text>
+
+  <!-- SF Adapter -->
+  <rect x="520" y="340" width="70" height="50" rx="6" fill="#1a73e8"/>
+  <text x="555" y="361" text-anchor="middle" font-size="10" font-weight="bold" fill="white">Salesforce</text>
+  <text x="555" y="376" text-anchor="middle" font-size="9" fill="#cce0ff">SOQL</text>
+
+  <!-- NS Adapter -->
+  <rect x="600" y="340" width="70" height="50" rx="6" fill="#7c3aed"/>
+  <text x="635" y="361" text-anchor="middle" font-size="10" font-weight="bold" fill="white">NetSuite</text>
+  <text x="635" y="376" text-anchor="middle" font-size="9" fill="#e9d5ff">REST</text>
+
+  <!-- MySQL Adapter -->
+  <rect x="680" y="340" width="70" height="50" rx="6" fill="#0f766e"/>
+  <text x="715" y="361" text-anchor="middle" font-size="10" font-weight="bold" fill="white">MySQL</text>
+  <text x="715" y="376" text-anchor="middle" font-size="9" fill="#ccfbf1">JDBC</text>
+
+  <!-- Schema components -->
+  <text x="640" y="415" text-anchor="middle" font-size="10" font-weight="bold" fill="#1d4ed8">SCHEMA MANAGEMENT</text>
+  <rect x="520" y="422" width="110" height="55" rx="7" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
+  <text x="575" y="443" text-anchor="middle" font-size="10" font-weight="bold" fill="#1e40af">Snapshot</text>
+  <text x="575" y="458" text-anchor="middle" font-size="10" font-weight="bold" fill="#1e40af">Repository</text>
+  <text x="575" y="470" text-anchor="middle" font-size="9" fill="#3b82f6">snapshot_repository.py</text>
+
+  <rect x="650" y="422" width="110" height="55" rx="7" fill="#dbeafe" stroke="#93c5fd" stroke-width="1"/>
+  <text x="705" y="443" text-anchor="middle" font-size="10" font-weight="bold" fill="#1e40af">Drift</text>
+  <text x="705" y="458" text-anchor="middle" font-size="10" font-weight="bold" fill="#1e40af">Evaluator</text>
+  <text x="705" y="470" text-anchor="middle" font-size="9" fill="#3b82f6">drift_evaluator.py</text>
+
+  <!-- Secrets -->
+  <rect x="520" y="490" width="240" height="50" rx="8" fill="#1e293b"/>
+  <text x="640" y="511" text-anchor="middle" font-size="11" font-weight="bold" fill="#fbbf24">Secrets Manager Client</text>
+  <text x="640" y="528" text-anchor="middle" font-size="10" fill="#94a3b8">Credentials fetched at runtime · never in code</text>
+
+  <!-- Observability (inside Lambda zone) -->
+  <rect x="520" y="555" width="115" height="50" rx="7" fill="#0f172a"/>
+  <text x="577" y="576" text-anchor="middle" font-size="10" font-weight="bold" fill="#22d3ee">Structured Logger</text>
+  <text x="577" y="591" text-anchor="middle" font-size="9" fill="#67e8f9">structured_logger.py</text>
+
+  <rect x="645" y="555" width="115" height="50" rx="7" fill="#0f172a"/>
+  <text x="702" y="576" text-anchor="middle" font-size="10" font-weight="bold" fill="#22d3ee">Metrics Emitter</text>
+  <text x="702" y="591" text-anchor="middle" font-size="9" fill="#67e8f9">metrics_emitter.py</text>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- ZONE: AWS STORAGE (middle-right) -->
+  <!-- ════════════════════════════════════════════ -->
+  <rect x="810" y="80" width="230" height="310" rx="12" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="925" y="100" text-anchor="middle" font-size="11" font-weight="bold" fill="#15803d">AWS STORAGE</text>
+
+  <!-- S3 Raw -->
+  <rect x="830" y="110" width="190" height="55" rx="8" fill="#16a34a"/>
+  <text x="925" y="133" text-anchor="middle" font-size="12" font-weight="bold" fill="white">S3 Raw Layer</text>
+  <text x="925" y="150" text-anchor="middle" font-size="10" fill="#dcfce7">{source}/{entity}/YYYY/MM/DD/*.parquet</text>
+
+  <!-- S3 Schema Snapshots -->
+  <rect x="830" y="175" width="190" height="55" rx="8" fill="#15803d"/>
+  <text x="925" y="197" text-anchor="middle" font-size="12" font-weight="bold" fill="white">S3 Schema Snapshots</text>
+  <text x="925" y="214" text-anchor="middle" font-size="10" fill="#dcfce7">JSON per-run schema + drift reports</text>
+
+  <!-- DynamoDB group -->
+  <rect x="830" y="240" width="190" height="55" rx="8" fill="#065f46"/>
+  <text x="925" y="260" text-anchor="middle" font-size="12" font-weight="bold" fill="white">DynamoDB Tables</text>
+  <text x="925" y="275" text-anchor="middle" font-size="9" fill="#a7f3d0">entity-config · watermark</text>
+  <text x="925" y="289" text-anchor="middle" font-size="9" fill="#a7f3d0">run-audit-log · source-onboarding</text>
+
+  <!-- S3 Mapping config + Entity Resolution config -->
+  <rect x="830" y="305" width="190" height="50" rx="8" fill="#047857"/>
+  <text x="925" y="325" text-anchor="middle" font-size="11" font-weight="bold" fill="white">S3 Config Bucket</text>
+  <text x="925" y="340" text-anchor="middle" font-size="9" fill="#d1fae5">field-mappings/{src}/{entity}/latest.json</text>
+  <text x="925" y="353" text-anchor="middle" font-size="9" fill="#d1fae5">entity-resolution/{type}/latest.json</text>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- ZONE: TRANSFORMATION (bottom-right of extraction) -->
+  <!-- ════════════════════════════════════════════ -->
+  <rect x="500" y="645" width="540" height="200" rx="12" fill="#fdf4ff" stroke="#a855f7" stroke-width="2"/>
+  <text x="770" y="665" text-anchor="middle" font-size="11" font-weight="bold" fill="#7e22ce">TRANSFORMATION PIPELINE (Lambda / Glue)</text>
+
+  <!-- Transformation pipeline boxes -->
+  <rect x="520" y="675" width="130" height="55" rx="8" fill="#7c3aed"/>
+  <text x="585" y="697" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Field Mapping</text>
+  <text x="585" y="712" text-anchor="middle" font-size="9" fill="#ede9fe">Rename · Cast · Mask</text>
+  <text x="585" y="725" text-anchor="middle" font-size="9" fill="#ede9fe">Concat · DateFormat</text>
+
+  <rect x="665" y="675" width="130" height="55" rx="8" fill="#7c3aed"/>
+  <text x="730" y="697" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Quality Evaluator</text>
+  <text x="730" y="712" text-anchor="middle" font-size="9" fill="#ede9fe">Null checks · Range checks</text>
+  <text x="730" y="725" text-anchor="middle" font-size="9" fill="#ede9fe">Regex · Referential</text>
+
+  <rect x="810" y="675" width="130" height="55" rx="8" fill="#7c3aed"/>
+  <text x="875" y="697" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Curated Writer</text>
+  <text x="875" y="712" text-anchor="middle" font-size="9" fill="#ede9fe">Parquet · Partitioned</text>
+  <text x="875" y="725" text-anchor="middle" font-size="9" fill="#ede9fe">KMS encrypted</text>
+
+  <!-- Governance under transformation -->
+  <rect x="520" y="745" width="120" height="50" rx="7" fill="#4c1d95" stroke="#7c3aed" stroke-width="1"/>
+  <text x="580" y="766" text-anchor="middle" font-size="10" font-weight="bold" fill="white">Lineage</text>
+  <text x="580" y="781" text-anchor="middle" font-size="9" fill="#ddd6fe">lineage_record.py</text>
+
+  <rect x="650" y="745" width="120" height="50" rx="7" fill="#4c1d95" stroke="#7c3aed" stroke-width="1"/>
+  <text x="710" y="766" text-anchor="middle" font-size="10" font-weight="bold" fill="white">Data Catalog</text>
+  <text x="710" y="781" text-anchor="middle" font-size="9" fill="#ddd6fe">AWS Glue Catalog</text>
+
+  <rect x="780" y="745" width="120" height="50" rx="7" fill="#4c1d95" stroke="#7c3aed" stroke-width="1"/>
+  <text x="840" y="766" text-anchor="middle" font-size="10" font-weight="bold" fill="white">Classification</text>
+  <text x="840" y="781" text-anchor="middle" font-size="9" fill="#ddd6fe">PII masking policy</text>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- ZONE: SERVING LAYER (far right) -->
+  <!-- ════════════════════════════════════════════ -->
+  <rect x="1070" y="80" width="310" height="455" rx="12" fill="#fff1f2" stroke="#f43f5e" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="1225" y="100" text-anchor="middle" font-size="11" font-weight="bold" fill="#be123c">SERVING &amp; ANALYTICS</text>
+
+  <!-- S3 Curated -->
+  <rect x="1090" y="110" width="270" height="55" rx="8" fill="#be123c"/>
+  <text x="1225" y="133" text-anchor="middle" font-size="12" font-weight="bold" fill="white">S3 Curated Layer</text>
+  <text x="1225" y="150" text-anchor="middle" font-size="10" fill="#ffe4e6">Canonical Parquet · 3-year retention</text>
+
+  <!-- S3 Analytics -->
+  <rect x="1090" y="175" width="270" height="55" rx="8" fill="#e11d48"/>
+  <text x="1225" y="197" text-anchor="middle" font-size="12" font-weight="bold" fill="white">S3 Analytics Layer</text>
+  <text x="1225" y="214" text-anchor="middle" font-size="10" fill="#ffe4e6">Aggregated Parquet · 1-year retention</text>
+
+  <!-- Athena -->
+  <rect x="1090" y="240" width="270" height="55" rx="8" fill="#9f1239"/>
+  <text x="1225" y="262" text-anchor="middle" font-size="12" font-weight="bold" fill="white">Amazon Athena</text>
+  <text x="1225" y="279" text-anchor="middle" font-size="10" fill="#ffe4e6">SQL queries on S3 · pay-per-query</text>
+
+  <!-- Entity Resolution -->
+  <rect x="1090" y="305" width="270" height="80" rx="8" fill="#881337"/>
+  <text x="1225" y="326" text-anchor="middle" font-size="12" font-weight="bold" fill="white">Entity Resolution</text>
+  <text x="1225" y="342" text-anchor="middle" font-size="10" fill="#ffe4e6">GoldenRecordPublisher.from_registry()</text>
+  <text x="1225" y="357" text-anchor="middle" font-size="9" fill="#fecdd3">Config-driven: ResolutionConfigRegistry</text>
+  <text x="1225" y="371" text-anchor="middle" font-size="9" fill="#fecdd3">Entities: company · person</text>
+
+  <!-- Serving Store -->
+  <rect x="1090" y="395" width="270" height="55" rx="8" fill="#7f1d1d"/>
+  <text x="1225" y="417" text-anchor="middle" font-size="12" font-weight="bold" fill="white">Serving Store (DynamoDB)</text>
+  <text x="1225" y="434" text-anchor="middle" font-size="10" fill="#ffe4e6">Pre-aggregated · low-latency reads</text>
+
+  <!-- Consumers -->
+  <rect x="1090" y="460" width="130" height="55" rx="8" fill="#450a0a"/>
+  <text x="1155" y="482" text-anchor="middle" font-size="11" font-weight="bold" fill="white">BI / Tableau</text>
+  <text x="1155" y="498" text-anchor="middle" font-size="9" fill="#fca5a5">via Athena JDBC</text>
+
+  <rect x="1230" y="460" width="130" height="55" rx="8" fill="#450a0a"/>
+  <text x="1295" y="482" text-anchor="middle" font-size="11" font-weight="bold" fill="white">ML / SageMaker</text>
+  <text x="1295" y="478" text-anchor="middle" font-size="9" fill="#fca5a5">curated Parquet</text>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- ZONE: SECURITY LAYER (bottom) -->
+  <!-- ════════════════════════════════════════════ -->
+  <rect x="20" y="860" width="1360" height="95" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+  <text x="700" y="882" text-anchor="middle" font-size="11" font-weight="bold" fill="#f1f5f9">SECURITY &amp; GOVERNANCE LAYER (applied to all zones)</text>
+
+  <!-- KMS -->
+  <rect x="40" y="892" width="160" height="48" rx="7" fill="#374151"/>
+  <text x="120" y="912" text-anchor="middle" font-size="11" font-weight="bold" fill="#fbbf24">AWS KMS</text>
+  <text x="120" y="928" text-anchor="middle" font-size="9" fill="#d1d5db">4 CMKs: storage · DB · secrets · logs</text>
+
+  <rect x="215" y="892" width="160" height="48" rx="7" fill="#374151"/>
+  <text x="295" y="912" text-anchor="middle" font-size="11" font-weight="bold" fill="#fbbf24">IAM Roles</text>
+  <text x="295" y="928" text-anchor="middle" font-size="9" fill="#d1d5db">extraction · transform · governance</text>
+
+  <rect x="390" y="892" width="160" height="48" rx="7" fill="#374151"/>
+  <text x="470" y="912" text-anchor="middle" font-size="11" font-weight="bold" fill="#fbbf24">Secrets Manager</text>
+  <text x="470" y="928" text-anchor="middle" font-size="9" fill="#d1d5db">Per-source credential secrets</text>
+
+  <rect x="565" y="892" width="160" height="48" rx="7" fill="#374151"/>
+  <text x="645" y="912" text-anchor="middle" font-size="11" font-weight="bold" fill="#fbbf24">VPC + Endpoints</text>
+  <text x="645" y="928" text-anchor="middle" font-size="9" fill="#d1d5db">Private subnets · no public internet</text>
+
+  <rect x="740" y="892" width="160" height="48" rx="7" fill="#374151"/>
+  <text x="820" y="912" text-anchor="middle" font-size="11" font-weight="bold" fill="#fbbf24">CloudWatch Alarms</text>
+  <text x="820" y="928" text-anchor="middle" font-size="9" fill="#d1d5db">DLQ depth · failure rate · drift</text>
+
+  <rect x="915" y="892" width="160" height="48" rx="7" fill="#374151"/>
+  <text x="995" y="912" text-anchor="middle" font-size="11" font-weight="bold" fill="#fbbf24">S3 Object Lock</text>
+  <text x="995" y="928" text-anchor="middle" font-size="9" fill="#d1d5db">Raw layer WORM · 30-day retention</text>
+
+  <rect x="1090" y="892" width="160" height="48" rx="7" fill="#374151"/>
+  <text x="1170" y="912" text-anchor="middle" font-size="11" font-weight="bold" fill="#fbbf24">Terraform IaC</text>
+  <text x="1170" y="928" text-anchor="middle" font-size="9" fill="#d1d5db">All infra versioned · no click-ops</text>
+
+  <rect x="1265" y="892" width="100" height="48" rx="7" fill="#374151"/>
+  <text x="1315" y="912" text-anchor="middle" font-size="11" font-weight="bold" fill="#fbbf24">Glue Catalog</text>
+  <text x="1315" y="928" text-anchor="middle" font-size="9" fill="#d1d5db">Schema registry</text>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- ARROWS -->
+  <!-- ════════════════════════════════════════════ -->
+
+  <!-- Sources → Lambda (extraction trigger) -->
+  <line x1="200" y1="145" x2="500" y2="145" stroke="#1a73e8" stroke-width="1.5" marker-end="url(#arrowBlue)"/>
+  <line x1="200" y1="230" x2="500" y2="230" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrowPurple)"/>
+  <line x1="200" y1="315" x2="500" y2="315" stroke="#0f766e" stroke-width="1.5" marker-end="url(#arrowTeal)"/>
+
+  <!-- EventBridge → Step Functions -->
+  <line x1="360" y1="170" x2="360" y2="185" stroke="#ff9900" stroke-width="1.5" marker-end="url(#arrowOrange)"/>
+
+  <!-- Step Functions → Lambda -->
+  <line x1="450" y1="215" x2="500" y2="130" stroke="#ff9900" stroke-width="1.5" marker-end="url(#arrowOrange)"/>
+
+  <!-- Lambda → SQS DLQ (failure path) -->
+  <line x1="500" y1="290" x2="450" y2="290" stroke="#e05d00" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrowDLQ)"/>
+
+  <!-- Lambda → S3 Raw -->
+  <line x1="780" y1="140" x2="830" y2="140" stroke="#16a34a" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+  <!-- Lambda → S3 Snapshots -->
+  <line x1="780" y1="200" x2="830" y2="200" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+
+  <!-- Lambda ↔ DynamoDB (watermark + config) -->
+  <line x1="780" y1="280" x2="830" y2="268" stroke="#065f46" stroke-width="1.5" marker-end="url(#arrowDark)"/>
+
+  <!-- Mapping bucket → Lambda (reads mapping) -->
+  <line x1="830" y1="330" x2="780" y2="330" stroke="#047857" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowMappingR)"/>
+
+  <!-- S3 Raw → Transformation -->
+  <line x1="925" y1="390" x2="925" y2="500" stroke="#a855f7" stroke-width="2"/>
+  <line x1="925" y1="500" x2="585" y2="675" stroke="#a855f7" stroke-width="2" marker-end="url(#arrowPurple2)"/>
+
+  <!-- Transformation → S3 Curated -->
+  <line x1="875" y1="700" x2="1090" y2="137" stroke="#be123c" stroke-width="1.5" marker-end="url(#arrowRed)"/>
+
+  <!-- Arrows Curated → Analytics → Entity Res → Serving -->
+  <line x1="1225" y1="165" x2="1225" y2="175" stroke="#e11d48" stroke-width="1.5" marker-end="url(#arrowRed)"/>
+  <line x1="1225" y1="230" x2="1225" y2="240" stroke="#e11d48" stroke-width="1.5" marker-end="url(#arrowRed)"/>
+  <line x1="1225" y1="295" x2="1225" y2="305" stroke="#9f1239" stroke-width="1.5" marker-end="url(#arrowRed)"/>
+  <line x1="1225" y1="385" x2="1225" y2="395" stroke="#881337" stroke-width="1.5" marker-end="url(#arrowRed)"/>
+  <line x1="1225" y1="450" x2="1155" y2="460" stroke="#7f1d1d" stroke-width="1.5" marker-end="url(#arrowRed)"/>
+  <line x1="1225" y1="450" x2="1295" y2="460" stroke="#7f1d1d" stroke-width="1.5" marker-end="url(#arrowRed)"/>
+
+  <!-- CloudWatch (Lambda → CW) -->
+  <line x1="702" y1="605" x2="820" y2="892" stroke="#22d3ee" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- Arrow markers -->
+  <defs>
+    <marker id="arrowBlue" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#1a73e8"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrowTeal" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#0f766e"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#ff9900"/>
+    </marker>
+    <marker id="arrowDLQ" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#e05d00"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#16a34a"/>
+    </marker>
+    <marker id="arrowDark" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#065f46"/>
+    </marker>
+    <marker id="arrowMappingR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#047857"/>
+    </marker>
+    <marker id="arrowPurple2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#a855f7"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#be123c"/>
+    </marker>
+  </defs>
+
+  <!-- ════════ DATA LAYER LEGEND ════════ -->
+  <rect x="810" y="400" width="230" height="225" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="925" y="418" text-anchor="middle" font-size="10" font-weight="bold" fill="#334155">DATA LAYER LEGEND</text>
+
+  <rect x="825" y="425" width="14" height="14" rx="2" fill="#16a34a"/>
+  <text x="845" y="437" font-size="10" fill="#334155">Raw Layer — Parquet, immutable, 7-year</text>
+
+  <rect x="825" y="448" width="14" height="14" rx="2" fill="#15803d"/>
+  <text x="845" y="460" font-size="10" fill="#334155">Schema Snapshots — drift detection</text>
+
+  <rect x="825" y="471" width="14" height="14" rx="2" fill="#be123c"/>
+  <text x="845" y="483" font-size="10" fill="#334155">Curated Layer — canonical, 3-year</text>
+
+  <rect x="825" y="494" width="14" height="14" rx="2" fill="#e11d48"/>
+  <text x="845" y="506" font-size="10" fill="#334155">Analytics Layer — aggregated, 1-year</text>
+
+  <rect x="825" y="517" width="14" height="14" rx="2" fill="#7f1d1d"/>
+  <text x="845" y="529" font-size="10" fill="#334155">Serving Store — DynamoDB low-latency</text>
+
+  <line x1="825" y1="545" x2="839" y2="545" stroke="#ff9900" stroke-width="2"/>
+  <text x="845" y="549" font-size="10" fill="#334155">Schedule / control flow</text>
+
+  <line x1="825" y1="565" x2="839" y2="565" stroke="#a855f7" stroke-width="2"/>
+  <text x="845" y="569" font-size="10" fill="#334155">Data flow (extraction → transform)</text>
+
+  <line x1="825" y1="585" x2="839" y2="585" stroke="#e05d00" stroke-width="2" stroke-dasharray="4,2"/>
+  <text x="845" y="589" font-size="10" fill="#334155">Failure / replay path</text>
+
+  <line x1="825" y1="605" x2="839" y2="605" stroke="#047857" stroke-width="2" stroke-dasharray="4,2"/>
+  <text x="845" y="609" font-size="10" fill="#334155">Config read (S3 → Lambda)</text>
+</svg>

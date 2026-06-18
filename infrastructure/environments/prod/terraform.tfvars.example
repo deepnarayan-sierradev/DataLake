@@ -1,0 +1,22 @@
+# prod environment — example non-sensitive variable values
+# Copy to terraform.tfvars (or provide via CI/CD) and replace placeholders.
+# Never store secrets here.
+
+aws_region  = "us-east-1"
+cost_center = "engineering"
+github_org  = "your-github-org"
+github_repo = "enterprise-data-lake"
+alert_email = "ops-team@yourcompany.com"
+
+# Optional IAM role ARNs allowed to replay DLQ messages
+replay_operator_role_arns = []
+
+# Optional additional managed policy ARNs for CI/CD deployment role
+cicd_deployment_policy_arns = []
+
+# Pipeline stage Lambda ARNs (required by Step Functions orchestration)
+extraction_pipeline_lambda_arn     = "arn:aws:lambda:us-east-1:123456789012:function:prod-extraction-pipeline"
+transformation_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:prod-transformation-pipeline"
+entity_resolution_lambda_arn       = "arn:aws:lambda:us-east-1:123456789012:function:prod-entity-resolution-pipeline"
+analytics_publisher_lambda_arn     = "arn:aws:lambda:us-east-1:123456789012:function:prod-analytics-layer-publisher"
+serving_store_loader_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:prod-serving-store-loader"

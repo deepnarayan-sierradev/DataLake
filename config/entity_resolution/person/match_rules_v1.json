@@ -1,0 +1,33 @@
+{
+  "_comment": "Match rules for dim_person. Single source today (Salesforce Contact). Rules prepared for future NetSuite/HubSpot person entities.",
+  "entity_type": "person",
+  "rule_set_version": "v1",
+
+  "blocking": {
+    "_comment": "Block by email domain before pairwise comparison.",
+    "key_type": "email_domain",
+    "source_field": "email_address",
+    "max_block_size": 500
+  },
+
+  "rules": [
+    {
+      "_comment": "Rule 1 — Deterministic: same email = same person.",
+      "rule_id": "email-exact",
+      "strategy": "deterministic",
+      "fields": [
+        { "field_name": "email_address", "normalise": true }
+      ]
+    },
+    {
+      "_comment": "Rule 2 — Probabilistic: full name similarity + same account company. Catches 'John Smith' vs 'J. Smith' when tied to same company.",
+      "rule_id": "name-account-fuzzy",
+      "strategy": "probabilistic",
+      "match_threshold": 0.88,
+      "fields": [
+        { "field_name": "full_name",    "weight": 0.65, "similarity_kind": "jaro_winkler" },
+        { "field_name": "account_id",   "weight": 0.35, "similarity_kind": "exact" }
+      ]
+    }
+  ]
+}

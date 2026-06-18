@@ -1,0 +1,131 @@
+name: Deploy — Production (Requires Approval)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: "Type 'deploy-production' to confirm"
+        required: true
+        type: string
+      change_ticket:
+        description: "Change management ticket reference (required for audit)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-deploy-prod
+  cancel-in-progress: false  # NEVER cancel a production deployment in flight
+
+jobs:
+  validate-confirmation:
+    name: "Validate Production Deployment Gate"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify confirmation and change ticket
+        run: |
+          if [[ "${{ github.event.inputs.confirm_deploy }}" != "deploy-production" ]]; then
+            echo "ERROR: Confirmation must be 'deploy-production'. Aborting."
+            exit 1
+          fi
+          if [[ -z "${{ github.event.inputs.change_ticket }}" ]]; then
+            echo "ERROR: change_ticket is required for production deployments."
+            exit 1
+          fi
+          echo "Gate passed. Change ticket: ${{ github.event.inputs.change_ticket }}"
+
+  terraform-plan-prod:
+    name: "Terraform Plan — Production"
+    runs-on: ubuntu-latest
+    needs: validate-confirmation
+    environment: prod
+    outputs:
+      plan_exitcode: ${{ steps.plan.outputs.exitcode }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.8"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_CICD_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-Plan-Prod-${{ github.run_id }}
+
+      - name: Terraform init
+        working-directory: infrastructure/environments/prod
+        run: terraform init
+
+      - name: Terraform plan
+        id: plan
+        working-directory: infrastructure/environments/prod
+        run: |
+          terraform plan \
+            -var="github_org=${{ vars.GITHUB_ORG }}" \
+            -var="github_repo=${{ github.event.repository.name }}" \
+            -var="alert_email=${{ vars.OPS_ALERT_EMAIL }}" \
+            -out=tfplan \
+            -detailed-exitcode
+        continue-on-error: true
+
+      - name: Upload immutable plan artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-tfplan-${{ github.run_id }}
+          path: infrastructure/environments/prod/tfplan
+          retention-days: 30  # Retain for audit trail
+
+      - name: Fail on plan error
+        if: steps.plan.outputs.exitcode == '1'
+        run: exit 1
+
+  terraform-apply-prod:
+    name: "Terraform Apply — Production (Requires Senior Engineer Approval)"
+    runs-on: ubuntu-latest
+    needs: terraform-plan-prod
+    if: needs.terraform-plan-prod.outputs.plan_exitcode == '2'
+    # 'prod-apply' environment requires at minimum 2 reviewers configured in GitHub
+    environment: prod-apply
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.8"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_CICD_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-Apply-Prod-${{ github.run_id }}
+
+      - name: Terraform init
+        working-directory: infrastructure/environments/prod
+        run: terraform init
+
+      - name: Download plan artefact
+        uses: actions/download-artifact@v4
+        with:
+          name: prod-tfplan-${{ github.run_id }}
+          path: infrastructure/environments/prod/
+
+      - name: Terraform apply
+        working-directory: infrastructure/environments/prod
+        run: terraform apply -auto-approve tfplan
+
+      - name: Post-deployment audit log
+        run: |
+          echo "Production deployment completed."
+          echo "Run ID: ${{ github.run_id }}"
+          echo "Change ticket: ${{ github.event.inputs.change_ticket }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Commit SHA: ${{ github.sha }}"

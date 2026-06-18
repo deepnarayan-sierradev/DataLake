@@ -1,0 +1,463 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="1720" viewBox="0 0 1900 1720">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#1A252F"/></marker>
+    <marker id="arr-b" markerWidth="9" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#2471A3"/></marker>
+    <marker id="arr-g" markerWidth="9" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#7F8C8D"/></marker>
+  </defs>
+  <rect width="1900" height="1720" fill="#F4F6F7"/>
+
+  <!-- TITLE -->
+  <rect x="0" y="0" width="1900" height="62" fill="#17202A"/>
+  <text x="30" y="37" font-family="Segoe UI,Arial" font-size="22" font-weight="700" fill="white">Enterprise Data Lake Platform — Corrected Architecture and Data Flow</text>
+  <text x="30" y="55" font-family="Segoe UI,Arial" font-size="11" fill="#AEB6BF">v2.0  ·  Connector framework shared across ALL sources  ·  Lake stages are STRICTLY SEQUENTIAL  ·  Control plane roles clearly labeled</text>
+
+  <!-- ══════════ SECTION 1: CONTROL PLANE ══════════ -->
+  <rect x="15" y="72" width="1870" height="212" rx="10" fill="#EAF4FB" stroke="#2471A3" stroke-width="2"/>
+  <rect x="15" y="72" width="430" height="24" rx="6" fill="#1A5276"/>
+  <text x="28" y="89" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="white">① ORCHESTRATION AND CONTROL PLANE</text>
+
+  <!-- EventBridge -->
+  <rect x="28" y="103" width="218" height="167" rx="7" fill="white" stroke="#2471A3" stroke-width="1.5"/>
+  <rect x="28" y="103" width="218" height="24" rx="5" fill="#1A5276"/>
+  <text x="38" y="121" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">Amazon EventBridge</text>
+  <text x="38" y="143" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Fires on cron schedule</text>
+  <text x="38" y="159" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ e.g. every 15/30/60 min</text>
+  <text x="38" y="175" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ One rule per source/entity</text>
+  <text x="38" y="191" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Also handles event-driven</text>
+  <text x="38" y="207" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">  triggers from upstream</text>
+  <text x="38" y="256" font-family="Segoe UI,Arial" font-size="9" fill="#1A5276" font-style="italic">STARTS THE PIPELINE</text>
+
+  <!-- Arrow: EB → SFN -->
+  <line x1="246" y1="187" x2="280" y2="187" stroke="#1A252F" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- Step Functions -->
+  <rect x="280" y="103" width="240" height="167" rx="7" fill="white" stroke="#1A5276" stroke-width="2"/>
+  <rect x="280" y="103" width="240" height="24" rx="5" fill="#154360"/>
+  <text x="290" y="121" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">AWS Step Functions</text>
+  <text x="290" y="143" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Orchestrates ALL stages</text>
+  <text x="290" y="159" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ State machine per entity run</text>
+  <text x="290" y="175" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Stage-by-stage transitions</text>
+  <text x="290" y="191" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Retry + error routing</text>
+  <text x="290" y="207" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Invokes Lambda + Glue tasks</text>
+  <text x="290" y="256" font-family="Segoe UI,Arial" font-size="9" fill="#154360" font-style="italic">CENTRAL ORCHESTRATOR</text>
+
+  <!-- Dashed arrows from SFN to support services -->
+  <line x1="520" y1="150" x2="548" y2="150" stroke="#2471A3" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr-b)"/>
+  <line x1="520" y1="168" x2="800" y2="168" stroke="#2471A3" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr-b)"/>
+  <line x1="520" y1="186" x2="1052" y2="186" stroke="#2471A3" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr-b)"/>
+  <line x1="520" y1="204" x2="1304" y2="204" stroke="#2471A3" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr-b)"/>
+  <line x1="520" y1="222" x2="1557" y2="222" stroke="#7F8C8D" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr-g)"/>
+
+  <!-- Config Repository -->
+  <rect x="548" y="103" width="228" height="167" rx="7" fill="white" stroke="#1E8449" stroke-width="1.5"/>
+  <rect x="548" y="103" width="228" height="24" rx="5" fill="#196F3D"/>
+  <text x="558" y="121" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">Configuration Repository</text>
+  <text x="558" y="143" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ DynamoDB or S3 JSON</text>
+  <text x="558" y="159" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Entity extraction profiles</text>
+  <text x="558" y="175" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ field_mode, watermark_field</text>
+  <text x="558" y="191" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ target_path, output_format</text>
+  <text x="558" y="207" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ load_type (full/incremental)</text>
+  <text x="558" y="256" font-family="Segoe UI,Arial" font-size="9" fill="#196F3D" font-style="italic">READ AT PIPELINE START</text>
+
+  <!-- Secrets Manager -->
+  <rect x="800" y="103" width="228" height="167" rx="7" fill="white" stroke="#B7950B" stroke-width="1.5"/>
+  <rect x="800" y="103" width="228" height="24" rx="5" fill="#9A7D0A"/>
+  <text x="810" y="121" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">AWS Secrets Manager</text>
+  <text x="810" y="143" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Salesforce OAuth tokens</text>
+  <text x="810" y="159" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ NetSuite TBA API keys</text>
+  <text x="810" y="175" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ MySQL passwords</text>
+  <text x="810" y="191" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Auto-rotation supported</text>
+  <text x="810" y="207" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Never in code or config</text>
+  <text x="810" y="256" font-family="Segoe UI,Arial" font-size="9" fill="#9A7D0A" font-style="italic">NEVER IN CODE OR LOGS</text>
+
+  <!-- Watermark Repository -->
+  <rect x="1052" y="103" width="228" height="167" rx="7" fill="white" stroke="#6C3483" stroke-width="1.5"/>
+  <rect x="1052" y="103" width="228" height="24" rx="5" fill="#5B2C6F"/>
+  <text x="1062" y="121" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">Watermark Repository</text>
+  <text x="1062" y="143" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ DynamoDB table</text>
+  <text x="1062" y="159" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Last successful extract time</text>
+  <text x="1062" y="175" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Key: source + entity + env</text>
+  <text x="1062" y="191" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Defines incremental window</text>
+  <text x="1062" y="207" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Updated ONLY on success</text>
+  <text x="1062" y="256" font-family="Segoe UI,Arial" font-size="9" fill="#5B2C6F" font-style="italic">CONTROLS WHAT TO EXTRACT</text>
+
+  <!-- Schema Snapshot Store -->
+  <rect x="1304" y="103" width="228" height="167" rx="7" fill="white" stroke="#117A65" stroke-width="1.5"/>
+  <rect x="1304" y="103" width="228" height="24" rx="5" fill="#0E6655"/>
+  <text x="1314" y="121" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">Schema Snapshot Store</text>
+  <text x="1314" y="143" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ S3 metadata prefix</text>
+  <text x="1314" y="159" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Field name, type, precision</text>
+  <text x="1314" y="175" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Saved after each run</text>
+  <text x="1314" y="191" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Compared next run for drift</text>
+  <text x="1314" y="207" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ New field = alert, no block</text>
+  <text x="1314" y="256" font-family="Segoe UI,Arial" font-size="9" fill="#0E6655" font-style="italic">DRIFT DETECTION BASELINE</text>
+
+  <!-- Failure Handling / DLQ -->
+  <rect x="1557" y="103" width="313" height="167" rx="7" fill="white" stroke="#C0392B" stroke-width="1.5"/>
+  <rect x="1557" y="103" width="313" height="24" rx="5" fill="#922B21"/>
+  <text x="1567" y="121" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">Failure Handling and Replay</text>
+  <text x="1567" y="143" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ SQS Dead Letter Queue (DLQ)</text>
+  <text x="1567" y="159" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Captures failed run payload</text>
+  <text x="1567" y="175" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Replay re-runs exact window</text>
+  <text x="1567" y="191" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ Watermark NOT advanced</text>
+  <text x="1567" y="207" font-family="Segoe UI,Arial" font-size="10" fill="#1A252F">▸ CloudWatch alarm triggered</text>
+  <text x="1567" y="256" font-family="Segoe UI,Arial" font-size="9" fill="#C0392B" font-style="italic">SAFE FAILURE — ALWAYS REPLAYABLE</text>
+
+  <!-- ══════════ SECTION 2: EXTRACTION PIPELINE ══════════ -->
+  <rect x="15" y="294" width="430" height="22" rx="6" fill="#1E8449"/>
+  <text x="28" y="310" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="white">② EXTRACTION PIPELINE (runs per entity per schedule)</text>
+  <line x1="400" y1="270" x2="400" y2="312" stroke="#2471A3" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arr-b)"/>
+
+  <!-- SOURCE SYSTEMS -->
+  <rect x="15" y="324" width="280" height="445" rx="9" fill="#FEF9E7" stroke="#D4AC0D" stroke-width="2"/>
+  <rect x="15" y="324" width="280" height="22" rx="6" fill="#9A7D0A"/>
+  <text x="28" y="340" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">Source Systems</text>
+
+  <rect x="28" y="354" width="254" height="88" rx="6" fill="white" stroke="#D4AC0D" stroke-width="1.2"/>
+  <text x="42" y="373" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="#1A252F">Salesforce</text>
+  <text x="42" y="390" font-family="Segoe UI,Arial" font-size="10" fill="#5D6D7E">Connected App · OAuth 2.0</text>
+  <text x="42" y="406" font-family="Segoe UI,Arial" font-size="10" fill="#5D6D7E">Describe API + Bulk API 2.0</text>
+  <text x="42" y="422" font-family="Segoe UI,Arial" font-size="9" fill="#D4AC0D" font-style="italic">High-volume async query</text>
+
+  <rect x="28" y="452" width="254" height="88" rx="6" fill="white" stroke="#D4AC0D" stroke-width="1.2"/>
+  <text x="42" y="471" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="#1A252F">NetSuite</text>
+  <text x="42" y="488" font-family="Segoe UI,Arial" font-size="10" fill="#5D6D7E">TBA-based auth · REST API</text>
+  <text x="42" y="504" font-family="Segoe UI,Arial" font-size="10" fill="#5D6D7E">REST metadata + SuiteQL</text>
+  <text x="42" y="520" font-family="Segoe UI,Arial" font-size="9" fill="#D4AC0D" font-style="italic">Paginated REST queries</text>
+
+  <rect x="28" y="550" width="254" height="88" rx="6" fill="white" stroke="#D4AC0D" stroke-width="1.2"/>
+  <text x="42" y="569" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="#1A252F">MySQL RDS</text>
+  <text x="42" y="586" font-family="Segoe UI,Arial" font-size="10" fill="#5D6D7E">IAM DB auth or Secrets Mgr</text>
+  <text x="42" y="602" font-family="Segoe UI,Arial" font-size="10" fill="#5D6D7E">SQLAlchemy / PyMySQL</text>
+  <text x="42" y="618" font-family="Segoe UI,Arial" font-size="9" fill="#D4AC0D" font-style="italic">Chunked incremental SQL</text>
+
+  <rect x="28" y="648" width="254" height="105" rx="6" fill="white" stroke="#D4AC0D" stroke-width="1.2" stroke-dasharray="6 3"/>
+  <text x="42" y="667" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="#1A252F">Future Connectors</text>
+  <text x="42" y="684" font-family="Segoe UI,Arial" font-size="10" fill="#5D6D7E">SQL Server, REST APIs</text>
+  <text x="42" y="700" font-family="Segoe UI,Arial" font-size="10" fill="#5D6D7E">Files, SFTP, HubSpot, SAP</text>
+  <text x="42" y="716" font-family="Segoe UI,Arial" font-size="10" fill="#5D6D7E">Config-only onboarding</text>
+  <text x="42" y="732" font-family="Segoe UI,Arial" font-size="9" fill="#D4AC0D" font-style="italic">Connector SDK plug-in</text>
+
+  <!-- Arrows: Sources → Connector -->
+  <line x1="295" y1="398" x2="328" y2="398" stroke="#1A252F" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="295" y1="496" x2="328" y2="496" stroke="#1A252F" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="295" y1="594" x2="328" y2="594" stroke="#1A252F" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="295" y1="700" x2="328" y2="700" stroke="#1A252F" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arr)"/>
+
+  <!-- CONNECTOR RUNTIME -->
+  <rect x="328" y="324" width="840" height="445" rx="9" fill="#EAFAF1" stroke="#1E8449" stroke-width="2"/>
+  <rect x="328" y="324" width="840" height="22" rx="6" fill="#1E8449"/>
+  <text x="342" y="340" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">Connector Runtime (Python 3.14) — Same framework for ALL sources. Only execution adapter differs per source.</text>
+
+  <!-- Shared Framework band -->
+  <rect x="342" y="352" width="812" height="20" rx="4" fill="#D5F5E3" stroke="#27AE60" stroke-width="1"/>
+  <text x="352" y="366" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#196F3D">SHARED FRAMEWORK — applies identically to Salesforce, NetSuite, MySQL and all future connectors</text>
+
+  <rect x="342" y="378" width="194" height="120" rx="6" fill="white" stroke="#27AE60" stroke-width="1.2"/>
+  <text x="352" y="397" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Metadata Discovery</text>
+  <text x="352" y="413" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">SF → Describe API</text>
+  <text x="352" y="428" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">NS → REST schema endpoint</text>
+  <text x="352" y="443" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">MySQL → INFORMATION_SCHEMA</text>
+  <text x="352" y="458" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">No hardcoded field lists</text>
+  <text x="352" y="473" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">ALL sources use this</text>
+  <text x="352" y="489" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">Discovers fields at runtime</text>
+
+  <rect x="546" y="378" width="194" height="120" rx="6" fill="white" stroke="#27AE60" stroke-width="1.2"/>
+  <text x="556" y="397" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Dynamic Query Builder</text>
+  <text x="556" y="413" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">SF → builds SOQL</text>
+  <text x="556" y="428" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">NS → builds SuiteQL</text>
+  <text x="556" y="443" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">MySQL → builds SQL</text>
+  <text x="556" y="458" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">Uses discovered fields</text>
+  <text x="556" y="473" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">Adds WHERE wm_field &gt; t</text>
+  <text x="556" y="489" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">ALL sources use this</text>
+
+  <rect x="750" y="378" width="194" height="120" rx="6" fill="white" stroke="#27AE60" stroke-width="1.2"/>
+  <text x="760" y="397" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Watermark Handler</text>
+  <text x="760" y="413" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">SF → SystemModstamp</text>
+  <text x="760" y="428" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">NS → lastModifiedDate</text>
+  <text x="760" y="443" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">MySQL → updated_at column</text>
+  <text x="760" y="458" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">Sets extraction window</text>
+  <text x="760" y="473" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">Updated ONLY on success</text>
+  <text x="760" y="489" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">ALL sources use this</text>
+
+  <rect x="954" y="378" width="200" height="120" rx="6" fill="white" stroke="#27AE60" stroke-width="1.2"/>
+  <text x="964" y="397" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Schema Drift Detector</text>
+  <text x="964" y="413" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Applies to ALL sources</text>
+  <text x="964" y="428" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Compares current vs previous</text>
+  <text x="964" y="443" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Added/removed/type changed</text>
+  <text x="964" y="458" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">Additive: no block, alert only</text>
+  <text x="964" y="473" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">Breaking: alert + pause curated</text>
+  <text x="964" y="489" font-family="Segoe UI,Arial" font-size="9" fill="#27AE60" font-style="italic">ALL sources use this</text>
+
+  <!-- Per-Source Adapters band -->
+  <rect x="342" y="508" width="812" height="20" rx="4" fill="#F4ECF7" stroke="#7D3C98" stroke-width="1"/>
+  <text x="352" y="522" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#6C3483">PER-SOURCE ADAPTERS — execution mechanism only differs here; shared framework above is identical for all</text>
+
+  <rect x="342" y="534" width="194" height="220" rx="6" fill="white" stroke="#7D3C98" stroke-width="1.2"/>
+  <rect x="342" y="534" width="194" height="20" rx="4" fill="#7D3C98"/>
+  <text x="352" y="549" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="white">Salesforce Adapter</text>
+  <text x="352" y="568" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Bulk API 2.0 (≥2000 records)</text>
+  <text x="352" y="583" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">REST API for metadata/auth</text>
+  <text x="352" y="598" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Job lifecycle:</text>
+  <text x="352" y="613" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  1. Create bulk query job</text>
+  <text x="352" y="628" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  2. Poll for completion</text>
+  <text x="352" y="643" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  3. Fetch CSV batches</text>
+  <text x="352" y="658" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  4. Validate record count</text>
+  <text x="352" y="673" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  5. Persist to raw S3</text>
+  <text x="352" y="688" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">API version: Summer 26</text>
+  <text x="352" y="728" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">Async · CSV download</text>
+  <text x="352" y="743" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">High-volume</text>
+
+  <rect x="546" y="534" width="194" height="220" rx="6" fill="white" stroke="#7D3C98" stroke-width="1.2"/>
+  <rect x="546" y="534" width="194" height="20" rx="4" fill="#7D3C98"/>
+  <text x="556" y="549" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="white">NetSuite Adapter</text>
+  <text x="556" y="568" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">REST API + TBA auth</text>
+  <text x="556" y="583" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">SuiteQL for data queries</text>
+  <text x="556" y="598" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">No Bulk API equivalent</text>
+  <text x="556" y="613" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Query lifecycle:</text>
+  <text x="556" y="628" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  1. Auth via TBA + Secrets</text>
+  <text x="556" y="643" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  2. Discover record types</text>
+  <text x="556" y="658" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  3. Build SuiteQL query</text>
+  <text x="556" y="673" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  4. Paginate with offset</text>
+  <text x="556" y="688" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  5. Persist JSON to raw S3</text>
+  <text x="556" y="728" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">Sync · JSON pages</text>
+  <text x="556" y="743" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">Paginated REST</text>
+
+  <rect x="750" y="534" width="194" height="220" rx="6" fill="white" stroke="#7D3C98" stroke-width="1.2"/>
+  <rect x="750" y="534" width="194" height="20" rx="4" fill="#7D3C98"/>
+  <text x="760" y="549" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="white">MySQL RDS Adapter</text>
+  <text x="760" y="568" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">SQLAlchemy / PyMySQL</text>
+  <text x="760" y="583" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">IAM DB auth or Secrets Mgr</text>
+  <text x="760" y="598" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Query lifecycle:</text>
+  <text x="760" y="613" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  1. Auth via IAM / Secrets</text>
+  <text x="760" y="628" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  2. INFORMATION_SCHEMA</text>
+  <text x="760" y="643" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  3. Build SQL WHERE wm&gt;t</text>
+  <text x="760" y="658" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  4. Chunked LIMIT/OFFSET</text>
+  <text x="760" y="673" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  5. Persist rows to raw S3</text>
+  <text x="760" y="728" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">Sync · row batches</text>
+  <text x="760" y="743" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">Parquet or JSON</text>
+
+  <rect x="954" y="534" width="200" height="220" rx="6" fill="white" stroke="#7D3C98" stroke-width="1.2" stroke-dasharray="6 3"/>
+  <rect x="954" y="534" width="200" height="20" rx="4" fill="#7D3C98"/>
+  <text x="964" y="549" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="white">Future Adapter (SDK)</text>
+  <text x="964" y="568" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Implement connector interface</text>
+  <text x="964" y="583" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Provide:</text>
+  <text x="964" y="598" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  discover_fields()</text>
+  <text x="964" y="613" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  build_extraction_query()</text>
+  <text x="964" y="628" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  execute_and_paginate()</text>
+  <text x="964" y="643" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">  write_to_raw()</text>
+  <text x="964" y="658" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Framework handles:</text>
+  <text x="964" y="673" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">retry · drift · watermark</text>
+  <text x="964" y="688" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">telemetry · schema snap</text>
+  <text x="964" y="728" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">Config-driven onboard</text>
+  <text x="964" y="743" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">No core code change</text>
+
+  <!-- Arrow: Connector → Raw -->
+  <line x1="1168" y1="547" x2="1195" y2="547" stroke="#1A252F" stroke-width="3" marker-end="url(#arr)"/>
+
+  <!-- RAW S3 LAYER -->
+  <rect x="1195" y="324" width="690" height="445" rx="9" fill="#FDEDEC" stroke="#C0392B" stroke-width="2"/>
+  <rect x="1195" y="324" width="690" height="22" rx="6" fill="#C0392B"/>
+  <text x="1210" y="340" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">③ Raw S3 Layer — Immutable Source-Aligned Storage (no transforms ever)</text>
+
+  <rect x="1210" y="354" width="660" height="112" rx="6" fill="white" stroke="#C0392B" stroke-width="1.2"/>
+  <text x="1225" y="374" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Raw File Write</text>
+  <text x="1225" y="390" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Path: /raw/{source}/{entity}/{year}/{month}/{day}/{run_id}/</text>
+  <text x="1225" y="406" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Format: JSON lines or Parquet (configured per entity)</text>
+  <text x="1225" y="422" font-family="Segoe UI,Arial" font-size="9" fill="#C0392B" font-style="italic">NO transformation — stored exactly as received from source</text>
+  <text x="1225" y="438" font-family="Segoe UI,Arial" font-size="9" fill="#C0392B" font-style="italic">Append-only — never overwritten. Object-level encryption (KMS)</text>
+  <text x="1225" y="454" font-family="Segoe UI,Arial" font-size="9" fill="#C0392B" font-style="italic">Replay source for all downstream pipelines</text>
+
+  <rect x="1210" y="476" width="660" height="98" rx="6" fill="white" stroke="#C0392B" stroke-width="1.2"/>
+  <text x="1225" y="496" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Schema Snapshot Persist (after successful write)</text>
+  <text x="1225" y="513" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Saves current field list to Schema Snapshot Store (S3)</text>
+  <text x="1225" y="529" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Next run compares to detect: added / removed / changed fields</text>
+  <text x="1225" y="545" font-family="Segoe UI,Arial" font-size="9" fill="#C0392B" font-style="italic">Drift report sent to CloudWatch + governance catalog</text>
+  <line x1="1450" y1="476" x2="1450" y2="270" stroke="#0E6655" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr-b)"/>
+
+  <rect x="1210" y="584" width="660" height="98" rx="6" fill="white" stroke="#C0392B" stroke-width="1.2"/>
+  <text x="1225" y="604" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Watermark Update (only on full success)</text>
+  <text x="1225" y="621" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Advances last_successful_extraction_at in Watermark Repository</text>
+  <text x="1225" y="637" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Defines start point for the NEXT incremental run window</text>
+  <text x="1225" y="653" font-family="Segoe UI,Arial" font-size="9" fill="#C0392B" font-style="italic">On failure: no watermark advance · DLQ · alert · safe to replay</text>
+  <line x1="1700" y1="584" x2="1700" y2="270" stroke="#5B2C6F" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr-b)"/>
+
+  <rect x="1210" y="692" width="660" height="62" rx="6" fill="#FDEDEC" stroke="#C0392B" stroke-width="1.2"/>
+  <text x="1225" y="712" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#C0392B">On Failure → no schema save · no watermark advance · route to DLQ · CloudWatch alarm</text>
+  <text x="1225" y="730" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Step Functions error state → SQS DLQ capture → replay re-runs exact window safely</text>
+
+  <!-- ══════════ SECTION 3: LAKE PROCESSING SEQUENTIAL ══════════ -->
+  <rect x="15" y="784" width="590" height="22" rx="6" fill="#1A5276"/>
+  <text x="28" y="800" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="white">③→⑧ LAKE PROCESSING — STAGES ARE STRICTLY SEQUENTIAL (follow numbered order)</text>
+
+  <!-- Arrow from Raw down + left to Transform -->
+  <line x1="1540" y1="771" x2="1540" y2="810" stroke="#1A252F" stroke-width="3"/>
+  <line x1="1540" y1="810" x2="880" y2="810" stroke="#1A252F" stroke-width="3" marker-end="url(#arr)"/>
+
+  <!-- STAGE 4: TRANSFORMATION -->
+  <rect x="15" y="820" width="860" height="148" rx="9" fill="#EBF5FB" stroke="#2471A3" stroke-width="2"/>
+  <rect x="15" y="820" width="860" height="22" rx="6" fill="#2471A3"/>
+  <text x="28" y="836" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">④ Transformation Jobs (AWS Glue / Spark)  ·  Reads from Raw  ·  Writes to Curated S3</text>
+
+  <rect x="28" y="849" width="408" height="105" rx="6" fill="white" stroke="#2471A3" stroke-width="1.2"/>
+  <text x="42" y="868" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">What Transformation Does</text>
+  <text x="42" y="884" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Type normalization (dates, decimals, booleans)</text>
+  <text x="42" y="899" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Null handling and default rules per field</text>
+  <text x="42" y="914" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Data quality rule evaluation</text>
+  <text x="42" y="929" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Reads Raw S3 → writes new Curated S3 files</text>
+  <text x="42" y="945" font-family="Segoe UI,Arial" font-size="9" fill="#2471A3" font-style="italic">Never modifies raw in-place</text>
+
+  <rect x="446" y="849" width="415" height="105" rx="6" fill="white" stroke="#2471A3" stroke-width="1.2"/>
+  <text x="460" y="868" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Cross-System Field Mapping</text>
+  <text x="460" y="884" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Maps source fields → canonical domain field</text>
+  <text x="460" y="899" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ SF FirstName+LastName → full_name</text>
+  <text x="460" y="914" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ NS full_name → full_name (already aligned)</text>
+  <text x="460" y="929" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Mapping registry versioned and config-driven</text>
+  <text x="460" y="945" font-family="Segoe UI,Arial" font-size="9" fill="#2471A3" font-style="italic">Canonical model applied here — NOT in extraction</text>
+
+  <!-- Arrow: Transform → Curated -->
+  <line x1="875" y1="894" x2="895" y2="894" stroke="#1A252F" stroke-width="3" marker-end="url(#arr)"/>
+
+  <!-- STAGE 5: CURATED LAYER -->
+  <rect x="895" y="820" width="990" height="148" rx="9" fill="#EAFAF1" stroke="#1E8449" stroke-width="2"/>
+  <rect x="895" y="820" width="990" height="22" rx="6" fill="#1E8449"/>
+  <text x="910" y="836" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">⑤ Curated Layer — S3  ·  Standardized + Mapped + Quality-Checked</text>
+
+  <rect x="910" y="849" width="960" height="105" rx="6" fill="white" stroke="#1E8449" stroke-width="1.2"/>
+  <text x="925" y="868" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">What Curated Layer Contains</text>
+  <text x="925" y="884" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Standardized data aligned to canonical domain model (all source fields translated to common names + types)</text>
+  <text x="925" y="899" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Quality-checked records with DQ pass/fail markers  ·  Path: /curated/{domain}/{entity}/{year}/{month}/  ·  Format: Parquet</text>
+  <text x="925" y="914" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Separate S3 bucket from Raw with separate IAM policy  ·  Entity resolution reads from here — never directly from Raw</text>
+  <text x="925" y="929" font-family="Segoe UI,Arial" font-size="9" fill="#1E8449" font-style="italic">Also: target DB loader can read directly from Curated for datasets that do not require entity resolution</text>
+  <text x="925" y="945" font-family="Segoe UI,Arial" font-size="9" fill="#1E8449" font-style="italic">Curated is the ONLY input to entity resolution — prevents resolution operating on un-standardized data</text>
+
+  <!-- Arrow: Curated → Entity Resolution -->
+  <line x1="1390" y1="968" x2="1390" y2="985" stroke="#1A252F" stroke-width="3"/>
+  <line x1="1390" y1="985" x2="860" y2="985" stroke="#1A252F" stroke-width="3" marker-end="url(#arr)"/>
+
+  <!-- STAGE 6: ENTITY RESOLUTION -->
+  <rect x="15" y="993" width="860" height="170" rx="9" fill="#FEF9E7" stroke="#D4AC0D" stroke-width="2"/>
+  <rect x="15" y="993" width="860" height="22" rx="6" fill="#9A7D0A"/>
+  <text x="28" y="1009" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">⑥ Entity Resolution Engine  ·  Matches same real-world entity across all sources</text>
+
+  <rect x="28" y="1022" width="408" height="127" rx="6" fill="white" stroke="#D4AC0D" stroke-width="1.2"/>
+  <text x="42" y="1040" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Matching Engine</text>
+  <text x="42" y="1056" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Deterministic: exact email/phone/ID match</text>
+  <text x="42" y="1071" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Probabilistic: fuzzy name + address scoring</text>
+  <text x="42" y="1086" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Cross-source: SF Account ↔ NS Customer ↔ MySQL</text>
+  <text x="28" y="1101" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Config: ResolutionConfigRegistry (S3-backed JSON)</text>
+  <text x="28" y="1116" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Entity types: company (SF+NS) · person (SF Contact)</text>
+  <text x="42" y="1135" font-family="Segoe UI,Arial" font-size="9" fill="#D4AC0D" font-style="italic">Reads from Curated only — never from Raw</text>
+
+  <rect x="446" y="1022" width="415" height="127" rx="6" fill="white" stroke="#D4AC0D" stroke-width="1.2"/>
+  <text x="460" y="1040" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Survivorship and Conflict Rules</text>
+  <text x="460" y="1056" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Defines which source field value wins per attribute</text>
+  <text x="460" y="1071" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ e.g. NS wins for financials, SF wins for CRM fields</text>
+  <text x="460" y="1086" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ output_fields list = explicit canonical schema</text>
+  <text x="460" y="1101" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Loaded via GoldenRecordPublisher.from_registry()</text>
+  <text x="460" y="1116" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Re-run produces same result (reproducible)</text>
+  <text x="460" y="1135" font-family="Segoe UI,Arial" font-size="9" fill="#D4AC0D" font-style="italic">All matches traceable to Curated and Raw records</text>
+
+  <!-- Arrow: EntityRes → Golden Record -->
+  <line x1="875" y1="1078" x2="895" y2="1078" stroke="#1A252F" stroke-width="3" marker-end="url(#arr)"/>
+
+  <!-- STAGE 7: GOLDEN RECORD -->
+  <rect x="895" y="993" width="990" height="170" rx="9" fill="#FEF5E7" stroke="#E67E22" stroke-width="2"/>
+  <rect x="895" y="993" width="990" height="22" rx="6" fill="#CA6F1E"/>
+  <text x="910" y="1009" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">⑦ Golden Record Publisher  ·  Single trusted master entity per customer/record</text>
+
+  <rect x="910" y="1022" width="960" height="127" rx="6" fill="white" stroke="#E67E22" stroke-width="1.2"/>
+  <text x="925" y="1040" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">What a Golden Record Is</text>
+  <text x="925" y="1056" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ One trusted master entity assembled from matched records across all sources (e.g. SF Account + NS Customer + MySQL user)</text>
+  <text x="925" y="1071" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ output_fields in survivorship policy = explicit output schema; only declared fields appear in Parquet (no source-internal IDs)</text>
+  <text x="925" y="1086" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Entry point: GoldenRecordPublisher.from_registry(registry, entity_type) — no rules hardcoded in Lambda handler</text>
+  <text x="925" y="1101" font-family="Segoe UI,Arial" font-size="9" fill="#CA6F1E" font-style="italic">This is what BI and AI/ML should consume — not raw or individual source curated records</text>
+  <text x="925" y="1116" font-family="Segoe UI,Arial" font-size="9" fill="#CA6F1E" font-style="italic">Reproducible: same rules + same curated data → same golden record</text>
+  <text x="925" y="1131" font-family="Segoe UI,Arial" font-size="9" fill="#CA6F1E" font-style="italic">Traceable: every field links back through curated to the raw source record</text>
+
+  <!-- Converging arrows from both Entity Res and Golden Record down to Analytics Layer -->
+  <line x1="440" y1="1163" x2="440" y2="1183" stroke="#1A252F" stroke-width="3"/>
+  <line x1="1390" y1="1163" x2="1390" y2="1183" stroke="#1A252F" stroke-width="3"/>
+  <line x1="440" y1="1183" x2="935" y2="1183" stroke="#1A252F" stroke-width="3" marker-end="url(#arr)"/>
+  <line x1="1390" y1="1183" x2="965" y2="1183" stroke="#1A252F" stroke-width="3" marker-end="url(#arr)"/>
+
+  <!-- STAGE 8: ANALYTICS LAYER -->
+  <rect x="15" y="1190" width="1870" height="140" rx="9" fill="#F4ECF7" stroke="#7D3C98" stroke-width="2"/>
+  <rect x="15" y="1190" width="1870" height="22" rx="6" fill="#7D3C98"/>
+  <text x="28" y="1206" font-family="Segoe UI,Arial" font-size="11" font-weight="700" fill="white">⑧ Analytics Layer — S3  ·  Consumption-Optimized  ·  Fed by BOTH Curated data AND Golden Records (two converging paths)</text>
+
+  <rect x="28" y="1219" width="580" height="97" rx="6" fill="white" stroke="#7D3C98" stroke-width="1.2"/>
+  <text x="42" y="1238" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">What the Analytics Layer Contains</text>
+  <text x="42" y="1254" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Parquet / Delta format — columnar, partitioned for fast queries</text>
+  <text x="42" y="1269" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Golden records + curated domain entities</text>
+  <text x="42" y="1284" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Pre-aggregated and denormalized views for reporting</text>
+  <text x="42" y="1299" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">Queryable via Athena, Redshift Spectrum, Spark</text>
+
+  <rect x="625" y="1219" width="580" height="97" rx="6" fill="white" stroke="#7D3C98" stroke-width="1.2"/>
+  <text x="640" y="1238" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Who Feeds the Analytics Layer</text>
+  <text x="640" y="1254" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Golden Record Publisher → master entities (entity-resolved)</text>
+  <text x="640" y="1269" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Curated Layer → domain datasets (non-entity-resolved)</text>
+  <text x="640" y="1284" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Both paths converge here — both available for analytics</text>
+  <text x="640" y="1299" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">Two converging arrows shown above</text>
+
+  <rect x="1222" y="1219" width="648" height="97" rx="6" fill="white" stroke="#7D3C98" stroke-width="1.2"/>
+  <text x="1237" y="1238" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Serving and Consumers</text>
+  <text x="1237" y="1254" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ Target Database (RDS / Redshift / Lakehouse) ← loaded from here</text>
+  <text x="1237" y="1269" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ BI dashboards (QuickSight / Tableau / Power BI)</text>
+  <text x="1237" y="1284" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">▸ AI/ML feature pipelines and training datasets</text>
+  <text x="1237" y="1299" font-family="Segoe UI,Arial" font-size="9" fill="#7D3C98" font-style="italic">Read-only IAM scopes enforced for all consumers</text>
+
+  <!-- ══════════ CROSS-CUTTING ══════════ -->
+  <rect x="15" y="1345" width="1870" height="22" rx="6" fill="#17202A"/>
+  <text x="28" y="1361" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="white">OBSERVABILITY, GOVERNANCE AND SECURITY (Cross-Cutting — every stage above emits telemetry here)</text>
+
+  <rect x="15" y="1373" width="455" height="105" rx="8" fill="#1C2833" stroke="#5D6D7E" stroke-width="1.2"/>
+  <text x="28" y="1393" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="white">CloudWatch Logs, Metrics and Traces</text>
+  <text x="28" y="1409" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">run_id · source_id · entity_id · stage · status</text>
+  <text x="28" y="1424" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">extraction_duration · records_extracted · drift_count</text>
+  <text x="28" y="1439" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">watermark_lag · retries · failure_count</text>
+  <text x="28" y="1454" font-family="Segoe UI,Arial" font-size="9" fill="#5DADE2" font-style="italic">No PII · No credentials · Structured JSON only</text>
+  <text x="28" y="1469" font-family="Segoe UI,Arial" font-size="9" fill="#5DADE2" font-style="italic">SLO: 99.9% control plane availability target</text>
+
+  <rect x="480" y="1373" width="455" height="105" rx="8" fill="#1C2833" stroke="#5D6D7E" stroke-width="1.2"/>
+  <text x="493" y="1393" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="white">Audit Trail and Data Lineage</text>
+  <text x="493" y="1409" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">Full trace: trigger → raw → curated → analytics</text>
+  <text x="493" y="1424" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">Dataset ownership + classification per domain</text>
+  <text x="493" y="1439" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">Retention + legal hold policies enforced</text>
+  <text x="493" y="1454" font-family="Segoe UI,Arial" font-size="9" fill="#5DADE2" font-style="italic">Governance catalog (AWS Glue Catalog)</text>
+  <text x="493" y="1469" font-family="Segoe UI,Arial" font-size="9" fill="#5DADE2" font-style="italic">Change history for config + pipeline definitions</text>
+
+  <rect x="945" y="1373" width="455" height="105" rx="8" fill="#1C2833" stroke="#5D6D7E" stroke-width="1.2"/>
+  <text x="958" y="1393" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="white">OWASP 2025 and Security Controls</text>
+  <text x="958" y="1409" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">A01 Broken Access Control · A02 Misconfiguration</text>
+  <text x="958" y="1424" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">A03 Supply Chain · A04 Crypto · A05 Injection</text>
+  <text x="958" y="1439" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">SAST + SCA + Container + IaC policy scans in CI/CD</text>
+  <text x="958" y="1454" font-family="Segoe UI,Arial" font-size="9" fill="#5DADE2" font-style="italic">Least privilege IAM · no wildcard actions or resources</text>
+  <text x="958" y="1469" font-family="Segoe UI,Arial" font-size="9" fill="#5DADE2" font-style="italic">All APIs: authenticated + authorized + encrypted</text>
+
+  <rect x="1410" y="1373" width="475" height="105" rx="8" fill="#1C2833" stroke="#5D6D7E" stroke-width="1.2"/>
+  <text x="1423" y="1393" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="white">Cost, Governance and Availability</text>
+  <text x="1423" y="1409" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">SLO: 99.9% availability per production month</text>
+  <text x="1423" y="1424" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">S3 lifecycle policies per classification tier</text>
+  <text x="1423" y="1439" font-family="Segoe UI,Arial" font-size="9" fill="#AEB6BF">Cost-per-million-records tracked per source</text>
+  <text x="1423" y="1454" font-family="Segoe UI,Arial" font-size="9" fill="#5DADE2" font-style="italic">Data steward ownership per domain entity</text>
+  <text x="1423" y="1469" font-family="Segoe UI,Arial" font-size="9" fill="#5DADE2" font-style="italic">Monthly governance + quarterly access reviews</text>
+
+  <!-- TERRAFORM -->
+  <rect x="15" y="1488" width="1870" height="78" rx="8" fill="#2C3E50" stroke="#566573" stroke-width="1.5"/>
+  <text x="28" y="1512" font-family="Segoe UI,Arial" font-size="12" font-weight="700" fill="white">TERRAFORM-MANAGED PLATFORM FOUNDATION — All infrastructure above is provisioned exclusively via Terraform (zero manual changes)</text>
+  <text x="28" y="1532" font-family="Segoe UI,Arial" font-size="10" fill="#AEB6BF">Modules: VPC · Subnets · IAM · S3+lifecycle · KMS · DynamoDB · Step Functions · Glue · Secrets Manager · CloudWatch · EventBridge · SQS · version-pinned · remote state in S3 + DynamoDB lock</text>
+  <text x="28" y="1550" font-family="Segoe UI,Arial" font-size="10" fill="#AEB6BF">AWS-first delivery · module contracts portable to Azure and GCP · policy-as-code (OPA/Sentinel) in CI/CD · root + child module hierarchy · approved modules in private registry</text>
+
+  <!-- LEGEND -->
+  <rect x="15" y="1577" width="1870" height="58" rx="6" fill="#ECF0F1" stroke="#BDC3C7" stroke-width="1"/>
+  <text x="28" y="1599" font-family="Segoe UI,Arial" font-size="10" font-weight="700" fill="#1A252F">Legend:</text>
+  <line x1="90" y1="1594" x2="140" y2="1594" stroke="#1A252F" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="148" y="1598" font-family="Segoe UI,Arial" font-size="9" fill="#1A252F">Main data flow</text>
+  <line x1="280" y1="1594" x2="330" y2="1594" stroke="#2471A3" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#arr-b)"/>
+  <text x="338" y="1598" font-family="Segoe UI,Arial" font-size="9" fill="#1A252F">Control plane reads/writes (dashed blue)</text>
+  <line x1="545" y1="1594" x2="595" y2="1594" stroke="#7F8C8D" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr-g)"/>
+  <text x="603" y="1598" font-family="Segoe UI,Arial" font-size="9" fill="#1A252F">Failure routing (dashed gray)</text>
+  <text x="740" y="1598" font-family="Segoe UI,Arial" font-size="9" fill="#1A252F">Green boxes = shared framework (identical for ALL sources)  ·  Purple boxes = per-source execution adapters  ·  Numbered ③→⑧ = strictly sequential pipeline</text>
+  <text x="28" y="1621" font-family="Segoe UI,Arial" font-size="9" fill="#5D6D7E">Watermark advances ONLY after full success  ·  Raw data is NEVER transformed in-place  ·  Curated and Analytics are separate S3 buckets with separate IAM policies  ·  Golden Records are traceable to source records in Raw</text>
+</svg>

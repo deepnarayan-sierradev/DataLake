@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Go-Live Readiness Checklist</title>
+  <style>
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #e2e8f0;
+  --accent: #0f766e;
+  --code-bg: #f1f5f9;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+}
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(15, 23, 42, 0.95);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
+.file { font-size: 12px; opacity: 0.9; }
+main {
+  max-width: 1100px;
+  margin: 24px auto 48px;
+  padding: 0 20px;
+}
+article {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
+}
+h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
+h1 { margin-top: 0; font-size: 2rem; }
+h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
+h3 { font-size: 1.2rem; }
+p, li { color: var(--text); line-height: 1.65; }
+ul, ol { padding-left: 1.25rem; }
+code {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre {
+  background: #0b1020;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  overflow-x: auto;
+  border: 1px solid #1e293b;
+}
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.7em 1em;
+  border-left: 4px solid var(--accent);
+  background: #f0fdfa;
+  color: var(--muted);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.95rem;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
+.toc {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  margin-bottom: 1rem;
+}
+.footer {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 14px;
+}
+@media (max-width: 760px) {
+  article { padding: 18px; border-radius: 10px; }
+  .header-inner { padding: 10px 14px; }
+  main { margin-top: 16px; padding: 0 12px; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand">Enterprise Data Lake Documentation</div>
+      <div class="file">GO_LIVE_READINESS_CHECKLIST.md</div>
+    </div>
+  </header>
+  <main>
+    <article>
+<h1 id="go-live-readiness-checklist">Go-Live Readiness Checklist</h1>
+<p><strong>For:</strong> Project manager, platform engineering lead, operations<br>
+<strong>Purpose:</strong> Verify all systems are ready before production activation<br>
+<strong>Date:</strong> 2026-06-17</p>
+<hr>
+<h2 id="infrastructure-readiness">Infrastructure Readiness</h2>
+<h3 id="aws-account-setup">AWS Account Setup</h3>
+<ul>
+<li>[ ] AWS account created &amp; billing configured</li>
+<li>[ ] VPC created (prod environment, tagged correctly)</li>
+<li>[ ] S3 buckets provisioned: raw-layer, curated-layer, analytics-layer, schema-snapshots</li>
+<li>[ ] DynamoDB tables created: config, watermark, audit-log, onboarding-registry</li>
+<li>[ ] IAM roles created for extraction, transformation, entity-resolution, serving</li>
+<li>[ ] Secrets Manager namespaces created for Salesforce, NetSuite, MySQL credentials</li>
+<li>[ ] CloudWatch log groups created; retention set to 30 days (hot storage)</li>
+<li>[ ] KMS key created for S3 encryption</li>
+<li>[ ] VPC endpoints configured for S3, DynamoDB, Secrets Manager, CloudWatch, Glue</li>
+</ul>
+<p><strong>Owner:</strong> Platform Engineering<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] Infrastructure Lead</p>
+<hr>
+<h3 id="lambda-compute">Lambda &amp; Compute</h3>
+<ul>
+<li>[ ] Extraction Lambda deployed (prod environment)</li>
+<li>[ ] Transformation Lambda deployed (prod environment)</li>
+<li>[ ] Entity resolution Lambda deployed (prod environment)</li>
+<li>[ ] Analytics publish Lambda deployed (prod environment)</li>
+<li>[ ] Serving store load Lambda deployed (prod environment)</li>
+<li>[ ] All Lambda functions have correct IAM role attached</li>
+<li>[ ] Environment variables set correctly (S3 bucket names, DynamoDB table names, region)</li>
+<li>[ ] Lambda timeout values set per function (extraction: 15 min, transformation: 10 min, etc.)</li>
+<li>[ ] Dead-Letter Queue Lambda created (for replay handling)</li>
+<li>[ ] VPC networking configured for Lambdas (private subnets, security groups)</li>
+</ul>
+<p><strong>Owner:</strong> Platform Engineering<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] Platform Engineering Lead</p>
+<hr>
+<h3 id="step-functions-orchestration">Step Functions &amp; Orchestration</h3>
+<ul>
+<li>[ ] Step Functions state machine deployed (prod environment)</li>
+<li>[ ] State machine execution role has correct permissions</li>
+<li>[ ] Retry policies configured (exponential backoff, 3 attempts, DLQ routing on failure)</li>
+<li>[ ] Branching logic tested: extraction → transformation → entity resolution → serving</li>
+<li>[ ] Schema drift blocking logic tested (breaks transformation if breaking drift detected)</li>
+<li>[ ] Quality policy blocking logic tested (breaks entity resolution if quality fails)</li>
+<li>[ ] Dead-Letter Queue integration tested (failed messages appear in DLQ topic)</li>
+<li>[ ] CloudWatch alarms configured for Step Functions failures</li>
+</ul>
+<p><strong>Owner:</strong> Platform Engineering<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] Platform Engineering Lead</p>
+<hr>
+<h3 id="orchestration-schedules-eventbridge">Orchestration Schedules (EventBridge)</h3>
+<ul>
+<li>[ ] EventBridge Scheduler configured with initial 5 entities (Salesforce Account, Contact, Opportunity, NetSuite Customer, MySQL Orders)</li>
+<li>[ ] Each entity has exactly one schedule (no duplicates)</li>
+<li>[ ] Schedule names follow <code>{source_id}--{entity_id}</code> convention</li>
+<li>[ ] Schedule times staggered to avoid concurrent source API load (e.g., SF Account 02:00, SF Contact 02:15, NS Customer 03:00)</li>
+<li>[ ] EventBridge execution role has permission to invoke Step Functions</li>
+<li>[ ] Schedules tested manually (manually trigger one step function execution, verify end-to-end)</li>
+</ul>
+<p><strong>Owner:</strong> Platform Engineering<br>
+<strong>Timeline:</strong> 0.5 day<br>
+<strong>Sign-off:</strong> [ ] Operations Lead</p>
+<hr>
+<h2 id="data-configuration">Data Configuration</h2>
+<h3 id="source-credentials-secrets-manager">Source Credentials (Secrets Manager)</h3>
+<ul>
+<li>[ ] Salesforce credentials stored: <code>prod/sources/salesforce/credentials</code></li>
+<li>[ ] <code>instance_url</code> verified (correct org)</li>
+<li>[ ] <code>client_id</code> and <code>client_secret</code> valid</li>
+<li>[ ] OAuth token scope includes Bulk API 2.0</li>
+<li>[ ] NetSuite credentials stored: <code>prod/sources/netsuite/credentials</code></li>
+<li>[ ] <code>account_id</code> correct (not sandbox)</li>
+<li>[ ] OAuth tokens valid</li>
+<li>[ ] Timestamp format validated (ISO-8601)</li>
+<li>[ ] MySQL RDS credentials stored: <code>prod/sources/mysql-rds/credentials</code></li>
+<li>[ ] <code>host</code> is prod database endpoint</li>
+<li>[ ] <code>username</code> is read-only user</li>
+<li>[ ] Network connectivity verified (MySQL from Lambda in VPC)</li>
+<li>[ ] All credentials rotated within 90 days (prior to go-live)</li>
+<li>[ ] Secrets Manager rotation schedule configured (auto-rotate every 90 days)</li>
+<li>[ ] KMS key policy grants extraction service role <code>kms:Decrypt</code> permission</li>
+</ul>
+<p><strong>Owner:</strong> Data Engineering + Security<br>
+<strong>Timeline:</strong> 0.5 day<br>
+<strong>Sign-off:</strong> [ ] Security Officer, [ ] Data Engineering Lead</p>
+<hr>
+<h3 id="entity-configuration-dynamodb">Entity Configuration (DynamoDB)</h3>
+<ul>
+<li>[ ] Configuration table populated with 5 initial entities</li>
+<li>[ ] <code>salesforce-account</code> (incremental, SystemModstamp watermark, 1 day window)</li>
+<li>[ ] <code>salesforce-contact</code> (incremental, SystemModstamp watermark, 1 day window)</li>
+<li>[ ] <code>salesforce-opportunity</code> (incremental, CloseDate watermark, 1 day window)</li>
+<li>[ ] <code>netsuite-customer</code> (incremental, dateCreated watermark, 1 day window)</li>
+<li>[ ] <code>mysql-orders</code> (incremental, updated_at watermark, 4 hour window)</li>
+<li>[ ] Each entity record includes: <code>source_id</code>, <code>entity_id</code>, <code>load_type</code>, <code>watermark_field</code>, <code>extraction_window_days</code>, <code>field_mode</code>, <code>exclude_fields</code></li>
+<li>[ ] All entities marked <code>active: True</code> (ready to extract)</li>
+<li>[ ] All entities have <code>created_at</code> timestamp (audit trail)</li>
+</ul>
+<p><strong>Owner:</strong> Data Engineering<br>
+<strong>Timeline:</strong> 0.5 day<br>
+<strong>Sign-off:</strong> [ ] Data Governance Lead</p>
+<hr>
+<h3 id="field-mapping-configuration-s3">Field Mapping Configuration (S3)</h3>
+<ul>
+<li>[ ] Field mapping JSON files created for each source/entity pair (5 files total)</li>
+<li>[ ] Salesforce Account mapping: source fields → canonical names (e.g., <code>Account_Name__c</code> → <code>account_name</code>)</li>
+<li>[ ] Salesforce Contact mapping: source fields → canonical names</li>
+<li>[ ] Salesforce Opportunity mapping: source fields → canonical names</li>
+<li>[ ] NetSuite Customer mapping: source fields → canonical names</li>
+<li>[ ] MySQL Orders mapping: source fields → canonical names</li>
+<li>[ ] All mapping files stored in S3: <code>s3://prod-schema-snapshots/field_mappings/</code></li>
+<li>[ ] Each mapping file versioned (v1.json)</li>
+<li>[ ] All transformation Lambda has read permission to mapping bucket</li>
+</ul>
+<p><strong>Owner:</strong> Data Engineering<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] Data Quality Lead</p>
+<hr>
+<h3 id="data-classification-pii-policy-s3">Data Classification &amp; PII Policy (S3)</h3>
+<ul>
+<li>[ ] PII classification policy file created: <code>s3://prod-schema-snapshots/data_classification/classification_policy.json</code></li>
+<li>[ ] Every field in every entity classified as: <code>PII</code>, <code>SENSITIVE</code>, <code>PUBLIC</code>, or <code>INTERNAL</code></li>
+<li>[ ] Masking strategy defined per field:</li>
+<li>[ ] Email fields: MASK_EMAIL (mask domain, keep first char)</li>
+<li>[ ] Phone fields: REDACT (replace with XXXX)</li>
+<li>[ ] SSN/taxpayer ID: TOKENIZE (HMAC-SHA256)</li>
+<li>[ ] Customer ID: HASH (irreversible)</li>
+<li>[ ] Transformation Lambda has read permission to classification policy file</li>
+<li>[ ] Policy reviewed by Data Governance + Compliance teams</li>
+</ul>
+<p><strong>Owner:</strong> Data Governance + Compliance<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] Chief Data Officer, [ ] Compliance Officer</p>
+<hr>
+<h3 id="entity-resolution-configuration-s3">Entity Resolution Configuration (S3)</h3>
+<ul>
+<li>[ ] Resolution config files created for planned entity types:</li>
+<li>[ ] <code>config/entity_resolution/company/company_resolution_v1.json</code> (matches Salesforce Account + NetSuite Customer)</li>
+<li>[ ] <code>config/entity_resolution/person/person_resolution_v1.json</code> (normalizes Salesforce Contact)</li>
+<li>[ ] Each config includes:</li>
+<li>[ ] Matching rules (deterministic: exact field match; probabilistic: Levenshtein distance &gt; 0.95)</li>
+<li>[ ] Survivorship policy (which source wins for which field)</li>
+<li>[ ] Output schema (<code>output_fields</code> list of 14 canonical fields)</li>
+<li>[ ] System fields automatically appended (golden_id, contributing_records, survivorship_version, match_run_id, field_provenance)</li>
+<li>[ ] Resolution rules reviewed &amp; approved by Data Governance</li>
+</ul>
+<p><strong>Owner:</strong> Entity Resolution Team<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] Data Governance Lead</p>
+<hr>
+<h2 id="quality-governance">Quality &amp; Governance</h2>
+<h3 id="quality-policy-s3">Quality Policy (S3)</h3>
+<ul>
+<li>[ ] Quality policy file created for each entity: <code>s3://prod-schema-snapshots/quality_policies/</code></li>
+<li>[ ] Salesforce Account: enforce not-null on <code>account_id</code>, name regex, account_type enum</li>
+<li>[ ] Salesforce Contact: enforce not-null on <code>contact_id</code>, email regex, valid phone</li>
+<li>[ ] Salesforce Opportunity: enforce not-null on <code>opp_id</code>, positive amount range</li>
+<li>[ ] NetSuite Customer: enforce not-null on <code>customer_id</code>, email regex</li>
+<li>[ ] MySQL Orders: enforce not-null on <code>order_id</code>, positive order_amount, valid status</li>
+<li>[ ] All BLOCKING violations log to CloudWatch and trigger SNS alert</li>
+<li>[ ] All WARNING violations logged but don't block publication</li>
+</ul>
+<p><strong>Owner:</strong> Data Quality<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] Data Quality Lead</p>
+<hr>
+<h3 id="lineage-audit-trail-setup">Lineage &amp; Audit Trail Setup</h3>
+<ul>
+<li>[ ] DynamoDB audit-log table configured</li>
+<li>[ ] CloudWatch log group created: <code>/aws/lambda/extraction</code>, <code>/aws/lambda/transformation</code>, etc.</li>
+<li>[ ] CloudWatch custom metrics configured:</li>
+<li>[ ] RecordsExtracted (per entity per run)</li>
+<li>[ ] RecordsFailed (per entity per run)</li>
+<li>[ ] WatermarkLagSeconds (per entity)</li>
+<li>[ ] SchemaDriftCount (per entity)</li>
+<li>[ ] RetryCount (per run)</li>
+<li>[ ] X-Ray tracing enabled on all Lambda functions</li>
+<li>[ ] S3 access logging enabled (all data buckets log to separate logging bucket)</li>
+</ul>
+<p><strong>Owner:</strong> Observability / DevOps<br>
+<strong>Timeline:</strong> 0.5 day<br>
+<strong>Sign-off:</strong> [ ] Observability Lead</p>
+<hr>
+<h3 id="alerting-monitoring">Alerting &amp; Monitoring</h3>
+<ul>
+<li>[ ] CloudWatch alarm created: "Extraction Failure" (SNS → Ops team email/Slack)</li>
+<li>[ ] CloudWatch alarm created: "Quality Blocking Violation" (SNS → Data team)</li>
+<li>[ ] CloudWatch alarm created: "Schema Breaking Drift" (SNS → Data Governance team)</li>
+<li>[ ] CloudWatch alarm created: "Watermark Lag &gt; 26 hours" (SNS → Ops team)</li>
+<li>[ ] CloudWatch alarm created: "DLQ Message Age &gt; 4 hours" (SNS → Ops team)</li>
+<li>[ ] Opsgenie/PagerDuty integration configured (alerts → on-call engineer)</li>
+<li>[ ] Dashboard created: "Data Lake Health" (shows key metrics + status per entity)</li>
+<li>[ ] Test alert mechanism (manually trigger one alarm, verify notification received)</li>
+</ul>
+<p><strong>Owner:</strong> Observability / DevOps<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] Ops Manager</p>
+<hr>
+<h2 id="security-compliance">Security &amp; Compliance</h2>
+<h3 id="security-hardening">Security Hardening</h3>
+<ul>
+<li>[ ] All S3 buckets: public access blocked (Block all public access enabled)</li>
+<li>[ ] All S3 buckets: versioning enabled (recovery capability)</li>
+<li>[ ] All S3 buckets: encryption enabled (SSE-KMS with prod KMS key)</li>
+<li>[ ] All S3 buckets: access logging enabled (logs written to logging bucket)</li>
+<li>[ ] Raw layer S3 bucket: Object Lock enabled (GOVERNANCE mode, 7-year retention)</li>
+<li>[ ] Curated layer S3 bucket: Object Lock NOT enabled (append-only via partition structure)</li>
+<li>[ ] VPC: no internet gateway attached (all services via VPC endpoints)</li>
+<li>[ ] VPC: security groups restrict Lambda outbound to only Secrets Manager, S3, DynamoDB, CloudWatch</li>
+<li>[ ] IAM roles: no wildcard resource or action permissions (<code>Resource: "*"</code> or <code>Action: "*"</code> forbidden)</li>
+<li>[ ] All cross-account access: requires explicit resource-based policy (if applicable)</li>
+<li>[ ] KMS key policy: reviewed by Security team (grants minimal permissions)</li>
+</ul>
+<p><strong>Owner:</strong> Security / Platform Engineering<br>
+<strong>Timeline:</strong> 0.5 day<br>
+<strong>Sign-off:</strong> [ ] CISO</p>
+<hr>
+<h3 id="compliance-review">Compliance Review</h3>
+<ul>
+<li>[ ] GDPR readiness: lineage tracking + legal hold capability verified</li>
+<li>[ ] CCPA readiness: data inventory (Glue catalog) + access log capability verified</li>
+<li>[ ] SOC 2 readiness: audit trail (DynamoDB) + change control (Git) verified</li>
+<li>[ ] HIPAA readiness (if applicable): encryption + access control verified</li>
+<li>[ ] Data residency: all resources confirmed single region (no cross-region replication)</li>
+<li>[ ] Incident response plan reviewed: DLQ handling, schema drift escalation, quality failure escalation</li>
+<li>[ ] Compliance sign-off obtained before production extraction begins</li>
+</ul>
+<p><strong>Owner:</strong> Compliance + Legal<br>
+<strong>Timeline:</strong> 0.5 day<br>
+<strong>Sign-off:</strong> [ ] Chief Compliance Officer</p>
+<hr>
+<h2 id="testing-validation">Testing &amp; Validation</h2>
+<h3 id="dry-run-extraction-dev-environment">Dry-run Extraction (Dev Environment)</h3>
+<ul>
+<li>[ ] Extract Salesforce Account (first 100 records manually triggered) → verify raw Parquet in S3</li>
+<li>[ ] Extract NetSuite Customer → verify raw Parquet in S3</li>
+<li>[ ] Extract MySQL Orders → verify raw Parquet in S3</li>
+<li>[ ] Verify watermark advanced correctly (DynamoDB watermark table)</li>
+<li>[ ] Verify schema snapshot created (S3 schema bucket)</li>
+<li>[ ] Verify audit records written (DynamoDB audit-log table)</li>
+</ul>
+<p><strong>Owner:</strong> Platform Engineering<br>
+<strong>Timeline:</strong> 0.5 day<br>
+<strong>Sign-off:</strong> [ ] QA Lead</p>
+<hr>
+<h3 id="transformation-test-dev-staging">Transformation Test (Dev → Staging)</h3>
+<ul>
+<li>[ ] Transform raw Salesforce Account → curated layer</li>
+<li>[ ] Verify field mapping applied (source fields renamed correctly)</li>
+<li>[ ] Verify PII masking applied (emails masked, etc.)</li>
+<li>[ ] Verify quality checks run (report generated)</li>
+<li>[ ] Verify curated Parquet written to S3</li>
+<li>[ ] Verify Glue catalog entry created</li>
+</ul>
+<p><strong>Owner:</strong> Data Engineering<br>
+<strong>Timeline:</strong> 0.5 day<br>
+<strong>Sign-off:</strong> [ ] Data Quality Lead</p>
+<hr>
+<h3 id="entity-resolution-test">Entity Resolution Test</h3>
+<ul>
+<li>[ ] Perform test resolution: Salesforce Account (1 record) + NetSuite Customer (1 record) matching → golden record produced</li>
+<li>[ ] Verify golden record schema matches declared output_fields (14 canonical fields + 5 system fields)</li>
+<li>[ ] Verify lineage record written to governance bucket</li>
+<li>[ ] Verify analytics layer Parquet written with canonical prefix</li>
+</ul>
+<p><strong>Owner:</strong> Entity Resolution Team<br>
+<strong>Timeline:</strong> 0.5 day<br>
+<strong>Sign-off:</strong> [ ] Data Governance Lead</p>
+<hr>
+<h3 id="end-to-end-pipeline-test-prod-like-on-staging">End-to-End Pipeline Test (Prod-like, on Staging)</h3>
+<ul>
+<li>[ ] Trigger complete pipeline manually (extraction → transformation → entity resolution → analytics publish)</li>
+<li>[ ] Verify all stages complete within SLO window (&lt; 4 hours total)</li>
+<li>[ ] Verify no data loss (raw record count ≈ curated record count within expected filter)</li>
+<li>[ ] Verify serving database load successful (if serving store enabled)</li>
+<li>[ ] Verify no CloudWatch alerts fired (baseline health check)</li>
+<li>[ ] Verify all audit records present in DynamoDB</li>
+</ul>
+<p><strong>Owner:</strong> QA + Platform Engineering<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] QA Lead, [ ] Platform Engineering Lead</p>
+<hr>
+<h3 id="failure-scenario-testing">Failure Scenario Testing</h3>
+<ul>
+<li>[ ] <strong>Test 1:</strong> Simulate source API timeout → verify Step Functions retries, eventually succeeds</li>
+<li>[ ] <strong>Test 2:</strong> Simulate breaking schema drift → verify transformation blocked, alert fired, raw data preserved</li>
+<li>[ ] <strong>Test 3:</strong> Simulate quality blocking violation → verify curated write skipped, previous data unchanged, alert fired</li>
+<li>[ ] <strong>Test 4:</strong> Simulate DLQ message → verify replay mechanism works, data reprocessed correctly</li>
+<li>[ ] <strong>Test 5:</strong> Simulate Lambda out-of-memory → verify Step Functions timeout respected, DLQ entry created</li>
+</ul>
+<p><strong>Owner:</strong> QA + Platform Engineering<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] QA Lead</p>
+<hr>
+<h2 id="training-operations">Training &amp; Operations</h2>
+<h3 id="runbooks-documentation">Runbooks &amp; Documentation</h3>
+<ul>
+<li>[ ] Extraction failure runbook created (symptoms → diagnosis → remediation steps)</li>
+<li>[ ] Schema drift alert runbook created (how to handle breaking vs. non-breaking drift)</li>
+<li>[ ] Quality failure runbook created (how to review reports, decide on remediation)</li>
+<li>[ ] DLQ message replay runbook created (how to manually trigger replay)</li>
+<li>[ ] Watermark reset runbook created (emergency watermark correction procedure)</li>
+<li>[ ] On-call escalation procedure documented (who to page for what failure type)</li>
+<li>[ ] All runbooks reviewed by operations team</li>
+</ul>
+<p><strong>Owner:</strong> Platform Engineering + Operations<br>
+<strong>Timeline:</strong> 1 day<br>
+<strong>Sign-off:</strong> [ ] Ops Manager</p>
+<hr>
+<h3 id="team-training">Team Training</h3>
+<ul>
+<li>[ ] Platform engineering team trained on: Lambda deployment, Step Functions, DynamoDB, S3 management</li>
+<li>[ ] Data engineering team trained on: Configuration management, field mapping edits, schema governance</li>
+<li>[ ] Data governance team trained on: Entity resolution rules, classification policy updates, lineage review</li>
+<li>[ ] Operations team trained on: Alert response, runbook execution, incident escalation</li>
+<li>[ ] BI analysts trained on: Athena query access, analytics layer schema, data freshness expectations</li>
+</ul>
+<p><strong>Owner:</strong> Platform Engineering Lead<br>
+<strong>Timeline:</strong> 2 days (1 day training + 1 day hands-on)<br>
+<strong>Sign-off:</strong> [ ] Training Coordinator</p>
+<hr>
+<h3 id="runbook-testing-disaster-recovery">Runbook Testing (Disaster Recovery)</h3>
+<ul>
+<li>[ ] Practice extraction failure response: Simulate alert, follow runbook, verify resolution</li>
+<li>[ ] Practice schema drift response: Simulate breaking drift, follow runbook, verify manual intervention</li>
+<li>[ ] Practice DLQ replay: Manually enqueue failed message, trigger replay, verify recovery</li>
+<li>[ ] Practice on-call escalation: Trigger alert, page on-call engineer, verify communication</li>
+</ul>
+<p><strong>Owner:</strong> Operations + Platform Engineering<br>
+<strong>Timeline:</strong> 0.5 day<br>
+<strong>Sign-off:</strong> [ ] Ops Manager</p>
+<hr>
+<h2 id="go-live-approval">Go-Live Approval</h2>
+<h3 id="final-sign-offs">Final Sign-Offs</h3>
+<p><strong>Infrastructure:</strong> [ ] Platform Engineering Lead<br>
+<strong>Data Configuration:</strong> [ ] Data Engineering Lead<br>
+<strong>Security:</strong> [ ] CISO<br>
+<strong>Compliance:</strong> [ ] Chief Compliance Officer<br>
+<strong>Operations:</strong> [ ] VP Operations / Ops Manager<br>
+<strong>Finance:</strong> [ ] CFO (budget approved)<br>
+<strong>Data Governance:</strong> [ ] Chief Data Officer<br>
+<strong>Executive Sponsor:</strong> [ ] VP / SVP (business owner)</p>
+<h3 id="go-live-timeline">Go-Live Timeline</h3>
+<p>Once all checklist items complete:</p>
+<ol>
+<li><strong>Day 1:</strong> Enable production extraction schedules (start with 1 entity as canary)</li>
+<li><strong>Day 1-2:</strong> Monitor alerts, verify extraction + transformation + entity resolution</li>
+<li><strong>Day 2-3:</strong> Enable remaining 4 entities (staggered, one per day)</li>
+<li><strong>Day 3-4:</strong> Serve curated data to BI tools; train users</li>
+<li><strong>Day 4-7:</strong> Monitor production metrics, refine alerts, adjust schedules if needed</li>
+</ol>
+<p><strong>Rollback plan:</strong> If critical issue found post-go-live, disable schedules (&lt; 5 min), revert to previous data sources until platform stabilized.</p>
+<hr>
+<p><strong>Prepared by:</strong> Platform Engineering Lead<br>
+<strong>Date:</strong> 2026-06-17<br>
+<strong>Next review:</strong> Post-go-live Day 7 (day 1 incident review; day 7 week 1 retrospective)</p>
+      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
+    </article>
+  </main>
+</body>
+</html>

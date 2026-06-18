@@ -1,0 +1,33 @@
+{
+  "_comment": "Match rules for dim_company. Merges Salesforce Account + NetSuite Customer into one canonical company record.",
+  "entity_type": "company",
+  "rule_set_version": "v1",
+
+  "blocking": {
+    "_comment": "Pre-partition by email domain before pairwise comparison. Reduces O(n²) to O(b·k²).",
+    "key_type": "email_domain",
+    "source_field": "email_address",
+    "max_block_size": 500
+  },
+
+  "rules": [
+    {
+      "_comment": "Rule 1 — Deterministic: identical normalised email address = same company billing contact → same company.",
+      "rule_id": "email-exact",
+      "strategy": "deterministic",
+      "fields": [
+        { "field_name": "email_address", "normalise": true }
+      ]
+    },
+    {
+      "_comment": "Rule 2 — Probabilistic: company name similarity + same country. Catches name variants like 'Acme Corp' vs 'ACME Corporation'.",
+      "rule_id": "name-country-fuzzy",
+      "strategy": "probabilistic",
+      "match_threshold": 0.85,
+      "fields": [
+        { "field_name": "full_name",       "weight": 0.70, "similarity_kind": "jaro_winkler" },
+        { "field_name": "billing_country", "weight": 0.30, "similarity_kind": "exact" }
+      ]
+    }
+  ]
+}

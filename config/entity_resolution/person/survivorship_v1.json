@@ -1,0 +1,102 @@
+{
+  "_comment": [
+    "Survivorship policy for dim_person.",
+    "Single source today: Salesforce Contact.",
+    "output_fields defines the canonical person schema exposed to BI and analytics.",
+    "Source IDs: 'salesforce' (Contact). Extend source_priority when HubSpot / NetSuite contacts are added."
+  ],
+  "entity_type": "person",
+  "policy_version": "v1",
+
+  "output_fields": [
+    "full_name",
+    "first_name",
+    "last_name",
+    "email_address",
+    "phone_number",
+    "job_title",
+    "department",
+    "account_id",
+    "mailing_country",
+    "is_active",
+    "created_date",
+    "last_modified_date"
+  ],
+
+  "default_strategy": "first_non_null",
+
+  "attribute_rules": [
+    {
+      "_comment": "Prefer full_name over reconstructed concat from first+last when available.",
+      "canonical_field": "full_name",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce"]
+    },
+    {
+      "_comment": "First name from Salesforce.",
+      "canonical_field": "first_name",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce"]
+    },
+    {
+      "_comment": "Last name from Salesforce.",
+      "canonical_field": "last_name",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce"]
+    },
+    {
+      "_comment": "Primary email. Most recently updated source wins when multi-source.",
+      "canonical_field": "email_address",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    },
+    {
+      "_comment": "Phone number. Most recently updated source wins.",
+      "canonical_field": "phone_number",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    },
+    {
+      "_comment": "Job title. Most recently updated wins — titles change frequently.",
+      "canonical_field": "job_title",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    },
+    {
+      "_comment": "Department. Salesforce is the CRM system of record.",
+      "canonical_field": "department",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce"]
+    },
+    {
+      "_comment": "Parent company reference (FK to dim_company.golden_id populated at serving layer join).",
+      "canonical_field": "account_id",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce"]
+    },
+    {
+      "_comment": "Mailing country for regional reporting.",
+      "canonical_field": "mailing_country",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce"]
+    },
+    {
+      "_comment": "Active status.",
+      "canonical_field": "is_active",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce"]
+    },
+    {
+      "_comment": "Earliest created_date = when this person first appeared in any system.",
+      "canonical_field": "created_date",
+      "strategy": "most_recent",
+      "timestamp_field": "created_date"
+    },
+    {
+      "_comment": "Most recent modification across all sources.",
+      "canonical_field": "last_modified_date",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    }
+  ]
+}

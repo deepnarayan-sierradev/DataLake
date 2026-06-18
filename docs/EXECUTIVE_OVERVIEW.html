@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Enterprise Data Lake Platform — Executive Overview</title>
+  <style>
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #e2e8f0;
+  --accent: #0f766e;
+  --code-bg: #f1f5f9;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+}
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(15, 23, 42, 0.95);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
+.file { font-size: 12px; opacity: 0.9; }
+main {
+  max-width: 1100px;
+  margin: 24px auto 48px;
+  padding: 0 20px;
+}
+article {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
+}
+h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
+h1 { margin-top: 0; font-size: 2rem; }
+h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
+h3 { font-size: 1.2rem; }
+p, li { color: var(--text); line-height: 1.65; }
+ul, ol { padding-left: 1.25rem; }
+code {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre {
+  background: #0b1020;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  overflow-x: auto;
+  border: 1px solid #1e293b;
+}
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.7em 1em;
+  border-left: 4px solid var(--accent);
+  background: #f0fdfa;
+  color: var(--muted);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.95rem;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
+.toc {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  margin-bottom: 1rem;
+}
+.footer {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 14px;
+}
+@media (max-width: 760px) {
+  article { padding: 18px; border-radius: 10px; }
+  .header-inner { padding: 10px 14px; }
+  main { margin-top: 16px; padding: 0 12px; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand">Enterprise Data Lake Documentation</div>
+      <div class="file">EXECUTIVE_OVERVIEW.md</div>
+    </div>
+  </header>
+  <main>
+    <article>
+<h1 id="enterprise-data-lake-platform-executive-overview">Enterprise Data Lake Platform — Executive Overview</h1>
+<p><strong>Version:</strong> 1.0<br>
+<strong>Date:</strong> 2026-06-15<br>
+<strong>Classification:</strong> Internal — Leadership Review<br>
+<strong>Audience:</strong> Engineering leadership, product leadership, data governance, security, and finance stakeholders</p>
+<hr>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-what-we-built-and-why">What We Built and Why</a></li>
+<li><a href="#2-business-outcomes">Business Outcomes</a></li>
+<li><a href="#3-how-the-platform-works--functional-walkthrough">How the Platform Works — Functional Walkthrough</a></li>
+<li><a href="#4-data-flow-from-source-to-business-insight">Data Flow: From Source to Business Insight</a></li>
+<li><a href="#5-connected-data-sources">Connected Data Sources</a></li>
+<li><a href="#6-delta-incremental-sync--how-we-stay-current">Delta (Incremental) Sync — How We Stay Current</a></li>
+<li><a href="#7-extraction-schedules-cron-job-reference">Extraction Schedules (Cron Job Reference)</a></li>
+<li><a href="#8-least-privilege-access-model--who-can-read-what">Least Privilege Access Model — Who Can Read What</a></li>
+<li><a href="#9-data-layers-explained">Data Layers Explained</a></li>
+<li><a href="#10-data-quality-and-governance">Data Quality and Governance</a></li>
+<li><a href="#11-security-architecture-summary">Security Architecture Summary</a></li>
+<li><a href="#12-operational-resilience">Operational Resilience</a></li>
+<li><a href="#13-scalability-and-cost-profile">Scalability and Cost Profile</a></li>
+<li><a href="#14-adding-new-data-sources--zero-code-changes">Adding New Data Sources — Zero Code Changes</a></li>
+<li><a href="#15-compliance-and-audit-readiness">Compliance and Audit Readiness</a></li>
+<li><a href="#16-key-metrics-and-slos">Key Metrics and SLOs</a></li>
+<li><a href="#17-roadmap">Roadmap</a></li>
+</ol>
+<hr>
+<h2 id="1-what-we-built-and-why">1. What We Built and Why</h2>
+<h3 id="the-problem">The Problem</h3>
+<p>Our organisation's data lived in silos:<br>
+- Customer records in <strong>Salesforce</strong> (CRM)<br>
+- Financial and order data in <strong>NetSuite</strong> (ERP)<br>
+- Transactional data in <strong>MySQL RDS</strong> (internal databases)</p>
+<p>Each team had its own extract scripts — inconsistent, brittle, impossible to audit, and carrying serious security risks (credentials in scripts, no access control, no lineage).</p>
+<p>Analytics teams waited days for data. Compliance teams had no record of who accessed what or when. The same customer could appear as three different entities across three systems with no way to resolve them.</p>
+<h3 id="what-we-built">What We Built</h3>
+<p>An <strong>Enterprise Data Lake Platform</strong> — a production-grade, security-first, metadata-driven pipeline that:</p>
+<ul>
+<li>Continuously extracts data from all source systems on defined schedules</li>
+<li>Stores it in three governed layers (Raw, Curated, Analytics)</li>
+<li>Resolves the same entity across sources into a single "golden record"</li>
+<li>Enforces data classification, masking, and retention automatically</li>
+<li>Provides a full audit trail from source record to business insight</li>
+<li>Requires <strong>zero code changes</strong> to add a new data source or a new entity</li>
+</ul>
+<hr>
+<h2 id="2-business-outcomes">2. Business Outcomes</h2>
+<table>
+<thead>
+<tr>
+<th>Outcome</th>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Time to data availability</td>
+<td>24–72 hours (manual)</td>
+<td>1–4 hours (automated, scheduled)</td>
+</tr>
+<tr>
+<td>Customer entity resolution</td>
+<td>3 disconnected systems</td>
+<td>Single golden record per customer</td>
+</tr>
+<tr>
+<td>PII in analytics datasets</td>
+<td>Uncontrolled</td>
+<td>Masked/tokenised at pipeline level</td>
+</tr>
+<tr>
+<td>Audit trail</td>
+<td>None</td>
+<td>Full lineage from source to serving</td>
+</tr>
+<tr>
+<td>New source onboarding</td>
+<td>2–4 weeks (code change + deployment)</td>
+<td>2–3 days (configuration only)</td>
+</tr>
+<tr>
+<td>Data quality visibility</td>
+<td>No monitoring</td>
+<td>Quality reports per entity per run</td>
+</tr>
+<tr>
+<td>Credential security</td>
+<td>Scripts and .env files</td>
+<td>AWS Secrets Manager with auto-rotation</td>
+</tr>
+<tr>
+<td>Compliance readiness</td>
+<td>Manual documentation</td>
+<td>Automated lineage + retention enforcement</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="3-how-the-platform-works-functional-walkthrough">3. How the Platform Works — Functional Walkthrough</h2>
+<p>The platform runs as a <strong>scheduled, fully automated pipeline</strong>. The flow is:</p>
+<pre><code>SCHEDULE
+    │
+    ▼  (e.g. every day at 02:00 UTC for Salesforce Accounts)
+EXTRACT — connect to source, discover what changed since last run, pull records
+    │
+    ▼
+STORE RAW — write every record exactly as it came from the source (immutable)
+    │
+    ▼
+TRANSFORM — map source fields to standard names, check data quality, mask PII
+    │
+    ▼
+CURATE — publish a clean, trusted, business-ready version of the data
+    │
+    ▼
+RESOLVE — match the same customer/supplier/product across Salesforce + NetSuite + MySQL
+    │
+    ▼
+SERVE — load into the analytics database for BI tools, dashboards, and ML models
+</code></pre>
+<p>Each step produces a machine-readable audit record. No step is skipped. No data is lost. If anything fails, the platform queues a replay automatically.</p>
+<hr>
+<h2 id="4-data-flow-from-source-to-business-insight">4. Data Flow: From Source to Business Insight</h2>
+<pre><code>┌─────────────────────────────────────────────────────────────────┐
+│                      SOURCE SYSTEMS                             │
+│   Salesforce (CRM) │ NetSuite (ERP) │ MySQL RDS (Transactional) │
+└────────────┬────────┴───────┬────────┴──────────┬───────────────┘
+             │                │                   │
+             └───────────────►▼◄──────────────────┘
+                     CONNECTOR RUNTIME
+                  (discovers fields, builds query,
+                   streams records in batches of 50k)
+                              │
+                   ┌──────────▼──────────┐
+                   │     RAW LAYER       │
+                   │  S3 — Parquet files │  ← Immutable. Every source record,
+                   │  per entity per day │    exactly as received. 7-year retention.
+                   └──────────┬──────────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │  TRANSFORMATION     │
+                   │  Field mapping      │  ← Rename fields to standard names.
+                   │  Quality checks     │    Reject/warn on bad data.
+                   │  PII masking        │    Mask or tokenise sensitive fields.
+                   └──────────┬──────────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │   CURATED LAYER     │
+                   │  S3 — clean data    │  ← Trusted, standardised, PII-safe.
+                   │  Glue catalog       │    Queryable via Athena immediately.
+                   └──────────┬──────────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │  ENTITY RESOLUTION  │
+                   │  Match + dedupe     │  ← &quot;John Smith&quot; in Salesforce and
+                   │  across all sources │    &quot;J. Smith&quot; in NetSuite → same person.
+                   └──────────┬──────────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │  ANALYTICS LAYER    │
+                   │  S3 — partitioned   │  ← Optimised for BI and ML.
+                   │  Golden records     │    Year/month/day partitions.
+                   └──────────┬──────────┘
+                              │
+                   ┌──────────▼──────────┐
+                   │   SERVING STORE     │
+                   │  RDS / Redshift /   │  ← Powers low-latency APIs,
+                   │  DynamoDB           │    apps, and microservices.
+                   └─────────────────────┘
+</code></pre>
+<hr>
+<h2 id="5-connected-data-sources">5. Connected Data Sources</h2>
+<table>
+<thead>
+<tr>
+<th>Source System</th>
+<th>Type</th>
+<th>Current Entities</th>
+<th>Extraction Method</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Salesforce</strong></td>
+<td>CRM</td>
+<td>Account, Contact, Opportunity, Lead, Case (configurable — no hardcoded list)</td>
+<td>Salesforce Bulk API 2.0 (high-volume, async)</td>
+</tr>
+<tr>
+<td><strong>NetSuite</strong></td>
+<td>ERP</td>
+<td>Customer, Vendor, Invoice, Purchase Order, GL Journal (configurable)</td>
+<td>SuiteQL REST API</td>
+</tr>
+<tr>
+<td><strong>MySQL RDS</strong></td>
+<td>Transactional DB</td>
+<td>Orders, Products, Inventory, Users (configurable)</td>
+<td>JDBC / SQLAlchemy read-only connection</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Planned future sources</strong> (configuration-only addition — no code change):<br>
+Dynamics 365, HubSpot, SAP, PostgreSQL, REST APIs, CSV/Excel/SFTP</p>
+<hr>
+<h2 id="6-delta-incremental-sync-how-we-stay-current">6. Delta (Incremental) Sync — How We Stay Current</h2>
+<h3 id="the-problem-with-full-loads">The Problem with Full Loads</h3>
+<p>Extracting every record every time a pipeline runs is wasteful and slow. A Salesforce org with 5 million accounts would take hours if extracted in full daily.</p>
+<h3 id="how-delta-sync-works">How Delta Sync Works</h3>
+<p>The platform uses a <strong>watermark</strong> — a timestamp bookmark that records exactly where each pipeline last left off.</p>
+<p><strong>Example (Salesforce Accounts):</strong></p>
+<pre><code>Run #1 (2026-06-14):
+  Extract all Accounts where SystemModstamp &gt;= 1970-01-01 AND &lt; 2026-06-14
+  → Writes watermark: &quot;last successful: 2026-06-14T00:00:00Z&quot;
+
+Run #2 (2026-06-15):
+  Extract Accounts where SystemModstamp &gt;= 2026-06-14T00:00:00Z AND &lt; 2026-06-15T00:00:00Z
+  → Only records changed in the last 24 hours are extracted
+  → Writes watermark: &quot;last successful: 2026-06-15T00:00:00Z&quot;
+</code></pre>
+<h3 id="late-arriving-data-protection">Late-Arriving Data Protection</h3>
+<p>Sources sometimes update records with a slight delay. The platform supports a configurable <strong>overlap window</strong> (e.g., subtract 2 hours from the watermark lower bound) to catch late-arriving updates without re-processing the entire dataset.</p>
+<h3 id="watermark-safety-guarantees">Watermark Safety Guarantees</h3>
+<ul>
+<li>The watermark <strong>never advances</strong> if the extraction failed.</li>
+<li>If two extraction runs finish concurrently, only one wins (optimistic locking) — no gap, no duplicate.</li>
+<li>Replay is supported: any historical window can be re-extracted without corrupting the watermark.</li>
+</ul>
+<h3 id="full-load-vs-incremental-per-entity">Full Load vs Incremental — Per Entity</h3>
+<table>
+<thead>
+<tr>
+<th>Entity</th>
+<th>Load type</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Salesforce Account</td>
+<td>Incremental</td>
+<td>High volume; changes frequently</td>
+</tr>
+<tr>
+<td>Salesforce Opportunity</td>
+<td>Incremental</td>
+<td>Large dataset; use <code>CloseDate</code> watermark</td>
+</tr>
+<tr>
+<td>NetSuite Invoice</td>
+<td>Incremental</td>
+<td>Append-heavy; use <code>dateCreated</code> watermark</td>
+</tr>
+<tr>
+<td>Reference data (country codes, currency)</td>
+<td>Full</td>
+<td>Small; rarely changes; simpler</td>
+</tr>
+</tbody>
+</table>
+<p>Load type is set per entity in the configuration record — no code change to switch.</p>
+<hr>
+<h2 id="7-extraction-schedules-cron-job-reference">7. Extraction Schedules (Cron Job Reference)</h2>
+<p>Schedules are managed by <strong>AWS EventBridge Scheduler</strong>. Each entity has exactly one schedule. Schedules can be updated at any time without deployment.</p>
+<h3 id="production-schedule-reference">Production Schedule Reference</h3>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Entity</th>
+<th>Schedule</th>
+<th>UTC Time</th>
+<th>Frequency</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Salesforce</td>
+<td>Account</td>
+<td><code>cron(0 2 * * ? *)</code></td>
+<td>02:00 daily</td>
+<td>Daily</td>
+<td>After close of business in US/Pacific (previous day)</td>
+</tr>
+<tr>
+<td>Salesforce</td>
+<td>Contact</td>
+<td><code>cron(0 2 * * ? *)</code></td>
+<td>02:00 daily</td>
+<td>Daily</td>
+<td>Co-scheduled with Account</td>
+</tr>
+<tr>
+<td>Salesforce</td>
+<td>Opportunity</td>
+<td><code>cron(0 3 * * ? *)</code></td>
+<td>03:00 daily</td>
+<td>Daily</td>
+<td>Staggered to avoid concurrent Salesforce API load</td>
+</tr>
+<tr>
+<td>Salesforce</td>
+<td>Lead</td>
+<td><code>cron(0 3 * * ? *)</code></td>
+<td>03:00 daily</td>
+<td>Daily</td>
+<td></td>
+</tr>
+<tr>
+<td>Salesforce</td>
+<td>Case</td>
+<td><code>cron(0 4 * * ? *)</code></td>
+<td>04:00 daily</td>
+<td>Daily</td>
+<td></td>
+</tr>
+<tr>
+<td>NetSuite</td>
+<td>Customer</td>
+<td><code>cron(0 1 * * ? *)</code></td>
+<td>01:00 daily</td>
+<td>Daily</td>
+<td>Before Salesforce load begins</td>
+</tr>
+<tr>
+<td>NetSuite</td>
+<td>Invoice</td>
+<td><code>cron(0 1 30 * ? *)</code></td>
+<td>01:30 daily</td>
+<td>Daily</td>
+<td></td>
+</tr>
+<tr>
+<td>NetSuite</td>
+<td>Vendor</td>
+<td><code>cron(0 5 * * ? *)</code></td>
+<td>05:00 daily</td>
+<td>Daily</td>
+<td>Low priority; runs after primary sources</td>
+</tr>
+<tr>
+<td>MySQL RDS</td>
+<td>Orders</td>
+<td><code>cron(0/4 * * * ? *)</code></td>
+<td>Every 4 hours</td>
+<td>6× daily</td>
+<td>High-frequency; near-real-time operational data</td>
+</tr>
+<tr>
+<td>MySQL RDS</td>
+<td>Products</td>
+<td><code>cron(0 6 * * ? *)</code></td>
+<td>06:00 daily</td>
+<td>Daily</td>
+<td>Reference data; low change rate</td>
+</tr>
+<tr>
+<td>MySQL RDS</td>
+<td>Inventory</td>
+<td><code>cron(0/2 * * * ? *)</code></td>
+<td>Every 2 hours</td>
+<td>12× daily</td>
+<td>Inventory is time-sensitive</td>
+</tr>
+</tbody>
+</table>
+<h3 id="how-to-update-a-schedule">How to Update a Schedule</h3>
+<p>No deployment required. The schedule can be updated via the platform API or CLI:</p>
+<pre><code class="language-bash"># Example: change Salesforce Account to run every 4 hours
+python scripts/trigger_extraction.py --update-schedule \
+  --source-id salesforce \
+  --entity-id salesforce-account \
+  --schedule &quot;cron(0 */4 * * ? *)&quot;
+</code></pre>
+<p>Changes take effect on the next trigger window.</p>
+<h3 id="schedule-naming-convention">Schedule Naming Convention</h3>
+<p>Schedule names follow <code>{source_id}--{entity_id}</code> (e.g. <code>salesforce--salesforce-account</code>). Double-hyphen separates source and entity to avoid ambiguity.</p>
+<hr>
+<h2 id="8-least-privilege-access-model-who-can-read-what">8. Least Privilege Access Model — Who Can Read What</h2>
+<p>The platform enforces a <strong>zero-trust, need-to-know</strong> access model. Each pipeline stage runs under a dedicated IAM service role with the minimum permissions required — no shared credentials, no wildcard permissions.</p>
+<h3 id="iam-role-map">IAM Role Map</h3>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Can Read</th>
+<th>Can Write</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>extraction-service-role</code></td>
+<td>Raw S3 (write-only via put_object); Secrets Manager (source credentials, GetSecretValue only); DynamoDB config table (GetItem only); DynamoDB watermark table (GetItem, PutItem on own entities)</td>
+<td>Raw S3</td>
+<td>Cannot read curated, analytics, or governance buckets</td>
+</tr>
+<tr>
+<td><code>transformation-service-role</code></td>
+<td>Raw S3 (read-only on own entity prefix); Mapping bucket; Quality policy bucket</td>
+<td>Curated S3; Glue catalog</td>
+<td>Cannot write to raw layer; cannot read Secrets Manager</td>
+</tr>
+<tr>
+<td><code>entity-resolution-role</code></td>
+<td>Curated S3 (read-only)</td>
+<td>Analytics S3; Glue catalog</td>
+<td>Scoped to resolution output prefix only</td>
+</tr>
+<tr>
+<td><code>analytics-serve-role</code></td>
+<td>Analytics S3 (read-only); Curated S3 (read-only)</td>
+<td>Serving database</td>
+<td>Read-only on data lakes</td>
+</tr>
+<tr>
+<td><code>governance-role</code></td>
+<td>All S3 buckets (metadata path only); DynamoDB audit tables</td>
+<td>Governance S3; DynamoDB onboarding table; S3 Object Lock API</td>
+<td>Only role that can place/lift legal holds</td>
+</tr>
+<tr>
+<td><code>ci-cd-deploy-role</code></td>
+<td>Terraform state bucket</td>
+<td>IAM role updates (boundary-constrained); Lambda/ECS task deployments</td>
+<td>Cannot access data buckets or Secrets Manager values</td>
+</tr>
+<tr>
+<td><strong>BI / Analytics consumers</strong></td>
+<td>Analytics S3 (read; prefix-scoped to approved datasets)</td>
+<td>None</td>
+<td>Individual user IAM roles or assumed role via Athena</td>
+</tr>
+<tr>
+<td><strong>ML engineers</strong></td>
+<td>Analytics S3 (read; feature store prefix)</td>
+<td>Feature store S3</td>
+<td>No access to raw or curated layers</td>
+</tr>
+</tbody>
+</table>
+<h3 id="s3-bucket-access-matrix">S3 Bucket Access Matrix</h3>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th>Extraction</th>
+<th>Transformation</th>
+<th>Entity Resolution</th>
+<th>Analytics Serve</th>
+<th>Governance</th>
+<th>BI/Analytics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Raw (<code>{env}-edl-raw</code>)</td>
+<td><strong>Write</strong></td>
+<td>Read</td>
+<td>✗</td>
+<td>✗</td>
+<td>Read (audit)</td>
+<td>✗</td>
+</tr>
+<tr>
+<td>Curated (<code>{env}-edl-curated</code>)</td>
+<td>✗</td>
+<td><strong>Write</strong></td>
+<td>Read</td>
+<td>Read</td>
+<td>Read (audit)</td>
+<td>✗</td>
+</tr>
+<tr>
+<td>Analytics (<code>{env}-edl-analytics</code>)</td>
+<td>✗</td>
+<td>✗</td>
+<td><strong>Write</strong></td>
+<td>Read</td>
+<td>Read (audit)</td>
+<td><strong>Read (prefix-scoped)</strong></td>
+</tr>
+<tr>
+<td>Schema Snapshots</td>
+<td>Write</td>
+<td>Read</td>
+<td>✗</td>
+<td>✗</td>
+<td>Read</td>
+<td>✗</td>
+</tr>
+<tr>
+<td>Governance</td>
+<td>✗</td>
+<td>Write (lineage)</td>
+<td>Write (lineage)</td>
+<td>✗</td>
+<td><strong>Write</strong></td>
+<td>✗</td>
+</tr>
+<tr>
+<td>Mapping / Quality</td>
+<td>✗</td>
+<td>Read</td>
+<td>✗</td>
+<td>✗</td>
+<td><strong>Write</strong></td>
+<td>✗</td>
+</tr>
+</tbody>
+</table>
+<h3 id="source-credential-access">Source Credential Access</h3>
+<p>Each source has its own Secrets Manager secret:<br>
+- Path: <code>{environment}/{source_id}/credentials</code><br>
+- Only the <code>extraction-service-role</code> for that source has <code>GetSecretValue</code> permission.<br>
+- Rotation is scheduled (every 90 days for Salesforce OAuth tokens, every 365 days for MySQL read-only passwords).<br>
+- Credentials are retrieved at runtime, held in memory for the duration of one extraction run, and never logged.</p>
+<hr>
+<h2 id="9-data-layers-explained">9. Data Layers Explained</h2>
+<h3 id="raw-layer-the-source-of-truth-archive">Raw Layer — The Source of Truth Archive</h3>
+<p><strong>Purpose:</strong> Store every record exactly as it came from the source system. Never modified. Never deleted (within retention window).</p>
+<ul>
+<li>Format: Apache Parquet (columnar, compressed — typically 5–10× smaller than JSON)</li>
+<li>Partitioned by source → entity → extraction date</li>
+<li>Immutable: old files are never overwritten; new files are added alongside</li>
+<li>Retention: 7 years (S3 Object Lock, GOVERNANCE mode)</li>
+<li>Access: extraction service role (write); transformation role (read)</li>
+<li><strong>No PII masking</strong> — raw data is as-received. Access is strictly controlled.</li>
+</ul>
+<p><strong>Why keep raw?</strong> If a transformation rule was wrong, or a field mapping was incorrect, you can replay from raw without going back to the source system. This is the single most important recovery capability in the platform.</p>
+<h3 id="curated-layer-the-trusted-business-layer">Curated Layer — The Trusted Business Layer</h3>
+<p><strong>Purpose:</strong> Clean, standardised, domain-aligned data ready for business use.</p>
+<ul>
+<li>Source fields mapped to canonical names (e.g. <code>Account_Name__c</code> → <code>account_name</code>)</li>
+<li>PII fields masked or tokenised per classification policy</li>
+<li>Quality-checked records only (blocking violations prevent publication)</li>
+<li>Registered in AWS Glue Data Catalog — immediately queryable via Athena</li>
+<li>Retention: 3 years</li>
+<li>Access: transformation role (write); analytics roles (read)</li>
+</ul>
+<p><strong>What "curated" means:</strong> A business analyst querying <code>curated.customer</code> sees a clean, consistent schema regardless of which source system the data originated from.</p>
+<h3 id="analytics-layer-the-consumption-layer">Analytics Layer — The Consumption Layer</h3>
+<p><strong>Purpose:</strong> Optimised for BI tools, dashboards, and ML models.</p>
+<ul>
+<li>Year/month/day partitioned for efficient time-range queries</li>
+<li>Contains <strong>curated domain datasets</strong> and <strong>canonical entity records</strong> (entity-resolved golden records)</li>
+<li>Two canonical entity types currently defined:</li>
+<li><strong><code>company</code></strong> — merges Salesforce Account + NetSuite Customer into a single trusted company profile</li>
+<li><strong><code>person</code></strong> — normalises Salesforce Contact into a canonical person record</li>
+<li>Every golden record includes <strong>5 system fields</strong> beyond the 14 business <code>output_fields</code>: <code>golden_id</code>, <code>contributing_source_records</code>, <code>survivorship_version</code>, <code>match_run_id</code>, and <code>field_provenance</code>. See <a href="../PLATFORM_FLOW.md#system-fields-in-golden-records">PLATFORM_FLOW: System Fields in Golden Records</a> for details.</li>
+<li>Registered in Glue catalog; Athena workgroup configured per team</li>
+<li>Retention: 1 year active; archival to Glacier after</li>
+<li>Access: read-only for approved BI users and ML engineers (prefix-scoped)</li>
+</ul>
+<h3 id="serving-store-the-application-layer">Serving Store — The Application Layer</h3>
+<p><strong>Purpose:</strong> Powers operational applications and APIs that require low-latency reads and cannot query S3 directly.</p>
+<ul>
+<li>Loaded from the analytics layer via upsert</li>
+<li>Target: RDS (PostgreSQL), Redshift, or DynamoDB (depending on deployment profile)</li>
+<li>Supports both full-replace and incremental-merge load modes</li>
+<li><strong>Not the same as Athena reporting</strong> — Athena is the query engine that runs SQL over the Analytics layer (S3 Parquet) for BI tools, dashboards, and ad-hoc analysis. Serving Store is the operational store for predictable sub-second API reads at high concurrency.</li>
+</ul>
+<hr>
+<h2 id="10-data-quality-and-governance">10. Data Quality and Governance</h2>
+<h3 id="quality-checks-per-entity">Quality Checks Per Entity</h3>
+<p>Every entity has a quality policy that runs before curated publication:</p>
+<table>
+<thead>
+<tr>
+<th>Check type</th>
+<th>Example</th>
+<th>Effect when violated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Null check</td>
+<td><code>customer_id</code> must not be null</td>
+<td><strong>BLOCKING</strong> — curated write skipped</td>
+</tr>
+<tr>
+<td>Pattern check</td>
+<td>Email must match <code>^[^@]+@[^@]+\.[^@]+$</code></td>
+<td>BLOCKING or WARNING</td>
+</tr>
+<tr>
+<td>Range check</td>
+<td><code>order_amount</code> must be between 0 and 10,000,000</td>
+<td>WARNING only</td>
+</tr>
+<tr>
+<td>Enum check</td>
+<td><code>status</code> must be one of <code>[active, inactive, pending]</code></td>
+<td>BLOCKING</td>
+</tr>
+</tbody>
+</table>
+<p>A quality report is written to S3 for every run. When a BLOCKING violation occurs, a CloudWatch alarm fires and the on-call team is notified. The curated write is skipped for that run — the previous curated dataset remains unchanged.</p>
+<h3 id="schema-drift-detection">Schema Drift Detection</h3>
+<p>Every time data is extracted, the field schema is compared against the previous snapshot. Changes are classified:</p>
+<table>
+<thead>
+<tr>
+<th>Change type</th>
+<th>Example</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>No drift</strong></td>
+<td>Nothing changed</td>
+<td>Pipeline proceeds normally</td>
+</tr>
+<tr>
+<td><strong>Non-breaking</strong></td>
+<td>New optional field added</td>
+<td>Pipeline proceeds; downstream teams notified</td>
+</tr>
+<tr>
+<td><strong>Potentially breaking</strong></td>
+<td>Field length reduced</td>
+<td>Pipeline proceeds; manual review recommended</td>
+</tr>
+<tr>
+<td><strong>Breaking</strong></td>
+<td>Field removed or type changed</td>
+<td>Raw data stored; <strong>transformation blocked until reviewed</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Breaking drift triggers a CloudWatch alarm and requires a governance review before transformation resumes. This prevents corrupt data from reaching the curated layer.</p>
+<h3 id="source-onboarding-governance">Source Onboarding Governance</h3>
+<p>A new data source cannot be extracted until it passes <strong>six mandatory gates</strong>:</p>
+<pre><code>SOURCE_REGISTRATION  →  CREDENTIAL_REGISTRATION  →  ENTITY_MAPPING
+        →  EXTRACTION_PROFILE  →  SECURITY_GOVERNANCE  →  ACCEPTANCE_VALIDATION
+</code></pre>
+<p>Each gate is recorded and immutably logged. A gate cannot be skipped without a written waiver (minimum 20-character justification, stored in the audit trail).</p>
+<h3 id="declarative-entity-resolution-configuration">Declarative Entity Resolution Configuration</h3>
+<p>Who counts as the "same company" across Salesforce and NetSuite, and which source wins when field values conflict, are declared as <strong>versioned JSON config files</strong> — not embedded in code. The files live in <code>config/entity_resolution/</code> (version-controlled in Git) and are published to S3 before each environment is activated.</p>
+<p>This means:<br>
+- Adding a new entity type or changing a match threshold is a config file change, reviewed and approved like any data governance decision, with no Lambda deployment required<br>
+- Every historical version of the rules is retained; any pipeline run can be replayed with the exact rules that were active at the time<br>
+- The <code>output_fields</code> list in each survivorship policy is the authoritative schema contract for canonical analytics tables — only declared fields appear in Parquet output</p>
+<hr>
+<h2 id="11-security-architecture-summary">11. Security Architecture Summary</h2>
+<p>The platform is built security-first, with controls embedded at every layer:</p>
+<h3 id="credential-management">Credential Management</h3>
+<ul>
+<li>Source credentials stored exclusively in <strong>AWS Secrets Manager</strong></li>
+<li>Separate secret per source system, per environment</li>
+<li>Automatic rotation scheduled per source type</li>
+<li>Credentials held in memory only for the duration of a single extraction run — never written to logs, files, or environment variables</li>
+</ul>
+<h3 id="encryption">Encryption</h3>
+<ul>
+<li>All data <strong>at rest</strong> encrypted with AWS KMS (SSE-KMS)</li>
+<li>All data <strong>in transit</strong> encrypted (TLS 1.2+ mandatory)</li>
+<li>All inter-service communication over AWS private endpoints (no public internet traversal)</li>
+</ul>
+<h3 id="network-isolation">Network Isolation</h3>
+<ul>
+<li>Platform runs in a private VPC with no internet gateway</li>
+<li>All AWS service access (S3, DynamoDB, Secrets Manager, CloudWatch) via VPC endpoints</li>
+<li>Source connectivity via AWS PrivateLink or VPN (no public credential exposure)</li>
+</ul>
+<h3 id="pii-and-sensitive-data">PII and Sensitive Data</h3>
+<ul>
+<li>Fields classified as PII are automatically masked before any write to the curated or analytics layer</li>
+<li>Masking strategies: redact, partial mask, tokenise (HMAC-SHA256 keyed), hash, full mask</li>
+<li>PII field names are never included in log output, quality reports, or drift alerts</li>
+<li>Classification policy is a configuration artefact — updated without code changes</li>
+</ul>
+<h3 id="audit-trail">Audit Trail</h3>
+<ul>
+<li>Every pipeline stage emits an immutable audit record to DynamoDB</li>
+<li>Every data write produces a lineage record in the governance S3 bucket</li>
+<li>CloudWatch logs capture all structured events; X-Ray traces all service calls</li>
+<li>S3 access logging enabled on all data buckets</li>
+</ul>
+<h3 id="least-privilege">Least Privilege</h3>
+<ul>
+<li>No IAM role has <code>Resource: "*"</code> or <code>Action: "*"</code> permissions</li>
+<li>All roles are scoped to specific tables, bucket prefixes, and actions</li>
+<li>CI/CD deployment role cannot access data buckets</li>
+<li>BI consumers can only read prefix-scoped analytics data</li>
+</ul>
+<hr>
+<h2 id="12-operational-resilience">12. Operational Resilience</h2>
+<h3 id="automated-failure-recovery">Automated Failure Recovery</h3>
+<table>
+<thead>
+<tr>
+<th>Failure scenario</th>
+<th>Automatic response</th>
+<th>Manual action required?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Source API temporarily unavailable</td>
+<td>Retry with exponential backoff (3 attempts)</td>
+<td>Only if circuit breaker opens</td>
+</tr>
+<tr>
+<td>Partial extraction run</td>
+<td>Watermark not advanced; next run picks up full window</td>
+<td>No</td>
+</tr>
+<tr>
+<td>DLQ message received</td>
+<td>Replay available via <code>RunReplayController</code></td>
+<td>Yes — operations team triggers replay</td>
+</tr>
+<tr>
+<td>Breaking schema drift</td>
+<td>Raw stored; transformation blocked; alarm fires</td>
+<td>Yes — governance review</td>
+</tr>
+<tr>
+<td>Quality BLOCKING violation</td>
+<td>Previous curated unchanged; report written; alarm fires</td>
+<td>Yes — data team review</td>
+</tr>
+<tr>
+<td>Watermark concurrency conflict</td>
+<td>Run completes with <code>partial=True</code>; next run self-heals</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<h3 id="circuit-breaker">Circuit Breaker</h3>
+<p>Each source–entity pair has an independent circuit breaker:<br>
+- Tracks consecutive failures<br>
+- Opens after threshold (default: 5 consecutive failures)<br>
+- Open circuit fails fast — does not waste time or API quota hammering a failing source<br>
+- Auto-resets on successful run; or manually reset after remediation</p>
+<h3 id="dead-letter-queue">Dead-Letter Queue</h3>
+<p>All terminal pipeline failures produce a structured DLQ message containing:<br>
+- <code>run_id</code>, <code>source_id</code>, <code>entity_id</code>, <code>failed_stage</code><br>
+- <code>error_message</code> (scrubbed of all credentials and PII)<br>
+- <code>enqueued_at</code> timestamp</p>
+<p>Operations teams consume DLQ messages via CloudWatch alarms and replay using the built-in replay controller.</p>
+<h3 id="idempotency">Idempotency</h3>
+<p>All pipeline writes are <strong>idempotent</strong>: re-running any stage with the same inputs produces the same outputs. S3 <code>put_object</code> replaces existing files; DynamoDB writes use conditional expressions. Replay is safe.</p>
+<hr>
+<h2 id="13-scalability-and-cost-profile">13. Scalability and Cost Profile</h2>
+<h3 id="extraction-scaling">Extraction Scaling</h3>
+<table>
+<thead>
+<tr>
+<th>Source volume</th>
+<th>Handling</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>&lt; 100k records / entity / day</td>
+<td>Single Lambda execution (max 15 min)</td>
+</tr>
+<tr>
+<td>100k – 5M records / entity / day</td>
+<td>Salesforce Bulk API 2.0 (async job); streamed in 50k-record chunks</td>
+</tr>
+<tr>
+<td>&gt; 5M records / entity / day</td>
+<td>ECS Fargate task (no Lambda timeout limit)</td>
+</tr>
+</tbody>
+</table>
+<p>Streaming architecture: only one 50,000-record chunk is held in memory at any time. RAM usage is constant regardless of dataset size.</p>
+<h3 id="storage-costs-approximate">Storage Costs (Approximate)</h3>
+<p>Parquet compression typically achieves 5–10× reduction vs raw JSON. Example: 10 million customer records (Salesforce Accounts) at ~2 KB each:</p>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Size</th>
+<th>Monthly S3 cost (Standard)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Raw JSON</td>
+<td>~20 GB / day</td>
+<td>~$0.46 / day</td>
+</tr>
+<tr>
+<td>Parquet (Snappy)</td>
+<td>~2.5 GB / day</td>
+<td>~$0.06 / day</td>
+</tr>
+</tbody>
+</table>
+<p>The analytics layer moves to <strong>S3 Intelligent-Tiering</strong> after 30 days (auto moves to infrequent access after 90 days of no access).</p>
+<h3 id="athena-query-cost">Athena Query Cost</h3>
+<p>Athena charges $5 per TB scanned. Year/month/day partitioning on the analytics layer means a typical dashboard query scans only the relevant partition — typically 1–10 GB rather than the full dataset.</p>
+<hr>
+<h2 id="14-adding-new-data-sources-zero-code-changes">14. Adding New Data Sources — Zero Code Changes</h2>
+<p>Adding a new data source requires only <strong>configuration</strong> — no code deployment:</p>
+<h3 id="what-is-needed">What is needed</h3>
+<ol>
+<li><strong>Register credentials</strong> in Secrets Manager at path <code>{env}/{source_id}/credentials</code></li>
+<li><strong>Add entity configuration records</strong> to DynamoDB (can be done via script or UI)</li>
+<li><strong>Create extraction schedule</strong> in EventBridge Scheduler</li>
+<li><strong>Pass the 6-gate onboarding checklist</strong> (security + governance review)</li>
+</ol>
+<h3 id="what-is-not-needed">What is NOT needed</h3>
+<ul>
+<li>No new Python code</li>
+<li>No changes to orchestration, transformation, or governance modules</li>
+<li>No code review or deployment cycle for the source itself</li>
+<li>No new infrastructure (all compute, storage, and networking is shared)</li>
+</ul>
+<h3 id="timeline-for-a-new-source-estimated">Timeline for a new source (estimated)</h3>
+<table>
+<thead>
+<tr>
+<th>Activity</th>
+<th>Owner</th>
+<th>Duration</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Credential registration + Secrets Manager setup</td>
+<td>Platform team</td>
+<td>0.5 day</td>
+</tr>
+<tr>
+<td>Entity configuration records</td>
+<td>Data team</td>
+<td>0.5 day</td>
+</tr>
+<tr>
+<td>Dry-run in dev environment</td>
+<td>Data team</td>
+<td>1 day</td>
+</tr>
+<tr>
+<td>Security governance review</td>
+<td>Security team</td>
+<td>1 day</td>
+</tr>
+<tr>
+<td>Canary run in staging</td>
+<td>Data team</td>
+<td>0.5 day</td>
+</tr>
+<tr>
+<td>Production activation</td>
+<td>Platform team</td>
+<td>0.5 day</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td></td>
+<td><strong>~4 days</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Compare: previous approach of writing a new ETL script = 2–4 weeks.</p>
+<hr>
+<h2 id="15-compliance-and-audit-readiness">15. Compliance and Audit Readiness</h2>
+<h3 id="regulatory-controls-implemented">Regulatory Controls Implemented</h3>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Data retention enforcement</td>
+<td>S3 Object Lock (GOVERNANCE mode); 7 years raw, 3 years curated</td>
+</tr>
+<tr>
+<td>Right to erasure (GDPR Article 17)</td>
+<td>Legal hold lift + S3 Object Lock governance bypass (governance role only); lineage records updated</td>
+</tr>
+<tr>
+<td>Data lineage documentation</td>
+<td>Automated lineage records from source to serving, per run</td>
+</tr>
+<tr>
+<td>Access audit trail</td>
+<td>CloudWatch Logs + S3 access logs; DynamoDB audit table per pipeline stage</td>
+</tr>
+<tr>
+<td>PII masking at rest</td>
+<td>Applied at transformation stage; never in raw layer without access control</td>
+</tr>
+<tr>
+<td>Breach notification readiness</td>
+<td>Classification policy enables immediate scoping of affected entities</td>
+</tr>
+<tr>
+<td>Third-party data access</td>
+<td>IAM prefix-scoped read roles per team; no shared credentials</td>
+</tr>
+</tbody>
+</table>
+<h3 id="evidence-available-for-audit">Evidence Available for Audit</h3>
+<table>
+<thead>
+<tr>
+<th>Audit question</th>
+<th>Evidence location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Who extracted this data on this date?"</td>
+<td>DynamoDB run audit log (table: <code>{env}-run-audit-log</code>)</td>
+</tr>
+<tr>
+<td>"What fields were extracted?"</td>
+<td>Schema snapshot (S3: <code>schemas/{source_id}/{entity_id}/{date}.json</code>)</td>
+</tr>
+<tr>
+<td>"Was PII masked before analytics access?"</td>
+<td>Transformation lineage record; classification policy version logged</td>
+</tr>
+<tr>
+<td>"What changed in the source schema?"</td>
+<td>Drift report (S3: alongside schema snapshot)</td>
+</tr>
+<tr>
+<td>"Was this source security-reviewed before extraction started?"</td>
+<td>Source onboarding registry (DynamoDB: <code>{env}-source-onboarding</code>)</td>
+</tr>
+<tr>
+<td>"Who has access to raw PII data?"</td>
+<td>IAM role policy (Terraform — version-controlled; extraction-service-role only)</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="16-key-metrics-and-slos">16. Key Metrics and SLOs</h2>
+<h3 id="service-level-objectives">Service Level Objectives</h3>
+<table>
+<thead>
+<tr>
+<th>SLO</th>
+<th>Target</th>
+<th>Alert threshold</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Extraction completion rate</td>
+<td>≥ 99.5% of scheduled runs complete</td>
+<td>&lt; 98% over 7 days</td>
+</tr>
+<tr>
+<td>Data freshness (time to curated)</td>
+<td>≤ 4 hours from extraction start</td>
+<td>&gt; 6 hours</td>
+</tr>
+<tr>
+<td>Quality pass rate</td>
+<td>≥ 95% of entities publish without blocking violations</td>
+<td>&lt; 90%</td>
+</tr>
+<tr>
+<td>Schema drift (breaking)</td>
+<td>0 unreviewed breaking drift events in production</td>
+<td>Any unreviewed event &gt; 24 hours</td>
+</tr>
+<tr>
+<td>Watermark lag</td>
+<td>≤ 26 hours (daily entities); ≤ 3 hours (hourly entities)</td>
+<td>Exceed threshold for 2 consecutive runs</td>
+</tr>
+<tr>
+<td>DLQ depth</td>
+<td>0 unprocessed messages</td>
+<td>Any message older than 4 hours</td>
+</tr>
+</tbody>
+</table>
+<h3 id="cloudwatch-dashboard-metrics">CloudWatch Dashboard Metrics</h3>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RecordsExtracted</code></td>
+<td>Count of raw records written per run per entity</td>
+</tr>
+<tr>
+<td><code>RecordsFailed</code></td>
+<td>Records rejected (quality or mapping failure)</td>
+</tr>
+<tr>
+<td><code>WatermarkLagSeconds</code></td>
+<td>How far behind the watermark is vs current time</td>
+</tr>
+<tr>
+<td><code>SchemaDriftCount</code></td>
+<td>Drift events detected per entity</td>
+</tr>
+<tr>
+<td><code>RetryCount</code></td>
+<td>Retry attempts per run (high value = source instability)</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="17-roadmap">17. Roadmap</h2>
+<h3 id="near-term-next-quarter">Near-term (next quarter)</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dynamics 365 connector</td>
+<td>Configuration-only addition; adapter code ~3 days</td>
+</tr>
+<tr>
+<td>HubSpot connector</td>
+<td>Marketing activity data for unified customer view</td>
+</tr>
+<tr>
+<td>Real-time CDC pipeline</td>
+<td>Debezium + Kafka for sub-minute latency on MySQL changes</td>
+</tr>
+<tr>
+<td>Self-service entity configuration UI</td>
+<td>Web UI for data owners to manage entity configs without scripts</td>
+</tr>
+<tr>
+<td>Data quality dashboard</td>
+<td>Business-facing quality report dashboard in CloudWatch or Grafana</td>
+</tr>
+</tbody>
+</table>
+<h3 id="medium-term-next-two-quarters">Medium-term (next two quarters)</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ML feature store integration</td>
+<td>Publish analytics features directly to SageMaker Feature Store</td>
+</tr>
+<tr>
+<td>Cross-environment data sharing</td>
+<td>Analytics layer shared across prod environments via AWS Lake Formation</td>
+</tr>
+<tr>
+<td>Column-level access control</td>
+<td>Lake Formation column-masking for Athena queries (alternative to IAM prefix scope)</td>
+</tr>
+<tr>
+<td>Automated schema migration</td>
+<td>When non-breaking drift detected, auto-update Glue catalog schema</td>
+</tr>
+</tbody>
+</table>
+<h3 id="long-term">Long-term</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Multi-cloud support</td>
+<td>Azure Data Lake and GCP BigQuery as alternative serving stores</td>
+</tr>
+<tr>
+<td>AI-assisted entity resolution</td>
+<td>LLM-based fuzzy matching for unstructured entity data</td>
+</tr>
+<tr>
+<td>Data mesh transition</td>
+<td>Domain-aligned ownership of curated datasets with platform providing infrastructure</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<p><em>For technical implementation details, see <a href="PLATFORM_FLOW.md">docs/PLATFORM_FLOW.md</a>.</em><br>
+<em>For infrastructure configuration, see <a href="../infrastructure/environments/">infrastructure/environments/</a>.</em><br>
+<em>For source onboarding, see <a href="../governance/source_onboarding_registry.py">governance/source_onboarding_registry.py</a>.</em></p>
+      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
+    </article>
+  </main>
+</body>
+</html>

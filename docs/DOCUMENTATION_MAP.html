@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Documentation Map &amp; Reading Guide</title>
+  <style>
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #e2e8f0;
+  --accent: #0f766e;
+  --code-bg: #f1f5f9;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+}
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(15, 23, 42, 0.95);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
+.file { font-size: 12px; opacity: 0.9; }
+main {
+  max-width: 1100px;
+  margin: 24px auto 48px;
+  padding: 0 20px;
+}
+article {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
+}
+h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
+h1 { margin-top: 0; font-size: 2rem; }
+h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
+h3 { font-size: 1.2rem; }
+p, li { color: var(--text); line-height: 1.65; }
+ul, ol { padding-left: 1.25rem; }
+code {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre {
+  background: #0b1020;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  overflow-x: auto;
+  border: 1px solid #1e293b;
+}
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+blockquote {
+  margin: 1em 0;
+  padding: 0.7em 1em;
+  border-left: 4px solid var(--accent);
+  background: #f0fdfa;
+  color: var(--muted);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.95rem;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
+.toc {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  margin-bottom: 1rem;
+}
+.footer {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 14px;
+}
+@media (max-width: 760px) {
+  article { padding: 18px; border-radius: 10px; }
+  .header-inner { padding: 10px 14px; }
+  main { margin-top: 16px; padding: 0 12px; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand">Enterprise Data Lake Documentation</div>
+      <div class="file">DOCUMENTATION_MAP.md</div>
+    </div>
+  </header>
+  <main>
+    <article>
+<h1 id="documentation-map-reading-guide">Documentation Map &amp; Reading Guide</h1>
+<p><strong>For:</strong> Anyone approaching the documentation for the first time<br>
+<strong>Purpose:</strong> Navigate 13 comprehensive documents + 6 existing docs effectively<br>
+<strong>Last updated:</strong> 2026-06-17</p>
+<hr>
+<h2 id="quick-navigation-by-role">Quick Navigation by Role</h2>
+<h3 id="executive-c-suite-board-members">Executive / C-Suite / Board Members</h3>
+<p><strong>Read these (in order):</strong></p>
+<ol>
+<li>
+<p><strong><a href="EXECUTIVE_SUMMARY_ONE_PAGE.md">EXECUTIVE_SUMMARY_ONE_PAGE.md</a></strong> ← START HERE<br>
+   - 2 min read<br>
+   - Problem → solution → business impact → next steps<br>
+   - Print-friendly version to share</p>
+</li>
+<li>
+<p><strong><a href="COST_ANALYSIS_AND_ROI.md">COST_ANALYSIS_AND_ROI.md</a></strong><br>
+   - 5 min read (exec summary) + 10 min (detailed)<br>
+   - Month 1 ROI, ongoing savings, financial comparison vs. alternatives<br>
+   - Share with CFO</p>
+</li>
+<li>
+<p><strong><a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a></strong> (sections: Business &amp; Strategy, Regulatory)<br>
+   - Skim for questions you'd ask<br>
+   - Bookmark for reference during meetings</p>
+</li>
+<li>
+<p><strong><a href="PRESENTATION_QUICK_REFERENCE.md">PRESENTATION_QUICK_REFERENCE.md</a></strong> (Card 1–7)<br>
+   - If attending the live presentation, read beforehand<br>
+   - Anticipate questions from your team</p>
+</li>
+</ol>
+<hr>
+<h3 id="chief-technology-officer-cio">Chief Technology Officer / CIO</h3>
+<p><strong>Read these (in order):</strong></p>
+<ol>
+<li>
+<p><strong><a href="EXECUTIVE_OVERVIEW.md">EXECUTIVE_OVERVIEW.md</a></strong> (Sections 1–9)<br>
+   - 15 min read<br>
+   - Business problem → platform architecture → technical walkthrough<br>
+   - Understand the full picture</p>
+</li>
+<li>
+<p><strong><a href="PLATFORM_FLOW.md">PLATFORM_FLOW.md</a></strong> (Sections 1–3)<br>
+   - 10 min read<br>
+   - Architecture diagram + data layer definitions + end-to-end flow<br>
+   - Visual reference for architecture reviews</p>
+</li>
+<li>
+<p><strong><a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a></strong> (section: Technical Concerns)<br>
+   - Answer common architecture questions</p>
+</li>
+<li>
+<p><strong><a href="GO_LIVE_READINESS_CHECKLIST.md">GO_LIVE_READINESS_CHECKLIST.md</a></strong> (Security &amp; Compliance section)<br>
+   - Verify all security hardening is complete</p>
+</li>
+</ol>
+<hr>
+<h3 id="chief-information-security-officer-ciso-security-team">Chief Information Security Officer (CISO) / Security Team</h3>
+<p><strong>Read these (in order):</strong></p>
+<ol>
+<li>
+<p><strong><a href="EXECUTIVE_OVERVIEW.md">EXECUTIVE_OVERVIEW.md</a></strong> (Sections 11, 15)<br>
+   - 5 min read<br>
+   - Security architecture summary + compliance &amp; audit readiness</p>
+</li>
+<li>
+<p><strong><a href="PLATFORM_FLOW.md">PLATFORM_FLOW.md</a></strong> (Sections 7, 8)<br>
+   - 10 min read<br>
+   - Security controls per layer + S3/DynamoDB layout</p>
+</li>
+<li>
+<p><strong><a href="GO_LIVE_READINESS_CHECKLIST.md">GO_LIVE_READINESS_CHECKLIST.md</a></strong> (Security &amp; Compliance)<br>
+   - Pre-go-live verification checklist</p>
+</li>
+<li>
+<p><strong><a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a></strong> (section: Technical Concerns — "Are we secure?")<br>
+   - Security Q&amp;A template</p>
+</li>
+</ol>
+<hr>
+<h3 id="chief-compliance-officer-compliance-legal-team">Chief Compliance Officer / Compliance &amp; Legal Team</h3>
+<p><strong>Read these (in order):</strong></p>
+<ol>
+<li>
+<p><strong><a href="EXECUTIVE_OVERVIEW.md">EXECUTIVE_OVERVIEW.md</a></strong> (Sections 10, 15)<br>
+   - 5 min read<br>
+   - Data quality &amp; governance + compliance &amp; audit readiness</p>
+</li>
+<li>
+<p><strong><a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a></strong> (section: Regulatory &amp; Compliance)<br>
+   - 5 min read<br>
+   - GDPR, CCPA, SOC 2, HIPAA readiness</p>
+</li>
+<li>
+<p><strong><a href="GO_LIVE_READINESS_CHECKLIST.md">GO_LIVE_READINESS_CHECKLIST.md</a></strong> (Compliance Review section)<br>
+   - Sign-off checklist</p>
+</li>
+</ol>
+<hr>
+<h3 id="chief-data-officer-vp-data-governance">Chief Data Officer / VP Data Governance</h3>
+<p><strong>Read these (in order):</strong></p>
+<ol>
+<li>
+<p><strong><a href="EXECUTIVE_OVERVIEW.md">EXECUTIVE_OVERVIEW.md</a></strong> (entire document)<br>
+   - 20 min read<br>
+   - Comprehensive walkthrough of data layers, entity resolution, governance</p>
+</li>
+<li>
+<p><strong><a href="PLATFORM_FLOW.md">PLATFORM_FLOW.md</a></strong> (entire document)<br>
+   - 20 min read<br>
+   - Technical flow with governance integration points</p>
+</li>
+<li>
+<p><strong><a href="PIPELINE_FLOW.md">PIPELINE_FLOW.md</a></strong> (Sections 3–6)<br>
+   - 15 min read<br>
+   - Entity resolution + field mapping systems + field mapping</p>
+</li>
+<li>
+<p><strong><a href="GO_LIVE_READINESS_CHECKLIST.md">GO_LIVE_READINESS_CHECKLIST.md</a></strong> (Data Configuration section)<br>
+   - Pre-go-live verification for configs</p>
+</li>
+</ol>
+<hr>
+<h3 id="vp-operations-operations-manager">VP Operations / Operations Manager</h3>
+<p><strong>Read these (in order):</strong></p>
+<ol>
+<li>
+<p><strong><a href="EXECUTIVE_OVERVIEW.md">EXECUTIVE_OVERVIEW.md</a></strong> (Sections 12–13)<br>
+   - 5 min read<br>
+   - Operational resilience + scalability</p>
+</li>
+<li>
+<p><strong><a href="GO_LIVE_READINESS_CHECKLIST.md">GO_LIVE_READINESS_CHECKLIST.md</a></strong> (entire document)<br>
+   - 30 min read<br>
+   - Pre-go-live verification + runbook testing</p>
+</li>
+<li>
+<p><strong><a href="PRODUCTION_INCIDENT_RUNBOOK.md">PRODUCTION_INCIDENT_RUNBOOK.md</a></strong><br>
+   - 20 min read (skim for scenarios)<br>
+   - Bookmark for on-call reference<br>
+   - Ensure all ops team members have read this</p>
+</li>
+<li>
+<p><strong><a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a></strong> (section: Operational &amp; Governance)<br>
+   - Who's responsible for running this?</p>
+</li>
+</ol>
+<hr>
+<h3 id="platform-engineering-lead-architecture-lead">Platform Engineering Lead / Architecture Lead</h3>
+<p><strong>Read these (in order):</strong></p>
+<ol>
+<li>
+<p><strong><a href="PLATFORM_FLOW.md">PLATFORM_FLOW.md</a></strong> (entire document)<br>
+   - 30 min read<br>
+   - Complete technical architecture + modules + failure handling</p>
+</li>
+<li>
+<p><strong><a href="BEGINNER_GUIDE.md">BEGINNER_GUIDE.md</a></strong> (if new to platform)<br>
+   - 30 min read<br>
+   - End-to-end walkthrough of one extraction run</p>
+</li>
+<li>
+<p><strong><a href="DEPLOYMENT_GUIDE.md">DEPLOYMENT_GUIDE.md</a></strong><br>
+   - 45 min read<br>
+   - How to deploy to production</p>
+</li>
+<li>
+<p><strong><a href="GO_LIVE_READINESS_CHECKLIST.md">GO_LIVE_READINESS_CHECKLIST.md</a></strong> (entire document)<br>
+   - 45 min read<br>
+   - Pre-go-live verification</p>
+</li>
+<li>
+<p><strong><a href="PRODUCTION_INCIDENT_RUNBOOK.md">PRODUCTION_INCIDENT_RUNBOOK.md</a></strong><br>
+   - 30 min read<br>
+   - How to respond to production incidents</p>
+</li>
+<li>
+<p><strong><a href="GLOSSARY_AND_TERMINOLOGY.md">GLOSSARY_AND_TERMINOLOGY.md</a></strong><br>
+   - Quick reference for terminology (bookmark)</p>
+</li>
+</ol>
+<hr>
+<h3 id="data-engineers-transformation-team">Data Engineers / Transformation Team</h3>
+<p><strong>Read these (in order):</strong></p>
+<ol>
+<li>
+<p><strong><a href="BEGINNER_GUIDE.md">BEGINNER_GUIDE.md</a></strong> (entire document)<br>
+   - 30 min read<br>
+   - How one extraction run works, step-by-step</p>
+</li>
+<li>
+<p><strong><a href="PLATFORM_FLOW.md">PLATFORM_FLOW.md</a></strong> (Sections 1–3)<br>
+   - 15 min read<br>
+   - Architecture overview + module layout</p>
+</li>
+<li>
+<p><strong><a href="PIPELINE_FLOW.md">PIPELINE_FLOW.md</a></strong> (Sections 4–6)<br>
+   - 15 min read<br>
+   - Field mapping system + entity resolution config system</p>
+</li>
+<li>
+<p><strong><a href="GLOSSARY_AND_TERMINOLOGY.md">GLOSSARY_AND_TERMINOLOGY.md</a></strong><br>
+   - Bookmark for terminology reference</p>
+</li>
+</ol>
+<hr>
+<h3 id="business-analysts-bi-analysts">Business Analysts / BI Analysts</h3>
+<p><strong>Read these (in order):</strong></p>
+<ol>
+<li>
+<p><strong><a href="EXECUTIVE_OVERVIEW.md">EXECUTIVE_OVERVIEW.md</a></strong> (Sections 1–4, 9)<br>
+   - 10 min read<br>
+   - Problem → solution → data layers explained<br>
+   - Understand what data is available and how fresh it is</p>
+</li>
+<li>
+<p><strong><a href="GLOSSARY_AND_TERMINOLOGY.md">GLOSSARY_AND_TERMINOLOGY.md</a></strong> (Data Lake Layers section)<br>
+   - 5 min read<br>
+   - Understand raw vs. curated vs. analytics layers</p>
+</li>
+<li>
+<p><strong><a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a></strong> (section: Technical Concerns — "What's the query latency?")<br>
+   - How to query analytics layer, expected freshness</p>
+</li>
+</ol>
+<hr>
+<h3 id="new-team-members-onboarding">New Team Members / Onboarding</h3>
+<p><strong>Read these (in order):</strong></p>
+<ol>
+<li>
+<p><strong><a href="EXECUTIVE_SUMMARY_ONE_PAGE.md">EXECUTIVE_SUMMARY_ONE_PAGE.md</a></strong><br>
+   - 2 min read<br>
+   - High-level overview</p>
+</li>
+<li>
+<p><strong><a href="BEGINNER_GUIDE.md">BEGINNER_GUIDE.md</a></strong><br>
+   - 30 min read<br>
+   - One extraction run explained step-by-step</p>
+</li>
+<li>
+<p><strong><a href="GLOSSARY_AND_TERMINOLOGY.md">GLOSSARY_AND_TERMINOLOGY.md</a></strong><br>
+   - 15 min read<br>
+   - All terminology defined</p>
+</li>
+<li>
+<p>Then read based on your role (see above)</p>
+</li>
+</ol>
+<hr>
+<h2 id="document-inventory">Document Inventory</h2>
+<h3 id="new-documents-created-for-this-review">NEW Documents (Created for This Review)</h3>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Audience</th>
+<th>Read time</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="EXECUTIVE_SUMMARY_ONE_PAGE.md">EXECUTIVE_SUMMARY_ONE_PAGE.md</a></td>
+<td>C-suite, board</td>
+<td>2 min</td>
+<td>One-page summary for print distribution</td>
+</tr>
+<tr>
+<td><a href="COST_ANALYSIS_AND_ROI.md">COST_ANALYSIS_AND_ROI.md</a></td>
+<td>Finance, leadership</td>
+<td>15 min</td>
+<td>Full financial case with ROI calculations</td>
+</tr>
+<tr>
+<td><a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a></td>
+<td>All stakeholders</td>
+<td>20 min</td>
+<td>Q&amp;A reference for common questions</td>
+</tr>
+<tr>
+<td><a href="GO_LIVE_READINESS_CHECKLIST.md">GO_LIVE_READINESS_CHECKLIST.md</a></td>
+<td>Project mgmt, ops</td>
+<td>45 min</td>
+<td>Pre-go-live verification checklist</td>
+</tr>
+<tr>
+<td><a href="PRODUCTION_INCIDENT_RUNBOOK.md">PRODUCTION_INCIDENT_RUNBOOK.md</a></td>
+<td>Operations, on-call</td>
+<td>30 min</td>
+<td>How to respond to production incidents</td>
+</tr>
+<tr>
+<td><a href="GLOSSARY_AND_TERMINOLOGY.md">GLOSSARY_AND_TERMINOLOGY.md</a></td>
+<td>All stakeholders</td>
+<td>15 min</td>
+<td>Terminology definitions + AWS services</td>
+</tr>
+<tr>
+<td><a href="PRESENTATION_QUICK_REFERENCE.md">PRESENTATION_QUICK_REFERENCE.md</a></td>
+<td>Presenters</td>
+<td>20 min</td>
+<td>Speaker notes + talking points</td>
+</tr>
+</tbody>
+</table>
+<h3 id="existing-documents-pre-existing">EXISTING Documents (Pre-existing)</h3>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Audience</th>
+<th>Read time</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="EXECUTIVE_OVERVIEW.md">EXECUTIVE_OVERVIEW.md</a></td>
+<td>Leadership, stakeholders</td>
+<td>20 min</td>
+<td>Functional walkthrough + roadmap</td>
+</tr>
+<tr>
+<td><a href="PLATFORM_FLOW.md">PLATFORM_FLOW.md</a></td>
+<td>Engineers, architects</td>
+<td>30 min</td>
+<td>Technical flow + module responsibilities</td>
+</tr>
+<tr>
+<td><a href="PIPELINE_FLOW.md">PIPELINE_FLOW.md</a></td>
+<td>Engineers, architects</td>
+<td>30 min</td>
+<td>Stage-by-stage pipeline reference</td>
+</tr>
+<tr>
+<td><a href="BEGINNER_GUIDE.md">BEGINNER_GUIDE.md</a></td>
+<td>New developers, QA</td>
+<td>30 min</td>
+<td>End-to-end walkthrough of one run</td>
+</tr>
+<tr>
+<td><a href="DEPLOYMENT_GUIDE.md">DEPLOYMENT_GUIDE.md</a></td>
+<td>Platform engineers</td>
+<td>45 min</td>
+<td>How to deploy to production</td>
+</tr>
+<tr>
+<td><a href="../Enterprise_Data_Lake_Platform_Full_Specification.md">Enterprise_Data_Lake_Platform_Full_Specification.md</a></td>
+<td>All</td>
+<td>Reference</td>
+<td>Full platform specification (source of truth)</td>
+</tr>
+<tr>
+<td><a href="../Implementation_Plan_Phase_Wise.md">Implementation_Plan_Phase_Wise.md</a></td>
+<td>Engineering</td>
+<td>Reference</td>
+<td>Phase-by-phase delivery plan</td>
+</tr>
+<tr>
+<td><a href="../README.md">README.md</a></td>
+<td>Everyone</td>
+<td>2 min</td>
+<td>Quick start, links to other docs</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="reading-paths-by-scenario">Reading Paths by Scenario</h2>
+<h3 id="scenario-1-i-have-1-hour-summarize-everything">Scenario 1: "I have 1 hour, summarize everything"</h3>
+<ol>
+<li><a href="EXECUTIVE_SUMMARY_ONE_PAGE.md">EXECUTIVE_SUMMARY_ONE_PAGE.md</a> (2 min)</li>
+<li><a href="COST_ANALYSIS_AND_ROI.md">COST_ANALYSIS_AND_ROI.md</a> — Executive Summary only (3 min)</li>
+<li><a href="EXECUTIVE_OVERVIEW.md">EXECUTIVE_OVERVIEW.md</a> — Sections 1–3 (10 min)</li>
+<li><a href="PLATFORM_FLOW.md">PLATFORM_FLOW.md</a> — Sections 1–2 (5 min)</li>
+<li><a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a> — Skim for your role (20 min)</li>
+<li>Reserve 20 min for Q&amp;A</li>
+</ol>
+<hr>
+<h3 id="scenario-2-i-need-to-present-this-to-my-board-next-week">Scenario 2: "I need to present this to my board next week"</h3>
+<ol>
+<li><a href="EXECUTIVE_SUMMARY_ONE_PAGE.md">EXECUTIVE_SUMMARY_ONE_PAGE.md</a> (2 min) — Print for handout</li>
+<li><a href="COST_ANALYSIS_AND_ROI.md">COST_ANALYSIS_AND_ROI.md</a> (15 min) — Have CFO read this first</li>
+<li><a href="PRESENTATION_QUICK_REFERENCE.md">PRESENTATION_QUICK_REFERENCE.md</a> (20 min) — Speaker notes</li>
+<li>Practice presentation with <a href="PLATFORM_FLOW.md">PLATFORM_FLOW.md</a> architecture diagram (10 min)</li>
+<li>Print <a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a> as backup for Q&amp;A</li>
+</ol>
+<hr>
+<h3 id="scenario-3-were-going-live-in-2-weeks-what-do-i-need-to-verify">Scenario 3: "We're going live in 2 weeks, what do I need to verify?"</h3>
+<ol>
+<li><a href="GO_LIVE_READINESS_CHECKLIST.md">GO_LIVE_READINESS_CHECKLIST.md</a> (45 min) — Work through entire checklist</li>
+<li><a href="PRODUCTION_INCIDENT_RUNBOOK.md">PRODUCTION_INCIDENT_RUNBOOK.md</a> (30 min) — Ensure ops team trained</li>
+<li><a href="../docs/DEPLOYMENT_GUIDE.md">DEPLOYMENT_GUIDE.md</a> (45 min) — Verify all deployment steps completed</li>
+<li><a href="PLATFORM_FLOW.md">PLATFORM_FLOW.md</a> (30 min) — Architecture review with security team</li>
+</ol>
+<hr>
+<h3 id="scenario-4-something-broke-in-production-what-do-i-do">Scenario 4: "Something broke in production, what do I do?"</h3>
+<ol>
+<li><a href="PRODUCTION_INCIDENT_RUNBOOK.md">PRODUCTION_INCIDENT_RUNBOOK.md</a> — Find your scenario (2 min)</li>
+<li>Follow the runbook step-by-step (5–30 min depending on severity)</li>
+<li>Document root cause in ticket system</li>
+<li>Reference <a href="GLOSSARY_AND_TERMINOLOGY.md">GLOSSARY_AND_TERMINOLOGY.md</a> if you need terminology</li>
+</ol>
+<hr>
+<h3 id="scenario-5-im-new-to-the-team-how-do-i-learn-this">Scenario 5: "I'm new to the team, how do I learn this?"</h3>
+<p><strong>Day 1:</strong><br>
+1. <a href="EXECUTIVE_SUMMARY_ONE_PAGE.md">EXECUTIVE_SUMMARY_ONE_PAGE.md</a> (2 min)<br>
+2. <a href="GLOSSARY_AND_TERMINOLOGY.md">GLOSSARY_AND_TERMINOLOGY.md</a> (15 min)</p>
+<p><strong>Day 2:</strong><br>
+1. <a href="BEGINNER_GUIDE.md">BEGINNER_GUIDE.md</a> (30 min) — Step-by-step walkthrough<br>
+2. <a href="EXECUTIVE_OVERVIEW.md">EXECUTIVE_OVERVIEW.md</a> (20 min) — Sections 1–9</p>
+<p><strong>Day 3:</strong><br>
+1. <a href="PLATFORM_FLOW.md">PLATFORM_FLOW.md</a> (30 min) — Your role-specific sections</p>
+<p><strong>Ongoing:</strong><br>
+- Bookmark <a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a> as reference<br>
+- Keep <a href="GLOSSARY_AND_TERMINOLOGY.md">GLOSSARY_AND_TERMINOLOGY.md</a> handy</p>
+<hr>
+<h2 id="how-to-use-this-map">How to Use This Map</h2>
+<h3 id="for-presenters">For Presenters</h3>
+<ol>
+<li>Use the <strong>"Quick Navigation by Role"</strong> section</li>
+<li>Share the appropriate docs with each attendee <strong>before</strong> your presentation</li>
+<li>Have <a href="PRESENTATION_QUICK_REFERENCE.md">PRESENTATION_QUICK_REFERENCE.md</a> printed for speaker notes</li>
+</ol>
+<h3 id="for-project-managers">For Project Managers</h3>
+<ol>
+<li>Use <strong>"Scenario 3"</strong> (Go-Live Readiness) as your checkpoint tracker</li>
+<li>Ensure each team has read their role-specific docs before meetings</li>
+<li>Share <a href="EXECUTIVE_SUMMARY_ONE_PAGE.md">EXECUTIVE_SUMMARY_ONE_PAGE.md</a> with stakeholders who ask "what is this?"</li>
+</ol>
+<h3 id="for-ops-teams">For Ops Teams</h3>
+<ol>
+<li>Print <a href="PRODUCTION_INCIDENT_RUNBOOK.md">PRODUCTION_INCIDENT_RUNBOOK.md</a> and laminate</li>
+<li>Keep it at your desk for on-call reference</li>
+<li>Practice 1–2 scenarios during team sync weekly</li>
+</ol>
+<h3 id="for-everyone">For Everyone</h3>
+<ol>
+<li>Bookmark <a href="GLOSSARY_AND_TERMINOLOGY.md">GLOSSARY_AND_TERMINOLOGY.md</a> for terminology lookup</li>
+<li>Share <a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a> when someone asks a question you've seen before</li>
+<li>Reference <a href="COST_ANALYSIS_AND_ROI.md">COST_ANALYSIS_AND_ROI.md</a> when discussing budget approvals</li>
+</ol>
+<hr>
+<h2 id="document-maintenance">Document Maintenance</h2>
+<h3 id="when-to-update">When to Update</h3>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Update frequency</th>
+<th>Trigger</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="EXECUTIVE_OVERVIEW.md">EXECUTIVE_OVERVIEW.md</a></td>
+<td>Quarterly</td>
+<td>Major feature addition; roadmap change</td>
+</tr>
+<tr>
+<td><a href="PRODUCTION_INCIDENT_RUNBOOK.md">PRODUCTION_INCIDENT_RUNBOOK.md</a></td>
+<td>After each incident</td>
+<td>New failure scenario discovered</td>
+</tr>
+<tr>
+<td><a href="GO_LIVE_READINESS_CHECKLIST.md">GO_LIVE_READINESS_CHECKLIST.md</a></td>
+<td>Quarterly</td>
+<td>Process changes</td>
+</tr>
+<tr>
+<td><a href="GLOSSARY_AND_TERMINOLOGY.md">GLOSSARY_AND_TERMINOLOGY.md</a></td>
+<td>Quarterly</td>
+<td>New terms introduced</td>
+</tr>
+<tr>
+<td><a href="FAQ_FOR_MANAGEMENT.md">FAQ_FOR_MANAGEMENT.md</a></td>
+<td>After each presentation</td>
+<td>New Q&amp;A collected</td>
+</tr>
+</tbody>
+</table>
+<h3 id="owner">Owner</h3>
+<ul>
+<li><strong>Platform Engineering Lead:</strong> PLATFORM_FLOW, DEPLOYMENT_GUIDE, PRODUCTION_INCIDENT_RUNBOOK, GLOSSARY</li>
+<li><strong>Chief Data Officer:</strong> EXECUTIVE_OVERVIEW, PIPELINE_FLOW, FAQ (Data Governance)</li>
+<li><strong>Project Manager:</strong> GO_LIVE_READINESS_CHECKLIST, PRESENTATION_QUICK_REFERENCE</li>
+<li><strong>Finance / CFO:</strong> COST_ANALYSIS_AND_ROI, EXECUTIVE_SUMMARY_ONE_PAGE</li>
+</ul>
+<hr>
+<p><strong>Last updated:</strong> 2026-06-17<br>
+<strong>Maintained by:</strong> Documentation Owner<br>
+<strong>Review cycle:</strong> Monthly</p>
+      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
+    </article>
+  </main>
+</body>
+</html>

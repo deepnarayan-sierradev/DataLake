@@ -1,0 +1,113 @@
+{
+  "source_id": "mysql-rds",
+  "entity_id": "mysql-rds-orders",
+  "mapping_version": "v1",
+  "rules": [
+    {
+      "source_fields": ["order_id"],
+      "canonical_field": "order_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["customer_id"],
+      "canonical_field": "customer_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["order_status"],
+      "canonical_field": "order_status",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": "unknown"
+    },
+    {
+      "source_fields": ["total_amount"],
+      "canonical_field": "total_amount",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["currency_code"],
+      "canonical_field": "currency_code",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": "USD"
+    },
+    {
+      "source_fields": ["discount_amount"],
+      "canonical_field": "discount_amount",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["tax_amount"],
+      "canonical_field": "tax_amount",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["shipping_country"],
+      "canonical_field": "shipping_country",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["payment_method"],
+      "canonical_field": "payment_method",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["is_fulfilled"],
+      "canonical_field": "is_fulfilled",
+      "transformation": "cast",
+      "transformation_params": { "type": "boolean" },
+      "missing_field_behavior": "use_default",
+      "default_value": "false"
+    },
+    {
+      "source_fields": ["order_date"],
+      "canonical_field": "order_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%d",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["created_at"],
+      "canonical_field": "created_at",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%d %H:%M:%S",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["updated_at"],
+      "canonical_field": "last_updated_at",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%d %H:%M:%S",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    }
+  ]
+}

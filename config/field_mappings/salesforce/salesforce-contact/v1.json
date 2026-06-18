@@ -1,0 +1,112 @@
+{
+  "source_id": "salesforce",
+  "entity_id": "salesforce-contact",
+  "mapping_version": "v1",
+  "rules": [
+    {
+      "source_fields": ["Id"],
+      "canonical_field": "contact_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["AccountId"],
+      "canonical_field": "account_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["FirstName", "LastName"],
+      "canonical_field": "full_name",
+      "transformation": "concat",
+      "transformation_params": { "separator": " " },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["FirstName"],
+      "canonical_field": "first_name",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["LastName"],
+      "canonical_field": "last_name",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["Email"],
+      "canonical_field": "email_address",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["Phone"],
+      "canonical_field": "phone_number",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["Title"],
+      "canonical_field": "job_title",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["Department"],
+      "canonical_field": "department",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["MailingCountry"],
+      "canonical_field": "mailing_country",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["OwnerId"],
+      "canonical_field": "owner_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["CreatedDate"],
+      "canonical_field": "created_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%S.%f%z",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["SystemModstamp"],
+      "canonical_field": "last_modified_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%S.%f%z",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["IsActive"],
+      "canonical_field": "is_active",
+      "transformation": "cast",
+      "transformation_params": { "type": "boolean" },
+      "missing_field_behavior": "use_default",
+      "default_value": "true"
+    }
+  ]
+}
