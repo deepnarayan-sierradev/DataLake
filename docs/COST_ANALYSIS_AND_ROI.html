@@ -532,6 +532,22 @@ Break-even: Month 2–3
 - [ ] Chief Information Security Officer<br>
 - [ ] VP Engineering</p>
       <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
+
+<hr>
+<h2 id="technology-stack-reference">Technology Stack Reference</h2>
+<table>
+<thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+<tbody>
+<tr><td>Cloud</td><td><strong>AWS</strong> (EventBridge, Step Functions, Lambda, ECS Fargate, S3, DynamoDB, Secrets Manager, Glue, Athena, RDS MySQL, SQS, CloudWatch, X-Ray, SNS, KMS, IAM, VPC)</td></tr>
+<tr><td>Data format</td><td><strong>Apache Parquet</strong> (Snappy) for data layers; <strong>JSON</strong> for configs and reports</td></tr>
+<tr><td>Source APIs</td><td><strong>Salesforce Bulk API 2.0</strong>; <strong>NetSuite SuiteQL REST</strong>; <strong>MySQL JDBC</strong> via <code>pymysql</code></td></tr>
+<tr><td>Language</td><td><strong>Python 3.14</strong> — Pydantic v2, structlog ≥ 24.4, pyarrow, boto3, pymysql, requests</td></tr>
+<tr><td>Infrastructure</td><td><strong>Terraform</strong> ≥ 1.8 (AWS Provider ~&gt; 5.0); 3 environments: dev / staging / prod</td></tr>
+<tr><td>CI/CD</td><td><strong>GitHub Actions</strong> — 7-stage gate: Ruff → mypy → pytest → bandit → pip-audit → checkov → terraform validate</td></tr>
+<tr><td>Security algorithms</td><td><strong>HMAC-SHA256</strong> (PII tokenisation); <strong>SHA-256</strong> (field fingerprinting); <strong>Jaro-Winkler</strong> + <strong>Jaccard</strong> (entity resolution)</td></tr>
+<tr><td>Testing</td><td><strong>pytest</strong> + <strong>moto</strong> ≥ 5.0 (AWS mocking); ≥ 80% coverage gate enforced in CI</td></tr>
+</tbody>
+</table>
     </article>
   </main>
 </body>

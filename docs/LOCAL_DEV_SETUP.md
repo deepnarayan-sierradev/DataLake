@@ -207,3 +207,71 @@ python scripts/trigger_extraction.py \
 ```bash
 aws configure sso --profile dev
 ```
+
+---
+
+## 9. Technology Stack Reference
+
+Complete list of tools required or used in local development.
+
+### Required Local Tools
+
+| Tool | Version | Install |
+|---|---|---|
+| **pyenv** | 2.7.2+ | `brew install pyenv` |
+| **Python** | 3.14.x | `pyenv install 3.14.6` |
+| **Terraform** | ≥ 1.8, < 2.0 | `brew install terraform` |
+| **AWS CLI** | v2 | `brew install awscli` |
+| **GNU Make** | ≥ 3.8 | Included on macOS; `brew install make` on Linux |
+| **Git** | Latest | `brew install git` |
+| **pre-commit** | Latest | `pip install pre-commit` |
+
+### Python Dev Dependencies (installed via `pip install -e ".[dev]"`)
+
+| Package | Version | Purpose |
+|---|---|---|
+| **pydantic** | ≥ 2.7 | Data model validation; frozen models |
+| **structlog** | ≥ 24.4 | Structured JSON logging |
+| **boto3** | Latest | AWS SDK for all service calls |
+| **pyarrow** | Latest | Parquet read/write |
+| **pymysql** | Latest | MySQL RDS connector |
+| **requests** | Latest | Salesforce / NetSuite HTTP client |
+| **ruff** | ≥ 0.5 | Linter (run: `ruff check .`) |
+| **mypy** | ≥ 1.10 | Type checker strict mode (run: `mypy .`) |
+| **bandit** | ≥ 1.7 | SAST scanner (run: `bandit -r . -c pyproject.toml`) |
+| **pip-audit** | ≥ 2.7 | CVE scan (run: `pip-audit`) |
+| **pytest** | Latest | Test runner (run: `pytest --cov --cov-fail-under=80`) |
+| **moto** | ≥ 5.0 | AWS service mocking (no real AWS needed for unit tests) |
+| **hatchling** | Latest | Build backend (`pyproject.toml`-only) |
+
+### Key AWS Services Used (in Dev Environment)
+
+| Service | Dev environment resource name |
+|---|---|
+| S3 raw layer | `dev-raw-layer` |
+| S3 curated layer | `dev-curated-layer` |
+| S3 analytics layer | `dev-analytics-layer` |
+| S3 schema snapshots | `dev-schema-snapshots` |
+| DynamoDB config table | `dev-entity-extraction-config` |
+| DynamoDB watermark | `dev-watermark-repository` |
+| DynamoDB audit log | `dev-run-audit-log` |
+| Secrets Manager | `dev/sources/{source}/credentials` |
+| Step Functions | `dev-extraction-orchestration-workflow` |
+| CloudWatch namespace | `EnterpriseDatalake` |
+
+### Run All Local Checks
+
+```bash
+source .venv/bin/activate
+
+# Full CI check suite (same as GitHub Actions)
+.venv/bin/ruff check .
+.venv/bin/mypy .
+.venv/bin/pytest --cov --cov-fail-under=80
+.venv/bin/bandit -r . -c pyproject.toml
+.venv/bin/pip-audit
+
+# Terraform checks
+cd infrastructure/environments/dev
+terraform validate
+```

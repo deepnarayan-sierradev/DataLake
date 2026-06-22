@@ -48,11 +48,20 @@ A **fully automated, secure, governed data pipeline** that:
 
 ## Technical Foundation (Behind the Scenes)
 
-- **Built on AWS** — secure cloud infrastructure
-- **Governed by metadata** — configuration, not code
-- **Scalable streaming** — handles millions of records
-- **Immutable audit log** — every transaction recorded
-- **Three data layers** — Raw (archival), Curated (clean), Analytics (ready-for-use)
+| Category | Technology | Notes |
+|---|---|---|
+| **Cloud** | AWS (Amazon Web Services) | All infrastructure; `us-east-1` default |
+| **Orchestration** | AWS Step Functions + EventBridge Scheduler | Cron-based scheduling; automatic retry and DLQ |
+| **Compute** | AWS Lambda / ECS Fargate | Lambda for standard runs; Fargate for large-volume (> 5 M records) |
+| **Storage** | Amazon S3 (3 layers) | Raw (Object Lock, 7-yr retention), Curated, Analytics (Intelligent-Tiering) |
+| **Databases** | Amazon DynamoDB + Amazon RDS MySQL | DynamoDB for config/watermark/audit; RDS for serving store |
+| **Data format** | Apache Parquet (Snappy) | 5–10× smaller than JSON; columnar for fast analytics queries |
+| **SQL engine** | Amazon Athena + AWS Glue Data Catalog | Serverless; BI tools connect via ODBC/JDBC |
+| **Security** | AWS KMS, Secrets Manager, IAM, VPC, TLS 1.2+ | Encryption at rest + in transit; no credentials in code |
+| **Source APIs** | Salesforce Bulk API 2.0, NetSuite SuiteQL, MySQL JDBC | High-throughput, incremental, parameterised |
+| **Language** | Python 3.14 (Pydantic v2, structlog, pyarrow, boto3) | Strict type checking; structured JSON logging |
+| **IaC** | Terraform ≥ 1.8 | All AWS resources version-controlled; 3 environments (dev/staging/prod) |
+| **CI/CD** | GitHub Actions (7-stage gate) | Lint → typecheck → test → SAST → CVE → IaC scan → Terraform validate |
 
 ---
 

@@ -335,3 +335,78 @@ We'll deliver pre-recorded videos + live Q&A for each level.
 
 **Schedule follow-up meeting:** Yes, absolutely. We'll walk through any part of this in detail.
 
+---
+
+## Technology Stack — Quick Q&A
+
+### Q: "What cloud does this run on?"
+
+**A:** AWS (Amazon Web Services) exclusively. All services are in a single AWS region (default: `us-east-1`; fully configurable). No multi-cloud dependencies.
+
+---
+
+### Q: "What are the main AWS services?"
+
+**A:** The platform uses these AWS services:
+
+| Service | Role |
+|---|---|
+| **EventBridge Scheduler** | Fires the pipeline on a cron schedule for each entity |
+| **Step Functions** | Manages pipeline stages with retry, branching, and failure routing |
+| **Lambda / ECS Fargate** | Runs the Python extraction and transformation code |
+| **S3** | Stores all data (raw 7-year, curated 3-year, analytics 1-year) |
+| **DynamoDB** | Config, watermark state, run audit log, onboarding records |
+| **Secrets Manager** | Stores Salesforce / NetSuite / MySQL credentials securely |
+| **Glue Data Catalog + Athena** | Makes curated data queryable via SQL from any BI tool |
+| **CloudWatch + X-Ray + SNS** | Logs, metrics, alarms, alerts, tracing |
+| **KMS + IAM + VPC** | Encryption, access control, network isolation |
+
+---
+
+### Q: "What programming language is it written in?"
+
+**A:** Python 3.14, using:
+- **Pydantic v2** — data model validation
+- **structlog** — structured JSON logging (auto-scrubs PII/credentials)
+- **pyarrow** — reads/writes Apache Parquet files
+- **boto3** — AWS SDK
+- **pymysql** — MySQL connector
+
+---
+
+### Q: "How is infrastructure managed?"
+
+**A:** **Terraform** (≥ 1.8). Every AWS resource — S3 buckets, DynamoDB tables, IAM roles, VPC, encryption keys — is declared as code in the `infrastructure/` directory. Changes go through the same code review and CI/CD process as application code.
+
+---
+
+### Q: "What's the data file format?"
+
+**A:** **Apache Parquet** (Snappy-compressed). It is:
+- 5–10× smaller than JSON
+- Columnar — fast for analytics queries
+- Supported natively by Athena, Spark, Pandas, and all major BI tools
+
+---
+
+### Q: "How do BI tools connect?"
+
+**A:** Two options:
+1. **Amazon Athena** — connect Tableau / Power BI / Looker via ODBC or JDBC driver; queries run directly against S3 Parquet; no separate database server
+2. **RDS MySQL serving store** — for dashboards requiring sub-second response times at high concurrency; pre-loaded from the analytics layer
+
+---
+
+### Q: "What CI/CD and quality tools are used?"
+
+**A:** GitHub Actions runs a 7-stage gate on every code change:
+1. **Ruff** — code style and security linting
+2. **mypy** — static type checking (strict mode)
+3. **pytest** — automated tests (≥ 80% coverage required)
+4. **bandit** — Python SAST scan (OWASP Top 10)
+5. **pip-audit** — dependency CVE scan
+6. **checkov** — Terraform security scan
+7. **Terraform validate** — infrastructure syntax and logic validation
+
+Deploys only proceed after all 7 gates pass.
+

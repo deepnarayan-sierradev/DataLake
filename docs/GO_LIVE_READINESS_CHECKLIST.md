@@ -392,6 +392,43 @@ Once all checklist items complete:
 
 ---
 
+## Technology and Tools Go-Live Checklist
+
+Verify that all required technologies are correctly configured before go-live.
+
+### AWS Services
+
+- [ ] **EventBridge Scheduler** — All 12 entity schedules created; correct cron expressions; correct state machine ARN
+- [ ] **Step Functions** — State machine deployed in `prod`; `Standard Workflow` type confirmed; IAM execution role attached
+- [ ] **Lambda** — All 5 pipeline stage functions deployed; correct memory (512 MB default) and timeout (15 min) settings; VPC config attached
+- [ ] **ECS Fargate** — Task definition registered; cluster created; capacity provider set; correct IAM task role
+- [ ] **S3 buckets** — All 5 buckets created (`raw`, `curated`, `analytics`, `schema-snapshots`, `governance`); Object Lock confirmed on raw; SSE-KMS on all; TLS-only bucket policy applied
+- [ ] **DynamoDB tables** — All 4 tables created; PITR enabled; KMS encryption confirmed; GSI names match code expectations
+- [ ] **Secrets Manager** — 3 secrets created (`salesforce`, `netsuite`, `mysql-rds`); initial values set; rotation schedule configured
+- [ ] **Glue Data Catalog** — Database `{env}_curated` created; IAM permissions allow `glue:CreateTable` and `glue:UpdateTable` from transformation role
+- [ ] **Athena** — Workgroup `{env}-analytics` created; output bucket set; per-query cost limit configured
+- [ ] **SQS (DLQ)** — Queue `{env}-extraction-dlq` created; KMS encrypted; 14-day retention; DLQ URL accessible from extraction Lambda
+- [ ] **CloudWatch** — Log groups for all 5 services created; custom namespace `EnterpriseDatalake` emitting metrics; 4 alarms active; SNS topic subscribed
+- [ ] **KMS** — Customer-managed CMK created; annual rotation enabled; all resource SSE configurations pointing to correct key ARN
+- [ ] **IAM roles** — All 5 service roles + 1 OIDC CI/CD role deployed; no wildcard permissions; `aws:SourceAccount` condition on all service trust policies
+- [ ] **VPC** — Private subnets in 3 AZs; no internet gateway; 5 VPC Endpoints configured (S3-gateway, DynamoDB-gateway, SecretsManager-interface, CloudWatch-interface, Step Functions-interface)
+
+### Python and Infrastructure
+
+- [ ] **Python 3.14.x** — Correct version in Lambda runtime / ECS image; `pyproject.toml` version pin matches
+- [ ] **Pydantic v2** — Dependency installed; no Pydantic v1 compatibility shims
+- [ ] **Terraform state** — Remote state bucket and DynamoDB lock table exist in `prod`; Terraform apply completed with no errors
+- [ ] **GitHub Actions** — All 7 CI gate stages pass on `main` branch; deploy workflow triggered and succeeded
+- [ ] **pre-commit hooks** — Installed in repository; baseline updated
+
+### Source System Connectivity
+
+- [ ] **Salesforce** — OAuth 2.0 client credentials tested; NAT Gateway IP added to Salesforce trusted IP allowlist; Bulk API 2.0 quota confirmed (API edition supports high-volume jobs)
+- [ ] **NetSuite** — OAuth 1.0a credentials tested; SuiteQL endpoint reachable from Lambda VPC; query timeout verified
+- [ ] **MySQL RDS** — Read-only credentials tested; VPC peering or PrivateLink to RDS established; `INFORMATION_SCHEMA` queries succeed
+
+---
+
 **Prepared by:** Platform Engineering Lead  
 **Date:** 2026-06-17  
 **Next review:** Post-go-live Day 7 (day 1 incident review; day 7 week 1 retrospective)

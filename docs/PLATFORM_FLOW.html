@@ -1221,6 +1221,95 @@ WHERE golden_id = 'acme-001';
 </tbody>
 </table>
       <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
+
+<hr>
+<h2 id="12-technology-stack-and-tools-reference">12. Technology Stack and Tools Reference</h2>
+<p>Complete mapping of every tool, library, AWS service, and configuration mechanism used across the platform.</p>
+<h3>AWS Services</h3>
+<table>
+<thead><tr><th>Service</th><th>Role in Platform</th></tr></thead>
+<tbody>
+<tr><td><strong>Amazon EventBridge Scheduler</strong></td><td>Cron trigger per source/entity; manages <code>{source_id}--{entity_id}</code> schedule names</td></tr>
+<tr><td><strong>AWS Step Functions</strong></td><td>Pipeline orchestrator; Standard Workflow (staging/prod), Express Workflow (dev); 5-stage chained state machine</td></tr>
+<tr><td><strong>AWS Lambda</strong></td><td>Compute for all 5 pipeline stages for datasets &lt; 5&nbsp;M records</td></tr>
+<tr><td><strong>AWS ECS Fargate</strong></td><td>Compute for large-volume extraction (&gt; 5&nbsp;M records/day); no Lambda 15-minute timeout</td></tr>
+<tr><td><strong>Amazon S3</strong></td><td>Raw layer, curated layer, analytics layer, schema snapshots, field mapping configs, ER configs, quality reports, lineage records</td></tr>
+<tr><td><strong>Amazon S3 Object Lock</strong></td><td>GOVERNANCE mode on raw layer; 7-year retention; prevents overwrites and premature deletion</td></tr>
+<tr><td><strong>S3 Intelligent-Tiering</strong></td><td>Analytics layer cost optimisation; auto-moves to infrequent access after 90 days</td></tr>
+<tr><td><strong>Amazon DynamoDB</strong></td><td>4 tables: config, watermark, run-audit-log, source-onboarding; PITR enabled; KMS encrypted</td></tr>
+<tr><td><strong>AWS Secrets Manager</strong></td><td>One secret per source per environment; scheduled rotation</td></tr>
+<tr><td><strong>AWS Glue Data Catalog</strong></td><td>Metadata registry for curated and analytics layer tables</td></tr>
+<tr><td><strong>Amazon Athena</strong></td><td>Serverless SQL on curated/analytics Parquet; $5/TB scanned; partitions minimise scan cost</td></tr>
+<tr><td><strong>Amazon RDS MySQL 8</strong></td><td>Serving store for operational APIs and dashboards; private VPC; read-only credentials</td></tr>
+<tr><td><strong>Amazon SQS</strong></td><td>Dead-Letter Queue (<code>{env}-extraction-dlq</code>); KMS-encrypted; 14-day retention</td></tr>
+<tr><td><strong>Amazon CloudWatch Logs</strong></td><td>All structured log events (structlog JSON); 5 log groups per environment</td></tr>
+<tr><td><strong>Amazon CloudWatch Metrics</strong></td><td>Custom namespace <code>EnterpriseDatalake</code>; 6 canonical metrics buffered and flushed in batches</td></tr>
+<tr><td><strong>Amazon CloudWatch Alarms</strong></td><td>4 platform alarms: extraction_failures, schema_drift_breaking, watermark_lag_slo_breach, extraction_activity_absent</td></tr>
+<tr><td><strong>Amazon SNS</strong></td><td>Alert topic → email / PagerDuty for on-call notification</td></tr>
+<tr><td><strong>AWS X-Ray</strong></td><td>Distributed tracing across all Lambda and service calls</td></tr>
+<tr><td><strong>AWS KMS</strong></td><td>Customer-managed CMK; annual key rotation; SSE-KMS applied to all S3, DynamoDB, and SQS resources</td></tr>
+<tr><td><strong>AWS IAM</strong></td><td>5 least-privilege service roles + 1 OIDC CI/CD role; no wildcards</td></tr>
+<tr><td><strong>Amazon VPC</strong></td><td>Private subnets (3 AZs); no internet gateway; NAT Gateway optional</td></tr>
+<tr><td><strong>AWS VPC Endpoints</strong></td><td>S3 Gateway, DynamoDB Gateway; SecretsManager, CloudWatch, Step Functions, KMS, Glue — Interface Endpoints</td></tr>
+</tbody>
+</table>
+<h3>Python Runtime and Libraries</h3>
+<table>
+<thead><tr><th>Library</th><th>Version</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><strong>Python</strong></td><td>3.14.x (pyenv 2.7.2)</td><td>Runtime language for all Lambda / ECS task code</td></tr>
+<tr><td><strong>Pydantic</strong></td><td>≥ 2.7</td><td>Frozen data models; <code>extra='forbid'</code>; strict validators; cross-field validation</td></tr>
+<tr><td><strong>structlog</strong></td><td>≥ 24.4</td><td>Structured JSON logging; <code>_scrub_sensitive_processor</code> strips 6 PII/credential patterns</td></tr>
+<tr><td><strong>boto3</strong></td><td>Latest (AWS SDK)</td><td>All AWS service calls (S3, DynamoDB, Secrets Manager, CloudWatch, SQS, Glue, Athena)</td></tr>
+<tr><td><strong>pyarrow</strong></td><td>Latest</td><td>Apache Parquet read/write; <code>large_utf8</code> column type in raw layer</td></tr>
+<tr><td><strong>pymysql</strong></td><td>Latest</td><td>MySQL RDS connector; parameterised queries</td></tr>
+<tr><td><strong>requests</strong></td><td>Latest</td><td>Salesforce OAuth 2.0 + Bulk API HTTP; NetSuite OAuth 1.0a + SuiteQL REST</td></tr>
+<tr><td><strong>hatchling</strong></td><td>Latest</td><td>Python build backend (<code>pyproject.toml</code>-only; no <code>setup.py</code>)</td></tr>
+</tbody>
+</table>
+<h3>Code Quality and Security Tools</h3>
+<table>
+<thead><tr><th>Tool</th><th>Version</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><strong>Ruff</strong></td><td>≥ 0.5</td><td>Linter (rules: E, W, F, I, N, S, B, C90, UP, ANN, T20, RUF)</td></tr>
+<tr><td><strong>mypy</strong></td><td>≥ 1.10</td><td>Static type checker (strict mode; <code>disallow_untyped_defs</code>; <code>warn_return_any</code>)</td></tr>
+<tr><td><strong>bandit</strong></td><td>≥ 1.7</td><td>Python SAST — OWASP Top 10 vulnerability scanner</td></tr>
+<tr><td><strong>pip-audit</strong></td><td>≥ 2.7</td><td>Dependency CVE scanning</td></tr>
+<tr><td><strong>checkov</strong></td><td>Latest</td><td>Terraform IaC security scanning</td></tr>
+<tr><td><strong>detect-secrets</strong></td><td>Latest</td><td>Secret leak prevention (pre-commit + CI)</td></tr>
+<tr><td><strong>pytest</strong></td><td>Latest</td><td>Unit and integration tests; ≥ 80% coverage gate enforced in CI</td></tr>
+<tr><td><strong>moto</strong></td><td>≥ 5.0</td><td>AWS service mocking for unit tests</td></tr>
+</tbody>
+</table>
+<h3>Infrastructure as Code</h3>
+<table>
+<thead><tr><th>Tool</th><th>Version</th><th>Scope</th></tr></thead>
+<tbody>
+<tr><td><strong>Terraform</strong></td><td>≥ 1.8, &lt; 2.0</td><td>All AWS infrastructure (VPC, S3, DynamoDB, IAM, Secrets, KMS, CloudWatch, Step Functions)</td></tr>
+<tr><td><strong>AWS Terraform Provider</strong></td><td>~&gt; 5.0</td><td>AWS resource management</td></tr>
+<tr><td>Terraform remote state</td><td>S3 + DynamoDB state lock + KMS</td><td>Per environment (dev, staging, prod)</td></tr>
+</tbody>
+</table>
+<h3>Entity Resolution Algorithms</h3>
+<table>
+<thead><tr><th>Algorithm</th><th>Implementation</th><th>Used for</th></tr></thead>
+<tbody>
+<tr><td><strong>Deterministic exact match</strong></td><td><code>matching_engine/</code></td><td>Email, CRM/ERP IDs, reference codes</td></tr>
+<tr><td><strong>Jaro-Winkler similarity</strong></td><td><code>matching_engine/</code></td><td>Name fuzzy matching; handles abbreviations and transpositions</td></tr>
+<tr><td><strong>Jaccard token-set similarity</strong></td><td><code>matching_engine/</code></td><td>Company name word-level overlap scoring</td></tr>
+<tr><td><strong>Blocking</strong></td><td>Email domain / phone prefix / name first-3 / record ID prefix</td><td>Reduce comparison space before similarity scoring</td></tr>
+</tbody>
+</table>
+<h3>Security Primitives</h3>
+<table>
+<thead><tr><th>Primitive</th><th>Algorithm</th><th>Applied at</th></tr></thead>
+<tbody>
+<tr><td>PII tokenisation</td><td><strong>HMAC-SHA256</strong> (keyed)</td><td>Transformation stage; deterministic pseudonym for join-key–preserving masking</td></tr>
+<tr><td>Field fingerprinting</td><td><strong>SHA-256</strong></td><td>Schema snapshot identity; drift detection</td></tr>
+<tr><td>Parameterised queries</td><td>Named placeholders; no string interpolation</td><td>All SQL (MySQL) and SOQL queries; prevents SQL injection</td></tr>
+<tr><td>Watermark concurrency</td><td>DynamoDB <code>ConditionExpression</code> on <code>version</code></td><td>Prevents double-advance race condition</td></tr>
+</tbody>
+</table>
     </article>
   </main>
 </body>

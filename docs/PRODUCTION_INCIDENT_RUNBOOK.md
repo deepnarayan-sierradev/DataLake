@@ -636,3 +636,81 @@ After every production incident:
 **Owner:** Platform Engineering Lead  
 **Review cycle:** Monthly (or after major incident)
 
+---
+
+## Technology Reference for Incident Response
+
+Quick reference for tools and AWS services used during incident investigation and resolution.
+
+### AWS Console Navigation
+
+| Service | Console path | Key view for incidents |
+|---|---|---|
+| **Step Functions** | Console → Step Functions → State Machines → `{env}-extraction-orchestration-workflow` | Execution history; failed executions; input/output per stage |
+| **Lambda** | Console → Lambda → Functions → `{env}-extraction-*` | Invocation errors; CloudWatch log link; concurrency |
+| **CloudWatch Logs** | Console → CloudWatch → Log Groups → `/edl/{env}/*` | Structured JSON log events; filter by `run_id` |
+| **CloudWatch Alarms** | Console → CloudWatch → Alarms | Active alarms; threshold; recent datapoints |
+| **X-Ray** | Console → X-Ray → Traces | Service map; latency; fault trace for specific `run_id` |
+| **DynamoDB** | Console → DynamoDB → Tables → `{env}-watermark-repository` | Current watermark; version; last run ID |
+| **DynamoDB** | Console → DynamoDB → Tables → `{env}-run-audit-log` | Stage-by-stage audit record per run |
+| **SQS (DLQ)** | Console → SQS → `{env}-extraction-dlq` | Message count; message body (contains `run_id`, `source_id`, `entity_id`, `failed_stage`) |
+| **S3** | Console → S3 → `{env}-schema-snapshots` | Latest schema snapshot; drift report |
+| **Secrets Manager** | Console → Secrets Manager → `{env}/sources/{source}/credentials` | Last rotation date; version status |
+
+### CLI Quick Commands for Incident Investigation
+
+```bash
+# Check current watermark for a source/entity
+aws dynamodb get-item \
+  --table-name prod-watermark-repository \
+  --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
+
+# Read DLQ messages (peek without deleting)
+aws sqs receive-message \
+  --queue-url https://sqs.us-east-1.amazonaws.com/ACCOUNT/prod-extraction-dlq \
+  --max-number-of-messages 10 \
+  --visibility-timeout 0
+
+# Get most recent Step Functions execution status
+aws stepfunctions list-executions \
+  --state-machine-arn arn:aws:states:us-east-1:ACCOUNT:stateMachine:prod-extraction-orchestration-workflow \
+  --status-filter FAILED \
+  --max-results 5
+
+# Check latest schema snapshot
+aws s3 cp s3://prod-schema-snapshots/salesforce/salesforce-account/latest.json -
+
+# Check CloudWatch alarm state
+aws cloudwatch describe-alarms \
+  --alarm-names prod-extraction-failures prod-schema-drift-breaking prod-watermark-lag
+
+# Trigger manual replay
+python scripts/trigger_extraction.py \
+  --source-id salesforce \
+  --entity-id salesforce-account \
+  --environment prod \
+  --is-replay \
+  --replay-of-run-id <run_id_from_DLQ>
+```
+
+### Key Log Fields for Filtering
+
+| Field | Meaning | Filter example |
+|---|---|---|
+| `run_id` | Unique ID for a pipeline run (`run-{YYYYMMDD}-{uuid}`) | `{ $.run_id = "run-20260622-*" }` |
+| `source_id` | Source system identifier | `{ $.source_id = "salesforce" }` |
+| `entity_id` | Entity being extracted | `{ $.entity_id = "salesforce-account" }` |
+| `stage` | Pipeline stage enum | `{ $.stage = "EXTRACTION" }` |
+| `status` | Run status enum | `{ $.status = "FAILURE" }` |
+| `error_classification` | Failure category | `{ $.error_classification = "TRANSIENT_NETWORK" }` |
+
+### Observability Stack
+
+| Layer | Tool | Location |
+|---|---|---|
+| Structured logs | structlog → CloudWatch Logs | Log group: `/edl/{env}/{service}` |
+| Custom metrics | CloudWatch (namespace: `EnterpriseDatalake`) | 6 canonical metrics per run |
+| Alarms | CloudWatch Alarms → SNS → Email/PagerDuty | 4 platform alarms |
+| Distributed traces | AWS X-Ray | Service map; trace by `run_id` annotation |
+| DLQ | SQS `{env}-extraction-dlq` | KMS-encrypted; 14-day message retention |
+

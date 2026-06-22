@@ -490,6 +490,75 @@ scripts/
 
 ---
 
+## Technology Stack Quick Reference
+
+A complete list of every technology this platform uses, with a one-line description of its role.
+
+### AWS Services
+
+| Service | What it does in this platform |
+|---|---|
+| **Amazon EventBridge Scheduler** | Fires the "time to run" signal for each entity on a cron schedule |
+| **AWS Step Functions** | Manages the pipeline as a 5-stage workflow; handles retries and failure routing |
+| **AWS Lambda** | Runs all pipeline code (extraction, transformation, entity resolution, analytics publish, serving load) |
+| **AWS ECS Fargate** | Runs large-volume extractions (> 5 M records/day) without Lambda timeout limits |
+| **Amazon S3** | Stores all data: raw, curated, analytics, schema snapshots, configs, reports, lineage |
+| **S3 Object Lock (GOVERNANCE)** | Makes raw data immutable — files cannot be deleted or overwritten for 7 years |
+| **S3 Intelligent-Tiering** | Automatically moves old analytics data to cheaper storage tier |
+| **Amazon DynamoDB** | Stores entity configs, watermarks, run audit logs, and source onboarding records |
+| **AWS Secrets Manager** | Stores source API credentials securely; rotates them automatically |
+| **AWS Glue Data Catalog** | Maintains a registry of all curated and analytics tables (like a library catalogue) |
+| **Amazon Athena** | Lets you run SQL queries directly against S3 Parquet files (no database server needed) |
+| **Amazon RDS MySQL 8** | Operational serving database for apps and dashboards requiring low-latency reads |
+| **Amazon SQS** | Dead-Letter Queue — holds failed pipeline runs for replay |
+| **Amazon CloudWatch** | Collects logs, custom metrics, and fires alarms when something goes wrong |
+| **AWS X-Ray** | Traces every request through the system for debugging |
+| **Amazon SNS** | Sends alert emails/PagerDuty notifications when alarms fire |
+| **AWS KMS** | Manages encryption keys for all data at rest |
+| **AWS IAM** | Controls who (which service role) can do what — no wildcard permissions |
+| **Amazon VPC** | Private network — all platform services run isolated from the public internet |
+
+### Source System APIs
+
+| Source | API Used | Notes |
+|---|---|---|
+| **Salesforce CRM** | Bulk API 2.0 | Async, high-volume CSV streaming; handles millions of records |
+| **NetSuite ERP** | SuiteQL REST API | SQL-like query language over REST |
+| **MySQL RDS** | SQL via `pymysql` | Read-only; introspects schema via `INFORMATION_SCHEMA` |
+
+### Python Libraries
+
+| Library | Purpose |
+|---|---|
+| **Pydantic v2** | Validates all config and data models; catches bad data before it enters the pipeline |
+| **structlog** | Writes structured JSON log events with automatic PII scrubbing |
+| **boto3** | Python SDK for all AWS services |
+| **pyarrow** | Reads and writes Apache Parquet files |
+| **pymysql** | Connects to MySQL RDS |
+| **requests** | Makes HTTP calls to Salesforce and NetSuite APIs |
+
+### Data Format
+
+| Format | Used for | Why |
+|---|---|---|
+| **Apache Parquet** | All data lake files (raw, curated, analytics) | Columnar format; 5–10× smaller than JSON; fast analytical queries |
+| **JSON** | Config files, snapshots, reports, lineage records | Human-readable; version-controlled in Git |
+
+### Infrastructure and CI/CD
+
+| Tool | Purpose |
+|---|---|
+| **Terraform** ≥ 1.8 | Provisions all AWS infrastructure; 3 environments (dev/staging/prod) |
+| **GitHub Actions** | 7-stage CI/CD pipeline: lint → typecheck → test → SAST → CVE → IaC → Terraform validate |
+| **Ruff** | Python code linter |
+| **mypy** | Python static type checker (strict mode) |
+| **bandit** | Python security scanner (OWASP Top 10) |
+| **pip-audit** | Checks Python dependencies for known CVEs |
+| **checkov** | Scans Terraform code for security misconfigurations |
+| **pytest + moto** | Unit/integration tests with AWS mocking (no real AWS needed for local tests) |
+
+---
+
 ## Related Documentation
 
 | Document | What it covers |

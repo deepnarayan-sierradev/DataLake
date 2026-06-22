@@ -414,6 +414,55 @@ Immutable record of every extraction, transformation, and data access.
 
 ---
 
+## Technology and Tools Glossary
+
+Quick-reference definitions for every tool and service used in the platform.
+
+| Term | Full Name | Role in Platform |
+|---|---|---|
+| **EventBridge** | Amazon EventBridge Scheduler | Fires cron-based pipeline triggers per entity |
+| **Step Functions** | AWS Step Functions | Orchestrates the 5-stage pipeline; handles retries and branching |
+| **Lambda** | AWS Lambda | Serverless Python compute for all pipeline stages |
+| **Fargate** | AWS ECS Fargate | Container compute for large-volume extractions (> 5 M records/day) |
+| **S3** | Amazon Simple Storage Service | Stores all data layers: raw, curated, analytics, snapshots, configs |
+| **Object Lock** | S3 Object Lock (GOVERNANCE mode) | Makes raw data immutable; enforces 7-year retention |
+| **Intelligent-Tiering** | S3 Intelligent-Tiering | Auto-moves analytics data to cheaper storage after 90 days of inactivity |
+| **DynamoDB** | Amazon DynamoDB | NoSQL database for config, watermark state, audit log, onboarding records |
+| **Secrets Manager** | AWS Secrets Manager | Secure credential store; auto-rotation; never in code or logs |
+| **Glue Catalog** | AWS Glue Data Catalog | Metadata registry for curated and analytics tables |
+| **Athena** | Amazon Athena | Serverless SQL query engine over S3 Parquet files |
+| **RDS** | Amazon Relational Database Service (MySQL 8) | Serving store for operational apps and low-latency reads |
+| **SQS** | Amazon Simple Queue Service | Dead-Letter Queue for failed pipeline runs; KMS-encrypted |
+| **CloudWatch** | Amazon CloudWatch | Logs, custom metrics, alarms, dashboards |
+| **X-Ray** | AWS X-Ray | Distributed tracing across all Lambda/service calls |
+| **SNS** | Amazon Simple Notification Service | Alert fanout to email / PagerDuty |
+| **KMS** | AWS Key Management Service | Customer-managed CMK; SSE-KMS encryption for all data at rest |
+| **IAM** | AWS Identity and Access Management | Least-privilege service roles; no wildcard permissions |
+| **VPC** | Amazon Virtual Private Cloud | Private network; no internet gateway; VPC Endpoints for AWS services |
+| **Terraform** | HashiCorp Terraform ≥ 1.8 | Infrastructure as Code; provisions all AWS resources |
+| **Python** | Python 3.14.x | Runtime language for all platform code |
+| **Pydantic** | Pydantic v2 | Data model validation library; frozen, strict models |
+| **structlog** | structlog ≥ 24.4 | Structured JSON logging with PII-scrubbing processor |
+| **boto3** | AWS SDK for Python | Python library for all AWS service calls |
+| **pyarrow** | Apache Arrow Python | Parquet file read/write |
+| **pymysql** | PyMySQL | Python MySQL connector for RDS |
+| **Ruff** | Ruff ≥ 0.5 | Python linter (enforces code style + security rules) |
+| **mypy** | mypy ≥ 1.10 | Python static type checker (strict mode) |
+| **bandit** | bandit ≥ 1.7 | Python SAST scanner (OWASP Top 10) |
+| **pip-audit** | pip-audit ≥ 2.7 | Dependency CVE scanner |
+| **checkov** | Checkov | Terraform IaC security scanner |
+| **moto** | moto ≥ 5.0 | AWS service mocking library for unit tests |
+| **Bulk API 2.0** | Salesforce Bulk API 2.0 | High-throughput async Salesforce data extraction API |
+| **SuiteQL** | NetSuite SuiteQL REST API | SQL-like query API for NetSuite ERP |
+| **HMAC-SHA256** | Hash-based Message Authentication Code | PII tokenisation algorithm (keyed; deterministic pseudonym) |
+| **SHA-256** | Secure Hash Algorithm 256-bit | Field schema fingerprinting; irreversible hash masking |
+| **Jaro-Winkler** | Jaro-Winkler string similarity | Name fuzzy-matching algorithm in entity resolution |
+| **Jaccard** | Jaccard token-set similarity | Company-name word-overlap scoring in entity resolution |
+| **Parquet** | Apache Parquet | Columnar binary file format (Snappy-compressed for curated/analytics; large_utf8 for raw) |
+| **SOQL** | Salesforce Object Query Language | SQL-like query language for Salesforce data |
+
+---
+
 ## Pronunciation Guide
 
 - **Parquet:** "par-KAY" (not "PAR-quet")

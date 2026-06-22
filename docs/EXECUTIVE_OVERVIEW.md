@@ -20,12 +20,13 @@
 9. [Data Layers Explained](#9-data-layers-explained)
 10. [Data Quality and Governance](#10-data-quality-and-governance)
 11. [Security Architecture Summary](#11-security-architecture-summary)
-12. [Operational Resilience](#12-operational-resilience)
-13. [Scalability and Cost Profile](#13-scalability-and-cost-profile)
-14. [Adding New Data Sources — Zero Code Changes](#14-adding-new-data-sources--zero-code-changes)
-15. [Compliance and Audit Readiness](#15-compliance-and-audit-readiness)
-16. [Key Metrics and SLOs](#16-key-metrics-and-slos)
-17. [Roadmap](#17-roadmap)
+12. [Technology Stack and Tools](#12-technology-stack-and-tools)
+13. [Operational Resilience](#13-operational-resilience)
+14. [Scalability and Cost Profile](#14-scalability-and-cost-profile)
+15. [Adding New Data Sources — Zero Code Changes](#15-adding-new-data-sources--zero-code-changes)
+16. [Compliance and Audit Readiness](#16-compliance-and-audit-readiness)
+17. [Key Metrics and SLOs](#17-key-metrics-and-slos)
+18. [Roadmap](#18-roadmap)
 
 ---
 
@@ -433,7 +434,115 @@ The platform is built security-first, with controls embedded at every layer:
 
 ---
 
-## 12. Operational Resilience
+## 12. Technology Stack and Tools
+
+The platform is built exclusively on proven, production-grade technologies. Every component is version-pinned, security-scanned, and infrastructure-as-code managed.
+
+### Cloud Platform
+
+| Layer | Technology | Notes |
+|---|---|---|
+| Cloud provider | **AWS (Amazon Web Services)** | All services; `us-east-1` default (configurable per environment) |
+| Infrastructure as Code | **Terraform** ≥ 1.8, < 2.0 | AWS Provider ~> 5.0; all infrastructure version-controlled |
+
+### Compute and Orchestration
+
+| Component | Technology | Notes |
+|---|---|---|
+| Pipeline orchestration | **AWS Step Functions** | Standard Workflow (staging/prod); Express Workflow (dev) |
+| Event scheduling | **Amazon EventBridge Scheduler** | Cron per entity; managed at runtime without deployment |
+| Extraction runtime (small/medium) | **AWS Lambda** (Python 3.14) | Up to 15-minute timeout; streaming memory model |
+| Extraction runtime (large volume) | **AWS ECS Fargate** | For datasets > 5 M records/day; no timeout limit |
+
+### Storage
+
+| Layer | Technology | Notes |
+|---|---|---|
+| Raw data | **Amazon S3** + S3 Object Lock (GOVERNANCE) | Immutable; 7-year retention; SSE-KMS encrypted |
+| Curated data | **Amazon S3** | Parquet (Snappy); append-only per `run_id` partition |
+| Analytics data | **Amazon S3** + S3 Intelligent-Tiering | Auto-moves to infrequent access after 90 days |
+| Schema snapshots | **Amazon S3** | Immutable JSON per run; SHA-256 fingerprinted |
+| Field mapping / entity resolution config | **Amazon S3** | Versioned JSON; latest-pointer pattern |
+| Watermark state | **Amazon DynamoDB** | Point-in-time recovery; optimistic concurrency |
+| Entity configuration | **Amazon DynamoDB** | `{env}-entity-extraction-config`; KMS encrypted |
+| Run audit log | **Amazon DynamoDB** | TTL-enabled; GSI on source/entity/time |
+| Serving store | **Amazon RDS MySQL 8** | Private VPC; read-only for analytics consumers |
+
+### Data Format
+
+| Format | Used for |
+|---|---|
+| **Apache Parquet** (Snappy compression) | All data layer files (raw, curated, analytics) — typically 5–10× smaller than JSON |
+| **JSON** | Config files, schema snapshots, drift reports, quality reports, lineage records |
+
+### Source System Connectors
+
+| Source | API / Protocol | Notes |
+|---|---|---|
+| **Salesforce CRM** | Bulk API 2.0 (async, high-volume); Describe API for metadata | Handles millions of records without API timeouts |
+| **NetSuite ERP** | SuiteQL REST API; metadata endpoint | OAuth 1.0a; parameterised SuiteQL queries |
+| **MySQL RDS** | SQL via `pymysql`; `INFORMATION_SCHEMA` introspection | Read-only credentials; parameterised queries only |
+
+### Data Catalog and Query Engine
+
+| Component | Technology | Notes |
+|---|---|---|
+| Metadata catalog | **AWS Glue Data Catalog** | Registered after every curated write |
+| Ad-hoc SQL queries | **Amazon Athena** | Serverless; $5/TB scanned; partitioned datasets minimise scan cost |
+| BI tool connectivity | Athena ODBC/JDBC or RDS direct | Supports Tableau, Power BI, Looker, Metabase |
+
+### Security and Secrets
+
+| Concern | Technology | Notes |
+|---|---|---|
+| Credential storage | **AWS Secrets Manager** | One secret per source per environment; scheduled rotation |
+| Encryption at rest | **AWS KMS** (customer-managed CMK, SSE-KMS) | Applied to all S3 buckets, DynamoDB tables, and SQS queues |
+| Encryption in transit | **TLS 1.2+** | Mandatory; enforced via S3 bucket policy (`aws:SecureTransport`) |
+| Network isolation | **Amazon VPC** (private subnets) | No internet gateway; all AWS traffic via VPC Endpoints |
+| PII tokenisation | **HMAC-SHA256** (keyed) | Deterministic pseudonym preserving join-key usability |
+| Field fingerprinting | **SHA-256** | Schema snapshot identity and drift detection |
+| Access control | **AWS IAM** (least-privilege roles) | No wildcard `Action:*` or `Resource:*` anywhere |
+
+### Monitoring and Observability
+
+| Component | Technology | Notes |
+|---|---|---|
+| Structured logging | **structlog** ≥ 24.4 | JSON output; PII-scrubbing processor; forwarded to CloudWatch Logs |
+| Custom metrics | **Amazon CloudWatch** | Namespace: `EnterpriseDatalake`; 6 canonical metrics |
+| Alarms | **Amazon CloudWatch Alarms** | 4 platform alarms: extraction failures, breaking drift, watermark lag, activity absent |
+| Distributed tracing | **AWS X-Ray** | All Lambda and service-to-service calls instrumented |
+| Alerting | **Amazon SNS** | SNS topic → email / PagerDuty for on-call |
+| Dead-Letter Queue | **Amazon SQS** (KMS-encrypted) | 14-day retention; replay via `RunReplayController` |
+
+### Python Stack and Code Quality
+
+| Tool / Library | Version | Purpose |
+|---|---|---|
+| **Python** | 3.14.x (pyenv) | Runtime language for all Lambda/ECS task code |
+| **Pydantic** | ≥ 2.7 | Data model validation; frozen models; strict `extra='forbid'` |
+| **boto3** | Latest | AWS SDK — all AWS service calls |
+| **pyarrow** | Latest | Apache Parquet read/write |
+| **pymysql** | Latest | MySQL RDS connector |
+| **structlog** | ≥ 24.4 | Structured JSON logging with PII scrubbing |
+| **Ruff** | ≥ 0.5 | Linter (rules: E, W, F, I, N, S, B, C90, UP, ANN, T20, RUF) |
+| **mypy** | ≥ 1.10 | Static type checker (strict mode) |
+| **bandit** | ≥ 1.7 | Python SAST scanner (OWASP Top 10) |
+| **pip-audit** | ≥ 2.7 | Dependency CVE scanning |
+| **checkov** | Latest | Terraform IaC security scanner |
+| **pytest** | Latest | Tests; ≥ 80% coverage gate enforced in CI |
+| **moto** | ≥ 5.0 | AWS service mocking for unit tests |
+
+### CI/CD
+
+| Tool | Notes |
+|---|---|
+| **GitHub Actions** | 7-stage CI gate: lint → typecheck → test → SAST → CVE scan → IaC scan → Terraform validate |
+| SHA-pinned action references | All `uses:` entries pinned to commit SHA digest (no mutable `@v4` tags) |
+| **pre-commit hooks** | Ruff, detect-private-key, no-commit-to-branch, bandit, Terraform fmt/validate/checkov, detect-secrets |
+
+---
+
+## 13. Operational Resilience
 
 ### Automated Failure Recovery
 
@@ -469,7 +578,7 @@ All pipeline writes are **idempotent**: re-running any stage with the same input
 
 ---
 
-## 13. Scalability and Cost Profile
+## 14. Scalability and Cost Profile
 
 ### Extraction Scaling
 
@@ -498,7 +607,7 @@ Athena charges $5 per TB scanned. Year/month/day partitioning on the analytics l
 
 ---
 
-## 14. Adding New Data Sources — Zero Code Changes
+## 15. Adding New Data Sources — Zero Code Changes
 
 Adding a new data source requires only **configuration** — no code deployment:
 
@@ -532,7 +641,7 @@ Compare: previous approach of writing a new ETL script = 2–4 weeks.
 
 ---
 
-## 15. Compliance and Audit Readiness
+## 16. Compliance and Audit Readiness
 
 ### Regulatory Controls Implemented
 
@@ -559,7 +668,7 @@ Compare: previous approach of writing a new ETL script = 2–4 weeks.
 
 ---
 
-## 16. Key Metrics and SLOs
+## 17. Key Metrics and SLOs
 
 ### Service Level Objectives
 
@@ -584,7 +693,7 @@ Compare: previous approach of writing a new ETL script = 2–4 weeks.
 
 ---
 
-## 17. Roadmap
+## 18. Roadmap
 
 ### Near-term (next quarter)
 

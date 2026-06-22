@@ -524,14 +524,14 @@ s3://{curated-bucket}/entity-resolution/{entity_type}/latest.json  ← version p
 - <code>LONGEST</code> — prefer the longest non-null string<br>
 - <code>FIRST_NON_NULL</code> — use first available value in source priority order</p>
 <p><strong>Field provenance tracking:</strong><br>
-Every golden record includes a <code>field_provenance</code> column — a JSON map documenting which source system won for each output field (via the survivorship rules above). This enables instant source attribution queries in Athena or the Serving Store without re-computation. Example queries available in <a href="PLATFORM_FLOW.md#field-provenance-and-source-attribution">PLATFORM_FLOW.md: Field Provenance and Source Attribution</a>.</p>
+Every golden record includes a <code>field_provenance</code> column — a JSON map documenting which source system won for each output field (via the survivorship rules above). This enables instant source attribution queries in Athena or the Serving Store without re-computation. Example queries available in <a href="PLATFORM_FLOW.html#field-provenance-and-source-attribution">PLATFORM_FLOW.md: Field Provenance and Source Attribution</a>.</p>
 <p><strong>System fields automatically added:</strong><br>
 - <code>golden_id</code> — deterministic ID stable across re-runs<br>
 - <code>contributing_source_records</code> — array of source record IDs that formed this golden record<br>
 - <code>survivorship_version</code> — policy version applied (e.g., "v1")<br>
 - <code>match_run_id</code> — entity resolution run ID<br>
 - <code>field_provenance</code> — JSON map of field winners (see above)</p>
-<p><strong>Total: 19 fields</strong> (14 declared output_fields + 5 system fields). See <a href="PLATFORM_FLOW.md#system-fields-in-golden-records">PLATFORM_FLOW: System Fields in Golden Records</a> for schema table.</p>
+<p><strong>Total: 19 fields</strong> (14 declared output_fields + 5 system fields). See <a href="PLATFORM_FLOW.html#system-fields-in-golden-records">PLATFORM_FLOW: System Fields in Golden Records</a> for schema table.</p>
 <p><strong>Output schema projection (<code>output_fields</code>):</strong><br>
 Each survivorship policy declares an explicit <code>output_fields</code> list. Only those fields appear in the canonical Parquet files — source-internal IDs, duplicate name variants, and system-only fields are excluded. Empty <code>output_fields</code> = pass-through (used only in tests).</p>
 <p><strong>Production entry point — <code>GoldenRecordPublisher.from_registry()</code>:</strong></p>
@@ -976,6 +976,92 @@ aws s3 cp s3://dev-curated-layer/quality-reports/salesforce/salesforce-account/&
 <li>[ ] At least one full extraction + transformation run verified in staging before prod promotion</li>
 </ul>
       <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
+
+<hr>
+<h2 id="11-technology-reference">11. Technology Reference</h2>
+<p>This section maps each pipeline stage to the exact tools, AWS services, Python libraries, and infrastructure components it depends on.</p>
+<h3>AWS Services by Stage</h3>
+<table>
+<thead><tr><th>Stage</th><th>AWS Service(s)</th></tr></thead>
+<tbody>
+<tr><td>Stage 1 — Event Scheduling</td><td>Amazon EventBridge Scheduler</td></tr>
+<tr><td>Stage 2 — Step Functions Orchestration</td><td>AWS Step Functions (Standard / Express Workflow)</td></tr>
+<tr><td>Stage 3 — Configuration Load</td><td>Amazon DynamoDB (<code>{env}-entity-extraction-config</code>)</td></tr>
+<tr><td>Stage 4 — Credential Retrieval</td><td>AWS Secrets Manager (<code>{env}/sources/{source}/credentials</code>)</td></tr>
+<tr><td>Stage 5 — Metadata Discovery</td><td>Source APIs (no AWS; called from Lambda/ECS over VPC)</td></tr>
+<tr><td>Stage 6 — Query Construction</td><td>In-process (no AWS service); ISO-8601 validated</td></tr>
+<tr><td>Stage 7 — Extraction</td><td>AWS Lambda (&lt; 5&nbsp;M records) or AWS ECS Fargate (≥ 5&nbsp;M records); Amazon S3 (raw layer write)</td></tr>
+<tr><td>Stage 8 — Schema Snapshot</td><td>Amazon S3 (<code>{env}-schema-snapshots</code>)</td></tr>
+<tr><td>Stage 9 — Drift Evaluation</td><td>In-process; writes drift report to Amazon S3</td></tr>
+<tr><td>Stage 10 — Raw Layer Write</td><td>Amazon S3 (Object Lock GOVERNANCE); CloudWatch metric emit</td></tr>
+<tr><td>Stage 11 — Watermark Update</td><td>Amazon DynamoDB (<code>{env}-watermark-repository</code>; conditional put)</td></tr>
+<tr><td>Stage 12 — Transformation</td><td>AWS Lambda or AWS Glue; Amazon S3 (curated layer); AWS Glue Data Catalog</td></tr>
+<tr><td>Stage 13 — Entity Resolution</td><td>AWS Lambda; Amazon S3 (curated read + analytics write)</td></tr>
+<tr><td>Stage 14 — Golden Record Publish</td><td>AWS Lambda; Amazon S3 (analytics layer <code>canonical/</code> prefix)</td></tr>
+<tr><td>Stage 15 — Analytics Layer Publish</td><td>Amazon S3 (analytics layer); AWS Glue Data Catalog</td></tr>
+<tr><td>Stage 16 — Serving Store Load</td><td>Amazon RDS MySQL 8 (private VPC); AWS Secrets Manager</td></tr>
+<tr><td>All stages</td><td>Amazon CloudWatch Logs; CloudWatch Metrics; AWS X-Ray; Amazon SQS (DLQ)</td></tr>
+</tbody>
+</table>
+<h3>Python Libraries by Component</h3>
+<table>
+<thead><tr><th>Component</th><th>Key Libraries</th></tr></thead>
+<tbody>
+<tr><td>Connector Runtime (all connectors)</td><td><code>boto3</code>, <code>pyarrow</code>, <code>pydantic</code> ≥ 2.7, <code>structlog</code> ≥ 24.4</td></tr>
+<tr><td>Salesforce connector</td><td><code>requests</code> (OAuth 2.0 client credentials); Bulk API 2.0 CSV streaming</td></tr>
+<tr><td>NetSuite connector</td><td><code>requests</code> (OAuth 1.0a); SuiteQL REST JSON</td></tr>
+<tr><td>MySQL RDS connector</td><td><code>pymysql</code>; <code>INFORMATION_SCHEMA</code> introspection</td></tr>
+<tr><td>Watermark / Schema / Config repositories</td><td><code>boto3</code> (DynamoDB / S3); <code>pydantic</code></td></tr>
+<tr><td>Transformation pipeline</td><td><code>pyarrow</code> (Parquet I/O); <code>boto3</code>; <code>re</code> (pre-compiled patterns)</td></tr>
+<tr><td>Entity resolution</td><td>Custom Jaro-Winkler / Jaccard implementation in <code>matching_engine/</code></td></tr>
+<tr><td>Observability</td><td><code>structlog</code>, <code>boto3</code> CloudWatch</td></tr>
+</tbody>
+</table>
+<h3>Data Formats</h3>
+<table>
+<thead><tr><th>Format</th><th>Stage produced</th><th>Compression</th></tr></thead>
+<tbody>
+<tr><td><strong>Apache Parquet</strong></td><td>Raw write (Stage 7), Curated write (Stage 12), Analytics write (Stages 14–15)</td><td>Snappy (curated/analytics); uncompressed <code>large_utf8</code> (raw)</td></tr>
+<tr><td><strong>JSON</strong></td><td>Schema snapshot (Stage 8), drift report (Stage 9), quality report (Stage 12), lineage record (Stage 12), golden match decisions (Stage 14)</td><td>None (human-readable)</td></tr>
+<tr><td><strong>DynamoDB Item</strong></td><td>Config (Stage 3), watermark (Stage 11), audit log (all stages)</td><td>DynamoDB-native</td></tr>
+</tbody>
+</table>
+<h3>Security Controls Applied Per Stage</h3>
+<table>
+<thead><tr><th>Stage</th><th>Security control</th></tr></thead>
+<tbody>
+<tr><td>Stage 4 — Credential Retrieval</td><td>Secrets Manager; credentials held in memory only; never logged (structlog PII scrubber)</td></tr>
+<tr><td>Stage 6 — Query Construction</td><td>Parameterised queries only; ISO-8601 validation on watermark values (SQL injection prevention)</td></tr>
+<tr><td>Stage 7 — Extraction</td><td>S3 Object Lock GOVERNANCE; SSE-KMS; TLS 1.2+; VPC-only egress</td></tr>
+<tr><td>Stage 12 — Transformation</td><td>HMAC-SHA256 tokenisation; SHA-256 hash; REDACT / PARTIAL_MASK / FULL_MASK applied before any write</td></tr>
+<tr><td>All stages</td><td>IAM least-privilege roles; no wildcard <code>Action:*</code>; VPC Endpoints for all AWS service access</td></tr>
+</tbody>
+</table>
+<h3>Entity Resolution Algorithms</h3>
+<table>
+<thead><tr><th>Algorithm</th><th>Purpose</th><th>Implementation</th></tr></thead>
+<tbody>
+<tr><td><strong>Deterministic exact match</strong></td><td>Email, CRM ID, ERP reference codes</td><td>String normalisation + equality</td></tr>
+<tr><td><strong>Jaro-Winkler similarity</strong></td><td>Name matching (handles abbreviations, transpositions)</td><td>Weighted probabilistic scoring</td></tr>
+<tr><td><strong>Jaccard token-set similarity</strong></td><td>Company name matching (word-level)</td><td>Token overlap ratio</td></tr>
+<tr><td><strong>Blocking</strong></td><td>Reduce comparison space before scoring</td><td>Email domain, phone prefix, name prefix, record ID prefix</td></tr>
+</tbody>
+</table>
+<h3>Infrastructure as Code Reference</h3>
+<table>
+<thead><tr><th>Resource type</th><th>Terraform module</th><th>Key outputs</th></tr></thead>
+<tbody>
+<tr><td>VPC, subnets, NAT, VPC Endpoints</td><td><code>infrastructure/modules/networking/</code></td><td>VPC ID, subnet IDs, endpoint IDs</td></tr>
+<tr><td>S3 buckets (all layers)</td><td><code>infrastructure/modules/storage/</code></td><td>Bucket names, ARNs, Object Lock config</td></tr>
+<tr><td>KMS key</td><td><code>infrastructure/modules/kms/</code></td><td>Key ARN (used as SSE key across all resources)</td></tr>
+<tr><td>IAM roles (5 service roles + CI/CD)</td><td><code>infrastructure/modules/iam/</code></td><td>Role ARNs</td></tr>
+<tr><td>Secrets Manager secrets</td><td><code>infrastructure/modules/secrets/</code></td><td>Secret ARNs, rotation schedules</td></tr>
+<tr><td>DynamoDB tables</td><td><code>infrastructure/modules/metadata_persistence/</code></td><td>Table names, GSI names</td></tr>
+<tr><td>CloudWatch, SNS, X-Ray</td><td><code>infrastructure/modules/observability/</code></td><td>Log group names, alarm ARNs, SNS topic ARN</td></tr>
+<tr><td>Step Functions state machine</td><td><code>infrastructure/modules/orchestration/</code></td><td>State machine ARN</td></tr>
+<tr><td>EventBridge schedules</td><td>Managed at runtime via <code>extraction_schedule_client.py</code></td><td>Schedule names follow <code>{source_id}--{entity_id}</code></td></tr>
+</tbody>
+</table>
     </article>
   </main>
 </body>

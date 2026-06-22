@@ -35,6 +35,7 @@
 9. [DynamoDB Table Layout](#9-dynamodb-table-layout)
 10. [Adding a New Connector](#10-adding-a-new-connector)
 11. [Runbook Reference](#11-runbook-reference)
+12. [Technology Stack and Tools Reference](#12-technology-stack-and-tools-reference)
 
 ---
 
@@ -949,3 +950,109 @@ No changes to orchestration, transformation, governance, or observability module
 | New entity to add (same source) | Add `EntityExtractionConfig` record to DynamoDB, create EventBridge schedule — no code change required |
 | Compliance legal hold required | Call `RetentionPolicyEnforcer.place_legal_hold(bucket, key)` with governance role credentials |
 | Manual Athena query on curated data | Use `AthenaQueryClient.execute_query()` with the Glue catalog database name |
+
+---
+
+## 12. Technology Stack and Tools Reference
+
+Complete mapping of every tool, library, AWS service, and configuration mechanism used across the platform.
+
+### AWS Services
+
+| Service | Role in Platform |
+|---|---|
+| **Amazon EventBridge Scheduler** | Cron trigger per source/entity; manages `{source_id}--{entity_id}` schedule names |
+| **AWS Step Functions** | Pipeline orchestrator; Standard Workflow (staging/prod), Express Workflow (dev); 5-stage chained state machine with conditional branching and retry |
+| **AWS Lambda** | Compute for all 5 pipeline stages (extraction, transformation, entity resolution, analytics publish, serving load) for datasets < 5 M records |
+| **AWS ECS Fargate** | Compute for large-volume extraction (> 5 M records/day); no Lambda 15-minute timeout |
+| **Amazon S3** | Raw layer, curated layer, analytics layer, schema snapshots, field mapping configs, entity resolution configs, quality reports, lineage records, governance artefacts |
+| **Amazon S3 Object Lock** | GOVERNANCE mode on raw layer; 7-year retention; prevents overwrites and premature deletion |
+| **S3 Intelligent-Tiering** | Analytics layer cost optimisation; auto-moves to infrequent access after 90 days of no access |
+| **Amazon DynamoDB** | 4 tables: `{env}-entity-extraction-config`, `{env}-watermark-repository`, `{env}-run-audit-log`, `{env}-source-onboarding`; PITR enabled; KMS encrypted |
+| **AWS Secrets Manager** | One secret per source per environment (`{env}/sources/{source}/credentials`); scheduled rotation |
+| **AWS Glue Data Catalog** | Metadata registry for curated and analytics layer tables; create-first / catch-AlreadyExistsException pattern |
+| **Amazon Athena** | Serverless SQL on curated/analytics Parquet; $5/TB scanned; year/month/day partitions minimise scan cost |
+| **Amazon RDS MySQL 8** | Serving store for operational APIs and dashboards; private VPC; read-only credentials |
+| **Amazon SQS** | Dead-Letter Queue (`{env}-extraction-dlq`); KMS-encrypted; 14-day retention; replayed via `RunReplayController` |
+| **Amazon CloudWatch Logs** | All structured log events (structlog JSON); 5 log groups per environment |
+| **Amazon CloudWatch Metrics** | Custom namespace `EnterpriseDatalake`; 6 canonical metrics buffered and flushed in batches |
+| **Amazon CloudWatch Alarms** | 4 platform alarms: `extraction_failures`, `schema_drift_breaking`, `watermark_lag_slo_breach`, `extraction_activity_absent` |
+| **Amazon SNS** | Alert topic → email / PagerDuty for on-call notification |
+| **AWS X-Ray** | Distributed tracing across all Lambda and service calls; X-Ray group per environment |
+| **AWS KMS** | Customer-managed CMK; annual key rotation; SSE-KMS applied to all S3, DynamoDB, and SQS resources |
+| **AWS IAM** | 5 least-privilege service roles (extraction, transformation, entity-resolution, analytics-serve, governance) + 1 OIDC CI/CD role; no wildcards |
+| **Amazon VPC** | Private subnets (3 AZs); no internet gateway; NAT Gateway optional (PrivateLink preferred) |
+| **AWS VPC Endpoints** | S3 Gateway, DynamoDB Gateway; SecretsManager, CloudWatch, Step Functions, KMS, Glue — Interface Endpoints |
+
+### Python Runtime and Libraries
+
+| Library | Version | Purpose |
+|---|---|---|
+| **Python** | 3.14.x (pyenv 2.7.2) | Runtime language for all Lambda / ECS task code |
+| **Pydantic** | ≥ 2.7 | Frozen data models; `extra='forbid'`; strict validators; cross-field validation |
+| **structlog** | ≥ 24.4 | Structured JSON logging; `_scrub_sensitive_processor` strips 6 PII/credential patterns |
+| **boto3** | Latest (AWS SDK) | All AWS service calls (S3, DynamoDB, Secrets Manager, CloudWatch, SQS, Glue, Athena) |
+| **pyarrow** | Latest | Apache Parquet read/write; `large_utf8` column type in raw layer |
+| **pymysql** | Latest | MySQL RDS connector; parameterised queries |
+| **requests** | Latest | Salesforce OAuth 2.0 + Bulk API HTTP; NetSuite OAuth 1.0a + SuiteQL REST |
+| **hatchling** | Latest | Python build backend (`pyproject.toml`-only; no `setup.py`) |
+
+### Code Quality and Security Tools
+
+| Tool | Version | Purpose |
+|---|---|---|
+| **Ruff** | ≥ 0.5 | Linter (rules: E, W, F, I, N, S, B, C90, UP, ANN, T20, RUF) |
+| **mypy** | ≥ 1.10 | Static type checker (strict mode; `disallow_untyped_defs`; `warn_return_any`) |
+| **bandit** | ≥ 1.7 | Python SAST — OWASP Top 10 vulnerability scanner |
+| **pip-audit** | ≥ 2.7 | Dependency CVE scanning |
+| **checkov** | Latest | Terraform IaC security scanning |
+| **detect-secrets** | Latest | Secret leak prevention (pre-commit + CI) |
+| **pytest** | Latest | Unit and integration tests; ≥ 80% coverage gate enforced in CI |
+| **moto** | ≥ 5.0 | AWS service mocking for unit tests (S3, DynamoDB, SQS, Secrets Manager, CloudWatch) |
+
+### Infrastructure as Code
+
+| Tool | Version | Scope |
+|---|---|---|
+| **Terraform** | ≥ 1.8, < 2.0 | All AWS infrastructure (VPC, S3, DynamoDB, IAM, Secrets, KMS, CloudWatch, Step Functions) |
+| **AWS Terraform Provider** | ~> 5.0 | AWS resource management |
+| Terraform remote state | S3 + DynamoDB state lock + KMS | Per environment (`dev`, `staging`, `prod`) |
+
+### CI/CD Pipeline
+
+| Stage | Tool |
+|---|---|
+| Lint | Ruff |
+| Type-check | mypy (strict) |
+| Tests | pytest (≥ 80% coverage) |
+| SAST | bandit |
+| CVE scan | pip-audit |
+| IaC security | checkov |
+| Terraform validation | `terraform validate` |
+| Deployment | GitHub Actions (SHA-pinned); deploy only after all 7 CI gates pass |
+
+### Data Formats
+
+| Format | Compression | Used at |
+|---|---|---|
+| **Apache Parquet** | Raw: `large_utf8` (no type loss); Curated/Analytics: Snappy | Raw write → Curated write → Analytics publish |
+| **JSON** | None (human-readable) | Schema snapshots, drift reports, quality reports, lineage records, config files |
+| **DynamoDB JSON** | Native DynamoDB serialisation | Entity config, watermark, run audit log, source onboarding |
+
+### Entity Resolution Algorithms
+
+| Algorithm | Implementation | Used for |
+|---|---|---|
+| **Deterministic exact match** | Normalised string equality | Email, CRM/ERP IDs, reference codes |
+| **Jaro-Winkler similarity** | `matching_engine/` | Name fuzzy matching; handles abbreviations and transpositions |
+| **Jaccard token-set similarity** | `matching_engine/` | Company name word-level overlap scoring |
+| **Blocking** | Email domain / phone prefix / name first-3 / record ID prefix | Reduce comparison space before similarity scoring |
+
+### Security Primitives
+
+| Primitive | Algorithm | Applied at |
+|---|---|---|
+| PII tokenisation | **HMAC-SHA256** (keyed) | Transformation stage; deterministic pseudonym for join-key–preserving masking |
+| Field fingerprinting | **SHA-256** | Schema snapshot identity; drift detection |
+| Parameterised queries | Named placeholders; no string interpolation | All SQL (MySQL) and SOQL queries; prevents SQL injection |
+| Watermark concurrency | DynamoDB `ConditionExpression` on `version` | Prevents double-advance race condition |

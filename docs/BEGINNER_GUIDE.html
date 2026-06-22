@@ -289,7 +289,7 @@ This run window:       2026-06-14 01:00 UTC  →  2026-06-15 02:00 UTC
 </tbody>
 </table>
 <p><strong>Code:</strong> <code>connector_runtime/adapters/</code><br>
-<strong>Credential format:</strong> see <a href="DEPLOYMENT_GUIDE.md#step-61--populate-source-credentials-in-secrets-manager">docs/DEPLOYMENT_GUIDE.md — Step 6.1</a><br>
+<strong>Credential format:</strong> see <a href="DEPLOYMENT_GUIDE.html#step-61--populate-source-credentials-in-secrets-manager">docs/DEPLOYMENT_GUIDE.md — Step 6.1</a><br>
 <strong>Set credentials (all connectors):</strong><br>
 - <code>aws secretsmanager put-secret-value --secret-id dev/sources/salesforce/credentials ...</code><br>
 - <code>aws secretsmanager put-secret-value --secret-id dev/sources/netsuite/credentials ...</code><br>
@@ -322,7 +322,7 @@ python scripts/trigger_extraction.py \
   --region us-east-1 \
   --param object_name=Account
 </code></pre>
-<p>For fuller troubleshooting and preflight details, see <a href="LOCAL_DEV_SETUP.md#7-run-salesforce-connector-locally-two-ways">docs/LOCAL_DEV_SETUP.md</a>.</p>
+<p>For fuller troubleshooting and preflight details, see <a href="LOCAL_DEV_SETUP.html#7-run-salesforce-connector-locally-two-ways">docs/LOCAL_DEV_SETUP.md</a>.</p>
 <hr>
 <h3 id="step-6-raw-layer-the-vault">Step 6 — Raw Layer ("The Vault")</h3>
 <p>Extracted records are written as <strong>Parquet files</strong> to the S3 Raw Layer. This layer is the permanent, unmodified copy of what the source sent.</p>
@@ -402,7 +402,7 @@ Fields classified as sensitive (e.g. SSN, credit card) are masked before writing
 Canonical records are written as Parquet to the Curated Layer (<code>s3://dev-edl-curated/</code>). A lineage record is written to S3 Governance, and the Glue Data Catalog is updated so Athena can query the new data immediately.</p>
 <p><strong>Code:</strong> <code>transformation/transformation_pipeline.py</code><br>
 <strong>Field mapping location:</strong> <code>s3://dev-edl-mapping-config/field-mappings/{source}/{entity}/latest.json</code><br>
-<strong>How to publish a mapping:</strong> see <a href="DEPLOYMENT_GUIDE.md#7-field-mapping-configuration--where-and-how">docs/DEPLOYMENT_GUIDE.md — Section 7</a></p>
+<strong>How to publish a mapping:</strong> see <a href="DEPLOYMENT_GUIDE.html#7-field-mapping-configuration--where-and-how">docs/DEPLOYMENT_GUIDE.md — Section 7</a></p>
 <hr>
 <h3 id="step-9-serving-ready-for-business-use">Step 9 — Serving ("Ready for Business Use")</h3>
 <p>After the curated layer is updated:</p>
@@ -624,24 +624,96 @@ scripts/
 </thead>
 <tbody>
 <tr>
-<td><a href="DEPLOYMENT_GUIDE.md">docs/DEPLOYMENT_GUIDE.md</a></td>
+<td><a href="DEPLOYMENT_GUIDE.html">docs/DEPLOYMENT_GUIDE.md</a></td>
 <td>Step-by-step instructions to deploy the platform to AWS</td>
 </tr>
 <tr>
-<td><a href="PLATFORM_FLOW.md">docs/PLATFORM_FLOW.md</a></td>
+<td><a href="PLATFORM_FLOW.html">docs/PLATFORM_FLOW.md</a></td>
 <td>Deep technical flow with all 15 internal pipeline stages</td>
 </tr>
 <tr>
-<td><a href="EXECUTIVE_OVERVIEW.md">docs/EXECUTIVE_OVERVIEW.md</a></td>
+<td><a href="EXECUTIVE_OVERVIEW.html">docs/EXECUTIVE_OVERVIEW.md</a></td>
 <td>Business outcomes, schedules, compliance — for leadership</td>
 </tr>
 <tr>
-<td><a href="../README.md">README.md</a></td>
+<td><a href="../README.html">README.md</a></td>
 <td>Developer setup, commands reference</td>
 </tr>
 </tbody>
 </table>
       <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
+
+<hr>
+<h2 id="technology-stack-quick-reference">Technology Stack Quick Reference</h2>
+<p>A complete list of every technology this platform uses, with a one-line description of its role.</p>
+<h3>AWS Services</h3>
+<table>
+<thead><tr><th>Service</th><th>What it does in this platform</th></tr></thead>
+<tbody>
+<tr><td><strong>Amazon EventBridge Scheduler</strong></td><td>Fires the "time to run" signal for each entity on a cron schedule</td></tr>
+<tr><td><strong>AWS Step Functions</strong></td><td>Manages the pipeline as a 5-stage workflow; handles retries and failure routing</td></tr>
+<tr><td><strong>AWS Lambda</strong></td><td>Runs all pipeline code (extraction, transformation, entity resolution, analytics publish, serving load)</td></tr>
+<tr><td><strong>AWS ECS Fargate</strong></td><td>Runs large-volume extractions (&gt; 5&nbsp;M records/day) without Lambda timeout limits</td></tr>
+<tr><td><strong>Amazon S3</strong></td><td>Stores all data: raw, curated, analytics, schema snapshots, configs, reports, lineage</td></tr>
+<tr><td>S3 Object Lock (GOVERNANCE)</td><td>Makes raw data immutable — files cannot be deleted or overwritten for 7 years</td></tr>
+<tr><td>S3 Intelligent-Tiering</td><td>Automatically moves old analytics data to cheaper storage tier</td></tr>
+<tr><td><strong>Amazon DynamoDB</strong></td><td>Stores entity configs, watermarks, run audit logs, and source onboarding records</td></tr>
+<tr><td><strong>AWS Secrets Manager</strong></td><td>Stores source API credentials securely; rotates them automatically</td></tr>
+<tr><td><strong>AWS Glue Data Catalog</strong></td><td>Maintains a registry of all curated and analytics tables (like a library catalogue)</td></tr>
+<tr><td><strong>Amazon Athena</strong></td><td>Lets you run SQL queries directly against S3 Parquet files (no database server needed)</td></tr>
+<tr><td><strong>Amazon RDS MySQL 8</strong></td><td>Operational serving database for apps and dashboards requiring low-latency reads</td></tr>
+<tr><td><strong>Amazon SQS</strong></td><td>Dead-Letter Queue — holds failed pipeline runs for replay</td></tr>
+<tr><td><strong>Amazon CloudWatch</strong></td><td>Collects logs, custom metrics, and fires alarms when something goes wrong</td></tr>
+<tr><td><strong>AWS X-Ray</strong></td><td>Traces every request through the system for debugging</td></tr>
+<tr><td><strong>Amazon SNS</strong></td><td>Sends alert emails/PagerDuty notifications when alarms fire</td></tr>
+<tr><td><strong>AWS KMS</strong></td><td>Manages encryption keys for all data at rest</td></tr>
+<tr><td><strong>AWS IAM</strong></td><td>Controls who (which service role) can do what — no wildcard permissions</td></tr>
+<tr><td><strong>Amazon VPC</strong></td><td>Private network — all platform services run isolated from the public internet</td></tr>
+</tbody>
+</table>
+<h3>Source System APIs</h3>
+<table>
+<thead><tr><th>Source</th><th>API Used</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>Salesforce CRM</strong></td><td>Bulk API 2.0</td><td>Async, high-volume CSV streaming; handles millions of records</td></tr>
+<tr><td><strong>NetSuite ERP</strong></td><td>SuiteQL REST API</td><td>SQL-like query language over REST</td></tr>
+<tr><td><strong>MySQL RDS</strong></td><td>SQL via <code>pymysql</code></td><td>Read-only; introspects schema via <code>INFORMATION_SCHEMA</code></td></tr>
+</tbody>
+</table>
+<h3>Python Libraries</h3>
+<table>
+<thead><tr><th>Library</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><strong>Pydantic v2</strong></td><td>Validates all config and data models; catches bad data before it enters the pipeline</td></tr>
+<tr><td><strong>structlog</strong></td><td>Writes structured JSON log events with automatic PII scrubbing</td></tr>
+<tr><td><strong>boto3</strong></td><td>Python SDK for all AWS services</td></tr>
+<tr><td><strong>pyarrow</strong></td><td>Reads and writes Apache Parquet files</td></tr>
+<tr><td><strong>pymysql</strong></td><td>Connects to MySQL RDS</td></tr>
+<tr><td><strong>requests</strong></td><td>Makes HTTP calls to Salesforce and NetSuite APIs</td></tr>
+</tbody>
+</table>
+<h3>Data Format</h3>
+<table>
+<thead><tr><th>Format</th><th>Used for</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><strong>Apache Parquet</strong></td><td>All data lake files (raw, curated, analytics)</td><td>Columnar format; 5–10× smaller than JSON; fast analytical queries</td></tr>
+<tr><td><strong>JSON</strong></td><td>Config files, snapshots, reports, lineage records</td><td>Human-readable; version-controlled in Git</td></tr>
+</tbody>
+</table>
+<h3>Infrastructure and CI/CD</h3>
+<table>
+<thead><tr><th>Tool</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><strong>Terraform</strong> ≥ 1.8</td><td>Provisions all AWS infrastructure; 3 environments (dev/staging/prod)</td></tr>
+<tr><td><strong>GitHub Actions</strong></td><td>7-stage CI/CD pipeline: lint → typecheck → test → SAST → CVE → IaC → Terraform validate</td></tr>
+<tr><td><strong>Ruff</strong></td><td>Python code linter</td></tr>
+<tr><td><strong>mypy</strong></td><td>Python static type checker (strict mode)</td></tr>
+<tr><td><strong>bandit</strong></td><td>Python security scanner (OWASP Top 10)</td></tr>
+<tr><td><strong>pip-audit</strong></td><td>Checks Python dependencies for known CVEs</td></tr>
+<tr><td><strong>checkov</strong></td><td>Scans Terraform code for security misconfigurations</td></tr>
+<tr><td><strong>pytest + moto</strong></td><td>Unit/integration tests with AWS mocking (no real AWS needed for local tests)</td></tr>
+</tbody>
+</table>
     </article>
   </main>
 </body>

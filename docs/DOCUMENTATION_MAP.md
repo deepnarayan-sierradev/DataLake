@@ -25,10 +25,6 @@
    - Skim for questions you'd ask
    - Bookmark for reference during meetings
 
-4. **[PRESENTATION_QUICK_REFERENCE.md](PRESENTATION_QUICK_REFERENCE.md)** (Card 1–7)
-   - If attending the live presentation, read beforehand
-   - Anticipate questions from your team
-
 ---
 
 ### Chief Technology Officer / CIO
@@ -224,7 +220,6 @@
 | [GO_LIVE_READINESS_CHECKLIST.md](GO_LIVE_READINESS_CHECKLIST.md) | Project mgmt, ops | 45 min | Pre-go-live verification checklist |
 | [PRODUCTION_INCIDENT_RUNBOOK.md](PRODUCTION_INCIDENT_RUNBOOK.md) | Operations, on-call | 30 min | How to respond to production incidents |
 | [GLOSSARY_AND_TERMINOLOGY.md](GLOSSARY_AND_TERMINOLOGY.md) | All stakeholders | 15 min | Terminology definitions + AWS services |
-| [PRESENTATION_QUICK_REFERENCE.md](PRESENTATION_QUICK_REFERENCE.md) | Presenters | 20 min | Speaker notes + talking points |
 
 ### EXISTING Documents (Pre-existing)
 
@@ -258,7 +253,7 @@
 
 1. [EXECUTIVE_SUMMARY_ONE_PAGE.md](EXECUTIVE_SUMMARY_ONE_PAGE.md) (2 min) — Print for handout
 2. [COST_ANALYSIS_AND_ROI.md](COST_ANALYSIS_AND_ROI.md) (15 min) — Have CFO read this first
-3. [PRESENTATION_QUICK_REFERENCE.md](PRESENTATION_QUICK_REFERENCE.md) (20 min) — Speaker notes
+3. [EXECUTIVE_OVERVIEW.md](EXECUTIVE_OVERVIEW.md) (20 min) — Full business case and tech walkthrough
 4. Practice presentation with [PLATFORM_FLOW.md](PLATFORM_FLOW.md) architecture diagram (10 min)
 5. Print [FAQ_FOR_MANAGEMENT.md](FAQ_FOR_MANAGEMENT.md) as backup for Q&A
 
@@ -306,7 +301,7 @@
 ### For Presenters
 1. Use the **"Quick Navigation by Role"** section
 2. Share the appropriate docs with each attendee **before** your presentation
-3. Have [PRESENTATION_QUICK_REFERENCE.md](PRESENTATION_QUICK_REFERENCE.md) printed for speaker notes
+3. Use [EXECUTIVE_SUMMARY_ONE_PAGE.md](EXECUTIVE_SUMMARY_ONE_PAGE.md) as speaker reference and print for distribution
 
 ### For Project Managers
 1. Use **"Scenario 3"** (Go-Live Readiness) as your checkpoint tracker
@@ -341,8 +336,45 @@
 
 - **Platform Engineering Lead:** PLATFORM_FLOW, DEPLOYMENT_GUIDE, PRODUCTION_INCIDENT_RUNBOOK, GLOSSARY
 - **Chief Data Officer:** EXECUTIVE_OVERVIEW, PIPELINE_FLOW, FAQ (Data Governance)
-- **Project Manager:** GO_LIVE_READINESS_CHECKLIST, PRESENTATION_QUICK_REFERENCE
+- **Project Manager:** GO_LIVE_READINESS_CHECKLIST
 - **Finance / CFO:** COST_ANALYSIS_AND_ROI, EXECUTIVE_SUMMARY_ONE_PAGE
+
+---
+
+## Technology Stack Index
+
+Use this table to quickly find where each technology is documented in detail.
+
+| Technology / Tool | Primary documentation | Brief description |
+|---|---|---|
+| **AWS Lambda** | [PLATFORM_FLOW.md](PLATFORM_FLOW.md#1-platform-architecture-overview) | Compute for all pipeline stages (< 5 M records) |
+| **AWS ECS Fargate** | [PLATFORM_FLOW.md](PLATFORM_FLOW.md#1-platform-architecture-overview) | Compute for large-volume extraction (> 5 M records/day) |
+| **AWS Step Functions** | [PIPELINE_FLOW.md](PIPELINE_FLOW.md#stage-2--step-functions-orchestration) | 5-stage pipeline orchestrator with retry/branching |
+| **Amazon EventBridge Scheduler** | [PIPELINE_FLOW.md](PIPELINE_FLOW.md#stage-1--event-scheduling) | Cron trigger per entity |
+| **Amazon S3** | [PIPELINE_FLOW.md](PIPELINE_FLOW.md#2-data-layer-definitions) | Raw, curated, analytics, snapshots, configs |
+| **S3 Object Lock (GOVERNANCE)** | [EXECUTIVE_OVERVIEW.md](EXECUTIVE_OVERVIEW.md#9-data-layers-explained) | Immutable raw layer; 7-year retention |
+| **Amazon DynamoDB** | [PLATFORM_FLOW.md](PLATFORM_FLOW.md#9-dynamodb-table-layout) | Config, watermark, audit log, onboarding tables |
+| **AWS Secrets Manager** | [PIPELINE_FLOW.md](PIPELINE_FLOW.md#stage-4--credential-retrieval) | Source credential storage; auto-rotation |
+| **AWS Glue Data Catalog** | [PLATFORM_FLOW.md](PLATFORM_FLOW.md#stage-12--curated-layer-write) | Curated and analytics table registry |
+| **Amazon Athena** | [EXECUTIVE_OVERVIEW.md](EXECUTIVE_OVERVIEW.md#9-data-layers-explained) | Serverless SQL on S3 Parquet |
+| **Amazon RDS MySQL** | [PIPELINE_FLOW.md](PIPELINE_FLOW.md#stage-16--serving-store-load) | Operational serving store |
+| **Amazon SQS (DLQ)** | [PIPELINE_FLOW.md](PIPELINE_FLOW.md#7-failure-handling-and-replay) | Dead-Letter Queue; 14-day retention |
+| **Amazon CloudWatch** | [EXECUTIVE_OVERVIEW.md](EXECUTIVE_OVERVIEW.md#17-key-metrics-and-slos) | Logs, metrics, alarms |
+| **AWS X-Ray** | [PLATFORM_FLOW.md](PLATFORM_FLOW.md#5-observability-logs-metrics-and-traces) | Distributed tracing |
+| **AWS KMS** | [EXECUTIVE_OVERVIEW.md](EXECUTIVE_OVERVIEW.md#12-technology-stack-and-tools) | SSE-KMS encryption for all data at rest |
+| **AWS IAM** | [EXECUTIVE_OVERVIEW.md](EXECUTIVE_OVERVIEW.md#8-least-privilege-access-model--who-can-read-what) | Least-privilege service roles |
+| **Amazon VPC** | [EXECUTIVE_OVERVIEW.md](EXECUTIVE_OVERVIEW.md#12-technology-stack-and-tools) | Private network; VPC Endpoints for AWS services |
+| **Terraform** | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Infrastructure as Code (≥ 1.8; AWS Provider ~> 5.0) |
+| **Python 3.14** | [LOCAL_DEV_SETUP.md](LOCAL_DEV_SETUP.md) | Runtime language for all platform code |
+| **Pydantic v2** | [PLATFORM_FLOW.md](PLATFORM_FLOW.md#2-repository-layout-and-module-responsibilities) | Data model validation; frozen models |
+| **structlog** | [PLATFORM_FLOW.md](PLATFORM_FLOW.md#5-observability-logs-metrics-and-traces) | Structured JSON logging; PII-scrubbing |
+| **Apache Parquet** | [PIPELINE_FLOW.md](PIPELINE_FLOW.md#2-data-layer-definitions) | Columnar data format; Snappy compressed |
+| **Salesforce Bulk API 2.0** | [PIPELINE_FLOW.md](PIPELINE_FLOW.md#stage-7--extraction) | High-volume async Salesforce extraction |
+| **NetSuite SuiteQL** | [PIPELINE_FLOW.md](PIPELINE_FLOW.md#stage-7--extraction) | REST API with SQL-like query language |
+| **GitHub Actions** | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | CI/CD; 7-stage gate (lint→typecheck→test→SAST→CVE→IaC→tf-validate) |
+| **Ruff / mypy / bandit / checkov** | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Code quality and security toolchain |
+| **Jaro-Winkler / Jaccard** | [PIPELINE_FLOW.md](PIPELINE_FLOW.md#stage-13--entity-resolution) | Entity resolution similarity algorithms |
+| **HMAC-SHA256** | [PLATFORM_FLOW.md](PLATFORM_FLOW.md#stage-12--curated-layer-write) | PII tokenisation (deterministic pseudonym) |
 
 ---
 

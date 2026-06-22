@@ -32,6 +32,7 @@
 8. [Version Control and Rollback](#8-version-control-and-rollback)
 9. [Manual Trigger Checklist](#9-manual-trigger-checklist)
 10. [Pre-Deployment Verification](#10-pre-deployment-verification)
+11. [Technology Reference](#11-technology-reference)
 
 ---
 
@@ -747,3 +748,86 @@ Before deploying to staging or prod, verify all of the following:
 - [ ] CloudWatch alarms reviewed and SNS alert email set
 - [ ] DLQ URL verified accessible by replay operator role
 - [ ] At least one full extraction + transformation run verified in staging before prod promotion
+
+---
+
+## 11. Technology Reference
+
+This section maps each pipeline stage to the exact tools, AWS services, Python libraries, and infrastructure components it depends on.
+
+### AWS Services by Stage
+
+| Stage | AWS Service(s) |
+|---|---|
+| Stage 1 — Event Scheduling | Amazon EventBridge Scheduler |
+| Stage 2 — Step Functions Orchestration | AWS Step Functions (Standard / Express Workflow) |
+| Stage 3 — Configuration Load | Amazon DynamoDB (`{env}-entity-extraction-config`) |
+| Stage 4 — Credential Retrieval | AWS Secrets Manager (`{env}/sources/{source}/credentials`) |
+| Stage 5 — Metadata Discovery | Source APIs (no AWS; called from Lambda/ECS over VPC) |
+| Stage 6 — Query Construction | In-process (no AWS service); ISO-8601 validated |
+| Stage 7 — Extraction | AWS Lambda (< 5 M records) or AWS ECS Fargate (≥ 5 M records); Amazon S3 (raw layer write) |
+| Stage 8 — Schema Snapshot | Amazon S3 (`{env}-schema-snapshots`) |
+| Stage 9 — Drift Evaluation | In-process (no AWS service); writes drift report to Amazon S3 |
+| Stage 10 — Raw Layer Write | Amazon S3 (Object Lock GOVERNANCE); CloudWatch metric emit |
+| Stage 11 — Watermark Update | Amazon DynamoDB (`{env}-watermark-repository`; conditional put) |
+| Stage 12 — Transformation | AWS Lambda or AWS Glue; Amazon S3 (curated layer); AWS Glue Data Catalog |
+| Stage 13 — Entity Resolution | AWS Lambda; Amazon S3 (curated source read + analytics write) |
+| Stage 14 — Golden Record Publish | AWS Lambda; Amazon S3 (analytics layer `canonical/` prefix) |
+| Stage 15 — Analytics Layer Publish | Amazon S3 (analytics layer); AWS Glue Data Catalog |
+| Stage 16 — Serving Store Load | Amazon RDS MySQL 8 (private VPC); AWS Secrets Manager |
+| All stages | Amazon CloudWatch Logs; Amazon CloudWatch Metrics; AWS X-Ray; Amazon SQS (DLQ) |
+
+### Python Libraries by Component
+
+| Component | Key Libraries |
+|---|---|
+| Connector Runtime (all connectors) | `boto3`, `pyarrow`, `pydantic` ≥ 2.7, `structlog` ≥ 24.4 |
+| Salesforce connector | `requests` (OAuth 2.0 client credentials); Bulk API 2.0 CSV streaming |
+| NetSuite connector | `requests` (OAuth 1.0a); SuiteQL REST JSON |
+| MySQL RDS connector | `pymysql`; `INFORMATION_SCHEMA` introspection |
+| Watermark / Schema / Config repositories | `boto3` (DynamoDB / S3); `pydantic` |
+| Transformation pipeline | `pyarrow` (Parquet I/O); `boto3`; `re` (pre-compiled patterns) |
+| Entity resolution | `rapidfuzz` or custom Jaro-Winkler / Jaccard implementation |
+| Observability | `structlog`, `boto3` CloudWatch |
+| Infrastructure as Code | Terraform ≥ 1.8 (AWS Provider ~> 5.0) |
+
+### Data Formats
+
+| Format | Stage produced | Compression |
+|---|---|---|
+| **Apache Parquet** | Raw write (Stage 7), Curated write (Stage 12), Analytics write (Stages 14–15) | Snappy (curated/analytics); uncompressed large_utf8 (raw) |
+| **JSON** | Schema snapshot (Stage 8), drift report (Stage 9), quality report (Stage 12), lineage record (Stage 12), golden match decisions (Stage 14) | None (human-readable) |
+| **DynamoDB Item** | Config (Stage 3), watermark (Stage 11), audit log (all stages) | DynamoDB-native |
+
+### Security Controls Applied Per Stage
+
+| Stage | Security control |
+|---|---|
+| Stage 4 — Credential Retrieval | Secrets Manager; credentials held in memory only; never logged (structlog PII scrubber) |
+| Stage 6 — Query Construction | Parameterised queries only; ISO-8601 validation on watermark values (SQL injection prevention) |
+| Stage 7 — Extraction | S3 Object Lock GOVERNANCE; SSE-KMS; TLS 1.2+; VPC-only egress |
+| Stage 12 — Transformation | HMAC-SHA256 tokenisation; SHA-256 hash; REDACT / PARTIAL_MASK / FULL_MASK applied before any write |
+| All stages | IAM least-privilege roles; no wildcard `Action:*`; VPC Endpoints for all AWS service access |
+
+### Entity Resolution Algorithms
+
+| Algorithm | Purpose | Implementation |
+|---|---|---|
+| **Deterministic exact match** | Email, CRM ID, ERP reference codes | String normalisation + equality |
+| **Jaro-Winkler similarity** | Name matching (handles abbreviations, transpositions) | Weighted probabilistic scoring |
+| **Jaccard token-set similarity** | Company name matching (word-level) | Token overlap ratio |
+| **Blocking** | Reduce comparison space before scoring | Email domain, phone prefix, name prefix, record ID prefix |
+
+### Infrastructure as Code Reference
+
+| Resource type | Terraform module | Key outputs |
+|---|---|---|
+| VPC, subnets, NAT, VPC Endpoints | `infrastructure/modules/networking/` | VPC ID, subnet IDs, endpoint IDs |
+| S3 buckets (all layers) | `infrastructure/modules/storage/` | Bucket names, ARNs, Object Lock config |
+| KMS key | `infrastructure/modules/kms/` | Key ARN (used as SSE key across all resources) |
+| IAM roles (5 service roles + CI/CD) | `infrastructure/modules/iam/` | Role ARNs |
+| Secrets Manager secrets | `infrastructure/modules/secrets/` | Secret ARNs, rotation schedules |
+| DynamoDB tables | `infrastructure/modules/metadata_persistence/` | Table names, GSI names |
+| CloudWatch, SNS, X-Ray | `infrastructure/modules/observability/` | Log group names, alarm ARNs, SNS topic ARN |
+| Step Functions state machine | `infrastructure/modules/orchestration/` | State machine ARN |
+| EventBridge schedules | Managed at runtime via `extraction_schedule_client.py` | Schedule names follow `{source_id}--{entity_id}` |

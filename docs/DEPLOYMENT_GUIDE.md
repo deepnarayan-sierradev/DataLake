@@ -1582,3 +1582,69 @@ aws sns list-subscriptions-by-topic \
 | EventBridge schedule not triggering | `active: false` in entity config; or schedule disabled | Set `active: true` in entity config; check schedule status in EventBridge console |
 | CloudWatch alarms firing immediately after deploy | `alert_email` not confirmed in SNS | Check email inbox for SNS subscription confirmation (see [Section 2.7](#27-sns-email-subscription-confirmation)) |
 | NAT Gateway IPs changed after infrastructure recreation | NAT Gateway was destroyed and recreated (new Elastic IPs assigned) | Get new IPs from `terraform output nat_gateway_public_ips`; update all source system allowlists |
+
+---
+
+## Technology Stack and Version Reference
+
+Complete authoritative version reference for all tools used in deployment.
+
+### Infrastructure and Provisioning
+
+| Tool | Required version | Verify with |
+|---|---|---|
+| **Terraform** | ≥ 1.8, < 2.0 | `terraform version` |
+| **AWS Terraform Provider** | ~> 5.0 | Declared in `infrastructure/modules/*/versions.tf` |
+| **AWS CLI** | v2 (any recent) | `aws --version` |
+| **Python** | 3.14.x | `python --version` (managed via pyenv) |
+| **pyenv** | 2.7.2+ | `pyenv --version` |
+| **GNU Make** | ≥ 3.8 | `make --version` |
+
+### Python Runtime Dependencies
+
+| Package | Minimum version | Purpose |
+|---|---|---|
+| **pydantic** | ≥ 2.7 | Frozen data model validation |
+| **structlog** | ≥ 24.4 | Structured JSON logging + PII scrubbing |
+| **boto3** | Latest | AWS SDK |
+| **pyarrow** | Latest | Apache Parquet I/O |
+| **pymysql** | Latest | MySQL RDS connector |
+| **requests** | Latest | Salesforce + NetSuite HTTP client |
+
+### Code Quality Gate (all must pass before deploy)
+
+| Tool | Min version | Command | Gate enforced by |
+|---|---|---|---|
+| **Ruff** | ≥ 0.5 | `ruff check .` | GitHub Actions `ci.yml` |
+| **mypy** | ≥ 1.10 | `mypy .` | GitHub Actions `ci.yml` |
+| **pytest** | Latest | `pytest --cov --cov-fail-under=80` | GitHub Actions `ci.yml` |
+| **bandit** | ≥ 1.7 | `bandit -r . -c pyproject.toml` | GitHub Actions `ci.yml` |
+| **pip-audit** | ≥ 2.7 | `pip-audit` | GitHub Actions `ci.yml` |
+| **checkov** | Latest | `checkov -d infrastructure/` | GitHub Actions `ci.yml` |
+| **Terraform validate** | N/A | `terraform validate` | GitHub Actions `ci.yml` |
+
+### AWS Services Deployed (per environment)
+
+| Service | Resource name pattern | Deployed by |
+|---|---|---|
+| **S3** | `{env}-raw-layer`, `{env}-curated-layer`, `{env}-analytics-layer`, `{env}-schema-snapshots`, `{env}-governance` | `infrastructure/modules/storage/` |
+| **KMS** | alias `{env}-edl-platform-key` | `infrastructure/modules/kms/` |
+| **VPC** | `{env}-edl-vpc`; 3 private subnets; 5 VPC Endpoints | `infrastructure/modules/networking/` |
+| **IAM** | 5 service roles + 1 OIDC CI/CD role | `infrastructure/modules/iam/` |
+| **DynamoDB** | `{env}-entity-extraction-config`, `{env}-watermark-repository`, `{env}-run-audit-log`, `{env}-source-onboarding` | `infrastructure/modules/metadata_persistence/` |
+| **Secrets Manager** | `{env}/sources/salesforce/credentials`, `{env}/sources/netsuite/credentials`, `{env}/sources/mysql-rds/credentials` | `infrastructure/modules/secrets/` |
+| **Step Functions** | `{env}-extraction-orchestration-workflow` | `infrastructure/modules/orchestration/` |
+| **CloudWatch** | 5 log groups; namespace `EnterpriseDatalake`; 4 alarms; X-Ray group | `infrastructure/modules/observability/` |
+| **SNS** | `{env}-edl-platform-alerts` | `infrastructure/modules/observability/` |
+| **SQS (DLQ)** | `{env}-extraction-dlq` | `infrastructure/modules/metadata_persistence/` |
+| **Glue Data Catalog** | `{env}_curated`, `{env}_analytics` databases | Created at runtime by transformation pipeline |
+| **EventBridge Schedules** | `{source_id}--{entity_id}` | Managed at runtime via `extraction_schedule_client.py` |
+| **RDS MySQL** | `{env}-edl-serving-store` | `infrastructure/modules/serving_store/` |
+
+### Data Format Specifications
+
+| Format | Spec | Storage layer |
+|---|---|---|
+| **Apache Parquet** | Raw: `large_utf8` columns (no type coercion); Curated/Analytics: Snappy-compressed | All data lake layers |
+| **JSON** | UTF-8; no BOM | Config files, snapshots, reports, lineage |
+| **DynamoDB Item** | Native DynamoDB JSON serialisation | Config, watermark, audit, onboarding tables |

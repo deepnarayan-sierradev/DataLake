@@ -210,13 +210,24 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </table>
 <hr>
 <h2 id="technical-foundation-behind-the-scenes">Technical Foundation (Behind the Scenes)</h2>
-<ul>
-<li><strong>Built on AWS</strong> — secure cloud infrastructure</li>
-<li><strong>Governed by metadata</strong> — configuration, not code</li>
-<li><strong>Scalable streaming</strong> — handles millions of records</li>
-<li><strong>Immutable audit log</strong> — every transaction recorded</li>
-<li><strong>Three data layers</strong> — Raw (archival), Curated (clean), Analytics (ready-for-use)</li>
-</ul>
+<table>
+<thead><tr><th>Category</th><th>Technology</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>Cloud</strong></td><td>AWS (Amazon Web Services)</td><td>All infrastructure; <code>us-east-1</code> default</td></tr>
+<tr><td><strong>Orchestration</strong></td><td>AWS Step Functions + EventBridge Scheduler</td><td>Cron-based scheduling; automatic retry and DLQ</td></tr>
+<tr><td><strong>Compute</strong></td><td>AWS Lambda / ECS Fargate</td><td>Lambda for standard runs; Fargate for large-volume (&gt; 5&nbsp;M records)</td></tr>
+<tr><td><strong>Storage</strong></td><td>Amazon S3 (3 layers)</td><td>Raw (Object Lock, 7-yr retention), Curated, Analytics (Intelligent-Tiering)</td></tr>
+<tr><td><strong>Databases</strong></td><td>Amazon DynamoDB + Amazon RDS MySQL</td><td>DynamoDB for config/watermark/audit; RDS for serving store</td></tr>
+<tr><td><strong>Data format</strong></td><td>Apache Parquet (Snappy)</td><td>5–10× smaller than JSON; columnar for fast analytics queries</td></tr>
+<tr><td><strong>SQL engine</strong></td><td>Amazon Athena + AWS Glue Data Catalog</td><td>Serverless; BI tools connect via ODBC/JDBC</td></tr>
+<tr><td><strong>Security</strong></td><td>AWS KMS, Secrets Manager, IAM, VPC, TLS 1.2+</td><td>Encryption at rest + in transit; no credentials in code</td></tr>
+<tr><td><strong>Source APIs</strong></td><td>Salesforce Bulk API 2.0, NetSuite SuiteQL, MySQL JDBC</td><td>High-throughput, incremental, parameterised</td></tr>
+<tr><td><strong>Language</strong></td><td>Python 3.14 (Pydantic v2, structlog, pyarrow, boto3)</td><td>Strict type checking; structured JSON logging</td></tr>
+<tr><td><strong>IaC</strong></td><td>Terraform ≥ 1.8</td><td>All AWS resources version-controlled; 3 environments (dev/staging/prod)</td></tr>
+<tr><td><strong>CI/CD</strong></td><td>GitHub Actions (7-stage gate)</td><td>Lint → typecheck → test → SAST → CVE → IaC scan → Terraform validate</td></tr>
+</tbody>
+</table>
+
 <hr>
 <h2 id="deployment-status">Deployment Status</h2>
 <table>

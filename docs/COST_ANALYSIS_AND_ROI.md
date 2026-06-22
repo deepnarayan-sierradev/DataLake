@@ -205,3 +205,29 @@ After year 1, costs stabilize:
 - [ ] Chief Information Security Officer
 - [ ] VP Engineering
 
+---
+
+## Technology Cost Drivers — Reference
+
+This section maps each AWS service to its cost driver and the optimisation already applied.
+
+| Service | Cost driver | Optimisation applied | Monthly estimate |
+|---|---|---|---|
+| **Amazon S3** | GB stored × storage class | S3 Intelligent-Tiering on analytics layer; Parquet compression (5–10× vs JSON) | $120 |
+| **S3 Data Transfer** | GB transferred out | Partitioned Athena scans minimise outbound; S3→Lambda intra-region is free | $180 |
+| **AWS Lambda** | GB-seconds × invocations | Streaming architecture (constant RAM regardless of dataset size); 512 MB allocation | $80 |
+| **AWS ECS Fargate** | vCPU-hours + GB-hours (large jobs only) | Only invoked for datasets > 5 M records; otherwise Lambda | Included in Lambda est. |
+| **Amazon DynamoDB** | Read/write capacity units | On-demand pricing; PITR adds ~25% to storage cost | $150 |
+| **AWS Step Functions** | State transitions | 16 transitions per pipeline run; Standard Workflow for staging/prod | $3 |
+| **Amazon EventBridge Scheduler** | Invocations | 12 schedules × 1/day × 30 days | $1 |
+| **AWS Secrets Manager** | Secrets stored + API calls | 3 secrets; retrieval cached per Lambda invocation | $9 |
+| **Amazon Athena** | TB scanned | Year/month/day partitioning limits scan to relevant partition (1–10 GB typical) | $25 |
+| **AWS Glue Data Catalog** | Catalog entries | Catalog-only cost (no Glue ETL jobs used) | $0 |
+| **Amazon CloudWatch** | Log ingestion + storage + metrics + alarms | Structured JSON logs (compact); 30-day hot retention; 50 custom metrics | $70 |
+| **AWS KMS** | API calls + CMK storage | 1 shared CMK for all resources (annual rotation) | $1 |
+| **Amazon SQS** | Messages sent | DLQ only (low volume; triggered only on failures) | < $1 |
+| **Amazon VPC / NAT Gateway** | Data processed + hourly charge | NAT Gateway optional if all sources reachable via PrivateLink | $45 |
+| **Amazon RDS MySQL** | Instance hours + storage | `db.t3.medium` dev; `db.r6g.large` prod; Multi-AZ in prod | Variable by tier |
+
+**Key cost insight:** The Parquet format (Apache Parquet, Snappy compression) is the single biggest cost lever — a 5–10× reduction in S3 storage compared to raw JSON directly reduces S3 storage, data transfer, and Athena scan costs simultaneously.
+

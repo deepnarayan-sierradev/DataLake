@@ -686,7 +686,7 @@ python scripts/trigger_extraction.py --update-schedule \
 <li>Two canonical entity types currently defined:</li>
 <li><strong><code>company</code></strong> — merges Salesforce Account + NetSuite Customer into a single trusted company profile</li>
 <li><strong><code>person</code></strong> — normalises Salesforce Contact into a canonical person record</li>
-<li>Every golden record includes <strong>5 system fields</strong> beyond the 14 business <code>output_fields</code>: <code>golden_id</code>, <code>contributing_source_records</code>, <code>survivorship_version</code>, <code>match_run_id</code>, and <code>field_provenance</code>. See <a href="../PLATFORM_FLOW.md#system-fields-in-golden-records">PLATFORM_FLOW: System Fields in Golden Records</a> for details.</li>
+<li>Every golden record includes <strong>5 system fields</strong> beyond the 14 business <code>output_fields</code>: <code>golden_id</code>, <code>contributing_source_records</code>, <code>survivorship_version</code>, <code>match_run_id</code>, and <code>field_provenance</code>. See <a href="../PLATFORM_FLOW.html#system-fields-in-golden-records">PLATFORM_FLOW: System Fields in Golden Records</a> for details.</li>
 <li>Registered in Glue catalog; Athena workgroup configured per team</li>
 <li>Retention: 1 year active; archival to Glacier after</li>
 <li>Access: read-only for approved BI users and ML engineers (prefix-scoped)</li>
@@ -1234,10 +1234,118 @@ python scripts/trigger_extraction.py --update-schedule \
 </tbody>
 </table>
 <hr>
-<p><em>For technical implementation details, see <a href="PLATFORM_FLOW.md">docs/PLATFORM_FLOW.md</a>.</em><br>
+<p><em>For technical implementation details, see <a href="PLATFORM_FLOW.html">docs/PLATFORM_FLOW.md</a>.</em><br>
 <em>For infrastructure configuration, see <a href="../infrastructure/environments/">infrastructure/environments/</a>.</em><br>
 <em>For source onboarding, see <a href="../governance/source_onboarding_registry.py">governance/source_onboarding_registry.py</a>.</em></p>
       <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
+
+<hr>
+<h2 id="12-technology-stack-and-tools">12. Technology Stack and Tools</h2>
+<p>The platform is built exclusively on proven, production-grade technologies. Every component is version-pinned, security-scanned, and infrastructure-as-code managed.</p>
+<h3>Cloud Platform</h3>
+<table>
+<thead><tr><th>Layer</th><th>Technology</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Cloud provider</td><td><strong>AWS (Amazon Web Services)</strong></td><td>All services; <code>us-east-1</code> default (configurable per environment)</td></tr>
+<tr><td>Infrastructure as Code</td><td><strong>Terraform</strong> ≥ 1.8, &lt; 2.0</td><td>AWS Provider ~&gt; 5.0; all infrastructure version-controlled</td></tr>
+</tbody>
+</table>
+<h3>Compute and Orchestration</h3>
+<table>
+<thead><tr><th>Component</th><th>Technology</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Pipeline orchestration</td><td><strong>AWS Step Functions</strong></td><td>Standard Workflow (staging/prod); Express Workflow (dev)</td></tr>
+<tr><td>Event scheduling</td><td><strong>Amazon EventBridge Scheduler</strong></td><td>Cron per entity; managed at runtime without deployment</td></tr>
+<tr><td>Extraction runtime (small/medium)</td><td><strong>AWS Lambda</strong> (Python 3.14)</td><td>Up to 15-minute timeout; streaming memory model</td></tr>
+<tr><td>Extraction runtime (large volume)</td><td><strong>AWS ECS Fargate</strong></td><td>For datasets &gt; 5&nbsp;M records/day; no timeout limit</td></tr>
+</tbody>
+</table>
+<h3>Storage</h3>
+<table>
+<thead><tr><th>Layer</th><th>Technology</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Raw data</td><td><strong>Amazon S3</strong> + S3 Object Lock (GOVERNANCE)</td><td>Immutable; 7-year retention; SSE-KMS encrypted</td></tr>
+<tr><td>Curated data</td><td><strong>Amazon S3</strong></td><td>Parquet (Snappy); append-only per <code>run_id</code> partition</td></tr>
+<tr><td>Analytics data</td><td><strong>Amazon S3</strong> + S3 Intelligent-Tiering</td><td>Auto-moves to infrequent access after 90 days</td></tr>
+<tr><td>Schema snapshots</td><td><strong>Amazon S3</strong></td><td>Immutable JSON per run; SHA-256 fingerprinted</td></tr>
+<tr><td>Field mapping / ER config</td><td><strong>Amazon S3</strong></td><td>Versioned JSON; latest-pointer pattern</td></tr>
+<tr><td>Watermark state</td><td><strong>Amazon DynamoDB</strong></td><td>Point-in-time recovery; optimistic concurrency</td></tr>
+<tr><td>Entity configuration</td><td><strong>Amazon DynamoDB</strong></td><td><code>{env}-entity-extraction-config</code>; KMS encrypted</td></tr>
+<tr><td>Run audit log</td><td><strong>Amazon DynamoDB</strong></td><td>TTL-enabled; GSI on source/entity/time</td></tr>
+<tr><td>Serving store</td><td><strong>Amazon RDS MySQL 8</strong></td><td>Private VPC; read-only for analytics consumers</td></tr>
+</tbody>
+</table>
+<h3>Source System Connectors</h3>
+<table>
+<thead><tr><th>Source</th><th>API / Protocol</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>Salesforce CRM</strong></td><td>Bulk API 2.0 (async, high-volume); Describe API for metadata</td><td>Handles millions of records without API timeouts</td></tr>
+<tr><td><strong>NetSuite ERP</strong></td><td>SuiteQL REST API; metadata endpoint</td><td>OAuth 1.0a; parameterised SuiteQL queries</td></tr>
+<tr><td><strong>MySQL RDS</strong></td><td>SQL via <code>pymysql</code>; <code>INFORMATION_SCHEMA</code> introspection</td><td>Read-only credentials; parameterised queries only</td></tr>
+</tbody>
+</table>
+<h3>Data Catalog and Query Engine</h3>
+<table>
+<thead><tr><th>Component</th><th>Technology</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Metadata catalog</td><td><strong>AWS Glue Data Catalog</strong></td><td>Registered after every curated write</td></tr>
+<tr><td>Ad-hoc SQL queries</td><td><strong>Amazon Athena</strong></td><td>Serverless; $5/TB scanned; partitioned datasets minimise scan cost</td></tr>
+<tr><td>BI tool connectivity</td><td>Athena ODBC/JDBC or RDS direct</td><td>Supports Tableau, Power BI, Looker, Metabase</td></tr>
+</tbody>
+</table>
+<h3>Security and Secrets</h3>
+<table>
+<thead><tr><th>Concern</th><th>Technology</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Credential storage</td><td><strong>AWS Secrets Manager</strong></td><td>One secret per source per environment; scheduled rotation</td></tr>
+<tr><td>Encryption at rest</td><td><strong>AWS KMS</strong> (customer-managed CMK, SSE-KMS)</td><td>Applied to all S3 buckets, DynamoDB tables, and SQS queues</td></tr>
+<tr><td>Encryption in transit</td><td><strong>TLS 1.2+</strong></td><td>Mandatory; enforced via S3 bucket policy (<code>aws:SecureTransport</code>)</td></tr>
+<tr><td>Network isolation</td><td><strong>Amazon VPC</strong> (private subnets)</td><td>No internet gateway; all AWS traffic via VPC Endpoints</td></tr>
+<tr><td>PII tokenisation</td><td><strong>HMAC-SHA256</strong> (keyed)</td><td>Deterministic pseudonym preserving join-key usability</td></tr>
+<tr><td>Field fingerprinting</td><td><strong>SHA-256</strong></td><td>Schema snapshot identity and drift detection</td></tr>
+<tr><td>Access control</td><td><strong>AWS IAM</strong> (least-privilege roles)</td><td>No wildcard <code>Action:*</code> or <code>Resource:*</code> anywhere</td></tr>
+</tbody>
+</table>
+<h3>Monitoring and Observability</h3>
+<table>
+<thead><tr><th>Component</th><th>Technology</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Structured logging</td><td><strong>structlog</strong> ≥ 24.4</td><td>JSON output; PII-scrubbing processor; forwarded to CloudWatch Logs</td></tr>
+<tr><td>Custom metrics</td><td><strong>Amazon CloudWatch</strong></td><td>Namespace: <code>EnterpriseDatalake</code>; 6 canonical metrics</td></tr>
+<tr><td>Alarms</td><td><strong>Amazon CloudWatch Alarms</strong></td><td>4 platform alarms: extraction failures, breaking drift, watermark lag, activity absent</td></tr>
+<tr><td>Distributed tracing</td><td><strong>AWS X-Ray</strong></td><td>All Lambda and service-to-service calls instrumented</td></tr>
+<tr><td>Alerting</td><td><strong>Amazon SNS</strong></td><td>SNS topic → email / PagerDuty for on-call</td></tr>
+<tr><td>Dead-Letter Queue</td><td><strong>Amazon SQS</strong> (KMS-encrypted)</td><td>14-day retention; replay via <code>RunReplayController</code></td></tr>
+</tbody>
+</table>
+<h3>Python Stack and Code Quality</h3>
+<table>
+<thead><tr><th>Tool / Library</th><th>Version</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><strong>Python</strong></td><td>3.14.x (pyenv)</td><td>Runtime language for all Lambda/ECS task code</td></tr>
+<tr><td><strong>Pydantic</strong></td><td>≥ 2.7</td><td>Data model validation; frozen models; strict <code>extra='forbid'</code></td></tr>
+<tr><td><strong>boto3</strong></td><td>Latest</td><td>AWS SDK — all AWS service calls</td></tr>
+<tr><td><strong>pyarrow</strong></td><td>Latest</td><td>Apache Parquet read/write</td></tr>
+<tr><td><strong>pymysql</strong></td><td>Latest</td><td>MySQL RDS connector</td></tr>
+<tr><td><strong>structlog</strong></td><td>≥ 24.4</td><td>Structured JSON logging with PII scrubbing</td></tr>
+<tr><td><strong>Ruff</strong></td><td>≥ 0.5</td><td>Linter (rules: E, W, F, I, N, S, B, C90, UP, ANN, T20, RUF)</td></tr>
+<tr><td><strong>mypy</strong></td><td>≥ 1.10</td><td>Static type checker (strict mode)</td></tr>
+<tr><td><strong>bandit</strong></td><td>≥ 1.7</td><td>Python SAST scanner (OWASP Top 10)</td></tr>
+<tr><td><strong>pip-audit</strong></td><td>≥ 2.7</td><td>Dependency CVE scanning</td></tr>
+<tr><td><strong>checkov</strong></td><td>Latest</td><td>Terraform IaC security scanner</td></tr>
+<tr><td><strong>pytest</strong></td><td>Latest</td><td>Tests; ≥ 80% coverage gate enforced in CI</td></tr>
+<tr><td><strong>moto</strong></td><td>≥ 5.0</td><td>AWS service mocking for unit tests</td></tr>
+</tbody>
+</table>
+<h3>CI/CD</h3>
+<table>
+<thead><tr><th>Tool</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>GitHub Actions</strong></td><td>7-stage CI gate: lint → typecheck → test → SAST → CVE scan → IaC scan → Terraform validate</td></tr>
+<tr><td>SHA-pinned action references</td><td>All <code>uses:</code> entries pinned to commit SHA digest (no mutable <code>@v4</code> tags)</td></tr>
+<tr><td><strong>pre-commit hooks</strong></td><td>Ruff, detect-private-key, no-commit-to-branch, bandit, Terraform fmt/validate/checkov, detect-secrets</td></tr>
+</tbody>
+</table>
     </article>
   </main>
 </body>
