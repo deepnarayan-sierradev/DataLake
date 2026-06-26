@@ -172,6 +172,37 @@ class TestAutomaticExclusions:
         names = [f.name for f in contract.fields]
         assert "HiddenField" not in names
 
+    def test_missing_queryable_attribute_defaults_to_queryable(self, requests_mock) -> None:  # type: ignore[no-untyped-def]
+        auth = _make_auth()
+        requests_mock.get(
+            f"{_INSTANCE_URL}/services/data/v59.0/sobjects/Account/describe",
+            json=_describe_response(
+                [
+                    {
+                        "name": "Id",
+                        "type": "id",
+                        # queryable intentionally omitted (seen in real org payloads)
+                        "custom": False,
+                        "nillable": False,
+                        "label": "Account ID",
+                    },
+                    {
+                        "name": "Name",
+                        "type": "string",
+                        # queryable intentionally omitted
+                        "custom": False,
+                        "nillable": True,
+                        "label": "Account Name",
+                    },
+                ]
+            ),
+        )
+        client = SalesforceMetadataDiscoveryClient(auth_client=auth, object_name="Account")
+        contract = client.discover_fields(_SOURCE_ID, _ENTITY_ID, FieldMode.ALL, [], [])
+        names = [f.name for f in contract.fields]
+        assert "Id" in names
+        assert "Name" in names
+
     def test_compound_address_field_excluded(self, requests_mock) -> None:  # type: ignore[no-untyped-def]
         auth = _make_auth()
         requests_mock.get(

@@ -31,6 +31,7 @@ Security:
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -123,7 +124,11 @@ class RunCoordinator:
         self._started_at: datetime = datetime.now(tz=UTC)
 
         dynamodb = boto3.resource("dynamodb", region_name=region_name)
-        self._audit_table = dynamodb.Table(_AUDIT_TABLE_TEMPLATE.format(environment=environment))
+        _audit_table_name = (
+            os.environ.get("AUDIT_LOG_TABLE")
+            or _AUDIT_TABLE_TEMPLATE.format(environment=environment)
+        )
+        self._audit_table = dynamodb.Table(_audit_table_name)
         self._sqs = boto3.client("sqs", region_name=region_name)
         self._region = region_name
         # DLQ URL cached after first successful resolution to avoid redundant API calls.

@@ -25,6 +25,7 @@ variable "replay_operator_role_arns" {
 variable "github_org" {
   type        = string
   description = "GitHub organisation name for CI/CD OIDC trust policy."
+  default     = "your-github-org"
 }
 
 variable "github_repo" {
@@ -42,6 +43,7 @@ variable "cicd_deployment_policy_arns" {
 variable "lambda_package_s3_bucket" {
   type        = string
   description = "S3 bucket that holds the extraction pipeline Lambda deployment zip."
+  default     = "dev-edl-terraform-state"
 }
 
 variable "lambda_package_s3_key" {
@@ -66,24 +68,29 @@ variable "lambda_package_source_hash" {
 variable "extraction_pipeline_lambda_arn" {
   type        = string
   description = "ARN of the deployed extraction pipeline Lambda function."
+  default     = ""
 }
 
 variable "transformation_pipeline_lambda_arn" {
   type        = string
   description = "ARN of the deployed transformation pipeline Lambda function."
+  default     = ""
 }
 
 variable "entity_resolution_lambda_arn" {
   type        = string
   description = "ARN of the deployed entity resolution Lambda function."
+  default     = ""
 }
 
 variable "analytics_publisher_lambda_arn" {
   type        = string
   description = "ARN of the deployed analytics layer publisher Lambda function."
+  default     = ""
 }
 
 variable "serving_store_loader_lambda_arn" {
   type        = string
   description = "ARN of the deployed serving store loader Lambda function."
+  default     = ""
 }

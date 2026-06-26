@@ -13,6 +13,21 @@ locals {
 
 data "aws_caller_identity" "current" {}
 
+# Look up the pre-existing entity extraction config table (created outside Terraform)
+data "aws_dynamodb_table" "entity_config" {
+  name = "${local.environment}-entity-extraction-config"
+}
+
+# Look up the pre-existing watermark and audit log tables.
+# These use the key schema the Python code expects (entity_id range key, not entity_id_env).
+data "aws_dynamodb_table" "watermark" {
+  name = "${local.environment}-watermark-repository"
+}
+
+data "aws_dynamodb_table" "audit_log" {
+  name = "${local.environment}-run-audit-log"
+}
+
 # ---------------------------------------------------------------------------
 # KMS Keys — one per capability area
 # ---------------------------------------------------------------------------
@@ -153,8 +168,9 @@ module "iam" {
   curated_layer_bucket_arn    = module.storage.curated_layer_bucket_arn
   analytics_layer_bucket_arn  = module.storage.analytics_layer_bucket_arn
   schema_snapshots_bucket_arn = module.storage.schema_snapshots_bucket_arn
-  watermark_table_arn         = module.metadata_persistence.watermark_repository_table_arn
-  run_audit_log_table_arn     = module.metadata_persistence.run_audit_log_table_arn
+  watermark_table_arn         = data.aws_dynamodb_table.watermark.arn
+  run_audit_log_table_arn     = data.aws_dynamodb_table.audit_log.arn
+  entity_config_table_arn     = data.aws_dynamodb_table.entity_config.arn
   dlq_arn                     = module.metadata_persistence.extraction_failure_dlq_arn
 
   kms_key_arns_for_extraction = [
@@ -210,6 +226,10 @@ module "lambda_pipeline" {
 
   raw_s3_bucket_name             = module.storage.raw_layer_bucket_id
   schema_snapshot_s3_bucket_name = module.storage.schema_snapshots_bucket_id
+
+  entity_config_table_name = data.aws_dynamodb_table.entity_config.name
+  watermark_table_name     = data.aws_dynamodb_table.watermark.name
+  audit_log_table_name     = data.aws_dynamodb_table.audit_log.name
 
   subnet_ids         = module.networking.private_subnet_ids
   security_group_ids = []

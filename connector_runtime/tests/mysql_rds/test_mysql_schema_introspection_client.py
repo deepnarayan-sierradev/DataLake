@@ -83,6 +83,19 @@ def _make_mock_connection(rows: list[dict] | None = None) -> MagicMock:
     return conn
 
 
+def _make_mock_dict_cursor_connection(rows: list[dict] | None = None) -> MagicMock:
+    """Return a pymysql connection mock that behaves like DictCursor."""
+    effective_rows = rows if rows is not None else _MOCK_ROWS
+    conn = MagicMock()
+    cursor = MagicMock()
+    col_names = list(effective_rows[0].keys()) if effective_rows else []
+    cursor.description = [(col,) for col in col_names]
+    cursor.fetchall.return_value = effective_rows
+    conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    return conn
+
+
 class TestFieldDiscovery:
     def test_discovers_all_queryable_columns(self) -> None:
         conn = _make_mock_connection()
@@ -183,6 +196,24 @@ class TestFieldDiscovery:
         field_by_name = {f.name: f for f in contract.fields}
         assert field_by_name["id"].is_nullable is False  # IS_NULLABLE=NO
         assert field_by_name["customer_id"].is_nullable is True  # IS_NULLABLE=YES
+
+    def test_discovers_columns_with_dict_cursor_rows(self) -> None:
+        """Regression: DictCursor rows must not be re-zipped as tuples."""
+        conn = _make_mock_dict_cursor_connection()
+        client = MySqlSchemaIntrospectionClient(connection=conn)
+        contract = client.discover_fields(
+            source_id=_SOURCE_ID,
+            entity_id=_ENTITY_ID,
+            database=_DATABASE,
+            table_name=_TABLE,
+            field_mode=FieldMode.ALL,
+            include_fields=[],
+            exclude_fields=[],
+        )
+        field_names = {f.name for f in contract.fields}
+        assert "id" in field_names
+        assert "customer_id" in field_names
+        assert "COLUMN_NAME" not in field_names
 
 
 class TestSecurityRequirements:

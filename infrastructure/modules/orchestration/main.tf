@@ -47,6 +47,36 @@ resource "aws_cloudwatch_log_group" "sfn_execution" {
   })
 }
 
+# CloudWatch log resource-based policy — pre-authorises the Step Functions log
+# delivery service to write execution history to the log group above.
+# This avoids granting logs:PutResourcePolicy to the SFN role (OWASP A01).
+resource "aws_cloudwatch_log_resource_policy" "sfn_log_delivery" {
+  policy_name = "${local.state_machine_name}-log-delivery"
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowStepFunctionsLogDelivery"
+        Effect = "Allow"
+        Principal = {
+          Service = ["delivery.logs.amazonaws.com", "states.amazonaws.com"]
+        }
+        Action = [
+          "logs:CreateLogDelivery",
+          "logs:GetLogDelivery",
+          "logs:UpdateLogDelivery",
+          "logs:DeleteLogDelivery",
+          "logs:ListLogDeliveries",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeResourcePolicies",
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # ---------------------------------------------------------------------------
 # Step Functions State Machine — Extraction Pipeline
 #
@@ -336,6 +366,8 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
   tags = merge(local.common_tags, {
     Name = local.state_machine_name
   })
+
+  depends_on = [aws_cloudwatch_log_resource_policy.sfn_log_delivery]
 }
 
 # ---------------------------------------------------------------------------

@@ -38,7 +38,7 @@ _MAPPINGS_DIR = _REPO_ROOT / "config" / "field_mappings"
 
 
 def _bucket_name(environment: str) -> str:
-    return f"{environment}-curated-layer"
+    return f"{environment}-edl-curated-layer"
 
 
 def _collect_mapping_files(

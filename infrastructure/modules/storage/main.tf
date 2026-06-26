@@ -68,7 +68,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
 
 resource "aws_s3_bucket_policy" "access_logs" {
   bucket = aws_s3_bucket.access_logs.id
-  policy = data.aws_iam_policy_document.enforce_tls.json
+  policy = data.aws_iam_policy_document.enforce_tls["access_logs"].json
 }
 
 # ---------------------------------------------------------------------------
@@ -85,9 +85,17 @@ resource "aws_s3_bucket" "raw_layer" {
     Name      = "${var.environment}-${var.project_name}-raw-layer"
     DataLayer = "raw"
   })
+
+  # object_lock_enabled cannot be changed after bucket creation.
+  # Buckets imported from outside Terraform may have it as false.
+  lifecycle {
+    ignore_changes = [object_lock_enabled]
+  }
 }
 
 resource "aws_s3_bucket_object_lock_configuration" "raw_layer" {
+  # Skip if the bucket was not created with object lock enabled (e.g. imported bucket).
+  count  = aws_s3_bucket.raw_layer.object_lock_enabled ? 1 : 0
   bucket = aws_s3_bucket.raw_layer.id
   rule {
     default_retention {
@@ -212,7 +220,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "curated_layer" {
 
 resource "aws_s3_bucket_policy" "curated_layer" {
   bucket = aws_s3_bucket.curated_layer.id
-  policy = data.aws_iam_policy_document.enforce_tls.json
+  policy = data.aws_iam_policy_document.enforce_tls["curated_layer"].json
 }
 
 # ---------------------------------------------------------------------------
@@ -259,7 +267,7 @@ resource "aws_s3_bucket_logging" "analytics_layer" {
 
 resource "aws_s3_bucket_policy" "analytics_layer" {
   bucket = aws_s3_bucket.analytics_layer.id
-  policy = data.aws_iam_policy_document.enforce_tls.json
+  policy = data.aws_iam_policy_document.enforce_tls["analytics_layer"].json
 }
 
 # ---------------------------------------------------------------------------
@@ -306,20 +314,33 @@ resource "aws_s3_bucket_logging" "schema_snapshots" {
 
 resource "aws_s3_bucket_policy" "schema_snapshots" {
   bucket = aws_s3_bucket.schema_snapshots.id
-  policy = data.aws_iam_policy_document.enforce_tls.json
+  policy = data.aws_iam_policy_document.enforce_tls["schema_snapshots"].json
 }
 
 # ---------------------------------------------------------------------------
 # Shared IAM policy documents
 # ---------------------------------------------------------------------------
 
-# Enforce TLS: deny any request that does not use HTTPS
+# Per-bucket TLS enforcement policies.
+# S3 bucket policies require an explicit ARN — "Resource": "*" is invalid.
+locals {
+  _tls_buckets = {
+    access_logs      = aws_s3_bucket.access_logs.arn
+    curated_layer    = aws_s3_bucket.curated_layer.arn
+    analytics_layer  = aws_s3_bucket.analytics_layer.arn
+    schema_snapshots = aws_s3_bucket.schema_snapshots.arn
+    raw_layer        = aws_s3_bucket.raw_layer.arn
+  }
+}
+
 data "aws_iam_policy_document" "enforce_tls" {
+  for_each = local._tls_buckets
+
   statement {
     sid     = "DenyNonTLSRequests"
     effect  = "Deny"
     actions = ["s3:*"]
-    resources = ["*"] # Applied per-bucket via individual bucket policies
+    resources = [each.value, "${each.value}/*"]
     principals {
       type        = "*"
       identifiers = ["*"]
@@ -335,7 +356,7 @@ data "aws_iam_policy_document" "enforce_tls" {
     sid     = "DenyOutdatedTLS"
     effect  = "Deny"
     actions = ["s3:*"]
-    resources = ["*"]
+    resources = [each.value, "${each.value}/*"]
     principals {
       type        = "*"
       identifiers = ["*"]
@@ -350,7 +371,7 @@ data "aws_iam_policy_document" "enforce_tls" {
 
 # Raw layer policy: enforce TLS + restrict PutObject to extraction runtime role only
 data "aws_iam_policy_document" "raw_layer_policy" {
-  source_policy_documents = [data.aws_iam_policy_document.enforce_tls.json]
+  source_policy_documents = [data.aws_iam_policy_document.enforce_tls["raw_layer"].json]
 
   statement {
     sid     = "RestrictRawWriteToExtractionRuntime"

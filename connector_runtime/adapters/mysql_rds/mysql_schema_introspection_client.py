@@ -173,7 +173,14 @@ class MySqlSchemaIntrospectionClient:
                     {"database": database, "table_name": table_name},
                 )
                 columns = [col[0] for col in cursor.description]
-                return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+                normalised_rows: list[dict[str, Any]] = []
+                for row in cursor.fetchall():
+                    # DictCursor returns dict rows; default cursors return tuples.
+                    if isinstance(row, dict):
+                        normalised_rows.append(dict(row))
+                    else:
+                        normalised_rows.append(dict(zip(columns, row, strict=True)))
+                return normalised_rows
         except Exception as exc:
             raise MySqlSchemaIntrospectionClientError(
                 f"information_schema query failed for "

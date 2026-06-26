@@ -100,7 +100,11 @@ class MySqlIncrementalExtractor:
                     if not rows:
                         break
                     for row in rows:
-                        payload = dict(zip(columns, row, strict=True))
+                        # DictCursor returns dict rows; default cursors return tuples.
+                        if isinstance(row, dict):
+                            payload = dict(row)
+                        else:
+                            payload = dict(zip(columns, row, strict=True))
                         record = ExtractionRecord(payload=payload)
                         if (
                             query_contract.watermark_field
@@ -114,7 +118,7 @@ class MySqlIncrementalExtractor:
             raise
         except Exception as exc:
             raise MySqlIncrementalExtractorError(
-                f"MySQL query execution failed: {type(exc).__name__}"
+                f"MySQL query execution failed: {type(exc).__name__}: {exc}"
             ) from exc
 
     @staticmethod

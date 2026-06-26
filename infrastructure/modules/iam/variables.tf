@@ -37,6 +37,11 @@ variable "run_audit_log_table_arn" {
   description = "ARN of the run audit log DynamoDB table."
 }
 
+variable "entity_config_table_arn" {
+  type        = string
+  description = "ARN of the entity extraction config DynamoDB table (read-only by the extraction runtime)."
+}
+
 variable "kms_key_arns_for_extraction" {
   type        = list(string)
   description = "KMS key ARNs the extraction runtime role is allowed to use."

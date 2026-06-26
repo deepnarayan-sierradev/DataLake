@@ -65,6 +65,18 @@ def _make_mock_connection(rows: list[dict]) -> MagicMock:
     return conn
 
 
+def _make_mock_dict_cursor_connection(rows: list[dict]) -> MagicMock:
+    """Return a connection mock that behaves like pymysql DictCursor."""
+    conn = MagicMock()
+    cursor = MagicMock()
+    col_names = list(rows[0].keys()) if rows else ["id"]
+    cursor.description = [(col,) for col in col_names]
+    cursor.fetchmany.side_effect = [rows, []]
+    conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    return conn
+
+
 class TestQueryConstruction:
     def test_full_load_no_where_clause(self) -> None:
         fc = _make_field_contract()
@@ -216,6 +228,23 @@ class TestExtraction:
         records = list(extractor.extract(qc))
         assert records[0].source_timestamp == "2026-06-10T12:00:00"
 
+    def test_yields_all_rows_with_dict_cursor(self) -> None:
+        rows = [{"id": str(i), "order_date": "2026-06-10"} for i in range(3)]
+        conn = _make_mock_dict_cursor_connection(rows)
+        extractor = MySqlIncrementalExtractor(connection=conn)
+        fc = _make_field_contract(["id", "order_date"])
+        qc = MySqlIncrementalExtractor.build_query(
+            field_contract=fc,
+            table_name="orders",
+            load_type=LoadType.FULL,
+            watermark_field=None,
+            watermark_lower=None,
+            watermark_upper=None,
+        )
+        records = list(extractor.extract(qc))
+        assert len(records) == 3
+        assert records[0].payload["id"] == "0"
+
     def test_cursor_failure_raises_extractor_error(self) -> None:
         conn = MagicMock()
         cursor = MagicMock()
@@ -233,4 +262,23 @@ class TestExtraction:
             watermark_upper=None,
         )
         with pytest.raises(MySqlIncrementalExtractorError, match="execution failed"):
+            list(extractor.extract(qc))
+
+    def test_cursor_failure_includes_underlying_message(self) -> None:
+        conn = MagicMock()
+        cursor = MagicMock()
+        cursor.execute.side_effect = Exception("Unknown column 'COLUMN_NAME'")
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        extractor = MySqlIncrementalExtractor(connection=conn)
+        fc = _make_field_contract()
+        qc = MySqlIncrementalExtractor.build_query(
+            field_contract=fc,
+            table_name="orders",
+            load_type=LoadType.FULL,
+            watermark_field=None,
+            watermark_lower=None,
+            watermark_upper=None,
+        )
+        with pytest.raises(MySqlIncrementalExtractorError, match="Unknown column"):
             list(extractor.extract(qc))

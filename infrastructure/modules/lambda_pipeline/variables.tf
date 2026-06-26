@@ -104,3 +104,18 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "entity_config_table_name" {
+  description = "Name of the entity extraction config DynamoDB table. Passed to Lambda as ENTITY_CONFIG_TABLE."
+  type        = string
+}
+
+variable "watermark_table_name" {
+  description = "Name of the watermark repository DynamoDB table. Passed to Lambda as WATERMARK_TABLE."
+  type        = string
+}
+
+variable "audit_log_table_name" {
+  description = "Name of the run audit log DynamoDB table. Passed to Lambda as AUDIT_LOG_TABLE."
+  type        = string
+}

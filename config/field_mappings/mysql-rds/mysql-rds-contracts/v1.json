@@ -1,11 +1,11 @@
 {
   "source_id": "mysql-rds",
-  "entity_id": "mysql-rds-orders",
+  "entity_id": "mysql-rds-contracts",
   "mapping_version": "v1",
   "rules": [
     {
-      "source_fields": ["order_id"],
-      "canonical_field": "order_id",
+      "source_fields": ["contract_id"],
+      "canonical_field": "contract_id",
       "transformation": "rename",
       "transformation_params": {},
       "missing_field_behavior": "raise_error"
@@ -18,16 +18,30 @@
       "missing_field_behavior": "raise_error"
     },
     {
-      "source_fields": ["order_status"],
-      "canonical_field": "order_status",
+      "source_fields": ["account_id"],
+      "canonical_field": "account_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["contract_status"],
+      "canonical_field": "contract_status",
       "transformation": "rename",
       "transformation_params": {},
       "missing_field_behavior": "use_default",
       "default_value": "unknown"
     },
     {
-      "source_fields": ["total_amount"],
-      "canonical_field": "total_amount",
+      "source_fields": ["contract_type"],
+      "canonical_field": "contract_type",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["contract_value"],
+      "canonical_field": "contract_value",
       "transformation": "cast",
       "transformation_params": { "type": "decimal" },
       "missing_field_behavior": "use_default",
@@ -58,36 +72,49 @@
       "default_value": "0"
     },
     {
-      "source_fields": ["shipping_country"],
-      "canonical_field": "shipping_country",
-      "transformation": "rename",
-      "transformation_params": {},
-      "missing_field_behavior": "drop_field"
-    },
-    {
-      "source_fields": ["payment_method"],
-      "canonical_field": "payment_method",
-      "transformation": "rename",
-      "transformation_params": {},
-      "missing_field_behavior": "drop_field"
-    },
-    {
-      "source_fields": ["is_fulfilled"],
-      "canonical_field": "is_fulfilled",
-      "transformation": "cast",
-      "transformation_params": { "type": "boolean" },
-      "missing_field_behavior": "use_default",
-      "default_value": "false"
-    },
-    {
-      "source_fields": ["order_date"],
-      "canonical_field": "order_date",
+      "source_fields": ["start_date"],
+      "canonical_field": "start_date",
       "transformation": "date_format",
       "transformation_params": {
         "input_format": "%Y-%m-%d",
         "output_format": "%Y-%m-%d"
       },
       "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["end_date"],
+      "canonical_field": "end_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%d",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["renewal_date"],
+      "canonical_field": "renewal_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%d",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["owner_id"],
+      "canonical_field": "owner_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["is_active"],
+      "canonical_field": "is_active",
+      "transformation": "cast",
+      "transformation_params": { "type": "boolean" },
+      "missing_field_behavior": "use_default",
+      "default_value": "true"
     },
     {
       "source_fields": ["created_at"],
@@ -101,7 +128,7 @@
     },
     {
       "source_fields": ["updated_at"],
-      "canonical_field": "last_updated_at",
+      "canonical_field": "updated_at",
       "transformation": "date_format",
       "transformation_params": {
         "input_format": "%Y-%m-%d %H:%M:%S",

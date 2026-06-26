@@ -85,6 +85,14 @@ data "aws_iam_policy_document" "extraction_runtime_permissions" {
     ]
   }
 
+  # Entity extraction config — read-only
+  statement {
+    sid     = "ReadEntityConfig"
+    effect  = "Allow"
+    actions = ["dynamodb:GetItem", "dynamodb:Query"]
+    resources = [var.entity_config_table_arn]
+  }
+
   # Watermark repository — conditional write (optimistic concurrency)
   statement {
     sid    = "WatermarkRepositoryAccess"
@@ -167,6 +175,19 @@ data "aws_iam_policy_document" "extraction_runtime_permissions" {
       "xray:PutTelemetryRecords",
       "xray:GetSamplingRules",
       "xray:GetSamplingTargets",
+    ]
+    resources = ["*"]
+  }
+
+  # VPC access — required for Lambda to create/manage ENIs in the VPC.
+  # These three actions cannot be scoped to a specific resource ARN.
+  statement {
+    sid    = "VpcNetworkInterfaceAccess"
+    effect = "Allow"
+    actions = [
+      "ec2:CreateNetworkInterface",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DeleteNetworkInterface",
     ]
     resources = ["*"]
   }
@@ -340,7 +361,11 @@ data "aws_iam_policy_document" "orchestration_sfn_permissions" {
     effect  = "Allow"
     actions = ["lambda:InvokeFunction"]
     resources = [
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-edl-*",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-extraction-pipeline",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-transformation-pipeline",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-entity-resolution",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-analytics-publisher",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-serving-store-loader",
     ]
   }
 
@@ -354,14 +379,14 @@ data "aws_iam_policy_document" "orchestration_sfn_permissions" {
   statement {
     sid    = "WriteOrchestrationLogs"
     effect = "Allow"
-    # logs:PutResourcePolicy intentionally excluded — it grants the ability to
-    # modify resource-based policies on any log group in the account, which could
-    # be abused to inject false audit entries or grant external access (OWASP A01).
-    # The log delivery actions below require resources = ["*"] per AWS IAM rules.
+    # logs:PutResourcePolicy is required by Step Functions to register its log
+    # delivery configuration with CloudWatch. Without it, CreateStateMachine
+    # fails with AccessDeniedException on the log destination.
+    # It cannot be scoped below "Resource": "*" per AWS IAM rules.
     actions = [
       "logs:CreateLogDelivery", "logs:GetLogDelivery", "logs:UpdateLogDelivery",
       "logs:DeleteLogDelivery", "logs:ListLogDeliveries",
-      "logs:DescribeResourcePolicies", "logs:DescribeLogGroups",
+      "logs:PutResourcePolicy", "logs:DescribeResourcePolicies", "logs:DescribeLogGroups",
     ]
     resources = ["*"]
   }

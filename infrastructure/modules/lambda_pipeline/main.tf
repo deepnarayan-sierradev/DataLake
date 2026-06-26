@@ -59,7 +59,7 @@ resource "aws_security_group" "lambda_pipeline" {
   vpc_id      = data.aws_vpc.selected.id
 
   egress {
-    description = "HTTPS egress — AWS service endpoints and external source APIs (Salesforce, NetSuite)."
+    description = "HTTPS egress - AWS service endpoints and external source APIs (Salesforce, NetSuite)."
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
@@ -67,7 +67,7 @@ resource "aws_security_group" "lambda_pipeline" {
   }
 
   egress {
-    description = "MySQL RDS egress — port 3306 to VPC CIDR only (no internet exposure)."
+    description = "MySQL RDS egress - port 3306 to VPC CIDR only (no internet exposure)."
     from_port   = 3306
     to_port     = 3306
     protocol    = "tcp"
@@ -125,6 +125,9 @@ resource "aws_lambda_function" "extraction_pipeline" {
       PLATFORM_ENVIRONMENT          = var.environment
       RAW_S3_BUCKET                 = var.raw_s3_bucket_name
       SCHEMA_SNAPSHOT_S3_BUCKET     = var.schema_snapshot_s3_bucket_name
+      ENTITY_CONFIG_TABLE           = var.entity_config_table_name
+      WATERMARK_TABLE               = var.watermark_table_name
+      AUDIT_LOG_TABLE               = var.audit_log_table_name
     }
   }
 

@@ -14,8 +14,9 @@ Prerequisite:
 
 Records seeded:
     salesforce / salesforce-account    (full load, all fields)
+    salesforce / salesforce-contact    (incremental, watermark on SystemModstamp)
     netsuite   / netsuite-customer     (incremental, watermark on lastModifiedDate)
-    mysql-rds  / mysql-rds-orders      (incremental, watermark on updated_at)
+    mysql-rds  / mysql-rds-contracts   (full load, table: Contracts)
 """
 
 from __future__ import annotations
@@ -81,17 +82,17 @@ _RECORDS: list[dict[str, object]] = [
     },
     {
         "source_id": "mysql-rds",
-        "entity_id": "mysql-rds-orders",
+        "entity_id": "mysql-rds-contracts",
         "config_version": "1.0.0",
-        "load_type": "incremental",
-        "watermark_field": "updated_at",
+        "load_type": "full",
+        "watermark_field": None,
         "extraction_window_days": 1,
         "watermark_overlap_hours": 0,
         "field_mode": "all",
         "include_fields": [],
         "exclude_fields": [],
-        "target_raw_s3_prefix": "mysql-rds/mysql-rds-orders/",
-        "schema_snapshot_s3_prefix": "mysql-rds/mysql-rds-orders/",
+        "target_raw_s3_prefix": "mysql-rds/mysql-rds-contracts/",
+        "schema_snapshot_s3_prefix": "mysql-rds/mysql-rds-contracts/",
         "output_format": "parquet",
         "active": True,
     },

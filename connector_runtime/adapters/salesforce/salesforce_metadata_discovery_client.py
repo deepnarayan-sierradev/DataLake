@@ -38,6 +38,19 @@ _DESCRIBE_PATH_TEMPLATE: Final[str] = "/services/data/v59.0/sobjects/{object_nam
 _NON_QUERYABLE_COMPOUND_TYPES: Final[frozenset[str]] = frozenset({"address", "location"})
 
 
+def _is_field_queryable(field: dict[str, Any]) -> bool:
+    """
+    Determine queryability for a Salesforce field descriptor.
+
+    In many orgs/versions, field-level Describe payloads do not include a
+    ``queryable`` attribute at all. Treat missing ``queryable`` as queryable by
+    default and rely on SOQL execution for final validation.
+    """
+    if "queryable" not in field:
+        return True
+    return bool(field.get("queryable", False))
+
+
 @dataclass(frozen=True)
 class SalesforceFieldMetadata:
     """
@@ -215,7 +228,7 @@ class SalesforceMetadataDiscoveryClient:
         in SOQL SELECT directly (their sub-fields are queryable instead).
         """
         sf_type: str = str(field.get("type", "")).lower()
-        return bool(field.get("queryable", False)) and sf_type not in _NON_QUERYABLE_COMPOUND_TYPES
+        return _is_field_queryable(field) and sf_type not in _NON_QUERYABLE_COMPOUND_TYPES
 
     @staticmethod
     def _parse_field(field: dict[str, Any]) -> SalesforceFieldMetadata:
@@ -223,7 +236,7 @@ class SalesforceMetadataDiscoveryClient:
         return SalesforceFieldMetadata(
             name=str(field["name"]),
             data_type=str(field.get("type", "string")),
-            is_queryable=bool(field.get("queryable", False)),
+            is_queryable=_is_field_queryable(field),
             is_custom=bool(field.get("custom", False)),
             is_nullable=bool(field.get("nillable", True)),
             label=str(field.get("label", field["name"])),

@@ -218,6 +218,7 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         height = 6
         properties = {
           title  = "Records Extracted"
+          region = data.aws_region.current.name
           period = 300
           stat   = "Sum"
           metrics = [["EnterpriseDatalake", "RecordsExtracted"]]
@@ -231,6 +232,7 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         height = 6
         properties = {
           title  = "Records Failed"
+          region = data.aws_region.current.name
           period = 300
           stat   = "Sum"
           metrics = [["EnterpriseDatalake", "RecordsFailed"]]
@@ -244,6 +246,7 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         height = 6
         properties = {
           title  = "Schema Drift Events"
+          region = data.aws_region.current.name
           period = 300
           stat   = "Sum"
           metrics = [["EnterpriseDatalake", "SchemaDriftCount"]]
@@ -257,6 +260,7 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         height = 6
         properties = {
           title  = "Watermark Lag (seconds)"
+          region = data.aws_region.current.name
           period = 300
           stat   = "Maximum"
           metrics = [["EnterpriseDatalake", "WatermarkLagSeconds"]]
@@ -270,6 +274,7 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         height = 6
         properties = {
           title  = "Retry Count"
+          region = data.aws_region.current.name
           period = 300
           stat   = "Sum"
           metrics = [["EnterpriseDatalake", "RetryCount"]]
@@ -307,6 +312,7 @@ resource "aws_cloudwatch_dashboard" "transformation_slo" {
         height = 6
         properties = {
           title   = "Canonical Records Produced"
+          region  = data.aws_region.current.name
           period  = 300
           stat    = "Sum"
           metrics = [["EnterpriseDatalake", "RecordsExtracted", "Stage", "transformation"]]
@@ -320,6 +326,7 @@ resource "aws_cloudwatch_dashboard" "transformation_slo" {
         height = 6
         properties = {
           title   = "Mapping Failures + Quality Blocking"
+          region  = data.aws_region.current.name
           period  = 300
           stat    = "Sum"
           metrics = [["EnterpriseDatalake", "RecordsFailed", "Stage", "transformation"]]
@@ -352,6 +359,7 @@ resource "aws_cloudwatch_dashboard" "serving_slo" {
         height = 6
         properties = {
           title   = "Serving Store Records Loaded"
+          region  = data.aws_region.current.name
           period  = 300
           stat    = "Sum"
           metrics = [["EnterpriseDatalake", "RecordsExtracted", "Stage", "serving_store_load"]]
@@ -365,6 +373,7 @@ resource "aws_cloudwatch_dashboard" "serving_slo" {
         height = 6
         properties = {
           title   = "Serving Store Load Failures"
+          region  = data.aws_region.current.name
           period  = 300
           stat    = "Sum"
           metrics = [["EnterpriseDatalake", "RecordsFailed", "Stage", "serving_store_load"]]

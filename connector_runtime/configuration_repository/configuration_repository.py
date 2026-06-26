@@ -21,6 +21,7 @@ Security:
 from __future__ import annotations
 
 import json
+import os
 from enum import StrEnum
 from typing import Any
 
@@ -78,7 +79,10 @@ class ConfigurationRepositoryClient:
 
         if backend == ConfigurationBackend.DYNAMODB:
             self._dynamodb = boto3.resource("dynamodb", region_name=region_name)
-            self._table_name = _DYNAMODB_TABLE_TEMPLATE.format(environment=environment)
+            self._table_name = (
+                os.environ.get("ENTITY_CONFIG_TABLE")
+                or _DYNAMODB_TABLE_TEMPLATE.format(environment=environment)
+            )
             self._table = self._dynamodb.Table(self._table_name)
         else:
             if not s3_bucket:

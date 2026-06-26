@@ -27,6 +27,7 @@ Security:
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
@@ -114,7 +115,10 @@ class WatermarkRepository:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        self._table_name = _WATERMARK_TABLE_TEMPLATE.format(environment=environment)
+        self._table_name = (
+            os.environ.get("WATERMARK_TABLE")
+            or _WATERMARK_TABLE_TEMPLATE.format(environment=environment)
+        )
         dynamodb = boto3.resource("dynamodb", region_name=region_name)
         self._table = dynamodb.Table(self._table_name)
 
