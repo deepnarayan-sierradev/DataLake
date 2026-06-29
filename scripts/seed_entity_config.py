@@ -31,94 +31,109 @@ def _table_name(environment: str) -> str:
     return f"{environment}-entity-extraction-config"
 
 
-_RECORDS: list[dict[str, object]] = [
-    {
-        "source_id": "salesforce",
-        "entity_id": "salesforce-account",
-        "config_version": "1.0.0",
-        "load_type": "full",
-        "watermark_field": None,
-        "extraction_window_days": 1,
-        "watermark_overlap_hours": 0,
-        "field_mode": "all",
-        "include_fields": [],
-        "exclude_fields": [],
-        "target_raw_s3_prefix": "salesforce/salesforce-account/",
-        "schema_snapshot_s3_prefix": "salesforce/salesforce-account/",
-        "output_format": "parquet",
-        "active": True,
-    },
-    {
-        "source_id": "salesforce",
-        "entity_id": "salesforce-contact",
-        "config_version": "1.0.0",
-        "load_type": "incremental",
-        "watermark_field": "SystemModstamp",
-        "extraction_window_days": 1,
-        "watermark_overlap_hours": 1,
-        "field_mode": "all",
-        "include_fields": [],
-        "exclude_fields": ["IsDeleted"],
-        "target_raw_s3_prefix": "salesforce/salesforce-contact/",
-        "schema_snapshot_s3_prefix": "salesforce/salesforce-contact/",
-        "output_format": "parquet",
-        "active": True,
-    },
-    {
-        "source_id": "netsuite",
-        "entity_id": "netsuite-customer",
-        "config_version": "1.0.0",
-        "load_type": "incremental",
-        "watermark_field": "lastModifiedDate",
-        "extraction_window_days": 1,
-        "watermark_overlap_hours": 2,
-        "field_mode": "all",
-        "include_fields": [],
-        "exclude_fields": [],
-        "target_raw_s3_prefix": "netsuite/netsuite-customer/",
-        "schema_snapshot_s3_prefix": "netsuite/netsuite-customer/",
-        "output_format": "parquet",
-        "active": True,
-    },
-    {
-        "source_id": "mysql-rds",
-        "entity_id": "mysql-rds-contracts",
-        "config_version": "1.0.0",
-        "load_type": "full",
-        "watermark_field": None,
-        "extraction_window_days": 1,
-        "watermark_overlap_hours": 0,
-        "field_mode": "all",
-        "include_fields": [],
-        "exclude_fields": [],
-        "target_raw_s3_prefix": "mysql-rds/mysql-rds-contracts/",
-        "schema_snapshot_s3_prefix": "mysql-rds/mysql-rds-contracts/",
-        "output_format": "parquet",
-        "active": True,
-    },
-]
+def _raw_prefix(environment: str, source_id: str, entity_id: str) -> str:
+    """Full s3:// URI for the raw layer partition root (no run-specific suffix)."""
+    return f"s3://{environment}-edl-raw-layer/raw/{source_id}/{entity_id}/"
+
+
+def _snapshot_prefix(environment: str, source_id: str, entity_id: str) -> str:
+    """Full s3:// URI for schema snapshot storage."""
+    return f"s3://{environment}-edl-schema-snapshots/{source_id}/{entity_id}/"
+
+
+def _build_records(environment: str) -> list[dict[str, object]]:
+    """Build entity extraction config records with environment-specific s3:// URIs."""
+    return [
+        {
+            "source_id": "salesforce",
+            "entity_id": "salesforce-account",
+            "config_version": "1.0.0",
+            "load_type": "full",
+            "watermark_field": None,
+            "extraction_window_days": 1,
+            "watermark_overlap_hours": 0,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": [],
+            "target_raw_s3_prefix": _raw_prefix(environment, "salesforce", "salesforce-account"),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "salesforce", "salesforce-account"),
+            "output_format": "parquet",
+            "active": True,
+        },
+        {
+            "source_id": "salesforce",
+            "entity_id": "salesforce-contact",
+            "config_version": "1.0.0",
+            "load_type": "incremental",
+            "watermark_field": "SystemModstamp",
+            "extraction_window_days": 1,
+            "watermark_overlap_hours": 1,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": ["IsDeleted"],
+            "target_raw_s3_prefix": _raw_prefix(environment, "salesforce", "salesforce-contact"),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "salesforce", "salesforce-contact"),
+            "output_format": "parquet",
+            "active": True,
+        },
+        {
+            "source_id": "netsuite",
+            "entity_id": "netsuite-customer",
+            "config_version": "1.0.0",
+            "load_type": "incremental",
+            "watermark_field": "lastModifiedDate",
+            "extraction_window_days": 1,
+            "watermark_overlap_hours": 2,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": [],
+            "target_raw_s3_prefix": _raw_prefix(environment, "netsuite", "netsuite-customer"),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "netsuite", "netsuite-customer"),
+            "output_format": "parquet",
+            "active": True,
+        },
+        {
+            "source_id": "mysql-rds",
+            "entity_id": "mysql-rds-contracts",
+            "config_version": "1.0.0",
+            "load_type": "full",
+            "watermark_field": None,
+            "extraction_window_days": 1,
+            "watermark_overlap_hours": 0,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": [],
+            "target_raw_s3_prefix": _raw_prefix(environment, "mysql-rds", "mysql-rds-contracts"),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "mysql-rds", "mysql-rds-contracts"),
+            "output_format": "parquet",
+            "active": True,
+        },
+    ]
 
 
 def seed(environment: str, region: str, dry_run: bool = False) -> None:
     table_name = _table_name(environment)
+    records = _build_records(environment)
     print(f"Target table: {table_name}  (region: {region})")
 
     if dry_run:
         print("\n[DRY RUN] Would write the following records:")
-        for rec in _RECORDS:
+        for rec in records:
             print(f"  {rec['source_id']} / {rec['entity_id']}")
+            print(f"    target_raw_s3_prefix       : {rec['target_raw_s3_prefix']}")
+            print(f"    schema_snapshot_s3_prefix  : {rec['schema_snapshot_s3_prefix']}")
         return
 
     dynamodb = boto3.resource("dynamodb", region_name=region)
     table = dynamodb.Table(table_name)
 
-    for rec in _RECORDS:
+    for rec in records:
         # DynamoDB does not have a native None type; omit None fields.
         item: dict[str, object] = {k: v for k, v in rec.items() if v is not None}
         table.put_item(Item=item)  # type: ignore[arg-type]
         print(f"  Written: {rec['source_id']} / {rec['entity_id']}")
 
-    print(f"\n{len(_RECORDS)} record(s) seeded successfully.")
+    print(f"\n{len(records)} record(s) seeded successfully.")
     print("\nNext step: trigger a manual extraction run:")
     print(
         "  python scripts/trigger_extraction.py "

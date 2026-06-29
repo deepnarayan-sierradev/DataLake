@@ -245,6 +245,41 @@ module "lambda_pipeline" {
 }
 
 # ---------------------------------------------------------------------------
+# Lambda — Transformation Pipeline
+# Reuses the same Lambda zip as the extraction pipeline (both packaged into
+# extraction-pipeline.zip). Different handler entry point.
+# See: make lambda-package && make lambda-upload
+# ---------------------------------------------------------------------------
+
+module "transformation_lambda" {
+  source      = "../../modules/transformation_lambda"
+  environment = local.environment
+
+  kms_key_arn        = module.kms_logs.key_arn
+  execution_role_arn = module.iam.transformation_runtime_role_arn
+
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  raw_s3_bucket_name           = module.storage.raw_layer_bucket_id
+  curated_s3_bucket_name       = module.storage.curated_layer_bucket_id
+  field_mapping_s3_bucket_name = module.storage.curated_layer_bucket_id  # field mappings live under curated/field-mappings/
+
+  subnet_ids         = module.networking.private_subnet_ids
+  security_group_ids = []
+
+  cloudwatch_log_group_arn = module.observability.log_group_arns["transformation"]
+  log_retention_days       = 30
+  memory_size_mb           = 1024
+  timeout_seconds          = 900
+
+  tags = local.common_tags
+
+  depends_on = [module.iam, module.storage, module.networking]
+}
+
+# ---------------------------------------------------------------------------
 # Orchestration — Step Functions + EventBridge Scheduler
 # ---------------------------------------------------------------------------
 
@@ -260,7 +295,7 @@ module "orchestration" {
   enable_xray_tracing     = true
 
   extraction_pipeline_lambda_arn     = var.extraction_pipeline_lambda_arn
-  transformation_pipeline_lambda_arn = var.transformation_pipeline_lambda_arn
+  transformation_pipeline_lambda_arn = module.transformation_lambda.lambda_function_arn
   entity_resolution_lambda_arn       = var.entity_resolution_lambda_arn
   analytics_publisher_lambda_arn     = var.analytics_publisher_lambda_arn
   serving_store_loader_lambda_arn    = var.serving_store_loader_lambda_arn

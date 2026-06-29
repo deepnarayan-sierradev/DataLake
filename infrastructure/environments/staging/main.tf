@@ -13,6 +13,22 @@ locals {
 
 data "aws_caller_identity" "current" {}
 
+# Look up pre-existing operational DynamoDB tables.
+# These tables are created outside Terraform with the correct key schema
+# for the Python connector runtime (entity_id hash key only).
+# They must exist before terraform apply is run in a new environment.
+data "aws_dynamodb_table" "entity_config" {
+  name = "${local.environment}-entity-extraction-config"
+}
+
+data "aws_dynamodb_table" "watermark" {
+  name = "${local.environment}-watermark-repository"
+}
+
+data "aws_dynamodb_table" "audit_log" {
+  name = "${local.environment}-run-audit-log"
+}
+
 module "kms_storage" {
   source                  = "../../modules/kms"
   environment             = local.environment
@@ -114,8 +130,9 @@ module "iam" {
   curated_layer_bucket_arn        = module.storage.curated_layer_bucket_arn
   analytics_layer_bucket_arn      = module.storage.analytics_layer_bucket_arn
   schema_snapshots_bucket_arn     = module.storage.schema_snapshots_bucket_arn
-  watermark_table_arn             = module.metadata_persistence.watermark_repository_table_arn
-  run_audit_log_table_arn         = module.metadata_persistence.run_audit_log_table_arn
+  watermark_table_arn             = data.aws_dynamodb_table.watermark.arn
+  run_audit_log_table_arn         = data.aws_dynamodb_table.audit_log.arn
+  entity_config_table_arn         = data.aws_dynamodb_table.entity_config.arn
   dlq_arn                         = module.metadata_persistence.extraction_failure_dlq_arn
   kms_key_arns_for_extraction     = [module.kms_storage.key_arn, module.kms_secrets.key_arn, module.kms_database.key_arn]
   kms_key_arns_for_transformation = [module.kms_storage.key_arn, module.kms_database.key_arn]
@@ -150,6 +167,73 @@ module "glue" {
 }
 
 # ---------------------------------------------------------------------------
+# Lambda — Extraction Pipeline
+# ---------------------------------------------------------------------------
+
+module "lambda_pipeline" {
+  source      = "../../modules/lambda_pipeline"
+  environment = local.environment
+
+  kms_key_arn        = module.kms_logs.key_arn
+  execution_role_arn = module.iam.extraction_runtime_role_arn
+
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  raw_s3_bucket_name             = module.storage.raw_layer_bucket_id
+  schema_snapshot_s3_bucket_name = module.storage.schema_snapshots_bucket_id
+
+  entity_config_table_name = data.aws_dynamodb_table.entity_config.name
+  watermark_table_name     = data.aws_dynamodb_table.watermark.name
+  audit_log_table_name     = data.aws_dynamodb_table.audit_log.name
+
+  subnet_ids         = module.networking.private_subnet_ids
+  security_group_ids = []
+
+  cloudwatch_log_group_arn = module.observability.log_group_arns["connector-runtime"]
+  log_retention_days       = 90
+  memory_size_mb           = 1024
+  timeout_seconds          = 900
+
+  tags = local.common_tags
+
+  depends_on = [module.iam, module.storage, module.networking]
+}
+
+# ---------------------------------------------------------------------------
+# Lambda — Transformation Pipeline
+# ---------------------------------------------------------------------------
+
+module "transformation_lambda" {
+  source      = "../../modules/transformation_lambda"
+  environment = local.environment
+
+  kms_key_arn        = module.kms_logs.key_arn
+  execution_role_arn = module.iam.transformation_runtime_role_arn
+
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  raw_s3_bucket_name           = module.storage.raw_layer_bucket_id
+  curated_s3_bucket_name       = module.storage.curated_layer_bucket_id
+  field_mapping_s3_bucket_name = module.storage.curated_layer_bucket_id
+
+  subnet_ids         = module.networking.private_subnet_ids
+  security_group_ids = []
+
+  cloudwatch_log_group_arn = module.observability.log_group_arns["transformation"]
+  log_retention_days       = 90
+  memory_size_mb           = 1024
+  timeout_seconds          = 900
+
+  tags = local.common_tags
+
+  depends_on = [module.iam, module.storage, module.networking]
+}
+
+# ---------------------------------------------------------------------------
 # Orchestration module — full chained pipeline state machine
 #
 # State machine type: STANDARD for staging (execution history preserved for
@@ -171,7 +255,7 @@ module "orchestration" {
   enable_xray_tracing     = true
 
   extraction_pipeline_lambda_arn     = var.extraction_pipeline_lambda_arn
-  transformation_pipeline_lambda_arn = var.transformation_pipeline_lambda_arn
+  transformation_pipeline_lambda_arn = module.transformation_lambda.lambda_function_arn
   entity_resolution_lambda_arn       = var.entity_resolution_lambda_arn
   analytics_publisher_lambda_arn     = var.analytics_publisher_lambda_arn
   serving_store_loader_lambda_arn    = var.serving_store_loader_lambda_arn

@@ -272,8 +272,12 @@ class WatermarkRepository:
           upper = reference_time
         """
         upper = reference_time
-        if config.load_type == LoadType.FULL or watermark is None:
+        if config.load_type == LoadType.FULL:
             lower = reference_time - timedelta(days=config.extraction_window_days)
+        elif watermark is None:
+            # First incremental run — use epoch to capture all historical records.
+            # extraction_window_days only applies to ongoing incremental runs.
+            lower = _EPOCH
         else:
             overlap = timedelta(hours=config.watermark_overlap_hours)
             lower = watermark.last_successful_watermark - overlap

@@ -246,7 +246,7 @@ class QualityPolicyEvaluator:
             return None
         try:
             numeric = float(val)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return QualityCheckViolation(
                 field_name=check.field_name,
                 check_kind=QualityCheckKind.RANGE_CHECK,

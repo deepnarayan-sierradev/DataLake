@@ -200,6 +200,138 @@ resource "aws_iam_role_policy" "extraction_runtime" {
 }
 
 # ---------------------------------------------------------------------------
+# Transformation Runtime Role
+# Assumed by the transformation pipeline Lambda function.
+# Permissions: read raw S3, read/write curated S3, KMS decrypt/encrypt,
+# emit CloudWatch metrics, register Glue catalog partitions, write Lambda
+# execution logs, create VPC network interfaces.
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "transformation_runtime_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    # Restrict role assumption to this account only — prevents confused-deputy
+    # attacks if the role ARN is exposed externally (OWASP A01).
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "transformation_runtime" {
+  name               = "${var.environment}-transformation-runtime-role"
+  assume_role_policy = data.aws_iam_policy_document.transformation_runtime_assume_role.json
+  description        = "Role assumed by the transformation pipeline Lambda for curated layer processing."
+  tags               = local.common_tags
+}
+
+data "aws_iam_policy_document" "transformation_runtime_permissions" {
+  # Read raw layer (source data for transformation) — no write permission
+  statement {
+    sid     = "ReadRawLayer"
+    effect  = "Allow"
+    actions = ["s3:GetObject", "s3:ListBucket"]
+    resources = [
+      var.raw_layer_bucket_arn,
+      "${var.raw_layer_bucket_arn}/*",
+    ]
+  }
+
+  # Read and write curated layer — field mappings + quality reports are read,
+  # canonical Parquet output is written.
+  statement {
+    sid    = "ReadWriteCuratedLayer"
+    effect = "Allow"
+    actions = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
+    resources = [
+      var.curated_layer_bucket_arn,
+      "${var.curated_layer_bucket_arn}/*",
+    ]
+  }
+
+  # KMS: decrypt raw data keys (written by extraction role) and generate new
+  # data keys for curated layer writes.
+  statement {
+    sid    = "KmsDecryptEncrypt"
+    effect = "Allow"
+    actions = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    resources = var.kms_key_arns_for_transformation
+  }
+
+  # CloudWatch Logs — write Lambda execution logs.
+  # CreateLogGroup intentionally excluded: the log group is pre-created by the
+  # transformation_lambda Terraform module with correct retention and encryption.
+  statement {
+    sid    = "WriteLambdaExecutionLogs"
+    effect = "Allow"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-transformation-pipeline",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-transformation-pipeline:log-stream:*",
+    ]
+  }
+
+  # CloudWatch Metrics — emit transformation pipeline metrics.
+  # Namespace-scoped condition prevents emission to unrelated namespaces.
+  statement {
+    sid     = "PutTransformationMetrics"
+    effect  = "Allow"
+    actions = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["EnterpriseDatalake"]
+    }
+  }
+
+  # Glue Data Catalog — register curated partitions so Athena can query them.
+  statement {
+    sid    = "GlueCatalogAccess"
+    effect = "Allow"
+    actions = [
+      "glue:GetDatabase",
+      "glue:GetTable",
+      "glue:GetPartition",
+      "glue:CreateTable",
+      "glue:UpdateTable",
+      "glue:CreatePartition",
+      "glue:BatchCreatePartition",
+    ]
+    resources = [
+      "arn:aws:glue:${local.region}:${local.account_id}:catalog",
+      "arn:aws:glue:${local.region}:${local.account_id}:database/${var.environment}_*",
+      "arn:aws:glue:${local.region}:${local.account_id}:table/${var.environment}_*/*",
+    ]
+  }
+
+  # VPC — create and destroy elastic network interfaces for VPC-deployed Lambda.
+  statement {
+    sid    = "VpcNetworkInterfaceAccess"
+    effect = "Allow"
+    actions = [
+      "ec2:CreateNetworkInterface",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DeleteNetworkInterface",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "transformation_runtime" {
+  name   = "${var.environment}-transformation-runtime-policy"
+  role   = aws_iam_role.transformation_runtime.id
+  policy = data.aws_iam_policy_document.transformation_runtime_permissions.json
+}
+
+# ---------------------------------------------------------------------------
 # Transformation Job Role
 # Assumed by AWS Glue jobs for curated layer processing.
 # ---------------------------------------------------------------------------

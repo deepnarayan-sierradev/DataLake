@@ -8,8 +8,13 @@ output "extraction_runtime_role_name" {
   value       = aws_iam_role.extraction_runtime.name
 }
 
+output "transformation_runtime_role_arn" {
+  description = "ARN of the transformation runtime IAM role (assumed by the transformation pipeline Lambda)."
+  value       = aws_iam_role.transformation_runtime.arn
+}
+
 output "transformation_job_role_arn" {
-  description = "ARN of the transformation job IAM role."
+  description = "ARN of the transformation job IAM role (assumed by Glue jobs)."
   value       = aws_iam_role.transformation_job.arn
 }
 

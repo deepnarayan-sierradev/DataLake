@@ -4,137 +4,153 @@
   "mapping_version": "v1",
   "rules": [
     {
-      "source_fields": ["contract_id"],
+      "source_fields": [
+        "Id"
+      ],
       "canonical_field": "contract_id",
       "transformation": "rename",
       "transformation_params": {},
       "missing_field_behavior": "raise_error"
     },
     {
-      "source_fields": ["customer_id"],
-      "canonical_field": "customer_id",
-      "transformation": "rename",
-      "transformation_params": {},
-      "missing_field_behavior": "raise_error"
-    },
-    {
-      "source_fields": ["account_id"],
-      "canonical_field": "account_id",
-      "transformation": "rename",
-      "transformation_params": {},
-      "missing_field_behavior": "drop_field"
-    },
-    {
-      "source_fields": ["contract_status"],
-      "canonical_field": "contract_status",
+      "source_fields": [
+        "TenantId"
+      ],
+      "canonical_field": "tenant_id",
       "transformation": "rename",
       "transformation_params": {},
       "missing_field_behavior": "use_default",
-      "default_value": "unknown"
+      "default_value": null
     },
     {
-      "source_fields": ["contract_type"],
-      "canonical_field": "contract_type",
-      "transformation": "rename",
-      "transformation_params": {},
-      "missing_field_behavior": "drop_field"
-    },
-    {
-      "source_fields": ["contract_value"],
-      "canonical_field": "contract_value",
-      "transformation": "cast",
-      "transformation_params": { "type": "decimal" },
-      "missing_field_behavior": "use_default",
-      "default_value": "0"
-    },
-    {
-      "source_fields": ["currency_code"],
-      "canonical_field": "currency_code",
+      "source_fields": [
+        "Name"
+      ],
+      "canonical_field": "contract_name",
       "transformation": "rename",
       "transformation_params": {},
       "missing_field_behavior": "use_default",
-      "default_value": "USD"
+      "default_value": null
     },
     {
-      "source_fields": ["discount_amount"],
-      "canonical_field": "discount_amount",
-      "transformation": "cast",
-      "transformation_params": { "type": "decimal" },
-      "missing_field_behavior": "use_default",
-      "default_value": "0"
-    },
-    {
-      "source_fields": ["tax_amount"],
-      "canonical_field": "tax_amount",
-      "transformation": "cast",
-      "transformation_params": { "type": "decimal" },
-      "missing_field_behavior": "use_default",
-      "default_value": "0"
-    },
-    {
-      "source_fields": ["start_date"],
-      "canonical_field": "start_date",
-      "transformation": "date_format",
-      "transformation_params": {
-        "input_format": "%Y-%m-%d",
-        "output_format": "%Y-%m-%d"
-      },
-      "missing_field_behavior": "raise_error"
-    },
-    {
-      "source_fields": ["end_date"],
-      "canonical_field": "end_date",
-      "transformation": "date_format",
-      "transformation_params": {
-        "input_format": "%Y-%m-%d",
-        "output_format": "%Y-%m-%d"
-      },
-      "missing_field_behavior": "drop_field"
-    },
-    {
-      "source_fields": ["renewal_date"],
-      "canonical_field": "renewal_date",
-      "transformation": "date_format",
-      "transformation_params": {
-        "input_format": "%Y-%m-%d",
-        "output_format": "%Y-%m-%d"
-      },
-      "missing_field_behavior": "drop_field"
-    },
-    {
-      "source_fields": ["owner_id"],
-      "canonical_field": "owner_id",
+      "source_fields": [
+        "Description"
+      ],
+      "canonical_field": "description",
       "transformation": "rename",
       "transformation_params": {},
-      "missing_field_behavior": "drop_field"
-    },
-    {
-      "source_fields": ["is_active"],
-      "canonical_field": "is_active",
-      "transformation": "cast",
-      "transformation_params": { "type": "boolean" },
       "missing_field_behavior": "use_default",
-      "default_value": "true"
+      "default_value": null
     },
     {
-      "source_fields": ["created_at"],
+      "source_fields": [
+        "Version"
+      ],
+      "canonical_field": "version",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": [
+        "IsDelete"
+      ],
+      "canonical_field": "is_deleted",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": [
+        "ContractTypeId"
+      ],
+      "canonical_field": "contract_type_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": [
+        "IsReprocessRequired"
+      ],
+      "canonical_field": "is_reprocess_required",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": [
+        "IsParent"
+      ],
+      "canonical_field": "is_parent",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": [
+        "ErrorMessage"
+      ],
+      "canonical_field": "error_message",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": [
+        "CreatedBy"
+      ],
+      "canonical_field": "created_by",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": [
+        "CreatedOn"
+      ],
       "canonical_field": "created_at",
-      "transformation": "date_format",
-      "transformation_params": {
-        "input_format": "%Y-%m-%d %H:%M:%S",
-        "output_format": "%Y-%m-%d"
-      },
-      "missing_field_behavior": "drop_field"
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
     },
     {
-      "source_fields": ["updated_at"],
+      "source_fields": [
+        "ModifiedBy"
+      ],
+      "canonical_field": "modified_by",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": [
+        "ModifiedOn"
+      ],
       "canonical_field": "updated_at",
-      "transformation": "date_format",
-      "transformation_params": {
-        "input_format": "%Y-%m-%d %H:%M:%S",
-        "output_format": "%Y-%m-%d"
-      },
-      "missing_field_behavior": "drop_field"
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": [
+        "DSRequest"
+      ],
+      "canonical_field": "ds_request",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
     }
   ]
 }

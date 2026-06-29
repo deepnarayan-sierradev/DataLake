@@ -65,8 +65,9 @@ from transformation.quality_evaluation.quality_policy_evaluator import (
 _logger = get_platform_logger(__name__)
 
 # S3 prefix safety: no path traversal sequences, no leading slash, bounded length (OWASP A03)
+# Hive-style partition paths (extraction_date=2026-06-29) require '=' in the allowed set.
 _SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[a-zA-Z0-9][a-zA-Z0-9\-_/]{0,511}$"
+    r"^[a-zA-Z0-9][a-zA-Z0-9\-_/=]{0,511}$"
 )
 # Domain must be a lowercase safe identifier suitable for Glue table name construction (OWASP A03)
 _SAFE_DOMAIN_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")

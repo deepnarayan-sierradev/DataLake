@@ -71,12 +71,6 @@ variable "extraction_pipeline_lambda_arn" {
   default     = ""
 }
 
-variable "transformation_pipeline_lambda_arn" {
-  type        = string
-  description = "ARN of the deployed transformation pipeline Lambda function."
-  default     = ""
-}
-
 variable "entity_resolution_lambda_arn" {
   type        = string
   description = "ARN of the deployed entity resolution Lambda function."
