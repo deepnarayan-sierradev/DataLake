@@ -2,16 +2,21 @@
 
 Metadata-driven, connector-based extraction platform built on AWS.
 
+**Status:** Dev environment live ✅ | Staging 🔲 | Production 🔲
+
 ## Documentation
 
 | Document | Audience | Description |
 |---|---|---|
-| [docs/BEGINNER_GUIDE.md](docs/BEGINNER_GUIDE.md) | New developers, anyone new to the codebase | End-to-end walkthrough of every step, module map, design principles |
-| [docs/EXECUTIVE_OVERVIEW.md](docs/EXECUTIVE_OVERVIEW.md) | Leadership, stakeholders | Functional walkthrough, schedules, access model, compliance, roadmap |
-| [docs/PLATFORM_FLOW.md](docs/PLATFORM_FLOW.md) | Engineers, architects, on-call | Step-by-step technical flow, module responsibilities, runbook reference |
-| [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Platform engineers | Step-by-step deployment, field mapping setup, AWS settings reference |
+| [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | Engineers | First-time setup, running tests, triggering pipelines, known gotchas |
+| [docs/PLATFORM_STATUS.md](docs/PLATFORM_STATUS.md) | Everyone | Current deployment state, live data, all AWS resource names |
+| [docs/PIPELINE_FLOW.md](docs/PIPELINE_FLOW.md) | Engineers, architects, on-call | Full pipeline architecture, stage-by-stage reference |
+| [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Platform engineers | Environment deployment (staging/prod), field mapping, AWS settings |
+| [docs/PRODUCTION_INCIDENT_RUNBOOK.md](docs/PRODUCTION_INCIDENT_RUNBOOK.md) | On-call engineers | Incident response, runbooks per failure scenario |
+| [docs/LEADERSHIP_BRIEF.md](docs/LEADERSHIP_BRIEF.md) | CTO, CIO, VP, Finance | What was built, current status, ROI, roadmap |
+| [docs/EXECUTIVE_OVERVIEW.md](docs/EXECUTIVE_OVERVIEW.md) | Engineering & product leadership | Deep-dive functional walkthrough, compliance, security |
+| [docs/GLOSSARY_AND_TERMINOLOGY.md](docs/GLOSSARY_AND_TERMINOLOGY.md) | All | Term definitions |
 | [Enterprise_Data_Lake_Platform_Full_Specification.md](Enterprise_Data_Lake_Platform_Full_Specification.md) | All | Full platform specification (source of truth) |
-| [Implementation_Plan_Phase_Wise.md](Implementation_Plan_Phase_Wise.md) | Engineering | Phase-by-phase delivery plan with acceptance criteria |
 
 ## Connector Credentials (AWS Secrets Manager)
 
@@ -19,13 +24,13 @@ All connector credentials are loaded from AWS Secrets Manager using this path pa
 
 `{environment}/sources/{source_id}/credentials`
 
-| Source | Secret ID example (`environment=dev`) | Required JSON keys |
-|---|---|---|
-| Salesforce | `dev/sources/salesforce/credentials` | `instance_url`, `client_id`, `client_secret` |
-| NetSuite | `dev/sources/netsuite/credentials` | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
-| MySQL RDS | `dev/sources/mysql-rds/credentials` | `host`, `port`, `username`, `password`, `database` |
+| Source | Secret ID example (`environment=dev`) | Status | Required JSON keys |
+|---|---|---|---|
+| Salesforce | `dev/sources/salesforce/credentials` | ✅ Connected | `instance_url`, `client_id`, `client_secret` |
+| MySQL RDS | `dev/sources/mysql-rds/credentials` | ✅ Connected | `host`, `port`, `username`, `password`, `database` |
+| NetSuite | `dev/sources/netsuite/credentials` | 🔲 Pending | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
 
-See [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md#step-61--populate-source-credentials-in-secrets-manager) for `aws secretsmanager put-secret-value` examples.
+See [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) for `aws secretsmanager put-secret-value` examples.
 
 ## Development Setup
 

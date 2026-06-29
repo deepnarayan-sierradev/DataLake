@@ -1,6 +1,8 @@
 # Enterprise Data Lake — Full Pipeline Flow
 
-> **Spec version:** 2.0 | **Last updated:** 2026-06-16
+> **Spec version:** 2.0 | **Last updated:** 2026-06-29
+
+> **Dev status:** ✅ All stages deployed and live. Data flowing end-to-end: Salesforce (Account, Contact) + MySQL RDS (Contracts). Entity resolution and analytics publisher both operational.
 
 ---
 
@@ -43,7 +45,7 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  SOURCE SYSTEMS                                                              │
-│  Salesforce CRM  │  NetSuite ERP  │  MySQL RDS  │  Future connectors        │
+│  Salesforce CRM ✅  │  NetSuite ERP 🔲  │  MySQL RDS ✅  │  Future connectors  │
 └────────────────────────────────┬─────────────────────────────────────────────┘
                                  │ full/incremental extraction (watermark-based)
                                  ▼
@@ -96,9 +98,9 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 
 | Layer | Purpose | Storage | Format | Mutability |
 |---|---|---|---|---|
-| **Raw** | Exact copy of source data, no transformation | `{env}-raw-layer` S3 | Parquet (large_utf8 columns) | Immutable — Object Lock GOVERNANCE |
-| **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked | `{env}-curated-layer` S3 | Parquet (Snappy) | Append-only per run_id partition |
-| **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Contains curated domain datasets (`curated/` prefix) and canonical (entity-resolved) outputs (`canonical/` prefix) | `{env}-analytics-layer` S3 | Parquet (Snappy) | Append-only |
+| **Raw** | Exact copy of source data, no transformation | `{env}-edl-raw-layer` S3 | Parquet (large_utf8 columns) | Immutable — Object Lock GOVERNANCE |
+| **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked | `{env}-edl-curated-layer` S3 | Parquet (Snappy) | Append-only per run_id partition |
+| **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Contains curated domain datasets (`curated/` prefix) and canonical (entity-resolved) outputs (`canonical/` prefix) | `{env}-edl-analytics-layer` S3 | Parquet (Snappy) | Append-only |
 | **Serving Store** | Optional operational store for low-latency API and application reads | MySQL RDS (private VPC) | SQL rows | Upsert (REPLACE INTO) |
 
 ---
@@ -418,7 +420,7 @@ s3://{analytics-layer}/canonical/{entity_type}/match-decisions/{run_id}/decision
 ### Stage 15 — Analytics Layer Publish
 
 **Component:** `AnalyticsLayerPublisher`  
-**Purpose:** Promotes curated domain datasets to consumption-optimised Parquet in the analytics layer and registers/updates Glue Catalog tables. The analytics layer (`{env}-analytics-layer`) is the single bucket for all consumption — it holds curated domain datasets under the `curated/` prefix and canonical (entity-resolved) outputs under the `canonical/` prefix.  
+**Purpose:** Promotes curated domain datasets to consumption-optimised Parquet in the analytics layer and registers/updates Glue Catalog tables. The analytics layer (`{env}-edl-analytics-layer`) is the single bucket for all consumption — it holds curated domain datasets under the `curated/` prefix and canonical (entity-resolved) outputs under the `canonical/` prefix.  
 **Partition scheme:** `s3://{bucket}/analytics/{domain}/{entity_id}/analytics_date={date}/run_id={run_id}/data.parquet`  
 **Consumers:** Athena, QuickSight, ML feature stores, data science notebooks.
 
@@ -675,7 +677,7 @@ aws dynamodb get-item \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
 # 3. Field mapping published to S3
-aws s3 ls s3://dev-curated-layer/field-mappings/salesforce/salesforce-account/
+aws s3 ls s3://dev-edl-curated-layer/field-mappings/salesforce/salesforce-account/
 
 # 4. Source credentials exist in Secrets Manager (pick the source you run)
 aws secretsmanager describe-secret \
@@ -705,7 +707,7 @@ python scripts/trigger_extraction.py \
 
 ```bash
 # Raw files written
-aws s3 ls s3://dev-raw-layer/salesforce/salesforce-account/ --recursive
+aws s3 ls s3://dev-edl-raw-layer/salesforce/salesforce-account/ --recursive
 
 # Watermark advanced
 aws dynamodb get-item \
@@ -713,20 +715,20 @@ aws dynamodb get-item \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
 # Schema snapshot written
-aws s3 ls s3://dev-schema-snapshots/salesforce/salesforce-account/ --recursive
+aws s3 ls s3://dev-edl-schema-snapshots/salesforce/salesforce-account/ --recursive
 
 # No breaking drift (check drift_report)
-aws s3 cp s3://dev-schema-snapshots/salesforce/salesforce-account/latest.json -
+aws s3 cp s3://dev-edl-schema-snapshots/salesforce/salesforce-account/latest.json -
 ```
 
 ### Post-transformation verification
 
 ```bash
 # Curated Parquet written
-aws s3 ls s3://dev-curated-layer/curated/customer/salesforce-account/ --recursive
+aws s3 ls s3://dev-edl-curated-layer/curated/customer/salesforce-account/ --recursive
 
 # Quality report — check is_publication_blocked=false
-aws s3 cp s3://dev-curated-layer/quality-reports/salesforce/salesforce-account/<run_id>/quality-report.json -
+aws s3 cp s3://dev-edl-curated-layer/quality-reports/salesforce/salesforce-account/<run_id>/quality-report.json -
 ```
 
 ---
@@ -766,7 +768,7 @@ This section maps each pipeline stage to the exact tools, AWS services, Python l
 | Stage 5 — Metadata Discovery | Source APIs (no AWS; called from Lambda/ECS over VPC) |
 | Stage 6 — Query Construction | In-process (no AWS service); ISO-8601 validated |
 | Stage 7 — Extraction | AWS Lambda (< 5 M records) or AWS ECS Fargate (≥ 5 M records); Amazon S3 (raw layer write) |
-| Stage 8 — Schema Snapshot | Amazon S3 (`{env}-schema-snapshots`) |
+| Stage 8 — Schema Snapshot | Amazon S3 (`{env}-edl-schema-snapshots`) |
 | Stage 9 — Drift Evaluation | In-process (no AWS service); writes drift report to Amazon S3 |
 | Stage 10 — Raw Layer Write | Amazon S3 (Object Lock GOVERNANCE); CloudWatch metric emit |
 | Stage 11 — Watermark Update | Amazon DynamoDB (`{env}-watermark-repository`; conditional put) |

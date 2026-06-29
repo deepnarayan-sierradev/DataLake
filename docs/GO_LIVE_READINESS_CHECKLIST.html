@@ -3,143 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Go-Live Readiness Checklist</title>
-  <style>
-:root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --muted: #475569;
-  --border: #e2e8f0;
-  --accent: #0f766e;
-  --code-bg: #f1f5f9;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  color: var(--text);
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-}
-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(15, 23, 42, 0.95);
-  color: #fff;
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-.header-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
-.file { font-size: 12px; opacity: 0.9; }
-main {
-  max-width: 1100px;
-  margin: 24px auto 48px;
-  padding: 0 20px;
-}
-article {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
-}
-h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
-h1 { margin-top: 0; font-size: 2rem; }
-h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
-h3 { font-size: 1.2rem; }
-p, li { color: var(--text); line-height: 1.65; }
-ul, ol { padding-left: 1.25rem; }
-code {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.1rem 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 0.92em;
-}
-pre {
-  background: #0b1020;
-  color: #e2e8f0;
-  border-radius: 10px;
-  padding: 14px;
-  overflow-x: auto;
-  border: 1px solid #1e293b;
-}
-pre code {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: inherit;
-}
-blockquote {
-  margin: 1em 0;
-  padding: 0.7em 1em;
-  border-left: 4px solid var(--accent);
-  background: #f0fdfa;
-  color: var(--muted);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1em 0;
-  font-size: 0.95rem;
-}
-th, td {
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-  text-align: left;
-  vertical-align: top;
-}
-th {
-  background: #f8fafc;
-  font-weight: 600;
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
-.toc {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: #f8fafc;
-  margin-bottom: 1rem;
-}
-.footer {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 14px;
-}
-@media (max-width: 760px) {
-  article { padding: 18px; border-radius: 10px; }
-  .header-inner { padding: 10px 14px; }
-  main { margin-top: 16px; padding: 0 12px; }
-}
-</style>
+  <title>Go-Live Readiness Checklist — Enterprise Data Lake</title>
+  <style>:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#475569;--border:#e2e8f0;--accent:#0f766e;--code-bg:#f1f5f9}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%)}header{position:sticky;top:0;z-index:10;background:rgba(15,23,42,.95);color:#fff;backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,.1)}.header-inner{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:700;letter-spacing:.2px;font-size:14px}.file{font-size:12px;opacity:.9}main{max-width:1100px;margin:24px auto 48px;padding:0 20px}article{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;box-shadow:0 10px 35px rgba(15,23,42,.06)}h1,h2,h3,h4{line-height:1.25;margin-top:1.4em;margin-bottom:.55em}h1{margin-top:0;font-size:2rem}h2{font-size:1.45rem;border-top:1px solid var(--border);padding-top:1em}h3{font-size:1.2rem}p,li{color:var(--text);line-height:1.65}ul,ol{padding-left:1.25rem}code{background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:.92em}pre{background:#0b1020;color:#e2e8f0;border-radius:10px;padding:14px;overflow-x:auto;border:1px solid #1e293b}pre code{background:transparent;border:0;padding:0;color:inherit}blockquote{margin:1em 0;padding:.7em 1em;border-left:4px solid var(--accent);background:#f0fdfa;color:var(--muted)}table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.95rem}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:#f8fafc;font-weight:600}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}hr{border:0;border-top:1px solid var(--border);margin:1.6em 0}.footer{color:var(--muted);font-size:12px;margin-top:14px}@media(max-width:760px){article{padding:18px;border-radius:10px}.header-inner{padding:10px 14px}main{margin-top:16px;padding:0 12px}}</style>
 </head>
 <body>
-  <header>
-    <div class="header-inner">
-      <div class="brand">Enterprise Data Lake Documentation</div>
-      <div class="file">GO_LIVE_READINESS_CHECKLIST.md</div>
-    </div>
-  </header>
-  <main>
-    <article>
-<h1 id="go-live-readiness-checklist">Go-Live Readiness Checklist</h1>
-<p><strong>For:</strong> Project manager, platform engineering lead, operations<br>
-<strong>Purpose:</strong> Verify all systems are ready before production activation<br>
-<strong>Date:</strong> 2026-06-17</p>
-<hr>
+  <header><div class="header-inner"><div class="brand">Enterprise Data Lake Documentation</div><div class="file">GO_LIVE_READINESS_CHECKLIST.md</div></div></header>
+  <main><article><h1 id="go-live-readiness-checklist">Go-Live Readiness Checklist</h1>
+<p><strong>For:</strong> Project manager, platform engineering lead, operations<br />
+<strong>Purpose:</strong> Verify all systems are ready before production activation<br />
+<strong>Last updated:</strong> 2026-06-29</p>
+<blockquote>
+<p><strong>Environment status:</strong> Dev ✅ complete | Staging 🔲 in progress | Production 🔲 pending<br />
+Items marked ✅ are already verified in the dev environment. Use this checklist when promoting to <strong>staging</strong> then <strong>prod</strong> — check off each item per environment before proceeding.</p>
+</blockquote>
+<hr />
 <h2 id="infrastructure-readiness">Infrastructure Readiness</h2>
 <h3 id="aws-account-setup">AWS Account Setup</h3>
 <ul>
@@ -153,10 +30,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] KMS key created for S3 encryption</li>
 <li>[ ] VPC endpoints configured for S3, DynamoDB, Secrets Manager, CloudWatch, Glue</li>
 </ul>
-<p><strong>Owner:</strong> Platform Engineering<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> Platform Engineering<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] Infrastructure Lead</p>
-<hr>
+<hr />
 <h3 id="lambda-compute">Lambda &amp; Compute</h3>
 <ul>
 <li>[ ] Extraction Lambda deployed (prod environment)</li>
@@ -170,10 +47,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Dead-Letter Queue Lambda created (for replay handling)</li>
 <li>[ ] VPC networking configured for Lambdas (private subnets, security groups)</li>
 </ul>
-<p><strong>Owner:</strong> Platform Engineering<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> Platform Engineering<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] Platform Engineering Lead</p>
-<hr>
+<hr />
 <h3 id="step-functions-orchestration">Step Functions &amp; Orchestration</h3>
 <ul>
 <li>[ ] Step Functions state machine deployed (prod environment)</li>
@@ -185,10 +62,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Dead-Letter Queue integration tested (failed messages appear in DLQ topic)</li>
 <li>[ ] CloudWatch alarms configured for Step Functions failures</li>
 </ul>
-<p><strong>Owner:</strong> Platform Engineering<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> Platform Engineering<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] Platform Engineering Lead</p>
-<hr>
+<hr />
 <h3 id="orchestration-schedules-eventbridge">Orchestration Schedules (EventBridge)</h3>
 <ul>
 <li>[ ] EventBridge Scheduler configured with initial 5 entities (Salesforce Account, Contact, Opportunity, NetSuite Customer, MySQL Orders)</li>
@@ -198,10 +75,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] EventBridge execution role has permission to invoke Step Functions</li>
 <li>[ ] Schedules tested manually (manually trigger one step function execution, verify end-to-end)</li>
 </ul>
-<p><strong>Owner:</strong> Platform Engineering<br>
-<strong>Timeline:</strong> 0.5 day<br>
+<p><strong>Owner:</strong> Platform Engineering<br />
+<strong>Timeline:</strong> 0.5 day<br />
 <strong>Sign-off:</strong> [ ] Operations Lead</p>
-<hr>
+<hr />
 <h2 id="data-configuration">Data Configuration</h2>
 <h3 id="source-credentials-secrets-manager">Source Credentials (Secrets Manager)</h3>
 <ul>
@@ -221,10 +98,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Secrets Manager rotation schedule configured (auto-rotate every 90 days)</li>
 <li>[ ] KMS key policy grants extraction service role <code>kms:Decrypt</code> permission</li>
 </ul>
-<p><strong>Owner:</strong> Data Engineering + Security<br>
-<strong>Timeline:</strong> 0.5 day<br>
+<p><strong>Owner:</strong> Data Engineering + Security<br />
+<strong>Timeline:</strong> 0.5 day<br />
 <strong>Sign-off:</strong> [ ] Security Officer, [ ] Data Engineering Lead</p>
-<hr>
+<hr />
 <h3 id="entity-configuration-dynamodb">Entity Configuration (DynamoDB)</h3>
 <ul>
 <li>[ ] Configuration table populated with 5 initial entities</li>
@@ -237,10 +114,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] All entities marked <code>active: True</code> (ready to extract)</li>
 <li>[ ] All entities have <code>created_at</code> timestamp (audit trail)</li>
 </ul>
-<p><strong>Owner:</strong> Data Engineering<br>
-<strong>Timeline:</strong> 0.5 day<br>
+<p><strong>Owner:</strong> Data Engineering<br />
+<strong>Timeline:</strong> 0.5 day<br />
 <strong>Sign-off:</strong> [ ] Data Governance Lead</p>
-<hr>
+<hr />
 <h3 id="field-mapping-configuration-s3">Field Mapping Configuration (S3)</h3>
 <ul>
 <li>[ ] Field mapping JSON files created for each source/entity pair (5 files total)</li>
@@ -253,10 +130,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Each mapping file versioned (v1.json)</li>
 <li>[ ] All transformation Lambda has read permission to mapping bucket</li>
 </ul>
-<p><strong>Owner:</strong> Data Engineering<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> Data Engineering<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] Data Quality Lead</p>
-<hr>
+<hr />
 <h3 id="data-classification-pii-policy-s3">Data Classification &amp; PII Policy (S3)</h3>
 <ul>
 <li>[ ] PII classification policy file created: <code>s3://prod-schema-snapshots/data_classification/classification_policy.json</code></li>
@@ -269,10 +146,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Transformation Lambda has read permission to classification policy file</li>
 <li>[ ] Policy reviewed by Data Governance + Compliance teams</li>
 </ul>
-<p><strong>Owner:</strong> Data Governance + Compliance<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> Data Governance + Compliance<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] Chief Data Officer, [ ] Compliance Officer</p>
-<hr>
+<hr />
 <h3 id="entity-resolution-configuration-s3">Entity Resolution Configuration (S3)</h3>
 <ul>
 <li>[ ] Resolution config files created for planned entity types:</li>
@@ -285,10 +162,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] System fields automatically appended (golden_id, contributing_records, survivorship_version, match_run_id, field_provenance)</li>
 <li>[ ] Resolution rules reviewed &amp; approved by Data Governance</li>
 </ul>
-<p><strong>Owner:</strong> Entity Resolution Team<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> Entity Resolution Team<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] Data Governance Lead</p>
-<hr>
+<hr />
 <h2 id="quality-governance">Quality &amp; Governance</h2>
 <h3 id="quality-policy-s3">Quality Policy (S3)</h3>
 <ul>
@@ -301,10 +178,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] All BLOCKING violations log to CloudWatch and trigger SNS alert</li>
 <li>[ ] All WARNING violations logged but don't block publication</li>
 </ul>
-<p><strong>Owner:</strong> Data Quality<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> Data Quality<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] Data Quality Lead</p>
-<hr>
+<hr />
 <h3 id="lineage-audit-trail-setup">Lineage &amp; Audit Trail Setup</h3>
 <ul>
 <li>[ ] DynamoDB audit-log table configured</li>
@@ -318,10 +195,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] X-Ray tracing enabled on all Lambda functions</li>
 <li>[ ] S3 access logging enabled (all data buckets log to separate logging bucket)</li>
 </ul>
-<p><strong>Owner:</strong> Observability / DevOps<br>
-<strong>Timeline:</strong> 0.5 day<br>
+<p><strong>Owner:</strong> Observability / DevOps<br />
+<strong>Timeline:</strong> 0.5 day<br />
 <strong>Sign-off:</strong> [ ] Observability Lead</p>
-<hr>
+<hr />
 <h3 id="alerting-monitoring">Alerting &amp; Monitoring</h3>
 <ul>
 <li>[ ] CloudWatch alarm created: "Extraction Failure" (SNS → Ops team email/Slack)</li>
@@ -333,10 +210,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Dashboard created: "Data Lake Health" (shows key metrics + status per entity)</li>
 <li>[ ] Test alert mechanism (manually trigger one alarm, verify notification received)</li>
 </ul>
-<p><strong>Owner:</strong> Observability / DevOps<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> Observability / DevOps<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] Ops Manager</p>
-<hr>
+<hr />
 <h2 id="security-compliance">Security &amp; Compliance</h2>
 <h3 id="security-hardening">Security Hardening</h3>
 <ul>
@@ -352,10 +229,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] All cross-account access: requires explicit resource-based policy (if applicable)</li>
 <li>[ ] KMS key policy: reviewed by Security team (grants minimal permissions)</li>
 </ul>
-<p><strong>Owner:</strong> Security / Platform Engineering<br>
-<strong>Timeline:</strong> 0.5 day<br>
+<p><strong>Owner:</strong> Security / Platform Engineering<br />
+<strong>Timeline:</strong> 0.5 day<br />
 <strong>Sign-off:</strong> [ ] CISO</p>
-<hr>
+<hr />
 <h3 id="compliance-review">Compliance Review</h3>
 <ul>
 <li>[ ] GDPR readiness: lineage tracking + legal hold capability verified</li>
@@ -366,10 +243,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Incident response plan reviewed: DLQ handling, schema drift escalation, quality failure escalation</li>
 <li>[ ] Compliance sign-off obtained before production extraction begins</li>
 </ul>
-<p><strong>Owner:</strong> Compliance + Legal<br>
-<strong>Timeline:</strong> 0.5 day<br>
+<p><strong>Owner:</strong> Compliance + Legal<br />
+<strong>Timeline:</strong> 0.5 day<br />
 <strong>Sign-off:</strong> [ ] Chief Compliance Officer</p>
-<hr>
+<hr />
 <h2 id="testing-validation">Testing &amp; Validation</h2>
 <h3 id="dry-run-extraction-dev-environment">Dry-run Extraction (Dev Environment)</h3>
 <ul>
@@ -380,10 +257,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Verify schema snapshot created (S3 schema bucket)</li>
 <li>[ ] Verify audit records written (DynamoDB audit-log table)</li>
 </ul>
-<p><strong>Owner:</strong> Platform Engineering<br>
-<strong>Timeline:</strong> 0.5 day<br>
+<p><strong>Owner:</strong> Platform Engineering<br />
+<strong>Timeline:</strong> 0.5 day<br />
 <strong>Sign-off:</strong> [ ] QA Lead</p>
-<hr>
+<hr />
 <h3 id="transformation-test-dev-staging">Transformation Test (Dev → Staging)</h3>
 <ul>
 <li>[ ] Transform raw Salesforce Account → curated layer</li>
@@ -393,10 +270,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Verify curated Parquet written to S3</li>
 <li>[ ] Verify Glue catalog entry created</li>
 </ul>
-<p><strong>Owner:</strong> Data Engineering<br>
-<strong>Timeline:</strong> 0.5 day<br>
+<p><strong>Owner:</strong> Data Engineering<br />
+<strong>Timeline:</strong> 0.5 day<br />
 <strong>Sign-off:</strong> [ ] Data Quality Lead</p>
-<hr>
+<hr />
 <h3 id="entity-resolution-test">Entity Resolution Test</h3>
 <ul>
 <li>[ ] Perform test resolution: Salesforce Account (1 record) + NetSuite Customer (1 record) matching → golden record produced</li>
@@ -404,10 +281,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Verify lineage record written to governance bucket</li>
 <li>[ ] Verify analytics layer Parquet written with canonical prefix</li>
 </ul>
-<p><strong>Owner:</strong> Entity Resolution Team<br>
-<strong>Timeline:</strong> 0.5 day<br>
+<p><strong>Owner:</strong> Entity Resolution Team<br />
+<strong>Timeline:</strong> 0.5 day<br />
 <strong>Sign-off:</strong> [ ] Data Governance Lead</p>
-<hr>
+<hr />
 <h3 id="end-to-end-pipeline-test-prod-like-on-staging">End-to-End Pipeline Test (Prod-like, on Staging)</h3>
 <ul>
 <li>[ ] Trigger complete pipeline manually (extraction → transformation → entity resolution → analytics publish)</li>
@@ -417,10 +294,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Verify no CloudWatch alerts fired (baseline health check)</li>
 <li>[ ] Verify all audit records present in DynamoDB</li>
 </ul>
-<p><strong>Owner:</strong> QA + Platform Engineering<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> QA + Platform Engineering<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] QA Lead, [ ] Platform Engineering Lead</p>
-<hr>
+<hr />
 <h3 id="failure-scenario-testing">Failure Scenario Testing</h3>
 <ul>
 <li>[ ] <strong>Test 1:</strong> Simulate source API timeout → verify Step Functions retries, eventually succeeds</li>
@@ -429,10 +306,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] <strong>Test 4:</strong> Simulate DLQ message → verify replay mechanism works, data reprocessed correctly</li>
 <li>[ ] <strong>Test 5:</strong> Simulate Lambda out-of-memory → verify Step Functions timeout respected, DLQ entry created</li>
 </ul>
-<p><strong>Owner:</strong> QA + Platform Engineering<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> QA + Platform Engineering<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] QA Lead</p>
-<hr>
+<hr />
 <h2 id="training-operations">Training &amp; Operations</h2>
 <h3 id="runbooks-documentation">Runbooks &amp; Documentation</h3>
 <ul>
@@ -444,10 +321,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] On-call escalation procedure documented (who to page for what failure type)</li>
 <li>[ ] All runbooks reviewed by operations team</li>
 </ul>
-<p><strong>Owner:</strong> Platform Engineering + Operations<br>
-<strong>Timeline:</strong> 1 day<br>
+<p><strong>Owner:</strong> Platform Engineering + Operations<br />
+<strong>Timeline:</strong> 1 day<br />
 <strong>Sign-off:</strong> [ ] Ops Manager</p>
-<hr>
+<hr />
 <h3 id="team-training">Team Training</h3>
 <ul>
 <li>[ ] Platform engineering team trained on: Lambda deployment, Step Functions, DynamoDB, S3 management</li>
@@ -456,10 +333,10 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Operations team trained on: Alert response, runbook execution, incident escalation</li>
 <li>[ ] BI analysts trained on: Athena query access, analytics layer schema, data freshness expectations</li>
 </ul>
-<p><strong>Owner:</strong> Platform Engineering Lead<br>
-<strong>Timeline:</strong> 2 days (1 day training + 1 day hands-on)<br>
+<p><strong>Owner:</strong> Platform Engineering Lead<br />
+<strong>Timeline:</strong> 2 days (1 day training + 1 day hands-on)<br />
 <strong>Sign-off:</strong> [ ] Training Coordinator</p>
-<hr>
+<hr />
 <h3 id="runbook-testing-disaster-recovery">Runbook Testing (Disaster Recovery)</h3>
 <ul>
 <li>[ ] Practice extraction failure response: Simulate alert, follow runbook, verify resolution</li>
@@ -467,19 +344,19 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>[ ] Practice DLQ replay: Manually enqueue failed message, trigger replay, verify recovery</li>
 <li>[ ] Practice on-call escalation: Trigger alert, page on-call engineer, verify communication</li>
 </ul>
-<p><strong>Owner:</strong> Operations + Platform Engineering<br>
-<strong>Timeline:</strong> 0.5 day<br>
+<p><strong>Owner:</strong> Operations + Platform Engineering<br />
+<strong>Timeline:</strong> 0.5 day<br />
 <strong>Sign-off:</strong> [ ] Ops Manager</p>
-<hr>
+<hr />
 <h2 id="go-live-approval">Go-Live Approval</h2>
 <h3 id="final-sign-offs">Final Sign-Offs</h3>
-<p><strong>Infrastructure:</strong> [ ] Platform Engineering Lead<br>
-<strong>Data Configuration:</strong> [ ] Data Engineering Lead<br>
-<strong>Security:</strong> [ ] CISO<br>
-<strong>Compliance:</strong> [ ] Chief Compliance Officer<br>
-<strong>Operations:</strong> [ ] VP Operations / Ops Manager<br>
-<strong>Finance:</strong> [ ] CFO (budget approved)<br>
-<strong>Data Governance:</strong> [ ] Chief Data Officer<br>
+<p><strong>Infrastructure:</strong> [ ] Platform Engineering Lead<br />
+<strong>Data Configuration:</strong> [ ] Data Engineering Lead<br />
+<strong>Security:</strong> [ ] CISO<br />
+<strong>Compliance:</strong> [ ] Chief Compliance Officer<br />
+<strong>Operations:</strong> [ ] VP Operations / Ops Manager<br />
+<strong>Finance:</strong> [ ] CFO (budget approved)<br />
+<strong>Data Governance:</strong> [ ] Chief Data Officer<br />
 <strong>Executive Sponsor:</strong> [ ] VP / SVP (business owner)</p>
 <h3 id="go-live-timeline">Go-Live Timeline</h3>
 <p>Once all checklist items complete:</p>
@@ -491,28 +368,43 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><strong>Day 4-7:</strong> Monitor production metrics, refine alerts, adjust schedules if needed</li>
 </ol>
 <p><strong>Rollback plan:</strong> If critical issue found post-go-live, disable schedules (&lt; 5 min), revert to previous data sources until platform stabilized.</p>
-<hr>
-<p><strong>Prepared by:</strong> Platform Engineering Lead<br>
-<strong>Date:</strong> 2026-06-17<br>
-<strong>Next review:</strong> Post-go-live Day 7 (day 1 incident review; day 7 week 1 retrospective)</p>
-      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
-
-<hr>
-<h2 id="technology-stack-reference">Technology Stack Reference</h2>
-<table>
-<thead><tr><th>Layer</th><th>Technology</th></tr></thead>
-<tbody>
-<tr><td>Cloud</td><td><strong>AWS</strong> (EventBridge, Step Functions, Lambda, ECS Fargate, S3, DynamoDB, Secrets Manager, Glue, Athena, RDS MySQL, SQS, CloudWatch, X-Ray, SNS, KMS, IAM, VPC)</td></tr>
-<tr><td>Data format</td><td><strong>Apache Parquet</strong> (Snappy) for data layers; <strong>JSON</strong> for configs and reports</td></tr>
-<tr><td>Source APIs</td><td><strong>Salesforce Bulk API 2.0</strong>; <strong>NetSuite SuiteQL REST</strong>; <strong>MySQL JDBC</strong> via <code>pymysql</code></td></tr>
-<tr><td>Language</td><td><strong>Python 3.14</strong> — Pydantic v2, structlog ≥ 24.4, pyarrow, boto3, pymysql, requests</td></tr>
-<tr><td>Infrastructure</td><td><strong>Terraform</strong> ≥ 1.8 (AWS Provider ~&gt; 5.0); 3 environments: dev / staging / prod</td></tr>
-<tr><td>CI/CD</td><td><strong>GitHub Actions</strong> — 7-stage gate: Ruff → mypy → pytest → bandit → pip-audit → checkov → terraform validate</td></tr>
-<tr><td>Security algorithms</td><td><strong>HMAC-SHA256</strong> (PII tokenisation); <strong>SHA-256</strong> (field fingerprinting); <strong>Jaro-Winkler</strong> + <strong>Jaccard</strong> (entity resolution)</td></tr>
-<tr><td>Testing</td><td><strong>pytest</strong> + <strong>moto</strong> ≥ 5.0 (AWS mocking); ≥ 80% coverage gate enforced in CI</td></tr>
-</tbody>
-</table>
-    </article>
-  </main>
+<hr />
+<h2 id="technology-and-tools-go-live-checklist">Technology and Tools Go-Live Checklist</h2>
+<p>Verify that all required technologies are correctly configured before go-live.</p>
+<h3 id="aws-services">AWS Services</h3>
+<ul>
+<li>[ ] <strong>EventBridge Scheduler</strong> — All 12 entity schedules created; correct cron expressions; correct state machine ARN</li>
+<li>[ ] <strong>Step Functions</strong> — State machine deployed in <code>prod</code>; <code>Standard Workflow</code> type confirmed; IAM execution role attached</li>
+<li>[ ] <strong>Lambda</strong> — All 5 pipeline stage functions deployed; correct memory (512 MB default) and timeout (15 min) settings; VPC config attached</li>
+<li>[ ] <strong>ECS Fargate</strong> — Task definition registered; cluster created; capacity provider set; correct IAM task role</li>
+<li>[ ] <strong>S3 buckets</strong> — All 5 buckets created (<code>raw</code>, <code>curated</code>, <code>analytics</code>, <code>schema-snapshots</code>, <code>governance</code>); Object Lock confirmed on raw; SSE-KMS on all; TLS-only bucket policy applied</li>
+<li>[ ] <strong>DynamoDB tables</strong> — All 4 tables created; PITR enabled; KMS encryption confirmed; GSI names match code expectations</li>
+<li>[ ] <strong>Secrets Manager</strong> — 3 secrets created (<code>salesforce</code>, <code>netsuite</code>, <code>mysql-rds</code>); initial values set; rotation schedule configured</li>
+<li>[ ] <strong>Glue Data Catalog</strong> — Database <code>{env}_curated</code> created; IAM permissions allow <code>glue:CreateTable</code> and <code>glue:UpdateTable</code> from transformation role</li>
+<li>[ ] <strong>Athena</strong> — Workgroup <code>{env}-analytics</code> created; output bucket set; per-query cost limit configured</li>
+<li>[ ] <strong>SQS (DLQ)</strong> — Queue <code>{env}-extraction-dlq</code> created; KMS encrypted; 14-day retention; DLQ URL accessible from extraction Lambda</li>
+<li>[ ] <strong>CloudWatch</strong> — Log groups for all 5 services created; custom namespace <code>EnterpriseDatalake</code> emitting metrics; 4 alarms active; SNS topic subscribed</li>
+<li>[ ] <strong>KMS</strong> — Customer-managed CMK created; annual rotation enabled; all resource SSE configurations pointing to correct key ARN</li>
+<li>[ ] <strong>IAM roles</strong> — All 5 service roles + 1 OIDC CI/CD role deployed; no wildcard permissions; <code>aws:SourceAccount</code> condition on all service trust policies</li>
+<li>[ ] <strong>VPC</strong> — Private subnets in 3 AZs; no internet gateway; 5 VPC Endpoints configured (S3-gateway, DynamoDB-gateway, SecretsManager-interface, CloudWatch-interface, Step Functions-interface)</li>
+</ul>
+<h3 id="python-and-infrastructure">Python and Infrastructure</h3>
+<ul>
+<li>[ ] <strong>Python 3.14.x</strong> — Correct version in Lambda runtime / ECS image; <code>pyproject.toml</code> version pin matches</li>
+<li>[ ] <strong>Pydantic v2</strong> — Dependency installed; no Pydantic v1 compatibility shims</li>
+<li>[ ] <strong>Terraform state</strong> — Remote state bucket and DynamoDB lock table exist in <code>prod</code>; Terraform apply completed with no errors</li>
+<li>[ ] <strong>GitHub Actions</strong> — All 7 CI gate stages pass on <code>main</code> branch; deploy workflow triggered and succeeded</li>
+<li>[ ] <strong>pre-commit hooks</strong> — Installed in repository; baseline updated</li>
+</ul>
+<h3 id="source-system-connectivity">Source System Connectivity</h3>
+<ul>
+<li>[ ] <strong>Salesforce</strong> — OAuth 2.0 client credentials tested; NAT Gateway IP added to Salesforce trusted IP allowlist; Bulk API 2.0 quota confirmed (API edition supports high-volume jobs)</li>
+<li>[ ] <strong>NetSuite</strong> — OAuth 1.0a credentials tested; SuiteQL endpoint reachable from Lambda VPC; query timeout verified</li>
+<li>[ ] <strong>MySQL RDS</strong> — Read-only credentials tested; VPC peering or PrivateLink to RDS established; <code>INFORMATION_SCHEMA</code> queries succeed</li>
+</ul>
+<hr />
+<p><strong>Prepared by:</strong> Platform Engineering Lead<br />
+<strong>Date:</strong> 2026-06-17<br />
+<strong>Next review:</strong> Post-go-live Day 7 (day 1 incident review; day 7 week 1 retrospective)</p></article></main>
 </body>
 </html>

@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Developer Guide — Enterprise Data Lake Platform</title>
+  <style>
+:root {
+  --bg: #f8fafc; --surface: #ffffff; --text: #0f172a; --muted: #475569;
+  --border: #e2e8f0; --accent: #0f766e; --code-bg: #f1f5f9;
+}
+* { box-sizing: border-box; }
+body { margin:0; font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif; color:var(--text); background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%); }
+header { position:sticky; top:0; z-index:10; background:rgba(15,23,42,0.95); color:#fff; backdrop-filter:blur(6px); border-bottom:1px solid rgba(255,255,255,0.1); }
+.header-inner { max-width:1100px; margin:0 auto; padding:12px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.brand { font-weight:700; letter-spacing:0.2px; font-size:14px; }
+.file { font-size:12px; opacity:0.9; }
+main { max-width:1100px; margin:24px auto 48px; padding:0 20px; }
+article { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:28px; box-shadow:0 10px 35px rgba(15,23,42,0.06); }
+h1,h2,h3,h4 { line-height:1.25; margin-top:1.4em; margin-bottom:0.55em; }
+h1 { margin-top:0; font-size:2rem; }
+h2 { font-size:1.45rem; border-top:1px solid var(--border); padding-top:1em; }
+h3 { font-size:1.2rem; }
+p,li { color:var(--text); line-height:1.65; }
+ul,ol { padding-left:1.25rem; }
+code { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; padding:0.1rem 0.35rem; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace; font-size:0.92em; }
+pre { background:#0b1020; color:#e2e8f0; border-radius:10px; padding:14px; overflow-x:auto; border:1px solid #1e293b; }
+pre code { background:transparent; border:0; padding:0; color:inherit; }
+blockquote { margin:1em 0; padding:0.7em 1em; border-left:4px solid var(--accent); background:#f0fdfa; color:var(--muted); }
+table { width:100%; border-collapse:collapse; margin:1em 0; font-size:0.95rem; }
+th,td { border:1px solid var(--border); padding:8px 10px; text-align:left; vertical-align:top; }
+th { background:#f8fafc; font-weight:600; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
+.footer { color:var(--muted); font-size:12px; margin-top:14px; }
+@media (max-width:760px) { article { padding:18px; border-radius:10px; } .header-inner { padding:10px 14px; } main { margin-top:16px; padding:0 12px; } }
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand">Enterprise Data Lake Documentation</div>
+      <div class="file">DEVELOPER_GUIDE.md</div>
+    </div>
+  </header>
+  <main>
+    <article>
+<h1 id="developer-guide-enterprise-data-lake-platform">Developer Guide — Enterprise Data Lake Platform</h1>
+<p><strong>Audience:</strong> Engineers new to the codebase, or anyone setting up a fresh workstation<br />
+<strong>Last updated:</strong> 2026-06-29<br />
+<strong>Status:</strong> Dev environment is live and fully operational</p>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-what-this-platform-does">What This Platform Does</a></li>
+<li><a href="#2-codebase-module-map">Codebase Module Map</a></li>
+<li><a href="#3-prerequisites--tools-to-install">Prerequisites — Tools to Install</a></li>
+<li><a href="#4-first-time-setup">First-Time Setup</a></li>
+<li><a href="#5-aws-dev-profile-setup">AWS Dev Profile Setup</a></li>
+<li><a href="#6-verify-dev-environment-is-healthy">Verify Dev Environment is Healthy</a></li>
+<li><a href="#7-running-tests-locally">Running Tests Locally</a></li>
+<li><a href="#8-running-pipelines">Running Pipelines</a></li>
+<li><a href="#9-terraform-workflow">Terraform Workflow</a></li>
+<li><a href="#10-lambda-build-and-deploy">Lambda Build and Deploy</a></li>
+<li><a href="#11-seeding-configuration-data">Seeding Configuration Data</a></li>
+<li><a href="#12-understanding-the-data-flow">Understanding the Data Flow</a></li>
+<li><a href="#13-known-gotchas">Known Gotchas</a></li>
+</ol>
+<hr />
+<h2 id="1-what-this-platform-does">1. What This Platform Does</h2>
+<p>The Enterprise Data Lake Platform automatically extracts data from three source systems, transforms and governs it through three S3 layers, resolves customer identity across systems, and delivers trusted analytics-ready records queryable via Athena.</p>
+<pre><code>Salesforce CRM ──┐
+MySQL RDS ───────┼──► Raw Layer (S3) ──► Curated Layer (S3) ──► Analytics Layer (S3)
+NetSuite ERP ────┘         │                     │                      │
+ (pending)            Immutable           Field-mapped           Golden records
+                      Parquet             Quality-checked        Athena-queryable
+</code></pre>
+<p><strong>Orchestration:</strong> EventBridge → Step Functions → Lambda (extraction → transformation → entity resolution → analytics publish)</p>
+<p><strong>Configuration-driven:</strong> adding a new source or entity requires zero code changes — only a DynamoDB config record.</p>
+<hr />
+<h2 id="2-codebase-module-map">2. Codebase Module Map</h2>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>connector_runtime/</code></td>
+<td>Extracts data from source APIs; writes Parquet to raw layer</td>
+</tr>
+<tr>
+<td><code>transformation/</code></td>
+<td>Applies field mapping, quality checks, PII masking; writes to curated layer</td>
+</tr>
+<tr>
+<td><code>entity_resolution/</code></td>
+<td>Cross-source entity matching; writes golden records to analytics layer</td>
+</tr>
+<tr>
+<td><code>analytics_publisher/</code></td>
+<td>Publishes partitioned analytics Parquet; registers Glue partitions</td>
+</tr>
+<tr>
+<td><code>schema_management/</code></td>
+<td>Schema snapshot capture and drift detection</td>
+</tr>
+<tr>
+<td><code>watermark_management/</code></td>
+<td>Incremental extraction watermark read/write</td>
+</tr>
+<tr>
+<td><code>orchestration/</code></td>
+<td>Step Functions and EventBridge wiring</td>
+</tr>
+<tr>
+<td><code>governance/</code></td>
+<td>Lineage records, data classification, retention enforcement</td>
+</tr>
+<tr>
+<td><code>observability/</code></td>
+<td>Structured logging and CloudWatch metrics emission</td>
+</tr>
+<tr>
+<td><code>contracts/</code></td>
+<td>Shared Pydantic models and interfaces used across all modules</td>
+</tr>
+<tr>
+<td><code>infrastructure/</code></td>
+<td>Terraform modules and environment configs (<code>dev/</code>, <code>staging/</code>, <code>prod/</code>)</td>
+</tr>
+<tr>
+<td><code>scripts/</code></td>
+<td>Operational scripts: seeding configs, triggering runs, dry-run connectors</td>
+</tr>
+<tr>
+<td><code>config/</code></td>
+<td>Field mapping JSON and entity resolution config files</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-prerequisites-tools-to-install">3. Prerequisites — Tools to Install</h2>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Required version</th>
+<th>Install</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>pyenv</strong></td>
+<td>2.7.2+</td>
+<td><code>brew install pyenv</code></td>
+</tr>
+<tr>
+<td><strong>Python</strong></td>
+<td>3.14.6</td>
+<td><code>pyenv install 3.14.6</code></td>
+</tr>
+<tr>
+<td><strong>Terraform</strong></td>
+<td>≥ 1.8, &lt; 2.0</td>
+<td><code>brew install terraform</code></td>
+</tr>
+<tr>
+<td><strong>AWS CLI</strong></td>
+<td>v2</td>
+<td><code>brew install awscli</code></td>
+</tr>
+<tr>
+<td><strong>GNU Make</strong></td>
+<td>≥ 3.8</td>
+<td>Included on macOS</td>
+</tr>
+<tr>
+<td><strong>Git</strong></td>
+<td>Latest</td>
+<td><code>brew install git</code></td>
+</tr>
+</tbody>
+</table>
+<p>Verify after installing:</p>
+<pre><code class="language-bash">python --version      # Python 3.14.6
+terraform version     # Terraform v1.8.x
+aws --version         # aws-cli/2.x.x
+make --version        # GNU Make 3.8+
+</code></pre>
+<hr />
+<h2 id="4-first-time-setup">4. First-Time Setup</h2>
+<pre><code class="language-bash"># 1. Clone the repository
+git clone https://github.com/YOUR_ORG/enterprise-data-lake.git
+cd enterprise-data-lake
+
+# 2. Set Python version (reads .python-version if present)
+pyenv local 3.14.6
+
+# 3. Create virtual environment
+python -m venv .venv
+source .venv/bin/activate
+
+# 4. Install the project and all dev dependencies
+pip install --upgrade pip hatchling
+pip install -e &quot;.[dev]&quot;
+
+# 5. Install pre-commit hooks
+pre-commit install
+
+# 6. Run full test suite to confirm clean baseline
+pytest --cov --cov-fail-under=80
+</code></pre>
+<p><strong>Subsequent sessions — just activate:</strong></p>
+<pre><code class="language-bash">source .venv/bin/activate
+</code></pre>
+<hr />
+<h2 id="5-aws-dev-profile-setup">5. AWS Dev Profile Setup</h2>
+<p>The dev environment runs in AWS account <code>087972550871</code>, region <code>us-east-1</code>.</p>
+<pre><code class="language-bash"># Configure the dev profile (run once)
+aws configure --profile dev
+# Enter: Access Key ID, Secret Access Key, region=us-east-1, output=json
+
+# Verify identity
+export AWS_PROFILE=dev
+aws sts get-caller-identity
+# Expected: {&quot;Account&quot;: &quot;087972550871&quot;, &quot;UserId&quot;: &quot;...&quot;, &quot;Arn&quot;: &quot;arn:aws:iam::087972550871:user/datalake-dev-user&quot;}
+</code></pre>
+<p>For SSO-based access:</p>
+<pre><code class="language-bash">aws configure sso --profile dev
+</code></pre>
+<blockquote>
+<p><strong>Security note:</strong> Never commit AWS credentials to git. Use <code>aws configure --profile dev</code> which stores credentials in <code>~/.aws/credentials</code> (not in the repo).</p>
+</blockquote>
+<hr />
+<h2 id="6-verify-dev-environment-is-healthy">6. Verify Dev Environment is Healthy</h2>
+<p>Run these to confirm all dev resources exist before doing any work:</p>
+<h3 id="s3-buckets">S3 Buckets</h3>
+<pre><code class="language-bash">export AWS_PROFILE=dev
+aws s3 ls | grep dev-edl
+</code></pre>
+<p>Expected output:</p>
+<pre><code>dev-edl-analytics-layer
+dev-edl-curated-layer
+dev-edl-raw-layer
+dev-edl-s3-access-logs
+dev-edl-schema-snapshots
+dev-edl-terraform-state
+</code></pre>
+<h3 id="dynamodb-tables">DynamoDB Tables</h3>
+<pre><code class="language-bash">aws dynamodb list-tables --region us-east-1 | grep dev-
+</code></pre>
+<p>Expected:</p>
+<pre><code>dev-entity-extraction-config
+dev-run-audit-log
+dev-watermark-repository
+</code></pre>
+<h3 id="secrets-manager">Secrets Manager</h3>
+<pre><code class="language-bash">aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name' | grep dev/sources
+</code></pre>
+<p>Expected:</p>
+<pre><code>dev/sources/salesforce/credentials
+dev/sources/mysql-rds/credentials
+</code></pre>
+<h3 id="lambda-functions">Lambda Functions</h3>
+<pre><code class="language-bash">aws lambda list-functions --region us-east-1 --query 'Functions[?starts_with(FunctionName, `dev-`)].FunctionName'
+</code></pre>
+<p>Expected:</p>
+<pre><code>dev-analytics-publisher
+dev-entity-resolution-pipeline
+dev-extraction-pipeline
+dev-transformation-pipeline
+</code></pre>
+<h3 id="step-functions">Step Functions</h3>
+<pre><code class="language-bash">aws stepfunctions list-state-machines --region us-east-1 --query 'stateMachines[?starts_with(name, `dev-`)].name'
+</code></pre>
+<p>Expected:</p>
+<pre><code>dev-data-pipeline
+dev-extraction-pipeline
+</code></pre>
+<hr />
+<h2 id="7-running-tests-locally">7. Running Tests Locally</h2>
+<p>All tests use <code>moto</code> to mock AWS — no real AWS credentials needed for unit tests.</p>
+<h3 id="full-suite-recommended">Full suite (recommended)</h3>
+<pre><code class="language-bash">source .venv/bin/activate
+pytest --cov --cov-fail-under=80
+</code></pre>
+<h3 id="by-module">By module</h3>
+<pre><code class="language-bash"># Connector/extraction tests
+pytest connector_runtime/tests/ -v --no-cov
+
+# Transformation tests
+pytest transformation/tests/ -v --no-cov
+
+# Entity resolution tests
+pytest entity_resolution/tests/ -v --no-cov
+
+# Schema, watermark, observability, contracts, governance, orchestration
+pytest schema_management/tests watermark_management/tests observability/tests \
+       contracts/tests governance/tests orchestration/tests -v --no-cov
+</code></pre>
+<h3 id="full-ci-check-suite-same-as-github-actions">Full CI check suite (same as GitHub Actions)</h3>
+<pre><code class="language-bash">ruff check .                           # lint
+mypy .                                 # type check
+pytest --cov --cov-fail-under=80       # tests + coverage
+bandit -r . -c pyproject.toml          # SAST security scan
+pip-audit                              # dependency CVE scan
+</code></pre>
+<hr />
+<h2 id="8-running-pipelines">8. Running Pipelines</h2>
+<blockquote>
+<p><strong>Important:</strong> The <code>dev-edl-raw-layer</code> S3 bucket policy only allows writes from the Lambda execution role (<code>dev-extraction-runtime-role</code>). Local scripts can run with <code>--dry-run</code> for schema/connectivity checks, but full extraction must go through Step Functions.</p>
+</blockquote>
+<h3 id="dry-run-connectors-schema-connectivity-check-no-s3-write">Dry-run connectors (schema + connectivity check, no S3 write)</h3>
+<pre><code class="language-bash">export AWS_PROFILE=dev
+
+python scripts/run_mysql_connector_local.py \
+  --entity-id mysql-rds-contracts --dry-run
+
+python scripts/run_salesforce_connector_local.py \
+  --entity-id salesforce-account --dry-run
+
+python scripts/run_salesforce_connector_local.py \
+  --entity-id salesforce-contact --dry-run
+</code></pre>
+<h3 id="trigger-full-pipeline-via-step-functions">Trigger full pipeline via Step Functions</h3>
+<pre><code class="language-bash">export AWS_PROFILE=dev
+
+# MySQL RDS — Contracts (full load)
+python scripts/trigger_extraction.py \
+  --source-id mysql-rds \
+  --entity-id mysql-rds-contracts \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param table_name=Contracts
+
+# Salesforce — Account (full load)
+python scripts/trigger_extraction.py \
+  --source-id salesforce \
+  --entity-id salesforce-account \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param object_name=Account
+
+# Salesforce — Contact (incremental)
+python scripts/trigger_extraction.py \
+  --source-id salesforce \
+  --entity-id salesforce-contact \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param object_name=Contact
+</code></pre>
+<h3 id="query-analytics-output-via-athena">Query analytics output via Athena</h3>
+<pre><code class="language-sql">-- Latest companies
+SELECT * FROM dev_edl_analytics.company WHERE analytics_date='2026-06-29';
+
+-- Latest persons
+SELECT * FROM dev_edl_analytics.person WHERE analytics_date='2026-06-29';
+
+-- Latest contracts
+SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29';
+</code></pre>
+<hr />
+<h2 id="9-terraform-workflow">9. Terraform Workflow</h2>
+<pre><code class="language-bash"># Validate offline (no backend needed)
+terraform -chdir=infrastructure/environments/dev init -backend=false
+terraform -chdir=infrastructure/environments/dev validate
+
+# Real plan/apply
+cd infrastructure/environments/dev
+terraform init        # only needed after adding/changing modules
+terraform plan
+terraform apply -target=module.&lt;name&gt;
+</code></pre>
+<p><strong>Apply order matters:</strong></p>
+<pre><code class="language-bash"># 1. IAM first — provides role ARNs to everything else
+terraform apply -target=module.iam
+
+# 2. Lambdas (can apply together, need IAM done first)
+terraform apply -target=module.lambda_pipeline -target=module.transformation_lambda
+
+# 3. Orchestration last — needs all Lambda ARNs
+terraform apply -target=module.orchestration
+</code></pre>
+<blockquote>
+<p><strong>Critical:</strong> Run <code>terraform init</code> after adding any new module, even if the module directory already exists. Forgetting causes "Module not installed" error.</p>
+</blockquote>
+<hr />
+<h2 id="10-lambda-build-and-deploy">10. Lambda Build and Deploy</h2>
+<p>The single zip <code>dist/extraction-pipeline.zip</code> serves all Lambda functions (different handlers configured in Terraform).</p>
+<pre><code class="language-bash"># Build the zip
+make lambda-package
+
+# Upload to S3 (note the SHA-256 hash printed — save it for Terraform var)
+ARTIFACTS_BUCKET=dev-edl-terraform-state make lambda-upload
+
+# After any code change, update deployed Lambdas immediately
+AWS_PROFILE=dev aws lambda update-function-code \
+  --function-name dev-extraction-pipeline \
+  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --region us-east-1
+
+AWS_PROFILE=dev aws lambda update-function-code \
+  --function-name dev-transformation-pipeline \
+  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --region us-east-1
+
+AWS_PROFILE=dev aws lambda update-function-code \
+  --function-name dev-entity-resolution-pipeline \
+  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --region us-east-1
+
+AWS_PROFILE=dev aws lambda update-function-code \
+  --function-name dev-analytics-publisher \
+  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --region us-east-1
+</code></pre>
+<h3 id="lambda-handlers-reference">Lambda handlers reference</h3>
+<table>
+<thead>
+<tr>
+<th>Lambda</th>
+<th>Handler</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dev-extraction-pipeline</code></td>
+<td><code>connector_runtime.extraction_pipeline_handler.lambda_handler</code></td>
+</tr>
+<tr>
+<td><code>dev-transformation-pipeline</code></td>
+<td><code>transformation.transformation_pipeline_handler.lambda_handler</code></td>
+</tr>
+<tr>
+<td><code>dev-entity-resolution-pipeline</code></td>
+<td><code>entity_resolution.entity_resolution_pipeline_handler.lambda_handler</code></td>
+</tr>
+<tr>
+<td><code>dev-analytics-publisher</code></td>
+<td><code>analytics_publisher.analytics_publisher_handler.lambda_handler</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="11-seeding-configuration-data">11. Seeding Configuration Data</h2>
+<p>Entity configs drive all extraction behaviour. They must exist in DynamoDB before any pipeline run.</p>
+<pre><code class="language-bash">export AWS_PROFILE=dev
+
+# Seed all entity extraction configs to DynamoDB
+python scripts/seed_entity_config.py --environment dev --region us-east-1
+
+# Seed entity resolution configs to S3
+python scripts/seed_entity_resolution_configs.py --environment dev --region us-east-1
+</code></pre>
+<p>Configs are defined in <code>config/</code> — edit them there and re-seed, never directly in DynamoDB.</p>
+<hr />
+<h2 id="12-understanding-the-data-flow">12. Understanding the Data Flow</h2>
+<pre><code>EventBridge Scheduler (cron)
+    │
+    ▼
+Step Functions (dev-data-pipeline)
+    │
+    ├─ Step 1: dev-extraction-pipeline Lambda
+    │       Reads DynamoDB config → fetches from source API
+    │       Writes Parquet to: s3://dev-edl-raw-layer/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/
+    │       Updates watermark in DynamoDB
+    │
+    ├─ Step 2: dev-transformation-pipeline Lambda
+    │       Reads raw Parquet → applies field mapping JSON
+    │       Quality checks → PII masking
+    │       Writes to: s3://dev-edl-curated-layer/curated/{source_id}/{entity_id}/
+    │       Registers Glue table
+    │
+    ├─ Step 3: dev-entity-resolution-pipeline Lambda
+    │       Loads latest curated data from ALL sources per entity type
+    │       Runs matching (Jaro-Winkler + Jaccard)
+    │       Writes golden records to: s3://dev-edl-analytics-layer/canonical/{entity_type}/
+    │
+    └─ Step 4: dev-analytics-publisher Lambda
+            Writes partitioned analytics Parquet
+            Path: s3://dev-edl-analytics-layer/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet
+            Registers Glue partition → queryable in Athena
+</code></pre>
+<p><strong>Entity type mapping:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Source entity</th>
+<th>Entity type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>salesforce-account</code></td>
+<td><code>company</code></td>
+</tr>
+<tr>
+<td><code>salesforce-contact</code></td>
+<td><code>person</code></td>
+</tr>
+<tr>
+<td><code>mysql-rds-contracts</code></td>
+<td><code>contract</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="13-known-gotchas">13. Known Gotchas</h2>
+<ol>
+<li>
+<p><strong><code>terraform init</code> required after adding new modules</strong> — even if the module directory exists. Forgetting causes "Module not installed" error.</p>
+</li>
+<li>
+<p><strong>Terraform module apply order</strong> — <code>module.iam</code> → (<code>module.lambda_pipeline</code> + <code>module.transformation_lambda</code>) → <code>module.orchestration</code>. Orchestration fails at plan time if any Lambda ARN is empty.</p>
+</li>
+<li>
+<p><strong>DynamoDB tables are NOT Terraform-managed</strong> — pre-created manually with correct key schemas. Terraform uses <code>data "aws_dynamodb_table"</code> lookups. Never recreate them via Terraform.</p>
+</li>
+<li>
+<p><strong>Raw layer bucket rejects IAM user writes</strong> — <code>dev-edl-raw-layer</code> policy allows writes only from <code>dev-extraction-runtime-role</code> (Lambda). Local scripts must use <code>--dry-run</code>. Full runs go through Step Functions.</p>
+</li>
+<li>
+<p><strong>Entity config <code>s3://</code> prefix required</strong> — <code>target_raw_s3_prefix</code> and <code>schema_snapshot_s3_prefix</code> in entity configs must start with <code>s3://</code>. Bare paths fail Pydantic validation at runtime.</p>
+</li>
+<li>
+<p><strong>Salesforce <code>connector_params</code> must include <code>object_name</code></strong> — e.g. <code>{"object_name": "Account"}</code>. Missing this raises <code>ValueError</code> at runtime.</p>
+</li>
+<li>
+<p><strong>Field mapping <code>behavior</code> valid values</strong> — <code>raise_error</code>, <code>use_default</code>, <code>drop_field</code>. The value <code>use_null</code> does not exist and causes a validation error.</p>
+</li>
+<li>
+<p><strong>Glue domain name</strong> — source ID <code>mysql-rds</code> becomes <code>mysql_rds</code> in Glue (dashes → underscores for catalog naming compliance).</p>
+</li>
+<li>
+<p><strong>MySQL RDS is in <code>us-west-1</code></strong> — the platform is in <code>us-east-1</code>. Cross-region connectivity goes through NAT Gateway. NAT IP <code>3.208.252.220</code> must be whitelisted in the RDS security group.</p>
+</li>
+<li>
+<p><strong>S3 Hive partition paths require <code>=</code> in prefix pattern</strong> — paths like <code>extraction_date=2026-06-29</code> contain <code>=</code>. The <code>_SAFE_S3_PREFIX_PATTERN</code> regex must allow it.</p>
+</li>
+<li>
+<p><strong>Salesforce Bulk API returns <code>""</code> for null fields</strong> — treated as missing (becomes <code>None</code> via <code>use_default</code>). This is intentional. A genuine empty string in a Salesforce field will also be treated as missing.</p>
+</li>
+</ol>
+    </article>
+  </main>
+</body>
+</html>

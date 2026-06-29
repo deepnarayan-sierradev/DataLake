@@ -4,142 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Deployment Guide — Enterprise Data Lake Platform</title>
-  <style>
-:root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --muted: #475569;
-  --border: #e2e8f0;
-  --accent: #0f766e;
-  --code-bg: #f1f5f9;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  color: var(--text);
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-}
-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(15, 23, 42, 0.95);
-  color: #fff;
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-.header-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
-.file { font-size: 12px; opacity: 0.9; }
-main {
-  max-width: 1100px;
-  margin: 24px auto 48px;
-  padding: 0 20px;
-}
-article {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
-}
-h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
-h1 { margin-top: 0; font-size: 2rem; }
-h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
-h3 { font-size: 1.2rem; }
-p, li { color: var(--text); line-height: 1.65; }
-ul, ol { padding-left: 1.25rem; }
-code {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.1rem 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 0.92em;
-}
-pre {
-  background: #0b1020;
-  color: #e2e8f0;
-  border-radius: 10px;
-  padding: 14px;
-  overflow-x: auto;
-  border: 1px solid #1e293b;
-}
-pre code {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: inherit;
-}
-blockquote {
-  margin: 1em 0;
-  padding: 0.7em 1em;
-  border-left: 4px solid var(--accent);
-  background: #f0fdfa;
-  color: var(--muted);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1em 0;
-  font-size: 0.95rem;
-}
-th, td {
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-  text-align: left;
-  vertical-align: top;
-}
-th {
-  background: #f8fafc;
-  font-weight: 600;
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
-.toc {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: #f8fafc;
-  margin-bottom: 1rem;
-}
-.footer {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 14px;
-}
-@media (max-width: 760px) {
-  article { padding: 18px; border-radius: 10px; }
-  .header-inner { padding: 10px 14px; }
-  main { margin-top: 16px; padding: 0 12px; }
-}
-</style>
+  <style>:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#475569;--border:#e2e8f0;--accent:#0f766e;--code-bg:#f1f5f9}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%)}header{position:sticky;top:0;z-index:10;background:rgba(15,23,42,.95);color:#fff;backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,.1)}.header-inner{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:700;letter-spacing:.2px;font-size:14px}.file{font-size:12px;opacity:.9}main{max-width:1100px;margin:24px auto 48px;padding:0 20px}article{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;box-shadow:0 10px 35px rgba(15,23,42,.06)}h1,h2,h3,h4{line-height:1.25;margin-top:1.4em;margin-bottom:.55em}h1{margin-top:0;font-size:2rem}h2{font-size:1.45rem;border-top:1px solid var(--border);padding-top:1em}h3{font-size:1.2rem}p,li{color:var(--text);line-height:1.65}ul,ol{padding-left:1.25rem}code{background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:.92em}pre{background:#0b1020;color:#e2e8f0;border-radius:10px;padding:14px;overflow-x:auto;border:1px solid #1e293b}pre code{background:transparent;border:0;padding:0;color:inherit}blockquote{margin:1em 0;padding:.7em 1em;border-left:4px solid var(--accent);background:#f0fdfa;color:var(--muted)}table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.95rem}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:#f8fafc;font-weight:600}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}hr{border:0;border-top:1px solid var(--border);margin:1.6em 0}.footer{color:var(--muted);font-size:12px;margin-top:14px}@media(max-width:760px){article{padding:18px;border-radius:10px}.header-inner{padding:10px 14px}main{margin-top:16px;padding:0 12px}}</style>
 </head>
 <body>
-  <header>
-    <div class="header-inner">
-      <div class="brand">Enterprise Data Lake Documentation</div>
-      <div class="file">DEPLOYMENT_GUIDE.md</div>
-    </div>
-  </header>
-  <main>
-    <article>
-<h1 id="deployment-guide-enterprise-data-lake-platform">Deployment Guide — Enterprise Data Lake Platform</h1>
-<p><strong>Version:</strong> 2.0<br>
-<strong>Date:</strong> 2026-06-16<br>
-<strong>Audience:</strong> Platform engineers deploying to AWS for the first time, or promoting to a new environment</p>
-<hr>
+  <header><div class="header-inner"><div class="brand">Enterprise Data Lake Documentation</div><div class="file">DEPLOYMENT_GUIDE.md</div></div></header>
+  <main><article><h1 id="deployment-guide-enterprise-data-lake-platform">Deployment Guide — Enterprise Data Lake Platform</h1>
+<p><strong>Version:</strong> 3.0<br />
+<strong>Date:</strong> 2026-06-29<br />
+<strong>Audience:</strong> Platform engineers promoting to a new environment (staging/prod)</p>
+<blockquote>
+<p><strong>Dev environment is complete.</strong> Local and dev deployments are fully operational as of 2026-06-29. This guide is now focused on promoting to <strong>staging</strong> and <strong>production</strong>. For developer setup, see <a href="DEVELOPER_GUIDE.md">DEVELOPER_GUIDE.md</a>. For current resource names, see <a href="PLATFORM_STATUS.md">PLATFORM_STATUS.md</a>.</p>
+</blockquote>
+<hr />
 <h2 id="table-of-contents">Table of Contents</h2>
 <ol>
 <li><a href="#1-prerequisites">Prerequisites</a></li>
@@ -157,7 +33,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><a href="#13-verification-checklist">Verification Checklist</a></li>
 <li><a href="#14-troubleshooting">Troubleshooting</a></li>
 </ol>
-<hr>
+<hr />
 <h2 id="1-prerequisites">1. Prerequisites</h2>
 <h3 id="tools-required">Tools Required</h3>
 <p>Install the following on your workstation before proceeding:</p>
@@ -169,14 +45,14 @@ make --version       # GNU Make &gt;= 3.8
 zip --version        # standard zip utility
 openssl version      # for SHA-256 hash of Lambda package
 </code></pre>
-<p><strong>Install links:</strong><br>
-- Terraform: https://developer.hashicorp.com/terraform/install<br>
-- AWS CLI v2: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html<br>
-- pyenv + Python 3.14: see <a href="../README.html#developer-setup">README.md</a></p>
+<p><strong>Install links:</strong>
+- Terraform: https://developer.hashicorp.com/terraform/install
+- AWS CLI v2: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+- pyenv + Python 3.14: see <a href="../README.md#developer-setup">README.md</a></p>
 <h3 id="aws-account-requirements">AWS Account Requirements</h3>
-<p>You need an AWS account with:<br>
-- An IAM user or role with <code>AdministratorAccess</code> <strong>for the bootstrap step only</strong> — after bootstrap you use the least-privilege CI/CD role<br>
-- AWS CLI configured: <code>aws configure</code> (sets <code>~/.aws/credentials</code> and <code>~/.aws/config</code>)<br>
+<p>You need an AWS account with:
+- An IAM user or role with <code>AdministratorAccess</code> <strong>for the bootstrap step only</strong> — after bootstrap you use the least-privilege CI/CD role
+- AWS CLI configured: <code>aws configure</code> (sets <code>~/.aws/credentials</code> and <code>~/.aws/config</code>)
 - Your account ID: <code>aws sts get-caller-identity --query Account --output text</code></p>
 <h3 id="repository-setup">Repository Setup</h3>
 <pre><code class="language-bash">git clone https://github.com/YOUR_ORG/enterprise-data-lake.git
@@ -190,13 +66,13 @@ make install
 # Confirm all tests pass (safety check before deploy)
 make test
 </code></pre>
-<hr>
+<hr />
 <h2 id="2-aws-prerequisites-must-exist-before-terraform">2. AWS Prerequisites — Must Exist Before Terraform</h2>
 <blockquote>
 <p><strong>Critical:</strong> Terraform manages almost all AWS resources in this platform, but a small set of resources <strong>must be created manually before <code>terraform init</code> can run</strong>. These are bootstrapping dependencies — Terraform cannot create its own remote state backend using itself.</p>
 <p>Additionally, several resources must exist <strong>before</strong> specific Terraform modules are applied, because those modules reference them as data sources (<code>data "aws_..."</code>).</p>
 </blockquote>
-<hr>
+<hr />
 <h3 id="21-terraform-remote-state-backend-per-environment">2.1 Terraform Remote State Backend (per environment)</h3>
 <p>These three resources must exist <strong>before</strong> <code>terraform init</code>. They hold Terraform's own state file and prevent concurrent applies from corrupting it.</p>
 <table>
@@ -226,7 +102,7 @@ make test
 </tbody>
 </table>
 <p><strong>Why Terraform cannot create these itself:</strong> The S3 backend configuration in <code>backend.tf</code> is resolved <em>before</em> any Terraform resources are applied. If the bucket doesn't exist, <code>terraform init</code> fails immediately with <code>NoSuchBucket</code>. There is no way around this — it is a fundamental constraint of how Terraform remote state works.</p>
-<hr>
+<hr />
 <h3 id="22-github-actions-oidc-provider">2.2 GitHub Actions OIDC Provider</h3>
 <p>The CI/CD deployment role (created by the <code>iam</code> Terraform module) trusts GitHub Actions via OIDC federation. The OIDC provider must be registered in your AWS account <strong>once</strong> before Terraform applies the IAM module.</p>
 <p><strong>Why Terraform cannot create this automatically:</strong> The OIDC provider is an account-level resource. Creating it inside the <code>iam</code> module would create a separate provider per environment (<code>dev</code>, <code>staging</code>, <code>prod</code>) which would conflict. It must be registered once at the account level.</p>
@@ -243,7 +119,7 @@ make test
 <blockquote>
 <p><strong>Note:</strong> The thumbprint <code>6938fd4d98bab03faadb97b34396831e3780aea1</code> is the GitHub Actions OIDC thumbprint as of 2026. Verify it against <a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect">GitHub's current documentation</a> before registering.</p>
 </blockquote>
-<hr>
+<hr />
 <h3 id="23-lambda-deployment-package-in-s3">2.3 Lambda Deployment Package in S3</h3>
 <p>The <code>lambda_pipeline</code> Terraform module references a Lambda zip file in S3 via <code>var.lambda_package_s3_bucket</code> and <code>var.lambda_package_s3_key</code>. If the zip does not exist in S3 at <code>terraform apply</code> time, the <code>aws_lambda_function</code> resource will fail.</p>
 <p><strong>Correct order:</strong></p>
@@ -257,7 +133,7 @@ terraform apply              # now safe to apply
   S3 Error Code: NoSuchKey
 </code></pre>
 <p>Fix: upload the zip first, then re-run <code>terraform apply</code>.</p>
-<hr>
+<hr />
 <h3 id="24-vpc-tagged-with-environment-name">2.4 VPC Tagged with Environment Name</h3>
 <p>The <code>lambda_pipeline</code> module locates the VPC to place Lambda into using a tag filter:</p>
 <pre><code class="language-hcl">data &quot;aws_vpc&quot; &quot;selected&quot; {
@@ -275,7 +151,7 @@ terraform apply              # now safe to apply
   --filters &quot;Name=tag:Environment,Values=dev&quot; \
   --query &quot;Vpcs[*].{VpcId:VpcId,State:State,CIDR:CidrBlock}&quot;
 </code></pre>
-<hr>
+<hr />
 <h3 id="25-five-pipeline-lambda-arns-for-step-functions-state-machine">2.5 Five Pipeline Lambda ARNs (for Step Functions state machine)</h3>
 <p>The orchestration module's Step Functions state machine references <strong>five Lambda function ARNs</strong> — one per pipeline stage. These are passed in as Terraform variables (<code>var.extraction_pipeline_lambda_arn</code>, etc.).</p>
 <p><strong>These must be deployed Lambda functions before <code>terraform apply</code> is run for the orchestration module.</strong></p>
@@ -290,7 +166,7 @@ terraform apply              # now safe to apply
   var.transformation_pipeline_lambda_arn
 </code></pre>
 <p>Fix: deploy the Lambda functions first, then set the ARNs in <code>terraform.tfvars</code>.</p>
-<hr>
+<hr />
 <h3 id="26-source-system-network-access">2.6 Source System Network Access</h3>
 <p>The extraction Lambda runs inside a private VPC and reaches external source systems (Salesforce, NetSuite) via NAT Gateway. Before the first extraction run:</p>
 <table>
@@ -327,7 +203,7 @@ terraform output nat_gateway_public_ips
 <blockquote>
 <p><strong>Important:</strong> If you ever recreate the NAT Gateways (e.g. by destroying and recreating networking), the public IPs change and you must update all source system allowlists before extractions will succeed.</p>
 </blockquote>
-<hr>
+<hr />
 <h3 id="27-sns-email-subscription-confirmation">2.7 SNS Email Subscription Confirmation</h3>
 <p>Terraform creates the SNS alert topic and subscribes <code>var.alert_email</code> to it. AWS sends a confirmation email to that address. <strong>CloudWatch alarms will not deliver notifications until the subscription is confirmed.</strong></p>
 <p><strong>After <code>terraform apply</code>:</strong> Check the inbox for <code>alert_email</code> and click "Confirm subscription" within 72 hours. If the email expires, re-subscribe:</p>
@@ -337,7 +213,7 @@ terraform output nat_gateway_public_ips
   --notification-endpoint &quot;ops@yourcompany.com&quot; \
   --region us-east-1
 </code></pre>
-<hr>
+<hr />
 <h3 id="28-aws-service-limits-to-check">2.8 AWS Service Limits to Check</h3>
 <p>For production deployments, verify these service limits in your AWS account <strong>before applying</strong>. The defaults are sufficient for dev but may need increasing for staging/prod.</p>
 <table>
@@ -400,7 +276,7 @@ terraform output nat_gateway_public_ips
   --query &quot;Quotas[?QuotaName=='Concurrent executions'].[Value,QuotaArn]&quot; \
   --region us-east-1
 </code></pre>
-<hr>
+<hr />
 <h3 id="summary-complete-prerequisites-checklist">Summary — Complete Prerequisites Checklist</h3>
 <p>Before running <code>terraform init</code> for any environment:</p>
 <ul>
@@ -417,7 +293,7 @@ terraform output nat_gateway_public_ips
 <li>[ ] SNS subscription confirmation email clicked (after first Terraform apply)</li>
 <li>[ ] AWS service limits reviewed for production</li>
 </ul>
-<hr>
+<hr />
 <h2 id="3-deployment-overview-the-six-phases">3. Deployment Overview — The Six Phases</h2>
 <pre><code>PHASE 1             PHASE 2                  PHASE 3              PHASE 4
 BOOTSTRAP           INFRASTRUCTURE           APPLICATION          PIPELINE CONFIG
@@ -439,7 +315,7 @@ python scripts/seed_entity_config.py       (publishes JSON files from config/ to
 Set EventBridge schedules               → Verify first automated end-to-end run
 (ExtractionScheduleClient)
 </code></pre>
-<hr>
+<hr />
 <h2 id="4-phase-1-bootstrap-one-time-only">4. Phase 1 — Bootstrap (One-time Only)</h2>
 <p>The Terraform remote state backend (S3 bucket + DynamoDB lock table) must exist <strong>before</strong> <code>terraform init</code> can run. This is a manual one-time step.</p>
 <h3 id="step-11-set-environment-variables">Step 1.1 — Set environment variables</h3>
@@ -505,7 +381,7 @@ echo &quot;KMS key ID: ${KEY_ID}&quot;
   }
 }
 </code></pre>
-<hr>
+<hr />
 <h2 id="5-phase-2-infrastructure-deployment-terraform">5. Phase 2 — Infrastructure Deployment (Terraform)</h2>
 <h3 id="step-21-configure-terraformtfvars">Step 2.1 — Configure terraform.tfvars</h3>
 <p>Edit <code>infrastructure/environments/dev/terraform.tfvars</code>:</p>
@@ -522,8 +398,8 @@ lambda_package_s3_bucket   = &quot;dev-edl-terraform-state&quot;
 lambda_package_s3_key      = &quot;lambda/extraction-pipeline.zip&quot;
 lambda_package_source_hash = &quot;&quot;   # Fill in after running make lambda-package
 </code></pre>
-<p>For higher environments, start from the new templates:<br>
-- <code>infrastructure/environments/staging/terraform.tfvars.example</code><br>
+<p>For higher environments, start from the new templates:
+- <code>infrastructure/environments/staging/terraform.tfvars.example</code>
 - <code>infrastructure/environments/prod/terraform.tfvars.example</code></p>
 <blockquote>
 <p><strong>Note:</strong> <code>terraform.tfvars</code> is committed to source control. Never put passwords, tokens, or secrets here. Secrets go in Secrets Manager (Step 6).</p>
@@ -673,7 +549,7 @@ cat /tmp/dev-outputs.json
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h2 id="6-phase-3-application-deployment-lambda">6. Phase 3 — Application Deployment (Lambda)</h2>
 <blockquote>
 <p><strong>Prerequisite:</strong> Phase 2 Terraform apply must be complete so the S3 artifacts bucket exists for the Lambda zip upload.</p>
@@ -771,7 +647,7 @@ aws lambda get-function --function-name dev-serving-store-loader \
 done
 </code></pre>
 <p>All five should show <code>State: Active</code>.</p>
-<hr>
+<hr />
 <h2 id="7-phase-4-automatic-pipeline-configuration-step-functions">7. Phase 4 — Automatic Pipeline Configuration (Step Functions)</h2>
 <p>This phase wires all five Lambda functions into the Step Functions state machine that runs the full end-to-end pipeline automatically.</p>
 <h3 id="step-41-add-lambda-arns-to-terraformtfvars">Step 4.1 — Add Lambda ARNs to terraform.tfvars</h3>
@@ -889,7 +765,7 @@ aws s3 cp s3://${ENV}-edl-curated/quality-reports/salesforce/salesforce-account/
 aws s3 ls s3://${ENV}-edl-analytics/canonical/ --recursive
 aws s3 ls s3://${ENV}-edl-analytics/ --recursive
 </code></pre>
-<hr>
+<hr />
 <h2 id="8-phase-5-data-configuration-dynamodb-seeds-secrets">8. Phase 5 — Data Configuration (DynamoDB Seeds + Secrets)</h2>
 <h3 id="step-61-populate-source-credentials-in-secrets-manager">Step 6.1 — Populate source credentials in Secrets Manager</h3>
 <p>This step stores actual credentials. <strong>Do this from a secure workstation only.</strong> Never commit credential values to git.</p>
@@ -965,7 +841,7 @@ aws s3 ls s3://${ENV}-edl-analytics/ --recursive
 <p>Repeat for each entity. To see all available options:</p>
 <pre><code class="language-bash">python scripts/trigger_extraction.py --help
 </code></pre>
-<hr>
+<hr />
 <h2 id="9-phase-6-field-mapping-configuration">9. Phase 6 — Field Mapping Configuration</h2>
 <p>Field mapping tells the transformation pipeline how to rename source fields to canonical business names. <strong>If you don't provide a mapping, the pipeline uses identity mapping (field names passed through unchanged).</strong></p>
 <h3 id="where-field-mappings-are-stored">Where field mappings are stored</h3>
@@ -1181,7 +1057,7 @@ print(f&quot;Published to: {key}&quot;)
 </code></pre>
 <h3 id="updating-a-field-mapping">Updating a field mapping</h3>
 <p>To update, create a new JSON file with an incremented <code>mapping_version</code> (e.g. <code>"1.1.0"</code>) and upload it. The <code>latest.json</code> pointer is updated automatically. The next transformation run picks up the new version. Old versions remain in S3 for replay.</p>
-<hr>
+<hr />
 <h2 id="10-phase-7-entity-resolution-config">10. Phase 7 — Entity Resolution Config</h2>
 <p>Entity resolution match rules and survivorship policies are stored as <strong>versioned JSON config files in S3</strong> — analogous to field mappings but for entity identity and canonical output schema.</p>
 <h3 id="where-entity-resolution-configs-are-stored">Where entity resolution configs are stored</h3>
@@ -1258,12 +1134,12 @@ done
 aws s3 cp s3://dev-edl-curated/entity-resolution/company/latest.json -
 # Expected: {&quot;match_rules_version&quot;: &quot;v1&quot;, &quot;survivorship_version&quot;: &quot;v1&quot;}
 </code></pre>
-<hr>
+<hr />
 <h2 id="11-all-aws-settings-reference-what-to-set-and-where">11. All AWS Settings Reference — What to Set and Where</h2>
 <h3 id="a-terraformtfvars-infrastructure-settings">A. <code>terraform.tfvars</code> — Infrastructure settings</h3>
 <p>File: <code>infrastructure/environments/{env}/terraform.tfvars</code></p>
-<p>Template files for promotion:<br>
-- <code>infrastructure/environments/staging/terraform.tfvars.example</code><br>
+<p>Template files for promotion:
+- <code>infrastructure/environments/staging/terraform.tfvars.example</code>
 - <code>infrastructure/environments/prod/terraform.tfvars.example</code></p>
 <table>
 <thead>
@@ -1382,8 +1258,8 @@ aws s3 cp s3://dev-edl-curated/entity-resolution/company/latest.json -
 </tr>
 </tbody>
 </table>
-<p><strong>How to set:</strong> <code>aws secretsmanager put-secret-value</code> (see Step 6.1 above)<br>
-<strong>Who can read:</strong> Only the <code>extraction-service-role</code> IAM role (enforced by Secrets Manager resource policy)<br>
+<p><strong>How to set:</strong> <code>aws secretsmanager put-secret-value</code> (see Step 6.1 above)<br />
+<strong>Who can read:</strong> Only the <code>extraction-service-role</code> IAM role (enforced by Secrets Manager resource policy)<br />
 <strong>Where configured:</strong> <code>infrastructure/modules/secrets/main.tf</code> — the secret ARNs and resource policies are created by Terraform</p>
 <h3 id="d-dynamodb-entity-extraction-configuration">D. DynamoDB — Entity extraction configuration</h3>
 <p>Table: <code>{environment}-entity-extraction-config</code></p>
@@ -1409,13 +1285,13 @@ aws s3 cp s3://dev-edl-curated/entity-resolution/company/latest.json -
 <tr>
 <td>New source system</td>
 <td>Add adapter code + seed record + register credential</td>
-<td>See <a href="PLATFORM_FLOW.html#10-adding-a-new-connector">docs/PLATFORM_FLOW.md — Adding a New Connector</a></td>
+<td>See <a href="PLATFORM_FLOW.md#10-adding-a-new-connector">docs/PLATFORM_FLOW.md — Adding a New Connector</a></td>
 </tr>
 </tbody>
 </table>
 <p>Key fields you will configure per entity: <code>load_type</code>, <code>watermark_field</code>, <code>field_mode</code>, <code>exclude_fields</code>, <code>extraction_window_days</code>.</p>
 <h3 id="e-s3-field-mapping-configuration">E. S3 — Field mapping configuration</h3>
-<p>Bucket: <code>{environment}-edl-mapping-config</code><br>
+<p>Bucket: <code>{environment}-edl-mapping-config</code><br />
 Prefix: <code>field-mappings/{source_id}/{entity_id}/</code></p>
 <table>
 <thead>
@@ -1471,8 +1347,8 @@ Prefix: <code>field-mappings/{source_id}/{entity_id}/</code></p>
 </tr>
 </tbody>
 </table>
-<p><strong>To update a schedule:</strong> <code>python scripts/trigger_extraction.py --update-schedule ...</code><br>
-<strong>To disable a schedule:</strong> <code>python scripts/trigger_extraction.py --disable-schedule ...</code><br>
+<p><strong>To update a schedule:</strong> <code>python scripts/trigger_extraction.py --update-schedule ...</code><br />
+<strong>To disable a schedule:</strong> <code>python scripts/trigger_extraction.py --disable-schedule ...</code><br />
 <strong>No Terraform change needed</strong> for schedule changes.</p>
 <h3 id="g-lambda-environment-variables">G. Lambda environment variables</h3>
 <p>These are set by Terraform in <code>infrastructure/modules/lambda_pipeline/main.tf</code>. After Terraform apply, Lambda has:</p>
@@ -1621,18 +1497,18 @@ Prefix: <code>field-mappings/{source_id}/{entity_id}/</code></p>
 </tbody>
 </table>
 <blockquote>
-<p><strong>Verification:</strong> After <code>terraform apply</code>, confirm no role has wildcard permissions:<br>
+<p><strong>Verification:</strong> After <code>terraform apply</code>, confirm no role has wildcard permissions:
 ```bash</p>
 <h1 id="check-no-policy-has-resource-with-action">Check no policy has Resource: "<em>" with Action: "</em>"</h1>
-<p>aws iam list-policies --scope Local --query "Policies[*].PolicyName" --output text | \<br>
-  xargs -I{} aws iam get-policy-version \<br>
-    --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/{}" \<br>
-    --version-id v1 --query "PolicyVersion.Document" | \<br>
+<p>aws iam list-policies --scope Local --query "Policies[*].PolicyName" --output text | \
+  xargs -I{} aws iam get-policy-version \
+    --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/{}" \
+    --version-id v1 --query "PolicyVersion.Document" | \
   grep -c '"Resource": "*"'</p>
 <h1 id="expected-0">Expected: 0</h1>
 <p>```</p>
 </blockquote>
-<hr>
+<hr />
 <h2 id="12-promoting-to-staging-and-production">12. Promoting to Staging and Production</h2>
 <p>The deployment process for staging and production is the same as dev — the environment directory changes, and a few additional steps apply because the full automatic pipeline (5-stage Step Functions state machine) requires all Lambda ARNs before Terraform can apply the orchestration module.</p>
 <h3 id="step-111-complete-aws-prerequisites-for-the-new-environment">Step 11.1 — Complete AWS Prerequisites for the new environment</h3>
@@ -1752,7 +1628,7 @@ done
 <li>[ ] Manual approval gate in CI/CD pipeline signed off by platform lead</li>
 <li>[ ] Runbook for production incident response reviewed and current</li>
 </ul>
-<hr>
+<hr />
 <h2 id="13-verification-checklist">13. Verification Checklist</h2>
 <p>After completing all phases, verify the full deployment is healthy.</p>
 <h3 id="infrastructure">Infrastructure</h3>
@@ -1906,7 +1782,7 @@ aws sns list-subscriptions-by-topic \
   --query &quot;Subscriptions[*].[Protocol,Endpoint,SubscriptionArn]&quot; \
   --output table
 </code></pre>
-<hr>
+<hr />
 <h2 id="14-troubleshooting">14. Troubleshooting</h2>
 <table>
 <thead>
@@ -1994,24 +1870,251 @@ aws sns list-subscriptions-by-topic \
 </tr>
 </tbody>
 </table>
-      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
-
-<hr>
-<h2 id="technology-stack-reference">Technology Stack Reference</h2>
+<hr />
+<h2 id="technology-stack-and-version-reference">Technology Stack and Version Reference</h2>
+<p>Complete authoritative version reference for all tools used in deployment.</p>
+<h3 id="infrastructure-and-provisioning">Infrastructure and Provisioning</h3>
 <table>
-<thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Required version</th>
+<th>Verify with</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Cloud</td><td><strong>AWS</strong> (EventBridge, Step Functions, Lambda, ECS Fargate, S3, DynamoDB, Secrets Manager, Glue, Athena, RDS MySQL, SQS, CloudWatch, X-Ray, SNS, KMS, IAM, VPC)</td></tr>
-<tr><td>Data format</td><td><strong>Apache Parquet</strong> (Snappy) for data layers; <strong>JSON</strong> for configs and reports</td></tr>
-<tr><td>Source APIs</td><td><strong>Salesforce Bulk API 2.0</strong>; <strong>NetSuite SuiteQL REST</strong>; <strong>MySQL JDBC</strong> via <code>pymysql</code></td></tr>
-<tr><td>Language</td><td><strong>Python 3.14</strong> — Pydantic v2, structlog ≥ 24.4, pyarrow, boto3, pymysql, requests</td></tr>
-<tr><td>Infrastructure</td><td><strong>Terraform</strong> ≥ 1.8 (AWS Provider ~&gt; 5.0); 3 environments: dev / staging / prod</td></tr>
-<tr><td>CI/CD</td><td><strong>GitHub Actions</strong> — 7-stage gate: Ruff → mypy → pytest → bandit → pip-audit → checkov → terraform validate</td></tr>
-<tr><td>Security algorithms</td><td><strong>HMAC-SHA256</strong> (PII tokenisation); <strong>SHA-256</strong> (field fingerprinting); <strong>Jaro-Winkler</strong> + <strong>Jaccard</strong> (entity resolution)</td></tr>
-<tr><td>Testing</td><td><strong>pytest</strong> + <strong>moto</strong> ≥ 5.0 (AWS mocking); ≥ 80% coverage gate enforced in CI</td></tr>
+<tr>
+<td><strong>Terraform</strong></td>
+<td>≥ 1.8, &lt; 2.0</td>
+<td><code>terraform version</code></td>
+</tr>
+<tr>
+<td><strong>AWS Terraform Provider</strong></td>
+<td>~&gt; 5.0</td>
+<td>Declared in <code>infrastructure/modules/*/versions.tf</code></td>
+</tr>
+<tr>
+<td><strong>AWS CLI</strong></td>
+<td>v2 (any recent)</td>
+<td><code>aws --version</code></td>
+</tr>
+<tr>
+<td><strong>Python</strong></td>
+<td>3.14.x</td>
+<td><code>python --version</code> (managed via pyenv)</td>
+</tr>
+<tr>
+<td><strong>pyenv</strong></td>
+<td>2.7.2+</td>
+<td><code>pyenv --version</code></td>
+</tr>
+<tr>
+<td><strong>GNU Make</strong></td>
+<td>≥ 3.8</td>
+<td><code>make --version</code></td>
+</tr>
 </tbody>
 </table>
-    </article>
-  </main>
+<h3 id="python-runtime-dependencies">Python Runtime Dependencies</h3>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Minimum version</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>pydantic</strong></td>
+<td>≥ 2.7</td>
+<td>Frozen data model validation</td>
+</tr>
+<tr>
+<td><strong>structlog</strong></td>
+<td>≥ 24.4</td>
+<td>Structured JSON logging + PII scrubbing</td>
+</tr>
+<tr>
+<td><strong>boto3</strong></td>
+<td>Latest</td>
+<td>AWS SDK</td>
+</tr>
+<tr>
+<td><strong>pyarrow</strong></td>
+<td>Latest</td>
+<td>Apache Parquet I/O</td>
+</tr>
+<tr>
+<td><strong>pymysql</strong></td>
+<td>Latest</td>
+<td>MySQL RDS connector</td>
+</tr>
+<tr>
+<td><strong>requests</strong></td>
+<td>Latest</td>
+<td>Salesforce + NetSuite HTTP client</td>
+</tr>
+</tbody>
+</table>
+<h3 id="code-quality-gate-all-must-pass-before-deploy">Code Quality Gate (all must pass before deploy)</h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Min version</th>
+<th>Command</th>
+<th>Gate enforced by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Ruff</strong></td>
+<td>≥ 0.5</td>
+<td><code>ruff check .</code></td>
+<td>GitHub Actions <code>ci.yml</code></td>
+</tr>
+<tr>
+<td><strong>mypy</strong></td>
+<td>≥ 1.10</td>
+<td><code>mypy .</code></td>
+<td>GitHub Actions <code>ci.yml</code></td>
+</tr>
+<tr>
+<td><strong>pytest</strong></td>
+<td>Latest</td>
+<td><code>pytest --cov --cov-fail-under=80</code></td>
+<td>GitHub Actions <code>ci.yml</code></td>
+</tr>
+<tr>
+<td><strong>bandit</strong></td>
+<td>≥ 1.7</td>
+<td><code>bandit -r . -c pyproject.toml</code></td>
+<td>GitHub Actions <code>ci.yml</code></td>
+</tr>
+<tr>
+<td><strong>pip-audit</strong></td>
+<td>≥ 2.7</td>
+<td><code>pip-audit</code></td>
+<td>GitHub Actions <code>ci.yml</code></td>
+</tr>
+<tr>
+<td><strong>checkov</strong></td>
+<td>Latest</td>
+<td><code>checkov -d infrastructure/</code></td>
+<td>GitHub Actions <code>ci.yml</code></td>
+</tr>
+<tr>
+<td><strong>Terraform validate</strong></td>
+<td>N/A</td>
+<td><code>terraform validate</code></td>
+<td>GitHub Actions <code>ci.yml</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="aws-services-deployed-per-environment">AWS Services Deployed (per environment)</h3>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Resource name pattern</th>
+<th>Deployed by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>S3</strong></td>
+<td><code>{env}-edl-raw-layer</code>, <code>{env}-edl-curated-layer</code>, <code>{env}-edl-analytics-layer</code>, <code>{env}-edl-schema-snapshots</code></td>
+<td><code>infrastructure/modules/storage/</code></td>
+</tr>
+<tr>
+<td><strong>KMS</strong></td>
+<td>alias <code>{env}-edl-platform-key</code></td>
+<td><code>infrastructure/modules/kms/</code></td>
+</tr>
+<tr>
+<td><strong>VPC</strong></td>
+<td><code>{env}-edl-vpc</code>; 3 private subnets; 5 VPC Endpoints</td>
+<td><code>infrastructure/modules/networking/</code></td>
+</tr>
+<tr>
+<td><strong>IAM</strong></td>
+<td>5 service roles + 1 OIDC CI/CD role</td>
+<td><code>infrastructure/modules/iam/</code></td>
+</tr>
+<tr>
+<td><strong>DynamoDB</strong></td>
+<td><code>{env}-entity-extraction-config</code>, <code>{env}-watermark-repository</code>, <code>{env}-run-audit-log</code>, <code>{env}-source-onboarding</code></td>
+<td><code>infrastructure/modules/metadata_persistence/</code></td>
+</tr>
+<tr>
+<td><strong>Secrets Manager</strong></td>
+<td><code>{env}/sources/salesforce/credentials</code>, <code>{env}/sources/netsuite/credentials</code>, <code>{env}/sources/mysql-rds/credentials</code></td>
+<td><code>infrastructure/modules/secrets/</code></td>
+</tr>
+<tr>
+<td><strong>Step Functions</strong></td>
+<td><code>{env}-extraction-orchestration-workflow</code></td>
+<td><code>infrastructure/modules/orchestration/</code></td>
+</tr>
+<tr>
+<td><strong>CloudWatch</strong></td>
+<td>5 log groups; namespace <code>EnterpriseDatalake</code>; 4 alarms; X-Ray group</td>
+<td><code>infrastructure/modules/observability/</code></td>
+</tr>
+<tr>
+<td><strong>SNS</strong></td>
+<td><code>{env}-edl-platform-alerts</code></td>
+<td><code>infrastructure/modules/observability/</code></td>
+</tr>
+<tr>
+<td><strong>SQS (DLQ)</strong></td>
+<td><code>{env}-extraction-dlq</code></td>
+<td><code>infrastructure/modules/metadata_persistence/</code></td>
+</tr>
+<tr>
+<td><strong>Glue Data Catalog</strong></td>
+<td><code>{env}_curated</code>, <code>{env}_analytics</code> databases</td>
+<td>Created at runtime by transformation pipeline</td>
+</tr>
+<tr>
+<td><strong>EventBridge Schedules</strong></td>
+<td><code>{source_id}--{entity_id}</code></td>
+<td>Managed at runtime via <code>extraction_schedule_client.py</code></td>
+</tr>
+<tr>
+<td><strong>RDS MySQL</strong></td>
+<td><code>{env}-edl-serving-store</code></td>
+<td><code>infrastructure/modules/serving_store/</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="data-format-specifications">Data Format Specifications</h3>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Spec</th>
+<th>Storage layer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Apache Parquet</strong></td>
+<td>Raw: <code>large_utf8</code> columns (no type coercion); Curated/Analytics: Snappy-compressed</td>
+<td>All data lake layers</td>
+</tr>
+<tr>
+<td><strong>JSON</strong></td>
+<td>UTF-8; no BOM</td>
+<td>Config files, snapshots, reports, lineage</td>
+</tr>
+<tr>
+<td><strong>DynamoDB Item</strong></td>
+<td>Native DynamoDB JSON serialisation</td>
+<td>Config, watermark, audit, onboarding tables</td>
+</tr>
+</tbody>
+</table></article></main>
 </body>
 </html>

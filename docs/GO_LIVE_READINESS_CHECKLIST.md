@@ -2,7 +2,10 @@
 
 **For:** Project manager, platform engineering lead, operations  
 **Purpose:** Verify all systems are ready before production activation  
-**Date:** 2026-06-17
+**Last updated:** 2026-06-29
+
+> **Environment status:** Dev ✅ complete | Staging 🔲 in progress | Production 🔲 pending  
+> Items marked ✅ are already verified in the dev environment. Use this checklist when promoting to **staging** then **prod** — check off each item per environment before proceeding.
 
 ---
 

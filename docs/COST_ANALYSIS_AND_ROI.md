@@ -2,7 +2,7 @@
 
 **For:** Finance, Leadership, Procurement  
 **Document version:** 1.0  
-**Date:** 2026-06-17
+**Date:** 2026-06-29
 
 ---
 

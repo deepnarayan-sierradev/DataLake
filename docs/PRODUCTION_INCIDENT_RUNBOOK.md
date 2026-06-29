@@ -2,7 +2,11 @@
 
 **For:** On-call engineers, operations team, support  
 **Purpose:** Quick response guide for common incidents  
-**Last updated:** 2026-06-17
+**Last updated:** 2026-06-29
+
+> **Lambda functions (prod):** `prod-extraction-pipeline` · `prod-transformation-pipeline` · `prod-entity-resolution-pipeline` · `prod-analytics-publisher`  
+> **Key buckets:** `prod-edl-raw-layer` · `prod-edl-curated-layer` · `prod-edl-analytics-layer` · `prod-edl-schema-snapshots`  
+> For dev equivalents replace `prod-` with `dev-`. See [PLATFORM_STATUS.md](PLATFORM_STATUS.md) for all resource names.
 
 ---
 
@@ -203,7 +207,7 @@ Timeline: Update policy, re-run transformation
 
 ```bash
 # Download current policy
-aws s3 cp s3://prod-schema-snapshots/quality_policies/salesforce-account.json ./
+aws s3 cp s3://prod-edl-schema-snapshots/quality_policies/salesforce-account.json ./
 
 # Edit policy file: change blocking violation to WARNING or update regex pattern
 # Example: change email pattern from strict to permissive
@@ -213,7 +217,7 @@ aws s3 cp s3://prod-schema-snapshots/quality_policies/salesforce-account.json ./
 python -m json.tool salesforce-account.json
 
 # Upload updated policy
-aws s3 cp salesforce-account.json s3://prod-schema-snapshots/quality_policies/
+aws s3 cp salesforce-account.json s3://prod-edl-schema-snapshots/quality_policies/
 
 # Trigger transformation re-run with new policy
 aws lambda invoke \
@@ -241,7 +245,7 @@ aws lambda invoke \
 
 ```bash
 # Get the drift report from S3
-aws s3 cp s3://prod-schema-snapshots/drift_reports/salesforce-account/2026-06-17.json - | jq '.'
+aws s3 cp s3://prod-edl-schema-snapshots/drift_reports/salesforce-account/2026-06-17.json - | jq '.'
 
 # Example output:
 # {
@@ -291,14 +295,14 @@ aws rds-data execute-statement \
 
 ```bash
 # Update schema snapshot to reflect new schema
-aws s3 cp s3://prod-schema-snapshots/schemas/salesforce-account/latest.json ./schema-latest.json
+aws s3 cp s3://prod-edl-schema-snapshots/schemas/salesforce-account/latest.json ./schema-latest.json
 
 # Update field mapping to exclude removed field
-aws s3 cp s3://prod-schema-snapshots/field_mappings/salesforce-account/v1.json ./mapping-v1.json
+aws s3 cp s3://prod-edl-schema-snapshots/field_mappings/salesforce-account/v1.json ./mapping-v1.json
 # Edit: remove any reference to LegacyAccountId__c
 # Save as v2.json
 
-aws s3 cp ./mapping-v2.json s3://prod-schema-snapshots/field_mappings/salesforce-account/v2.json
+aws s3 cp ./mapping-v2.json s3://prod-edl-schema-snapshots/field_mappings/salesforce-account/v2.json
 
 # Update entity config to reference new mapping version
 aws dynamodb update-item \
@@ -380,7 +384,7 @@ aws logs tail /aws/lambda/extraction --since 30m --follow
 ```bash
 # Check raw data write throughput
 aws s3api list-objects-v2 \
-  --bucket prod-raw-layer \
+  --bucket prod-edl-raw-layer \
   --prefix salesforce/salesforce-account/extraction_date=2026-06-17 \
   --query 'Contents | length'
 
@@ -678,7 +682,7 @@ aws stepfunctions list-executions \
   --max-results 5
 
 # Check latest schema snapshot
-aws s3 cp s3://prod-schema-snapshots/salesforce/salesforce-account/latest.json -
+aws s3 cp s3://prod-edl-schema-snapshots/salesforce/salesforce-account/latest.json -
 
 # Check CloudWatch alarm state
 aws cloudwatch describe-alarms \

@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Platform Status — Enterprise Data Lake</title>
+  <style>
+:root {
+  --bg: #f8fafc; --surface: #ffffff; --text: #0f172a; --muted: #475569;
+  --border: #e2e8f0; --accent: #0f766e; --code-bg: #f1f5f9;
+}
+* { box-sizing: border-box; }
+body { margin:0; font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif; color:var(--text); background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%); }
+header { position:sticky; top:0; z-index:10; background:rgba(15,23,42,0.95); color:#fff; backdrop-filter:blur(6px); border-bottom:1px solid rgba(255,255,255,0.1); }
+.header-inner { max-width:1100px; margin:0 auto; padding:12px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.brand { font-weight:700; letter-spacing:0.2px; font-size:14px; }
+.file { font-size:12px; opacity:0.9; }
+main { max-width:1100px; margin:24px auto 48px; padding:0 20px; }
+article { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:28px; box-shadow:0 10px 35px rgba(15,23,42,0.06); }
+h1,h2,h3,h4 { line-height:1.25; margin-top:1.4em; margin-bottom:0.55em; }
+h1 { margin-top:0; font-size:2rem; }
+h2 { font-size:1.45rem; border-top:1px solid var(--border); padding-top:1em; }
+h3 { font-size:1.2rem; }
+p,li { color:var(--text); line-height:1.65; }
+ul,ol { padding-left:1.25rem; }
+code { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; padding:0.1rem 0.35rem; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace; font-size:0.92em; }
+pre { background:#0b1020; color:#e2e8f0; border-radius:10px; padding:14px; overflow-x:auto; border:1px solid #1e293b; }
+pre code { background:transparent; border:0; padding:0; color:inherit; }
+blockquote { margin:1em 0; padding:0.7em 1em; border-left:4px solid var(--accent); background:#f0fdfa; color:var(--muted); }
+table { width:100%; border-collapse:collapse; margin:1em 0; font-size:0.95rem; }
+th,td { border:1px solid var(--border); padding:8px 10px; text-align:left; vertical-align:top; }
+th { background:#f8fafc; font-weight:600; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
+.footer { color:var(--muted); font-size:12px; margin-top:14px; }
+@media (max-width:760px) { article { padding:18px; border-radius:10px; } .header-inner { padding:10px 14px; } main { margin-top:16px; padding:0 12px; } }
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand">Enterprise Data Lake Documentation</div>
+      <div class="file">PLATFORM_STATUS.md</div>
+    </div>
+  </header>
+  <main>
+    <article>
+<h1 id="platform-status-enterprise-data-lake">Platform Status — Enterprise Data Lake</h1>
+<p><strong>Last updated:</strong> 2026-06-29<br />
+<strong>Prepared by:</strong> Platform Engineering</p>
+<hr />
+<h2 id="current-status-dev-staging-production">Current Status: Dev ✅ | Staging 🔲 | Production 🔲</h2>
+<table>
+<thead>
+<tr>
+<th>Environment</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Dev</strong></td>
+<td>✅ Live and operational</td>
+<td>All 4 Lambda stages deployed and tested end-to-end</td>
+</tr>
+<tr>
+<td><strong>Staging</strong></td>
+<td>🔲 Not started</td>
+<td>Requires DynamoDB pre-creation + Terraform apply</td>
+</tr>
+<tr>
+<td><strong>Production</strong></td>
+<td>🔲 Not started</td>
+<td>Requires staging sign-off first</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="live-data-dev-as-of-2026-06-29">Live Data (Dev — as of 2026-06-29)</h2>
+<table>
+<thead>
+<tr>
+<th>Entity</th>
+<th>Records</th>
+<th>Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Companies (Salesforce Accounts)</td>
+<td>34</td>
+<td><code>dev_edl_analytics.company</code></td>
+</tr>
+<tr>
+<td>Persons (Salesforce Contacts)</td>
+<td>49</td>
+<td><code>dev_edl_analytics.person</code></td>
+</tr>
+<tr>
+<td>Contracts (MySQL RDS)</td>
+<td>35,971</td>
+<td><code>dev_edl_analytics.contract</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Query in Athena (AWS Console → Athena → database: <code>dev_edl_analytics</code>):</strong></p>
+<pre><code class="language-sql">SELECT * FROM dev_edl_analytics.company   WHERE analytics_date='2026-06-29';
+SELECT * FROM dev_edl_analytics.person    WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29';
+</code></pre>
+<hr />
+<h2 id="connected-data-sources">Connected Data Sources</h2>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Status</th>
+<th>Entities</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Salesforce CRM</strong></td>
+<td>✅ Connected</td>
+<td><code>salesforce-account</code> (companies), <code>salesforce-contact</code> (persons)</td>
+</tr>
+<tr>
+<td><strong>MySQL RDS</strong></td>
+<td>✅ Connected</td>
+<td><code>mysql-rds-contracts</code> (contracts)</td>
+</tr>
+<tr>
+<td><strong>NetSuite ERP</strong></td>
+<td>🔲 Pending</td>
+<td>Not yet onboarded</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="aws-resources-dev-environment">AWS Resources — Dev Environment</h2>
+<p><strong>AWS Account:</strong> <code>087972550871</code> | <strong>Region:</strong> <code>us-east-1</code></p>
+<h3 id="s3-buckets">S3 Buckets</h3>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dev-edl-raw-layer</code></td>
+<td>Immutable raw Parquet from extraction</td>
+</tr>
+<tr>
+<td><code>dev-edl-curated-layer</code></td>
+<td>Field-mapped, quality-checked Parquet; also hosts field-mapping JSON</td>
+</tr>
+<tr>
+<td><code>dev-edl-analytics-layer</code></td>
+<td>Golden records + analytics-ready Parquet (Athena-queryable)</td>
+</tr>
+<tr>
+<td><code>dev-edl-schema-snapshots</code></td>
+<td>Schema snapshot files per entity per run</td>
+</tr>
+<tr>
+<td><code>dev-edl-s3-access-logs</code></td>
+<td>S3 server access logs</td>
+</tr>
+<tr>
+<td><code>dev-edl-terraform-state</code></td>
+<td>Terraform remote state + Lambda zip artifacts</td>
+</tr>
+</tbody>
+</table>
+<h3 id="s3-key-patterns">S3 Key Patterns</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Pattern</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Raw</td>
+<td><code>s3://dev-edl-raw-layer/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/part-NNNNN.parquet</code></td>
+</tr>
+<tr>
+<td>Curated</td>
+<td><code>s3://dev-edl-curated-layer/curated/{source_id}/{entity_id}/run_id={run_id}/data.parquet</code></td>
+</tr>
+<tr>
+<td>Golden records</td>
+<td><code>s3://dev-edl-analytics-layer/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet</code></td>
+</tr>
+<tr>
+<td>Analytics</td>
+<td><code>s3://dev-edl-analytics-layer/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="dynamodb-tables">DynamoDB Tables</h3>
+<blockquote>
+<p>These tables are <strong>not</strong> Terraform-managed — they were pre-created manually and must be created by hand in any new environment before running <code>terraform apply</code>.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Purpose</th>
+<th>Hash key</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dev-entity-extraction-config</code></td>
+<td>Entity extraction configuration (source, watermark field, load type, etc.)</td>
+<td><code>entity_id</code> (String)</td>
+</tr>
+<tr>
+<td><code>dev-watermark-repository</code></td>
+<td>Per-entity watermark timestamps for incremental loads</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>dev-run-audit-log</code></td>
+<td>Immutable audit record of every pipeline run</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="lambda-functions">Lambda Functions</h3>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Handler</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dev-extraction-pipeline</code></td>
+<td><code>connector_runtime.extraction_pipeline_handler.lambda_handler</code></td>
+<td>Extract from source → raw layer</td>
+</tr>
+<tr>
+<td><code>dev-transformation-pipeline</code></td>
+<td><code>transformation.transformation_pipeline_handler.lambda_handler</code></td>
+<td>Raw → curated layer</td>
+</tr>
+<tr>
+<td><code>dev-entity-resolution-pipeline</code></td>
+<td><code>entity_resolution.entity_resolution_pipeline_handler.lambda_handler</code></td>
+<td>Curated → golden records</td>
+</tr>
+<tr>
+<td><code>dev-analytics-publisher</code></td>
+<td><code>analytics_publisher.analytics_publisher_handler.lambda_handler</code></td>
+<td>Golden records → analytics layer</td>
+</tr>
+</tbody>
+</table>
+<p>All four Lambdas are deployed from the <strong>same zip</strong>: <code>s3://dev-edl-terraform-state/lambda/extraction-pipeline.zip</code></p>
+<h3 id="step-functions">Step Functions</h3>
+<table>
+<thead>
+<tr>
+<th>State Machine</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dev-data-pipeline</code></td>
+<td>Full end-to-end pipeline (extraction → analytics)</td>
+</tr>
+<tr>
+<td><code>dev-extraction-pipeline</code></td>
+<td>Extraction stage only (used for manual triggers)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="glue-catalog">Glue Catalog</h3>
+<table>
+<thead>
+<tr>
+<th>Database</th>
+<th>Tables</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dev_edl_analytics</code></td>
+<td><code>company</code>, <code>person</code>, <code>contract</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="secrets-manager">Secrets Manager</h3>
+<table>
+<thead>
+<tr>
+<th>Secret</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dev/sources/salesforce/credentials</code></td>
+<td><code>instance_url</code>, <code>client_id</code>, <code>client_secret</code></td>
+</tr>
+<tr>
+<td><code>dev/sources/mysql-rds/credentials</code></td>
+<td><code>host</code>, <code>port</code>, <code>username</code>, <code>password</code>, <code>database</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="terraform-state">Terraform State</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Backend</td>
+<td>S3 remote state</td>
+</tr>
+<tr>
+<td>State bucket</td>
+<td><code>dev-edl-terraform-state</code></td>
+</tr>
+<tr>
+<td>State key</td>
+<td><code>environments/dev/terraform.tfstate</code></td>
+</tr>
+<tr>
+<td>Lock table</td>
+<td><code>dev-edl-terraform-state-lock</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="next-steps">Next Steps</h2>
+<h3 id="deploy-staging-environment">Deploy Staging Environment</h3>
+<p>Pre-requisites:
+- Staging AWS credentials configured
+- Create 3 DynamoDB tables manually: <code>staging-entity-extraction-config</code>, <code>staging-watermark-repository</code>, <code>staging-run-audit-log</code>
+- Upload Lambda zip: <code>ARTIFACTS_BUCKET=staging-edl-terraform-state make lambda-upload</code></p>
+<pre><code class="language-bash">cd infrastructure/environments/staging
+terraform init
+terraform apply -target=module.iam
+terraform apply -target=module.lambda_pipeline -target=module.transformation_lambda
+terraform apply -target=module.orchestration
+</code></pre>
+<h3 id="deploy-production-environment">Deploy Production Environment</h3>
+<p>Same pattern as staging — use <code>prod-edl-terraform-state</code> as <code>ARTIFACTS_BUCKET</code>. Lambda log retention is already configured at 365 days in HCL.</p>
+<h3 id="onboard-netsuite">Onboard NetSuite</h3>
+<ul>
+<li>Add connector credentials to Secrets Manager: <code>dev/sources/netsuite/credentials</code></li>
+<li>Seed entity config for NetSuite entities</li>
+<li>No code changes required — configuration-only onboarding</li>
+</ul>
+    </article>
+  </main>
+</body>
+</html>

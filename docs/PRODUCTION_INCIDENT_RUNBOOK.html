@@ -3,143 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Production Incident Runbook</title>
-  <style>
-:root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --muted: #475569;
-  --border: #e2e8f0;
-  --accent: #0f766e;
-  --code-bg: #f1f5f9;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  color: var(--text);
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-}
-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(15, 23, 42, 0.95);
-  color: #fff;
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-.header-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
-.file { font-size: 12px; opacity: 0.9; }
-main {
-  max-width: 1100px;
-  margin: 24px auto 48px;
-  padding: 0 20px;
-}
-article {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
-}
-h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
-h1 { margin-top: 0; font-size: 2rem; }
-h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
-h3 { font-size: 1.2rem; }
-p, li { color: var(--text); line-height: 1.65; }
-ul, ol { padding-left: 1.25rem; }
-code {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.1rem 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 0.92em;
-}
-pre {
-  background: #0b1020;
-  color: #e2e8f0;
-  border-radius: 10px;
-  padding: 14px;
-  overflow-x: auto;
-  border: 1px solid #1e293b;
-}
-pre code {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: inherit;
-}
-blockquote {
-  margin: 1em 0;
-  padding: 0.7em 1em;
-  border-left: 4px solid var(--accent);
-  background: #f0fdfa;
-  color: var(--muted);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1em 0;
-  font-size: 0.95rem;
-}
-th, td {
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-  text-align: left;
-  vertical-align: top;
-}
-th {
-  background: #f8fafc;
-  font-weight: 600;
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
-.toc {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: #f8fafc;
-  margin-bottom: 1rem;
-}
-.footer {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 14px;
-}
-@media (max-width: 760px) {
-  article { padding: 18px; border-radius: 10px; }
-  .header-inner { padding: 10px 14px; }
-  main { margin-top: 16px; padding: 0 12px; }
-}
-</style>
+  <title>Production Incident Runbook — Enterprise Data Lake</title>
+  <style>:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#475569;--border:#e2e8f0;--accent:#0f766e;--code-bg:#f1f5f9}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%)}header{position:sticky;top:0;z-index:10;background:rgba(15,23,42,.95);color:#fff;backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,.1)}.header-inner{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:700;letter-spacing:.2px;font-size:14px}.file{font-size:12px;opacity:.9}main{max-width:1100px;margin:24px auto 48px;padding:0 20px}article{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;box-shadow:0 10px 35px rgba(15,23,42,.06)}h1,h2,h3,h4{line-height:1.25;margin-top:1.4em;margin-bottom:.55em}h1{margin-top:0;font-size:2rem}h2{font-size:1.45rem;border-top:1px solid var(--border);padding-top:1em}h3{font-size:1.2rem}p,li{color:var(--text);line-height:1.65}ul,ol{padding-left:1.25rem}code{background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:.92em}pre{background:#0b1020;color:#e2e8f0;border-radius:10px;padding:14px;overflow-x:auto;border:1px solid #1e293b}pre code{background:transparent;border:0;padding:0;color:inherit}blockquote{margin:1em 0;padding:.7em 1em;border-left:4px solid var(--accent);background:#f0fdfa;color:var(--muted)}table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.95rem}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:#f8fafc;font-weight:600}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}hr{border:0;border-top:1px solid var(--border);margin:1.6em 0}.footer{color:var(--muted);font-size:12px;margin-top:14px}@media(max-width:760px){article{padding:18px;border-radius:10px}.header-inner{padding:10px 14px}main{margin-top:16px;padding:0 12px}}</style>
 </head>
 <body>
-  <header>
-    <div class="header-inner">
-      <div class="brand">Enterprise Data Lake Documentation</div>
-      <div class="file">PRODUCTION_INCIDENT_RUNBOOK.md</div>
-    </div>
-  </header>
-  <main>
-    <article>
-<h1 id="production-incident-runbook">Production Incident Runbook</h1>
-<p><strong>For:</strong> On-call engineers, operations team, support<br>
-<strong>Purpose:</strong> Quick response guide for common incidents<br>
-<strong>Last updated:</strong> 2026-06-17</p>
-<hr>
+  <header><div class="header-inner"><div class="brand">Enterprise Data Lake Documentation</div><div class="file">PRODUCTION_INCIDENT_RUNBOOK.md</div></div></header>
+  <main><article><h1 id="production-incident-runbook">Production Incident Runbook</h1>
+<p><strong>For:</strong> On-call engineers, operations team, support<br />
+<strong>Purpose:</strong> Quick response guide for common incidents<br />
+<strong>Last updated:</strong> 2026-06-29</p>
+<blockquote>
+<p><strong>Lambda functions (prod):</strong> <code>prod-extraction-pipeline</code> · <code>prod-transformation-pipeline</code> · <code>prod-entity-resolution-pipeline</code> · <code>prod-analytics-publisher</code><br />
+<strong>Key buckets:</strong> <code>prod-edl-raw-layer</code> · <code>prod-edl-curated-layer</code> · <code>prod-edl-analytics-layer</code> · <code>prod-edl-schema-snapshots</code><br />
+For dev equivalents replace <code>prod-</code> with <code>dev-</code>. See <a href="PLATFORM_STATUS.md">PLATFORM_STATUS.md</a> for all resource names.</p>
+</blockquote>
+<hr />
 <h2 id="quick-alert-reference">Quick Alert Reference</h2>
 <h3 id="alert-priority-matrix">Alert Priority Matrix</h3>
 <table>
@@ -211,12 +89,12 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h2 id="runbooks-by-scenario">Runbooks by Scenario</h2>
-<hr>
+<hr />
 <h2 id="scenario-1-extraction-failure-alert">SCENARIO 1: Extraction Failure Alert</h2>
-<p><strong>Alert name:</strong> <code>ExtractionFailureAlert</code><br>
-<strong>Severity:</strong> High<br>
+<p><strong>Alert name:</strong> <code>ExtractionFailureAlert</code><br />
+<strong>Severity:</strong> High<br />
 <strong>Typical root cause:</strong> Source API temporarily unavailable, network connectivity issue, or auth failure</p>
 <h3 id="step-1-gather-information-2-min">Step 1: Gather Information (2 min)</h3>
 <pre><code class="language-bash"># Get the specific failure from CloudWatch Logs
@@ -253,9 +131,9 @@ aws secretsmanager describe-secret \
   --secret-id prod/sources/salesforce/credentials \
   --query 'RotationRules'
 </code></pre>
-<p><strong>Check source system status:</strong><br>
-- <strong>Salesforce:</strong> Check https://status.salesforce.com/ (Bulk API 2.0 or REST API down?)<br>
-- <strong>NetSuite:</strong> Check https://netsuite.status.io/ (REST API down?)<br>
+<p><strong>Check source system status:</strong>
+- <strong>Salesforce:</strong> Check https://status.salesforce.com/ (Bulk API 2.0 or REST API down?)
+- <strong>NetSuite:</strong> Check https://netsuite.status.io/ (REST API down?)
 - <strong>MySQL RDS:</strong> Check AWS RDS dashboard (instance available? CPU/memory normal?)</p>
 <h3 id="step-3-resolution">Step 3: Resolution</h3>
 <p><strong>If source API is temporarily down:</strong></p>
@@ -294,10 +172,10 @@ If missing: Add rule via Terraform or AWS console
 <li>[ ] If network issue: add monitoring for source connectivity</li>
 <li>[ ] Notify data team: extraction was delayed but will complete in next scheduled window</li>
 </ul>
-<hr>
+<hr />
 <h2 id="scenario-2-quality-blocking-violation">SCENARIO 2: Quality Blocking Violation</h2>
-<p><strong>Alert name:</strong> <code>QualityBlockingViolationAlert</code><br>
-<strong>Severity:</strong> Medium<br>
+<p><strong>Alert name:</strong> <code>QualityBlockingViolationAlert</code><br />
+<strong>Severity:</strong> Medium<br />
 <strong>Typical root cause:</strong> Source data changed; quality policy needs update; or bad data in source</p>
 <h3 id="step-1-gather-information-3-min">Step 1: Gather Information (3 min)</h3>
 <pre><code class="language-bash"># Get the quality report from S3
@@ -352,7 +230,7 @@ Timeline: Update policy, re-run transformation
 <h3 id="step-4-remediation">Step 4: Remediation</h3>
 <p><strong>Update quality policy (if Option B or C):</strong></p>
 <pre><code class="language-bash"># Download current policy
-aws s3 cp s3://prod-schema-snapshots/quality_policies/salesforce-account.json ./
+aws s3 cp s3://prod-edl-schema-snapshots/quality_policies/salesforce-account.json ./
 
 # Edit policy file: change blocking violation to WARNING or update regex pattern
 # Example: change email pattern from strict to permissive
@@ -362,7 +240,7 @@ aws s3 cp s3://prod-schema-snapshots/quality_policies/salesforce-account.json ./
 python -m json.tool salesforce-account.json
 
 # Upload updated policy
-aws s3 cp salesforce-account.json s3://prod-schema-snapshots/quality_policies/
+aws s3 cp salesforce-account.json s3://prod-edl-schema-snapshots/quality_policies/
 
 # Trigger transformation re-run with new policy
 aws lambda invoke \
@@ -377,14 +255,14 @@ aws lambda invoke \
 <li>[ ] If source data issue: create ticket with data owner, set follow-up date</li>
 <li>[ ] Verify curated data published successfully on next re-run</li>
 </ul>
-<hr>
+<hr />
 <h2 id="scenario-3-schema-breaking-drift">SCENARIO 3: Schema Breaking Drift</h2>
-<p><strong>Alert name:</strong> <code>SchemaDriftAlert</code> (breaking severity)<br>
-<strong>Severity:</strong> Medium<br>
+<p><strong>Alert name:</strong> <code>SchemaDriftAlert</code> (breaking severity)<br />
+<strong>Severity:</strong> Medium<br />
 <strong>Typical root cause:</strong> Source system schema changed (field removed, type changed, or made mandatory)</p>
 <h3 id="step-1-review-drift-report-2-min">Step 1: Review Drift Report (2 min)</h3>
 <pre><code class="language-bash"># Get the drift report from S3
-aws s3 cp s3://prod-schema-snapshots/drift_reports/salesforce-account/2026-06-17.json - | jq '.'
+aws s3 cp s3://prod-edl-schema-snapshots/drift_reports/salesforce-account/2026-06-17.json - | jq '.'
 
 # Example output:
 # {
@@ -414,10 +292,10 @@ aws rds-data execute-statement \
 <h3 id="step-3-governance-review-515-min">Step 3: Governance Review (5–15 min)</h3>
 <p><strong>Convene data governance team:</strong></p>
 <ol>
+<li>Is the removed/changed field critical for analytics?</li>
+<li>If no: Approve transformation to proceed (ignore removed field)</li>
 <li>
-<p>Is the removed/changed field critical for analytics?<br>
-   - If no: Approve transformation to proceed (ignore removed field)<br>
-   - If yes: Block transformation; require manual data reconciliation</p>
+<p>If yes: Block transformation; require manual data reconciliation</p>
 </li>
 <li>
 <p>Update schema snapshot + field mapping to reflect change</p>
@@ -429,14 +307,14 @@ aws rds-data execute-statement \
 <h3 id="step-4-remediation_1">Step 4: Remediation</h3>
 <p><strong>If field removal is non-critical:</strong></p>
 <pre><code class="language-bash"># Update schema snapshot to reflect new schema
-aws s3 cp s3://prod-schema-snapshots/schemas/salesforce-account/latest.json ./schema-latest.json
+aws s3 cp s3://prod-edl-schema-snapshots/schemas/salesforce-account/latest.json ./schema-latest.json
 
 # Update field mapping to exclude removed field
-aws s3 cp s3://prod-schema-snapshots/field_mappings/salesforce-account/v1.json ./mapping-v1.json
+aws s3 cp s3://prod-edl-schema-snapshots/field_mappings/salesforce-account/v1.json ./mapping-v1.json
 # Edit: remove any reference to LegacyAccountId__c
 # Save as v2.json
 
-aws s3 cp ./mapping-v2.json s3://prod-schema-snapshots/field_mappings/salesforce-account/v2.json
+aws s3 cp ./mapping-v2.json s3://prod-edl-schema-snapshots/field_mappings/salesforce-account/v2.json
 
 # Update entity config to reference new mapping version
 aws dynamodb update-item \
@@ -456,10 +334,10 @@ aws lambda invoke \
 <li>[ ] Notify downstream analytics teams: "Salesforce Account field removed (non-critical); curated data updated"</li>
 <li>[ ] Schedule sync meeting with Salesforce admin to understand why field was removed (prevent future surprises)</li>
 </ul>
-<hr>
+<hr />
 <h2 id="scenario-4-watermark-lag-alert">SCENARIO 4: Watermark Lag Alert</h2>
-<p><strong>Alert name:</strong> <code>WatermarkLagAlert</code><br>
-<strong>Severity:</strong> Medium<br>
+<p><strong>Alert name:</strong> <code>WatermarkLagAlert</code><br />
+<strong>Severity:</strong> Medium<br />
 <strong>Typical root cause:</strong> Extraction is running but slowly; incremental window is far behind current time</p>
 <h3 id="step-1-check-extraction-status-2-min">Step 1: Check Extraction Status (2 min)</h3>
 <pre><code class="language-bash"># Get latest extraction run for the entity
@@ -504,7 +382,7 @@ aws logs tail /aws/lambda/extraction --since 30m --follow
 <p><strong>If extraction is running but slow:</strong></p>
 <pre><code class="language-bash"># Check raw data write throughput
 aws s3api list-objects-v2 \
-  --bucket prod-raw-layer \
+  --bucket prod-edl-raw-layer \
   --prefix salesforce/salesforce-account/extraction_date=2026-06-17 \
   --query 'Contents | length'
 
@@ -528,10 +406,10 @@ aws logs filter-log-events \
 # Redeploy Lambda
 terraform apply -target=&quot;aws_lambda_function.extraction&quot; -var=&quot;extraction_timeout_sec=1200&quot;
 </code></pre>
-<hr>
+<hr />
 <h2 id="scenario-5-dlq-message-age-4-hours">SCENARIO 5: DLQ Message Age &gt; 4 Hours</h2>
-<p><strong>Alert name:</strong> <code>DLQMessageAgeAlert</code><br>
-<strong>Severity:</strong> Medium<br>
+<p><strong>Alert name:</strong> <code>DLQMessageAgeAlert</code><br />
+<strong>Severity:</strong> Medium<br />
 <strong>Typical root cause:</strong> Failed run was queued but not manually replayed</p>
 <h3 id="step-1-check-dlq-contents-2-min">Step 1: Check DLQ Contents (2 min)</h3>
 <pre><code class="language-bash"># List messages in DLQ (SNS topic)
@@ -590,10 +468,10 @@ aws dynamodb query \
 <li>[ ] Note root cause and resolution</li>
 <li>[ ] Alert threshold check: Is 4-hour DLQ age threshold still appropriate? Consider adjusting if frequent</li>
 </ul>
-<hr>
+<hr />
 <h2 id="scenario-6-lambda-out-of-memory-error">SCENARIO 6: Lambda Out-of-Memory Error</h2>
-<p><strong>Alert name:</strong> <code>LambdaOutOfMemoryAlert</code><br>
-<strong>Severity:</strong> High<br>
+<p><strong>Alert name:</strong> <code>LambdaOutOfMemoryAlert</code><br />
+<strong>Severity:</strong> High<br />
 <strong>Typical root cause:</strong> Entity extraction volume exceeds allocated Lambda memory</p>
 <h3 id="step-1-confirm-oom-1-min">Step 1: Confirm OOM (1 min)</h3>
 <pre><code class="language-bash"># Check Lambda logs for OOM error
@@ -653,10 +531,10 @@ terraform apply -target=&quot;aws_ecs_task_definition.extraction&quot;
 <li>[ ] Track record volume per entity; plan memory/compute upgrades ahead of growth</li>
 <li>[ ] For rapid-growth entities, consider scheduling migration to ECS proactively</li>
 </ul>
-<hr>
+<hr />
 <h2 id="scenario-7-deadletter-queue-configuration-issue">SCENARIO 7: Deadletter Queue Configuration Issue</h2>
-<p><strong>Alert name:</strong> Custom monitoring<br>
-<strong>Severity:</strong> Medium<br>
+<p><strong>Alert name:</strong> Custom monitoring<br />
+<strong>Severity:</strong> Medium<br />
 <strong>Typical root cause:</strong> DLQ topic deleted, subscription removed, or permissions changed</p>
 <h3 id="recovery">Recovery</h3>
 <pre><code class="language-bash"># Verify DLQ topic exists
@@ -680,7 +558,7 @@ aws sns subscribe \
   --protocol email \
   --notification-endpoint ops-team@company.com
 </code></pre>
-<hr>
+<hr />
 <h2 id="escalation-matrix">Escalation Matrix</h2>
 <table>
 <thead>
@@ -728,7 +606,7 @@ aws sns subscribe \
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h2 id="post-incident-review-checklist">Post-Incident Review Checklist</h2>
 <p>After every production incident:</p>
 <ul>
@@ -741,28 +619,186 @@ aws sns subscribe \
 <li>[ ] Scheduled training for team on the incident resolution</li>
 <li>[ ] Updated SLOs if response time was insufficient</li>
 </ul>
-<hr>
-<p><strong>Last updated:</strong> 2026-06-17<br>
-<strong>Owner:</strong> Platform Engineering Lead<br>
+<hr />
+<p><strong>Last updated:</strong> 2026-06-17<br />
+<strong>Owner:</strong> Platform Engineering Lead<br />
 <strong>Review cycle:</strong> Monthly (or after major incident)</p>
-      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
-
-<hr>
-<h2 id="technology-stack-reference">Technology Stack Reference</h2>
+<hr />
+<h2 id="technology-reference-for-incident-response">Technology Reference for Incident Response</h2>
+<p>Quick reference for tools and AWS services used during incident investigation and resolution.</p>
+<h3 id="aws-console-navigation">AWS Console Navigation</h3>
 <table>
-<thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+<thead>
+<tr>
+<th>Service</th>
+<th>Console path</th>
+<th>Key view for incidents</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Cloud</td><td><strong>AWS</strong> (EventBridge, Step Functions, Lambda, ECS Fargate, S3, DynamoDB, Secrets Manager, Glue, Athena, RDS MySQL, SQS, CloudWatch, X-Ray, SNS, KMS, IAM, VPC)</td></tr>
-<tr><td>Data format</td><td><strong>Apache Parquet</strong> (Snappy) for data layers; <strong>JSON</strong> for configs and reports</td></tr>
-<tr><td>Source APIs</td><td><strong>Salesforce Bulk API 2.0</strong>; <strong>NetSuite SuiteQL REST</strong>; <strong>MySQL JDBC</strong> via <code>pymysql</code></td></tr>
-<tr><td>Language</td><td><strong>Python 3.14</strong> — Pydantic v2, structlog ≥ 24.4, pyarrow, boto3, pymysql, requests</td></tr>
-<tr><td>Infrastructure</td><td><strong>Terraform</strong> ≥ 1.8 (AWS Provider ~&gt; 5.0); 3 environments: dev / staging / prod</td></tr>
-<tr><td>CI/CD</td><td><strong>GitHub Actions</strong> — 7-stage gate: Ruff → mypy → pytest → bandit → pip-audit → checkov → terraform validate</td></tr>
-<tr><td>Security algorithms</td><td><strong>HMAC-SHA256</strong> (PII tokenisation); <strong>SHA-256</strong> (field fingerprinting); <strong>Jaro-Winkler</strong> + <strong>Jaccard</strong> (entity resolution)</td></tr>
-<tr><td>Testing</td><td><strong>pytest</strong> + <strong>moto</strong> ≥ 5.0 (AWS mocking); ≥ 80% coverage gate enforced in CI</td></tr>
+<tr>
+<td><strong>Step Functions</strong></td>
+<td>Console → Step Functions → State Machines → <code>{env}-extraction-orchestration-workflow</code></td>
+<td>Execution history; failed executions; input/output per stage</td>
+</tr>
+<tr>
+<td><strong>Lambda</strong></td>
+<td>Console → Lambda → Functions → <code>{env}-extraction-*</code></td>
+<td>Invocation errors; CloudWatch log link; concurrency</td>
+</tr>
+<tr>
+<td><strong>CloudWatch Logs</strong></td>
+<td>Console → CloudWatch → Log Groups → <code>/edl/{env}/*</code></td>
+<td>Structured JSON log events; filter by <code>run_id</code></td>
+</tr>
+<tr>
+<td><strong>CloudWatch Alarms</strong></td>
+<td>Console → CloudWatch → Alarms</td>
+<td>Active alarms; threshold; recent datapoints</td>
+</tr>
+<tr>
+<td><strong>X-Ray</strong></td>
+<td>Console → X-Ray → Traces</td>
+<td>Service map; latency; fault trace for specific <code>run_id</code></td>
+</tr>
+<tr>
+<td><strong>DynamoDB</strong></td>
+<td>Console → DynamoDB → Tables → <code>{env}-watermark-repository</code></td>
+<td>Current watermark; version; last run ID</td>
+</tr>
+<tr>
+<td><strong>DynamoDB</strong></td>
+<td>Console → DynamoDB → Tables → <code>{env}-run-audit-log</code></td>
+<td>Stage-by-stage audit record per run</td>
+</tr>
+<tr>
+<td><strong>SQS (DLQ)</strong></td>
+<td>Console → SQS → <code>{env}-extraction-dlq</code></td>
+<td>Message count; message body (contains <code>run_id</code>, <code>source_id</code>, <code>entity_id</code>, <code>failed_stage</code>)</td>
+</tr>
+<tr>
+<td><strong>S3</strong></td>
+<td>Console → S3 → <code>{env}-schema-snapshots</code></td>
+<td>Latest schema snapshot; drift report</td>
+</tr>
+<tr>
+<td><strong>Secrets Manager</strong></td>
+<td>Console → Secrets Manager → <code>{env}/sources/{source}/credentials</code></td>
+<td>Last rotation date; version status</td>
+</tr>
 </tbody>
 </table>
-    </article>
-  </main>
+<h3 id="cli-quick-commands-for-incident-investigation">CLI Quick Commands for Incident Investigation</h3>
+<pre><code class="language-bash"># Check current watermark for a source/entity
+aws dynamodb get-item \
+  --table-name prod-watermark-repository \
+  --key '{&quot;source_id&quot;:{&quot;S&quot;:&quot;salesforce&quot;},&quot;entity_id&quot;:{&quot;S&quot;:&quot;salesforce-account&quot;}}'
+
+# Read DLQ messages (peek without deleting)
+aws sqs receive-message \
+  --queue-url https://sqs.us-east-1.amazonaws.com/ACCOUNT/prod-extraction-dlq \
+  --max-number-of-messages 10 \
+  --visibility-timeout 0
+
+# Get most recent Step Functions execution status
+aws stepfunctions list-executions \
+  --state-machine-arn arn:aws:states:us-east-1:ACCOUNT:stateMachine:prod-extraction-orchestration-workflow \
+  --status-filter FAILED \
+  --max-results 5
+
+# Check latest schema snapshot
+aws s3 cp s3://prod-edl-schema-snapshots/salesforce/salesforce-account/latest.json -
+
+# Check CloudWatch alarm state
+aws cloudwatch describe-alarms \
+  --alarm-names prod-extraction-failures prod-schema-drift-breaking prod-watermark-lag
+
+# Trigger manual replay
+python scripts/trigger_extraction.py \
+  --source-id salesforce \
+  --entity-id salesforce-account \
+  --environment prod \
+  --is-replay \
+  --replay-of-run-id &lt;run_id_from_DLQ&gt;
+</code></pre>
+<h3 id="key-log-fields-for-filtering">Key Log Fields for Filtering</h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+<th>Filter example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>run_id</code></td>
+<td>Unique ID for a pipeline run (<code>run-{YYYYMMDD}-{uuid}</code>)</td>
+<td><code>{ $.run_id = "run-20260622-*" }</code></td>
+</tr>
+<tr>
+<td><code>source_id</code></td>
+<td>Source system identifier</td>
+<td><code>{ $.source_id = "salesforce" }</code></td>
+</tr>
+<tr>
+<td><code>entity_id</code></td>
+<td>Entity being extracted</td>
+<td><code>{ $.entity_id = "salesforce-account" }</code></td>
+</tr>
+<tr>
+<td><code>stage</code></td>
+<td>Pipeline stage enum</td>
+<td><code>{ $.stage = "EXTRACTION" }</code></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>Run status enum</td>
+<td><code>{ $.status = "FAILURE" }</code></td>
+</tr>
+<tr>
+<td><code>error_classification</code></td>
+<td>Failure category</td>
+<td><code>{ $.error_classification = "TRANSIENT_NETWORK" }</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="observability-stack">Observability Stack</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Tool</th>
+<th>Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Structured logs</td>
+<td>structlog → CloudWatch Logs</td>
+<td>Log group: <code>/edl/{env}/{service}</code></td>
+</tr>
+<tr>
+<td>Custom metrics</td>
+<td>CloudWatch (namespace: <code>EnterpriseDatalake</code>)</td>
+<td>6 canonical metrics per run</td>
+</tr>
+<tr>
+<td>Alarms</td>
+<td>CloudWatch Alarms → SNS → Email/PagerDuty</td>
+<td>4 platform alarms</td>
+</tr>
+<tr>
+<td>Distributed traces</td>
+<td>AWS X-Ray</td>
+<td>Service map; trace by <code>run_id</code> annotation</td>
+</tr>
+<tr>
+<td>DLQ</td>
+<td>SQS <code>{env}-extraction-dlq</code></td>
+<td>KMS-encrypted; 14-day message retention</td>
+</tr>
+</tbody>
+</table></article></main>
 </body>
 </html>

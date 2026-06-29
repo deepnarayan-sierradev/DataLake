@@ -2,7 +2,7 @@
 
 **For:** All stakeholder levels  
 **Format:** Q&A reference  
-**Last updated:** 2026-06-17
+**Last updated:** 2026-06-29
 
 ---
 

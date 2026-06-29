@@ -1,8 +1,11 @@
 # Enterprise Data Lake Platform — Executive Overview
 
-**Version:** 1.0  
-**Date:** 2026-06-15  
+**Version:** 2.0  
+**Date:** 2026-06-29  
 **Classification:** Internal — Leadership Review  
+
+> **Current Status:** Dev environment fully operational as of 2026-06-29. 34 companies, 49 persons, and 35,971 contracts are live and queryable via Athena. Staging and Production deployments are next.  
+> For a concise leadership-ready summary, see [LEADERSHIP_BRIEF.md](LEADERSHIP_BRIEF.md).
 **Audience:** Engineering leadership, product leadership, data governance, security, and finance stakeholders
 
 ---

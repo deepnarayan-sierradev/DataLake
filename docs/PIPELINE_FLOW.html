@@ -4,177 +4,78 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Enterprise Data Lake — Full Pipeline Flow</title>
-  <style>
-:root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --muted: #475569;
-  --border: #e2e8f0;
-  --accent: #0f766e;
-  --code-bg: #f1f5f9;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  color: var(--text);
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-}
-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(15, 23, 42, 0.95);
-  color: #fff;
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-.header-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
-.file { font-size: 12px; opacity: 0.9; }
-main {
-  max-width: 1100px;
-  margin: 24px auto 48px;
-  padding: 0 20px;
-}
-article {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
-}
-h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
-h1 { margin-top: 0; font-size: 2rem; }
-h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
-h3 { font-size: 1.2rem; }
-p, li { color: var(--text); line-height: 1.65; }
-ul, ol { padding-left: 1.25rem; }
-code {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.1rem 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 0.92em;
-}
-pre {
-  background: #0b1020;
-  color: #e2e8f0;
-  border-radius: 10px;
-  padding: 14px;
-  overflow-x: auto;
-  border: 1px solid #1e293b;
-}
-pre code {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: inherit;
-}
-blockquote {
-  margin: 1em 0;
-  padding: 0.7em 1em;
-  border-left: 4px solid var(--accent);
-  background: #f0fdfa;
-  color: var(--muted);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1em 0;
-  font-size: 0.95rem;
-}
-th, td {
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-  text-align: left;
-  vertical-align: top;
-}
-th {
-  background: #f8fafc;
-  font-weight: 600;
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
-.toc {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: #f8fafc;
-  margin-bottom: 1rem;
-}
-.footer {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 14px;
-}
-@media (max-width: 760px) {
-  article { padding: 18px; border-radius: 10px; }
-  .header-inner { padding: 10px 14px; }
-  main { margin-top: 16px; padding: 0 12px; }
-}
-</style>
+  <style>:root { --bg:#f8fafc;--surface:#ffffff;--text:#0f172a;--muted:#475569;--border:#e2e8f0;--accent:#0f766e;--code-bg:#f1f5f9; }
+* { box-sizing:border-box; }
+body { margin:0;font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%); }
+header { position:sticky;top:0;z-index:10;background:rgba(15,23,42,0.95);color:#fff;backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,0.1); }
+.header-inner { max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px; }
+.brand { font-weight:700;letter-spacing:0.2px;font-size:14px; }
+.file { font-size:12px;opacity:0.9; }
+main { max-width:1100px;margin:24px auto 48px;padding:0 20px; }
+article { background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;box-shadow:0 10px 35px rgba(15,23,42,0.06); }
+h1,h2,h3,h4 { line-height:1.25;margin-top:1.4em;margin-bottom:0.55em; }
+h1 { margin-top:0;font-size:2rem; }
+h2 { font-size:1.45rem;border-top:1px solid var(--border);padding-top:1em; }
+h3 { font-size:1.2rem; }
+p,li { color:var(--text);line-height:1.65; }
+ul,ol { padding-left:1.25rem; }
+code { background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:0.1rem 0.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:0.92em; }
+pre { background:#0b1020;color:#e2e8f0;border-radius:10px;padding:14px;overflow-x:auto;border:1px solid #1e293b; }
+pre code { background:transparent;border:0;padding:0;color:inherit; }
+blockquote { margin:1em 0;padding:0.7em 1em;border-left:4px solid var(--accent);background:#f0fdfa;color:var(--muted); }
+table { width:100%;border-collapse:collapse;margin:1em 0;font-size:0.95rem; }
+th,td { border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top; }
+th { background:#f8fafc;font-weight:600; }
+a { color:var(--accent);text-decoration:none; }
+a:hover { text-decoration:underline; }
+hr { border:0;border-top:1px solid var(--border);margin:1.6em 0; }
+.footer { color:var(--muted);font-size:12px;margin-top:14px; }
+@media (max-width:760px) { article { padding:18px;border-radius:10px; } .header-inner { padding:10px 14px; } main { margin-top:16px;padding:0 12px; } }</style>
 </head>
 <body>
-  <header>
-    <div class="header-inner">
-      <div class="brand">Enterprise Data Lake Documentation</div>
-      <div class="file">PIPELINE_FLOW.md</div>
-    </div>
-  </header>
-  <main>
-    <article>
-<h1 id="enterprise-data-lake-full-pipeline-flow">Enterprise Data Lake — Full Pipeline Flow</h1>
+  <header><div class="header-inner"><div class="brand">Enterprise Data Lake Documentation</div><div class="file">PIPELINE_FLOW.md</div></div></header>
+  <main><article><h1 id="enterprise-data-lake-full-pipeline-flow">Enterprise Data Lake — Full Pipeline Flow</h1>
 <blockquote>
-<p><strong>Spec version:</strong> 2.0 | <strong>Last updated:</strong> 2026-06-16</p>
+<p><strong>Spec version:</strong> 2.0 | <strong>Last updated:</strong> 2026-06-29</p>
+<p><strong>Dev status:</strong> ✅ All stages deployed and live. Data flowing end-to-end: Salesforce (Account, Contact) + MySQL RDS (Contracts). Entity resolution and analytics publisher both operational.</p>
 </blockquote>
-<hr>
+<hr />
 <h2 id="table-of-contents">Table of Contents</h2>
 <ol>
 <li><a href="#1-architecture-overview">Architecture Overview</a></li>
 <li><a href="#2-data-layer-definitions">Data Layer Definitions</a></li>
 <li><a href="#3-end-to-end-pipeline-flow">End-to-End Pipeline Flow</a></li>
-<li><a href="#4-stage-by-stage-reference">Stage-by-Stage Reference</a><br>
-   - <a href="#stage-1--event-scheduling">Stage 1 — Event Scheduling</a><br>
-   - <a href="#stage-2--step-functions-orchestration">Stage 2 — Step Functions Orchestration</a><br>
-   - <a href="#stage-3--configuration-load">Stage 3 — Configuration Load</a><br>
-   - <a href="#stage-4--credential-retrieval">Stage 4 — Credential Retrieval</a><br>
-   - <a href="#stage-5--metadata-discovery">Stage 5 — Metadata Discovery</a><br>
-   - <a href="#stage-6--query-construction">Stage 6 — Query Construction</a><br>
-   - <a href="#stage-7--extraction">Stage 7 — Extraction</a><br>
-   - <a href="#stage-8--schema-snapshot">Stage 8 — Schema Snapshot</a><br>
-   - <a href="#stage-9--schema-drift-evaluation">Stage 9 — Schema Drift Evaluation</a><br>
-   - <a href="#stage-10--raw-layer-write">Stage 10 — Raw Layer Write</a><br>
-   - <a href="#stage-11--watermark-update">Stage 11 — Watermark Update</a><br>
-   - <a href="#stage-12--transformation-raw--curated">Stage 12 — Transformation (Raw → Curated)</a><br>
-   - <a href="#stage-13--entity-resolution">Stage 13 — Entity Resolution</a><br>
-   - <a href="#stage-14--golden-record-publish">Stage 14 — Golden Record Publish</a><br>
-   - <a href="#stage-15--analytics-layer-publish">Stage 15 — Analytics Layer Publish</a><br>
-   - <a href="#stage-16--serving-store-load">Stage 16 — Serving Store Load</a></li>
+<li><a href="#4-stage-by-stage-reference">Stage-by-Stage Reference</a></li>
+<li><a href="#stage-1--event-scheduling">Stage 1 — Event Scheduling</a></li>
+<li><a href="#stage-2--step-functions-orchestration">Stage 2 — Step Functions Orchestration</a></li>
+<li><a href="#stage-3--configuration-load">Stage 3 — Configuration Load</a></li>
+<li><a href="#stage-4--credential-retrieval">Stage 4 — Credential Retrieval</a></li>
+<li><a href="#stage-5--metadata-discovery">Stage 5 — Metadata Discovery</a></li>
+<li><a href="#stage-6--query-construction">Stage 6 — Query Construction</a></li>
+<li><a href="#stage-7--extraction">Stage 7 — Extraction</a></li>
+<li><a href="#stage-8--schema-snapshot">Stage 8 — Schema Snapshot</a></li>
+<li><a href="#stage-9--schema-drift-evaluation">Stage 9 — Schema Drift Evaluation</a></li>
+<li><a href="#stage-10--raw-layer-write">Stage 10 — Raw Layer Write</a></li>
+<li><a href="#stage-11--watermark-update">Stage 11 — Watermark Update</a></li>
+<li><a href="#stage-12--transformation-raw--curated">Stage 12 — Transformation (Raw → Curated)</a></li>
+<li><a href="#stage-13--entity-resolution">Stage 13 — Entity Resolution</a></li>
+<li><a href="#stage-14--golden-record-publish">Stage 14 — Golden Record Publish</a></li>
+<li><a href="#stage-15--analytics-layer-publish">Stage 15 — Analytics Layer Publish</a></li>
+<li><a href="#stage-16--serving-store-load">Stage 16 — Serving Store Load</a></li>
 <li><a href="#5-field-mapping-system">Field Mapping System</a></li>
 <li><a href="#6-entity-resolution-config-system">Entity Resolution Config System</a></li>
 <li><a href="#7-failure-handling-and-replay">Failure Handling and Replay</a></li>
 <li><a href="#8-version-control-and-rollback">Version Control and Rollback</a></li>
 <li><a href="#9-manual-trigger-checklist">Manual Trigger Checklist</a></li>
 <li><a href="#10-pre-deployment-verification">Pre-Deployment Verification</a></li>
+<li><a href="#11-technology-reference">Technology Reference</a></li>
 </ol>
-<hr>
+<hr />
 <h2 id="1-architecture-overview">1. Architecture Overview</h2>
 <p>The Enterprise Data Lake platform ingests data from multiple source systems (Salesforce, NetSuite, MySQL RDS), transforms it through three distinct data lake layers, resolves cross-source entity identity, and delivers trusted canonical records to analytics and serving stores.</p>
 <pre><code>┌──────────────────────────────────────────────────────────────────────────────┐
 │  SOURCE SYSTEMS                                                              │
-│  Salesforce CRM  │  NetSuite ERP  │  MySQL RDS  │  Future connectors        │
+│  Salesforce CRM ✅  │  NetSuite ERP 🔲  │  MySQL RDS ✅  │  Future connectors  │
 └────────────────────────────────┬─────────────────────────────────────────────┘
                                  │ full/incremental extraction (watermark-based)
                                  ▼
@@ -220,7 +121,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 │  Operational APIs, Applications │
 └─────────────────────────────────┘
 </code></pre>
-<hr>
+<hr />
 <h2 id="2-data-layer-definitions">2. Data Layer Definitions</h2>
 <table>
 <thead>
@@ -236,21 +137,21 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <tr>
 <td><strong>Raw</strong></td>
 <td>Exact copy of source data, no transformation</td>
-<td><code>{env}-raw-layer</code> S3</td>
+<td><code>{env}-edl-raw-layer</code> S3</td>
 <td>Parquet (large_utf8 columns)</td>
 <td>Immutable — Object Lock GOVERNANCE</td>
 </tr>
 <tr>
 <td><strong>Curated</strong></td>
 <td>Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked</td>
-<td><code>{env}-curated-layer</code> S3</td>
+<td><code>{env}-edl-curated-layer</code> S3</td>
 <td>Parquet (Snappy)</td>
 <td>Append-only per run_id partition</td>
 </tr>
 <tr>
 <td><strong>Analytics</strong></td>
 <td>Consumption-optimised, Glue-catalogued datasets for Athena/BI. Contains curated domain datasets (<code>curated/</code> prefix) and canonical (entity-resolved) outputs (<code>canonical/</code> prefix)</td>
-<td><code>{env}-analytics-layer</code> S3</td>
+<td><code>{env}-edl-analytics-layer</code> S3</td>
 <td>Parquet (Snappy)</td>
 <td>Append-only</td>
 </tr>
@@ -263,7 +164,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h2 id="3-end-to-end-pipeline-flow">3. End-to-End Pipeline Flow</h2>
 <pre><code>EventBridge Scheduler (cron per entity)
           │
@@ -346,25 +247,25 @@ Step Functions: START EXECUTION
               PIPELINE COMPLETE ◄───────────────────────────────────┘
               (all stages succeeded)
 </code></pre>
-<hr>
+<hr />
 <h2 id="4-stage-by-stage-reference">4. Stage-by-Stage Reference</h2>
 <h3 id="stage-1-event-scheduling">Stage 1 — Event Scheduling</h3>
-<p><strong>Component:</strong> Amazon EventBridge Scheduler<br>
-<strong>Trigger:</strong> Cron expression per source/entity (configured per entity at runtime via <code>ExtractionScheduleClient</code>)<br>
-<strong>Purpose:</strong> Fires a Step Functions execution on schedule without any manual intervention.<br>
-<strong>Key behaviour:</strong><br>
-- One schedule per entity (e.g. <code>salesforce--salesforce-account</code>, <code>netsuite--netsuite-customer</code>)<br>
-- Schedules are data — managed at runtime, not in Terraform<br>
+<p><strong>Component:</strong> Amazon EventBridge Scheduler<br />
+<strong>Trigger:</strong> Cron expression per source/entity (configured per entity at runtime via <code>ExtractionScheduleClient</code>)<br />
+<strong>Purpose:</strong> Fires a Step Functions execution on schedule without any manual intervention.<br />
+<strong>Key behaviour:</strong>
+- One schedule per entity (e.g. <code>salesforce--salesforce-account</code>, <code>netsuite--netsuite-customer</code>)
+- Schedules are data — managed at runtime, not in Terraform
 - Passes <code>source_id</code>, <code>entity_id</code>, <code>environment</code>, <code>connector_params</code> as execution input</p>
 <p><strong>What can go wrong:</strong> Schedule disabled, IAM execution role missing <code>sfn:StartExecution</code>, wrong state machine ARN.</p>
-<hr>
+<hr />
 <h3 id="stage-2-step-functions-orchestration">Stage 2 — Step Functions Orchestration</h3>
-<p><strong>Component:</strong> AWS Step Functions Standard Workflow (staging/prod) or Express Workflow (dev)<br>
-<strong>Purpose:</strong> Chains all five Lambda stages with explicit branching logic, retry policies, and failure routing.<br>
-<strong>Key behaviour:</strong><br>
-- Reads <code>transformation_blocked</code> from extraction output — skips stages B–E if breaking drift detected<br>
-- Reads <code>is_publication_blocked</code> from transformation output — skips entity resolution and downstream if quality blocks publication<br>
-- Retries transient Lambda errors with exponential backoff (3 attempts, 10s initial, 2× backoff)<br>
+<p><strong>Component:</strong> AWS Step Functions Standard Workflow (staging/prod) or Express Workflow (dev)<br />
+<strong>Purpose:</strong> Chains all five Lambda stages with explicit branching logic, retry policies, and failure routing.<br />
+<strong>Key behaviour:</strong>
+- Reads <code>transformation_blocked</code> from extraction output — skips stages B–E if breaking drift detected
+- Reads <code>is_publication_blocked</code> from transformation output — skips entity resolution and downstream if quality blocks publication
+- Retries transient Lambda errors with exponential backoff (3 attempts, 10s initial, 2× backoff)
 - Terminal failures route to <code>PipelineFailed</code> state and enqueue to DLQ</p>
 <p><strong>Branching logic:</strong></p>
 <pre><code>Extraction succeeded?
@@ -377,47 +278,47 @@ Transformation succeeded?
 
 Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 </code></pre>
-<hr>
+<hr />
 <h3 id="stage-3-configuration-load">Stage 3 — Configuration Load</h3>
-<p><strong>Component:</strong> <code>ConfigurationRepositoryClient</code> (DynamoDB backend)<br>
-<strong>Purpose:</strong> Loads <code>EntityExtractionConfig</code> for the requested source/entity. Validates config before any AWS or source API call is made.<br>
-<strong>Key fields read:</strong> <code>load_type</code>, <code>watermark_field</code>, <code>extraction_window_days</code>, <code>field_mode</code>, <code>include_fields</code>, <code>exclude_fields</code>, <code>output_format</code><br>
+<p><strong>Component:</strong> <code>ConfigurationRepositoryClient</code> (DynamoDB backend)<br />
+<strong>Purpose:</strong> Loads <code>EntityExtractionConfig</code> for the requested source/entity. Validates config before any AWS or source API call is made.<br />
+<strong>Key fields read:</strong> <code>load_type</code>, <code>watermark_field</code>, <code>extraction_window_days</code>, <code>field_mode</code>, <code>include_fields</code>, <code>exclude_fields</code>, <code>output_format</code><br />
 <strong>Failure behaviour:</strong> Raises <code>ConfigurationNotFoundError</code> → pipeline aborts, DLQ entry created.</p>
-<hr>
+<hr />
 <h3 id="stage-4-credential-retrieval">Stage 4 — Credential Retrieval</h3>
-<p><strong>Component:</strong> AWS Secrets Manager<br>
-<strong>Purpose:</strong> Retrieves short-lived source credentials (OAuth tokens, API keys, DB passwords). Credentials never appear in code, environment variables, or logs.<br>
-<strong>Secret path pattern:</strong> <code>{environment}/sources/{source}/credentials</code><br>
+<p><strong>Component:</strong> AWS Secrets Manager<br />
+<strong>Purpose:</strong> Retrieves short-lived source credentials (OAuth tokens, API keys, DB passwords). Credentials never appear in code, environment variables, or logs.<br />
+<strong>Secret path pattern:</strong> <code>{environment}/sources/{source}/credentials</code><br />
 <strong>Failure behaviour:</strong> Raises credential error → classified as <code>DETERMINISTIC_INVALID_CREDENTIALS</code> → no retry.</p>
-<hr>
+<hr />
 <h3 id="stage-5-metadata-discovery">Stage 5 — Metadata Discovery</h3>
-<p><strong>Component:</strong> Connector-specific metadata client (<code>SalesforceMetadataDiscoveryClient</code>, <code>NetSuiteMetadataAdapter</code>, <code>MySqlSchemaIntrospectionClient</code>)<br>
-<strong>Purpose:</strong> Discovers all queryable fields from the source at runtime — no hardcoded schema. Produces a <code>FieldContract</code> used by query builder and schema snapshot.<br>
-<strong>Key output:</strong> <code>FieldContract</code> — list of <code>FieldDescriptor</code> objects (name, type, precision, nullable, queryable flags)<br>
+<p><strong>Component:</strong> Connector-specific metadata client (<code>SalesforceMetadataDiscoveryClient</code>, <code>NetSuiteMetadataAdapter</code>, <code>MySqlSchemaIntrospectionClient</code>)<br />
+<strong>Purpose:</strong> Discovers all queryable fields from the source at runtime — no hardcoded schema. Produces a <code>FieldContract</code> used by query builder and schema snapshot.<br />
+<strong>Key output:</strong> <code>FieldContract</code> — list of <code>FieldDescriptor</code> objects (name, type, precision, nullable, queryable flags)<br />
 <strong>Failure behaviour:</strong> Raises metadata error → pipeline aborts.</p>
-<hr>
+<hr />
 <h3 id="stage-6-query-construction">Stage 6 — Query Construction</h3>
-<p><strong>Component:</strong> <code>SalesforceSoqlQueryBuilder</code>, <code>NetSuiteIncrementalQueryPlanner</code>, MySQL parameterized query<br>
-<strong>Purpose:</strong> Builds a parameterized extraction query incorporating watermark bounds for incremental loads. Values are <strong>never string-interpolated</strong> — always bound as parameters (SQL injection prevention).<br>
+<p><strong>Component:</strong> <code>SalesforceSoqlQueryBuilder</code>, <code>NetSuiteIncrementalQueryPlanner</code>, MySQL parameterized query<br />
+<strong>Purpose:</strong> Builds a parameterized extraction query incorporating watermark bounds for incremental loads. Values are <strong>never string-interpolated</strong> — always bound as parameters (SQL injection prevention).<br />
 <strong>Key output:</strong> <code>QueryContract</code> — <code>query_text</code> with named placeholders + <code>query_parameters</code> dict</p>
-<hr>
+<hr />
 <h3 id="stage-7-extraction">Stage 7 — Extraction</h3>
-<p><strong>Component:</strong> <code>SalesforceBulkQueryJobController</code> (Bulk API 2.0), <code>NetSuiteConnector</code> (SuiteQL REST), <code>MySqlRdsConnector</code> (pymysql)<br>
-<strong>Purpose:</strong> Executes the extraction query, streams records, writes raw Parquet to S3.<br>
-<strong>S3 partition scheme:</strong> <code>s3://{bucket}/{source}/{entity_id}/extraction_date={YYYY-MM-DD}/run_id={run_id}/data.parquet</code><br>
-<strong>Key properties:</strong><br>
-- All column values stored as <code>large_utf8</code> strings — no type loss, max compatibility<br>
-- Records written in chunks (50,000 per file for large volumes)<br>
+<p><strong>Component:</strong> <code>SalesforceBulkQueryJobController</code> (Bulk API 2.0), <code>NetSuiteConnector</code> (SuiteQL REST), <code>MySqlRdsConnector</code> (pymysql)<br />
+<strong>Purpose:</strong> Executes the extraction query, streams records, writes raw Parquet to S3.<br />
+<strong>S3 partition scheme:</strong> <code>s3://{bucket}/{source}/{entity_id}/extraction_date={YYYY-MM-DD}/run_id={run_id}/data.parquet</code><br />
+<strong>Key properties:</strong>
+- All column values stored as <code>large_utf8</code> strings — no type loss, max compatibility
+- Records written in chunks (50,000 per file for large volumes)
 - <code>metadata.json</code> written alongside each Parquet file</p>
-<hr>
+<hr />
 <h3 id="stage-8-schema-snapshot">Stage 8 — Schema Snapshot</h3>
-<p><strong>Component:</strong> <code>SchemaSnapshotRepository</code><br>
-<strong>Purpose:</strong> Persists the current field schema to S3 as an immutable snapshot after every successful run. Used by drift evaluator to compare against the next run's schema.<br>
-<strong>S3 path:</strong> <code>s3://{bucket}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json</code><br>
+<p><strong>Component:</strong> <code>SchemaSnapshotRepository</code><br />
+<strong>Purpose:</strong> Persists the current field schema to S3 as an immutable snapshot after every successful run. Used by drift evaluator to compare against the next run's schema.<br />
+<strong>S3 path:</strong> <code>s3://{bucket}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json</code><br />
 <strong>Latest pointer:</strong> <code>latest.json</code> updated after each write (avoids S3 listing latency).</p>
-<hr>
+<hr />
 <h3 id="stage-9-schema-drift-evaluation">Stage 9 — Schema Drift Evaluation</h3>
-<p><strong>Component:</strong> <code>SchemaDriftEvaluator</code><br>
+<p><strong>Component:</strong> <code>SchemaDriftEvaluator</code><br />
 <strong>Purpose:</strong> Compares current schema snapshot against the previous one. Produces a <code>DriftReport</code> with field-level change classification.  </p>
 <table>
 <thead>
@@ -450,43 +351,43 @@ Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h3 id="stage-10-raw-layer-write">Stage 10 — Raw Layer Write</h3>
-<p><strong>Component:</strong> <code>*RawLayerWriter</code> per source<br>
-<strong>Purpose:</strong> Validates extracted record count, writes S3 partition audit record.<br>
+<p><strong>Component:</strong> <code>*RawLayerWriter</code> per source<br />
+<strong>Purpose:</strong> Validates extracted record count, writes S3 partition audit record.<br />
 <strong>Guarantees:</strong> Object Lock GOVERNANCE mode — files cannot be overwritten or deleted during retention period. Every run produces a unique <code>run_id</code> partition.</p>
-<hr>
+<hr />
 <h3 id="stage-11-watermark-update">Stage 11 — Watermark Update</h3>
-<p><strong>Component:</strong> <code>WatermarkRepository</code><br>
-<strong>Purpose:</strong> Advances the watermark to <code>upper_watermark</code> of the completed extraction window. Uses optimistic concurrency (DynamoDB <code>ConditionExpression</code> on <code>version</code>) to prevent concurrent runs from corrupting state.<br>
+<p><strong>Component:</strong> <code>WatermarkRepository</code><br />
+<strong>Purpose:</strong> Advances the watermark to <code>upper_watermark</code> of the completed extraction window. Uses optimistic concurrency (DynamoDB <code>ConditionExpression</code> on <code>version</code>) to prevent concurrent runs from corrupting state.<br />
 <strong>Critical rule:</strong> Watermark advances <strong>only on full success</strong>. Any failure at any earlier stage leaves the watermark unchanged, enabling safe replay.</p>
-<hr>
+<hr />
 <h3 id="stage-12-transformation-raw-curated">Stage 12 — Transformation (Raw → Curated)</h3>
-<p><strong>Component:</strong> <code>TransformationPipeline</code><br>
+<p><strong>Component:</strong> <code>TransformationPipeline</code><br />
 <strong>Purpose:</strong> Reads raw Parquet, applies field mappings, evaluates quality, writes canonical records to curated layer.</p>
-<p><strong>Field mapping system</strong> (see also §5):<br>
-- Rule set loaded from S3: <code>s3://{bucket}/field-mappings/{source_id}/{entity_id}/{version}.json</code><br>
-- If no rule set exists, records pass through as-is (identity mode — logged as warning)<br>
+<p><strong>Field mapping system</strong> (see also §5):
+- Rule set loaded from S3: <code>s3://{bucket}/field-mappings/{source_id}/{entity_id}/{version}.json</code>
+- If no rule set exists, records pass through as-is (identity mode — logged as warning)
 - Rules applied per record: rename, concat, date_format, cast, boolean, mask</p>
-<p><strong>Quality evaluation:</strong><br>
-- <code>null_check</code> — required fields must be non-null<br>
-- <code>range_check</code> — numeric bounds validation<br>
-- <code>pattern_check</code> — regex match<br>
-- <code>allowed_values</code> — enum validation<br>
-- <code>WARNING</code> severity: publication continues, violations logged<br>
+<p><strong>Quality evaluation:</strong>
+- <code>null_check</code> — required fields must be non-null
+- <code>range_check</code> — numeric bounds validation
+- <code>pattern_check</code> — regex match
+- <code>allowed_values</code> — enum validation
+- <code>WARNING</code> severity: publication continues, violations logged
 - <code>BLOCKING</code> severity: publication halted, downstream paused</p>
-<p><strong>Outputs:</strong><br>
-- Curated Parquet: <code>s3://{bucket}/curated/{domain}/{entity_id}/curated_date={date}/run_id={run_id}/data.parquet</code><br>
-- Quality report: <code>s3://{bucket}/quality-reports/{source_id}/{entity_id}/{run_id}/quality-report.json</code><br>
+<p><strong>Outputs:</strong>
+- Curated Parquet: <code>s3://{bucket}/curated/{domain}/{entity_id}/curated_date={date}/run_id={run_id}/data.parquet</code>
+- Quality report: <code>s3://{bucket}/quality-reports/{source_id}/{entity_id}/{run_id}/quality-report.json</code>
 - Glue Catalog table registered</p>
-<hr>
+<hr />
 <h3 id="stage-13-entity-resolution">Stage 13 — Entity Resolution</h3>
-<p><strong>Component:</strong> <code>EntityResolutionEngine</code>, <code>MatchRuleEngine</code>, <code>ResolutionConfigRegistry</code><br>
-<strong>Purpose:</strong> Matches records for the same entity type across multiple source systems. Answers: "Is Salesforce Account SF:001 the same company as NetSuite Customer NS:C-4421?"<br>
-<strong>Matching strategies:</strong> Deterministic (exact ID match, email match) and probabilistic (name similarity, address normalisation)<br>
-<strong>Input:</strong> Curated records from all sources for one entity type<br>
+<p><strong>Component:</strong> <code>EntityResolutionEngine</code>, <code>MatchRuleEngine</code>, <code>ResolutionConfigRegistry</code><br />
+<strong>Purpose:</strong> Matches records for the same entity type across multiple source systems. Answers: "Is Salesforce Account SF:001 the same company as NetSuite Customer NS:C-4421?"<br />
+<strong>Matching strategies:</strong> Deterministic (exact ID match, email match) and probabilistic (name similarity, address normalisation)<br />
+<strong>Input:</strong> Curated records from all sources for one entity type<br />
 <strong>Output:</strong> Match clusters — groups of source records that represent the same real-world entity</p>
-<p><strong>Config-driven matching (no hardcoded rules):</strong><br>
+<p><strong>Config-driven matching (no hardcoded rules):</strong><br />
 Match rules and survivorship policies are loaded at runtime from S3 via <code>ResolutionConfigRegistry</code>. No match threshold, field weight, or source priority is hardcoded in Python.</p>
 <pre><code>s3://{curated-bucket}/entity-resolution/{entity_type}/match_rules_{version}.json
 s3://{curated-bucket}/entity-resolution/{entity_type}/survivorship_{version}.json
@@ -514,25 +415,25 @@ s3://{curated-bucket}/entity-resolution/{entity_type}/latest.json  ← version p
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h3 id="stage-14-golden-record-publish">Stage 14 — Golden Record Publish</h3>
-<p><strong>Component:</strong> <code>GoldenRecordPublisher</code>, <code>GoldenRecordSurvivorshipPolicy</code>, <code>ResolutionConfigRegistry</code><br>
-<strong>Purpose:</strong> Applies survivorship rules to each match cluster to produce one trusted record per real-world entity.<br>
-<strong>Survivorship strategies per field:</strong><br>
-- <code>SOURCE_PRIORITY</code> — prefer the value from the highest-ranked source (e.g. NetSuite &gt; Salesforce for <code>full_name</code>)<br>
-- <code>MOST_RECENT</code> — prefer the value with the latest timestamp<br>
-- <code>LONGEST</code> — prefer the longest non-null string<br>
+<p><strong>Component:</strong> <code>GoldenRecordPublisher</code>, <code>GoldenRecordSurvivorshipPolicy</code>, <code>ResolutionConfigRegistry</code><br />
+<strong>Purpose:</strong> Applies survivorship rules to each match cluster to produce one trusted record per real-world entity.<br />
+<strong>Survivorship strategies per field:</strong>
+- <code>SOURCE_PRIORITY</code> — prefer the value from the highest-ranked source (e.g. NetSuite &gt; Salesforce for <code>full_name</code>)
+- <code>MOST_RECENT</code> — prefer the value with the latest timestamp
+- <code>LONGEST</code> — prefer the longest non-null string
 - <code>FIRST_NON_NULL</code> — use first available value in source priority order</p>
-<p><strong>Field provenance tracking:</strong><br>
-Every golden record includes a <code>field_provenance</code> column — a JSON map documenting which source system won for each output field (via the survivorship rules above). This enables instant source attribution queries in Athena or the Serving Store without re-computation. Example queries available in <a href="PLATFORM_FLOW.html#field-provenance-and-source-attribution">PLATFORM_FLOW.md: Field Provenance and Source Attribution</a>.</p>
-<p><strong>System fields automatically added:</strong><br>
-- <code>golden_id</code> — deterministic ID stable across re-runs<br>
-- <code>contributing_source_records</code> — array of source record IDs that formed this golden record<br>
-- <code>survivorship_version</code> — policy version applied (e.g., "v1")<br>
-- <code>match_run_id</code> — entity resolution run ID<br>
+<p><strong>Field provenance tracking:</strong><br />
+Every golden record includes a <code>field_provenance</code> column — a JSON map documenting which source system won for each output field (via the survivorship rules above). This enables instant source attribution queries in Athena or the Serving Store without re-computation. Example queries available in <a href="PLATFORM_FLOW.md#field-provenance-and-source-attribution">PLATFORM_FLOW.md: Field Provenance and Source Attribution</a>.</p>
+<p><strong>System fields automatically added:</strong>
+- <code>golden_id</code> — deterministic ID stable across re-runs
+- <code>contributing_source_records</code> — array of source record IDs that formed this golden record
+- <code>survivorship_version</code> — policy version applied (e.g., "v1")
+- <code>match_run_id</code> — entity resolution run ID
 - <code>field_provenance</code> — JSON map of field winners (see above)</p>
-<p><strong>Total: 19 fields</strong> (14 declared output_fields + 5 system fields). See <a href="PLATFORM_FLOW.html#system-fields-in-golden-records">PLATFORM_FLOW: System Fields in Golden Records</a> for schema table.</p>
-<p><strong>Output schema projection (<code>output_fields</code>):</strong><br>
+<p><strong>Total: 19 fields</strong> (14 declared output_fields + 5 system fields). See <a href="PLATFORM_FLOW.md#system-fields-in-golden-records">PLATFORM_FLOW: System Fields in Golden Records</a> for schema table.</p>
+<p><strong>Output schema projection (<code>output_fields</code>):</strong><br />
 Each survivorship policy declares an explicit <code>output_fields</code> list. Only those fields appear in the canonical Parquet files — source-internal IDs, duplicate name variants, and system-only fields are excluded. Empty <code>output_fields</code> = pass-through (used only in tests).</p>
 <p><strong>Production entry point — <code>GoldenRecordPublisher.from_registry()</code>:</strong></p>
 <pre><code class="language-python">registry = ResolutionConfigRegistry(s3_bucket=&quot;dev-edl-curated&quot;, region_name=&quot;us-east-1&quot;)
@@ -549,22 +450,22 @@ publisher = GoldenRecordPublisher.from_registry(
 s3://{analytics-layer}/canonical/{entity_type}/match-decisions/{run_id}/decisions.json
 </code></pre>
 <p><strong>Lineage:</strong> Every field traces back to its contributing source record.</p>
-<hr>
+<hr />
 <h3 id="stage-15-analytics-layer-publish">Stage 15 — Analytics Layer Publish</h3>
-<p><strong>Component:</strong> <code>AnalyticsLayerPublisher</code><br>
-<strong>Purpose:</strong> Promotes curated domain datasets to consumption-optimised Parquet in the analytics layer and registers/updates Glue Catalog tables. The analytics layer (<code>{env}-analytics-layer</code>) is the single bucket for all consumption — it holds curated domain datasets under the <code>curated/</code> prefix and canonical (entity-resolved) outputs under the <code>canonical/</code> prefix.<br>
-<strong>Partition scheme:</strong> <code>s3://{bucket}/analytics/{domain}/{entity_id}/analytics_date={date}/run_id={run_id}/data.parquet</code><br>
+<p><strong>Component:</strong> <code>AnalyticsLayerPublisher</code><br />
+<strong>Purpose:</strong> Promotes curated domain datasets to consumption-optimised Parquet in the analytics layer and registers/updates Glue Catalog tables. The analytics layer (<code>{env}-edl-analytics-layer</code>) is the single bucket for all consumption — it holds curated domain datasets under the <code>curated/</code> prefix and canonical (entity-resolved) outputs under the <code>canonical/</code> prefix.<br />
+<strong>Partition scheme:</strong> <code>s3://{bucket}/analytics/{domain}/{entity_id}/analytics_date={date}/run_id={run_id}/data.parquet</code><br />
 <strong>Consumers:</strong> Athena, QuickSight, ML feature stores, data science notebooks.</p>
-<hr>
+<hr />
 <h3 id="stage-16-serving-store-load">Stage 16 — Serving Store Load</h3>
-<p><strong>Component:</strong> <code>ServingStoreLoader</code><br>
-<strong>Purpose:</strong> Loads analytics records into a MySQL RDS serving database for BI tools and applications.<br>
-<strong>Key properties:</strong><br>
-- Table schema inferred from Parquet schema — no hardcoded DDL<br>
-- <code>REPLACE INTO</code> — idempotent upsert, safe to re-run<br>
-- All SQL parameterized — no string interpolation of column names or values<br>
+<p><strong>Component:</strong> <code>ServingStoreLoader</code><br />
+<strong>Purpose:</strong> Loads analytics records into a MySQL RDS serving database for BI tools and applications.<br />
+<strong>Key properties:</strong>
+- Table schema inferred from Parquet schema — no hardcoded DDL
+- <code>REPLACE INTO</code> — idempotent upsert, safe to re-run
+- All SQL parameterized — no string interpolation of column names or values
 - Credentials exclusively from Secrets Manager</p>
-<hr>
+<hr />
 <h2 id="5-field-mapping-system">5. Field Mapping System</h2>
 <p>Field mappings define how source field names and types are transformed into canonical domain model fields at the Raw → Curated stage.</p>
 <h3 id="config-file-location-git">Config file location (Git)</h3>
@@ -648,7 +549,7 @@ python scripts/seed_field_mappings.py --environment dev --region us-east-1
 python scripts/seed_field_mappings.py --environment dev \
   --source-id salesforce --entity-id salesforce-account
 </code></pre>
-<hr>
+<hr />
 <h2 id="6-entity-resolution-config-system">6. Entity Resolution Config System</h2>
 <p>Entity resolution match rules and survivorship policies are managed as <strong>versioned JSON config files</strong> — analogous to field mapping configs but for entity identity.</p>
 <h3 id="config-file-location-git_1">Config file location (Git)</h3>
@@ -793,7 +694,7 @@ python scripts/seed_entity_resolution_configs.py --environment dev --region us-e
 # Publish single entity type
 python scripts/seed_entity_resolution_configs.py --environment dev --entity-type company
 </code></pre>
-<hr>
+<hr />
 <h2 id="7-failure-handling-and-replay">7. Failure Handling and Replay</h2>
 <table>
 <thead>
@@ -850,7 +751,7 @@ python scripts/seed_entity_resolution_configs.py --environment dev --entity-type
   --is-replay \
   --replay-of-run-id run-20260615-120000000000-ab12cd34
 </code></pre>
-<hr>
+<hr />
 <h2 id="8-version-control-and-rollback">8. Version Control and Rollback</h2>
 <table>
 <thead>
@@ -900,7 +801,7 @@ python scripts/seed_entity_resolution_configs.py --environment dev --entity-type
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h2 id="9-manual-trigger-checklist">9. Manual Trigger Checklist</h2>
 <p>Use this checklist when triggering stages manually (dev, debugging, replay).</p>
 <h3 id="pre-flight-checks">Pre-flight checks</h3>
@@ -913,7 +814,7 @@ aws dynamodb get-item \
   --key '{&quot;source_id&quot;:{&quot;S&quot;:&quot;salesforce&quot;},&quot;entity_id&quot;:{&quot;S&quot;:&quot;salesforce-account&quot;}}'
 
 # 3. Field mapping published to S3
-aws s3 ls s3://dev-curated-layer/field-mappings/salesforce/salesforce-account/
+aws s3 ls s3://dev-edl-curated-layer/field-mappings/salesforce/salesforce-account/
 
 # 4. Source credentials exist in Secrets Manager (pick the source you run)
 aws secretsmanager describe-secret \
@@ -937,7 +838,7 @@ aws dynamodb get-item \
 </code></pre>
 <h3 id="post-extraction-verification">Post-extraction verification</h3>
 <pre><code class="language-bash"># Raw files written
-aws s3 ls s3://dev-raw-layer/salesforce/salesforce-account/ --recursive
+aws s3 ls s3://dev-edl-raw-layer/salesforce/salesforce-account/ --recursive
 
 # Watermark advanced
 aws dynamodb get-item \
@@ -945,19 +846,19 @@ aws dynamodb get-item \
   --key '{&quot;source_id&quot;:{&quot;S&quot;:&quot;salesforce&quot;},&quot;entity_id&quot;:{&quot;S&quot;:&quot;salesforce-account&quot;}}'
 
 # Schema snapshot written
-aws s3 ls s3://dev-schema-snapshots/salesforce/salesforce-account/ --recursive
+aws s3 ls s3://dev-edl-schema-snapshots/salesforce/salesforce-account/ --recursive
 
 # No breaking drift (check drift_report)
-aws s3 cp s3://dev-schema-snapshots/salesforce/salesforce-account/latest.json -
+aws s3 cp s3://dev-edl-schema-snapshots/salesforce/salesforce-account/latest.json -
 </code></pre>
 <h3 id="post-transformation-verification">Post-transformation verification</h3>
 <pre><code class="language-bash"># Curated Parquet written
-aws s3 ls s3://dev-curated-layer/curated/customer/salesforce-account/ --recursive
+aws s3 ls s3://dev-edl-curated-layer/curated/customer/salesforce-account/ --recursive
 
 # Quality report — check is_publication_blocked=false
-aws s3 cp s3://dev-curated-layer/quality-reports/salesforce/salesforce-account/&lt;run_id&gt;/quality-report.json -
+aws s3 cp s3://dev-edl-curated-layer/quality-reports/salesforce/salesforce-account/&lt;run_id&gt;/quality-report.json -
 </code></pre>
-<hr>
+<hr />
 <h2 id="10-pre-deployment-verification">10. Pre-Deployment Verification</h2>
 <p>Before deploying to staging or prod, verify all of the following:</p>
 <ul>
@@ -975,94 +876,281 @@ aws s3 cp s3://dev-curated-layer/quality-reports/salesforce/salesforce-account/&
 <li>[ ] DLQ URL verified accessible by replay operator role</li>
 <li>[ ] At least one full extraction + transformation run verified in staging before prod promotion</li>
 </ul>
-      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
-
-<hr>
+<hr />
 <h2 id="11-technology-reference">11. Technology Reference</h2>
 <p>This section maps each pipeline stage to the exact tools, AWS services, Python libraries, and infrastructure components it depends on.</p>
-<h3>AWS Services by Stage</h3>
+<h3 id="aws-services-by-stage">AWS Services by Stage</h3>
 <table>
-<thead><tr><th>Stage</th><th>AWS Service(s)</th></tr></thead>
+<thead>
+<tr>
+<th>Stage</th>
+<th>AWS Service(s)</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Stage 1 — Event Scheduling</td><td>Amazon EventBridge Scheduler</td></tr>
-<tr><td>Stage 2 — Step Functions Orchestration</td><td>AWS Step Functions (Standard / Express Workflow)</td></tr>
-<tr><td>Stage 3 — Configuration Load</td><td>Amazon DynamoDB (<code>{env}-entity-extraction-config</code>)</td></tr>
-<tr><td>Stage 4 — Credential Retrieval</td><td>AWS Secrets Manager (<code>{env}/sources/{source}/credentials</code>)</td></tr>
-<tr><td>Stage 5 — Metadata Discovery</td><td>Source APIs (no AWS; called from Lambda/ECS over VPC)</td></tr>
-<tr><td>Stage 6 — Query Construction</td><td>In-process (no AWS service); ISO-8601 validated</td></tr>
-<tr><td>Stage 7 — Extraction</td><td>AWS Lambda (&lt; 5&nbsp;M records) or AWS ECS Fargate (≥ 5&nbsp;M records); Amazon S3 (raw layer write)</td></tr>
-<tr><td>Stage 8 — Schema Snapshot</td><td>Amazon S3 (<code>{env}-schema-snapshots</code>)</td></tr>
-<tr><td>Stage 9 — Drift Evaluation</td><td>In-process; writes drift report to Amazon S3</td></tr>
-<tr><td>Stage 10 — Raw Layer Write</td><td>Amazon S3 (Object Lock GOVERNANCE); CloudWatch metric emit</td></tr>
-<tr><td>Stage 11 — Watermark Update</td><td>Amazon DynamoDB (<code>{env}-watermark-repository</code>; conditional put)</td></tr>
-<tr><td>Stage 12 — Transformation</td><td>AWS Lambda or AWS Glue; Amazon S3 (curated layer); AWS Glue Data Catalog</td></tr>
-<tr><td>Stage 13 — Entity Resolution</td><td>AWS Lambda; Amazon S3 (curated read + analytics write)</td></tr>
-<tr><td>Stage 14 — Golden Record Publish</td><td>AWS Lambda; Amazon S3 (analytics layer <code>canonical/</code> prefix)</td></tr>
-<tr><td>Stage 15 — Analytics Layer Publish</td><td>Amazon S3 (analytics layer); AWS Glue Data Catalog</td></tr>
-<tr><td>Stage 16 — Serving Store Load</td><td>Amazon RDS MySQL 8 (private VPC); AWS Secrets Manager</td></tr>
-<tr><td>All stages</td><td>Amazon CloudWatch Logs; CloudWatch Metrics; AWS X-Ray; Amazon SQS (DLQ)</td></tr>
+<tr>
+<td>Stage 1 — Event Scheduling</td>
+<td>Amazon EventBridge Scheduler</td>
+</tr>
+<tr>
+<td>Stage 2 — Step Functions Orchestration</td>
+<td>AWS Step Functions (Standard / Express Workflow)</td>
+</tr>
+<tr>
+<td>Stage 3 — Configuration Load</td>
+<td>Amazon DynamoDB (<code>{env}-entity-extraction-config</code>)</td>
+</tr>
+<tr>
+<td>Stage 4 — Credential Retrieval</td>
+<td>AWS Secrets Manager (<code>{env}/sources/{source}/credentials</code>)</td>
+</tr>
+<tr>
+<td>Stage 5 — Metadata Discovery</td>
+<td>Source APIs (no AWS; called from Lambda/ECS over VPC)</td>
+</tr>
+<tr>
+<td>Stage 6 — Query Construction</td>
+<td>In-process (no AWS service); ISO-8601 validated</td>
+</tr>
+<tr>
+<td>Stage 7 — Extraction</td>
+<td>AWS Lambda (&lt; 5 M records) or AWS ECS Fargate (≥ 5 M records); Amazon S3 (raw layer write)</td>
+</tr>
+<tr>
+<td>Stage 8 — Schema Snapshot</td>
+<td>Amazon S3 (<code>{env}-edl-schema-snapshots</code>)</td>
+</tr>
+<tr>
+<td>Stage 9 — Drift Evaluation</td>
+<td>In-process (no AWS service); writes drift report to Amazon S3</td>
+</tr>
+<tr>
+<td>Stage 10 — Raw Layer Write</td>
+<td>Amazon S3 (Object Lock GOVERNANCE); CloudWatch metric emit</td>
+</tr>
+<tr>
+<td>Stage 11 — Watermark Update</td>
+<td>Amazon DynamoDB (<code>{env}-watermark-repository</code>; conditional put)</td>
+</tr>
+<tr>
+<td>Stage 12 — Transformation</td>
+<td>AWS Lambda or AWS Glue; Amazon S3 (curated layer); AWS Glue Data Catalog</td>
+</tr>
+<tr>
+<td>Stage 13 — Entity Resolution</td>
+<td>AWS Lambda; Amazon S3 (curated source read + analytics write)</td>
+</tr>
+<tr>
+<td>Stage 14 — Golden Record Publish</td>
+<td>AWS Lambda; Amazon S3 (analytics layer <code>canonical/</code> prefix)</td>
+</tr>
+<tr>
+<td>Stage 15 — Analytics Layer Publish</td>
+<td>Amazon S3 (analytics layer); AWS Glue Data Catalog</td>
+</tr>
+<tr>
+<td>Stage 16 — Serving Store Load</td>
+<td>Amazon RDS MySQL 8 (private VPC); AWS Secrets Manager</td>
+</tr>
+<tr>
+<td>All stages</td>
+<td>Amazon CloudWatch Logs; Amazon CloudWatch Metrics; AWS X-Ray; Amazon SQS (DLQ)</td>
+</tr>
 </tbody>
 </table>
-<h3>Python Libraries by Component</h3>
+<h3 id="python-libraries-by-component">Python Libraries by Component</h3>
 <table>
-<thead><tr><th>Component</th><th>Key Libraries</th></tr></thead>
+<thead>
+<tr>
+<th>Component</th>
+<th>Key Libraries</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Connector Runtime (all connectors)</td><td><code>boto3</code>, <code>pyarrow</code>, <code>pydantic</code> ≥ 2.7, <code>structlog</code> ≥ 24.4</td></tr>
-<tr><td>Salesforce connector</td><td><code>requests</code> (OAuth 2.0 client credentials); Bulk API 2.0 CSV streaming</td></tr>
-<tr><td>NetSuite connector</td><td><code>requests</code> (OAuth 1.0a); SuiteQL REST JSON</td></tr>
-<tr><td>MySQL RDS connector</td><td><code>pymysql</code>; <code>INFORMATION_SCHEMA</code> introspection</td></tr>
-<tr><td>Watermark / Schema / Config repositories</td><td><code>boto3</code> (DynamoDB / S3); <code>pydantic</code></td></tr>
-<tr><td>Transformation pipeline</td><td><code>pyarrow</code> (Parquet I/O); <code>boto3</code>; <code>re</code> (pre-compiled patterns)</td></tr>
-<tr><td>Entity resolution</td><td>Custom Jaro-Winkler / Jaccard implementation in <code>matching_engine/</code></td></tr>
-<tr><td>Observability</td><td><code>structlog</code>, <code>boto3</code> CloudWatch</td></tr>
+<tr>
+<td>Connector Runtime (all connectors)</td>
+<td><code>boto3</code>, <code>pyarrow</code>, <code>pydantic</code> ≥ 2.7, <code>structlog</code> ≥ 24.4</td>
+</tr>
+<tr>
+<td>Salesforce connector</td>
+<td><code>requests</code> (OAuth 2.0 client credentials); Bulk API 2.0 CSV streaming</td>
+</tr>
+<tr>
+<td>NetSuite connector</td>
+<td><code>requests</code> (OAuth 1.0a); SuiteQL REST JSON</td>
+</tr>
+<tr>
+<td>MySQL RDS connector</td>
+<td><code>pymysql</code>; <code>INFORMATION_SCHEMA</code> introspection</td>
+</tr>
+<tr>
+<td>Watermark / Schema / Config repositories</td>
+<td><code>boto3</code> (DynamoDB / S3); <code>pydantic</code></td>
+</tr>
+<tr>
+<td>Transformation pipeline</td>
+<td><code>pyarrow</code> (Parquet I/O); <code>boto3</code>; <code>re</code> (pre-compiled patterns)</td>
+</tr>
+<tr>
+<td>Entity resolution</td>
+<td><code>rapidfuzz</code> or custom Jaro-Winkler / Jaccard implementation</td>
+</tr>
+<tr>
+<td>Observability</td>
+<td><code>structlog</code>, <code>boto3</code> CloudWatch</td>
+</tr>
+<tr>
+<td>Infrastructure as Code</td>
+<td>Terraform ≥ 1.8 (AWS Provider ~&gt; 5.0)</td>
+</tr>
 </tbody>
 </table>
-<h3>Data Formats</h3>
+<h3 id="data-formats">Data Formats</h3>
 <table>
-<thead><tr><th>Format</th><th>Stage produced</th><th>Compression</th></tr></thead>
+<thead>
+<tr>
+<th>Format</th>
+<th>Stage produced</th>
+<th>Compression</th>
+</tr>
+</thead>
 <tbody>
-<tr><td><strong>Apache Parquet</strong></td><td>Raw write (Stage 7), Curated write (Stage 12), Analytics write (Stages 14–15)</td><td>Snappy (curated/analytics); uncompressed <code>large_utf8</code> (raw)</td></tr>
-<tr><td><strong>JSON</strong></td><td>Schema snapshot (Stage 8), drift report (Stage 9), quality report (Stage 12), lineage record (Stage 12), golden match decisions (Stage 14)</td><td>None (human-readable)</td></tr>
-<tr><td><strong>DynamoDB Item</strong></td><td>Config (Stage 3), watermark (Stage 11), audit log (all stages)</td><td>DynamoDB-native</td></tr>
+<tr>
+<td><strong>Apache Parquet</strong></td>
+<td>Raw write (Stage 7), Curated write (Stage 12), Analytics write (Stages 14–15)</td>
+<td>Snappy (curated/analytics); uncompressed large_utf8 (raw)</td>
+</tr>
+<tr>
+<td><strong>JSON</strong></td>
+<td>Schema snapshot (Stage 8), drift report (Stage 9), quality report (Stage 12), lineage record (Stage 12), golden match decisions (Stage 14)</td>
+<td>None (human-readable)</td>
+</tr>
+<tr>
+<td><strong>DynamoDB Item</strong></td>
+<td>Config (Stage 3), watermark (Stage 11), audit log (all stages)</td>
+<td>DynamoDB-native</td>
+</tr>
 </tbody>
 </table>
-<h3>Security Controls Applied Per Stage</h3>
+<h3 id="security-controls-applied-per-stage">Security Controls Applied Per Stage</h3>
 <table>
-<thead><tr><th>Stage</th><th>Security control</th></tr></thead>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Security control</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Stage 4 — Credential Retrieval</td><td>Secrets Manager; credentials held in memory only; never logged (structlog PII scrubber)</td></tr>
-<tr><td>Stage 6 — Query Construction</td><td>Parameterised queries only; ISO-8601 validation on watermark values (SQL injection prevention)</td></tr>
-<tr><td>Stage 7 — Extraction</td><td>S3 Object Lock GOVERNANCE; SSE-KMS; TLS 1.2+; VPC-only egress</td></tr>
-<tr><td>Stage 12 — Transformation</td><td>HMAC-SHA256 tokenisation; SHA-256 hash; REDACT / PARTIAL_MASK / FULL_MASK applied before any write</td></tr>
-<tr><td>All stages</td><td>IAM least-privilege roles; no wildcard <code>Action:*</code>; VPC Endpoints for all AWS service access</td></tr>
+<tr>
+<td>Stage 4 — Credential Retrieval</td>
+<td>Secrets Manager; credentials held in memory only; never logged (structlog PII scrubber)</td>
+</tr>
+<tr>
+<td>Stage 6 — Query Construction</td>
+<td>Parameterised queries only; ISO-8601 validation on watermark values (SQL injection prevention)</td>
+</tr>
+<tr>
+<td>Stage 7 — Extraction</td>
+<td>S3 Object Lock GOVERNANCE; SSE-KMS; TLS 1.2+; VPC-only egress</td>
+</tr>
+<tr>
+<td>Stage 12 — Transformation</td>
+<td>HMAC-SHA256 tokenisation; SHA-256 hash; REDACT / PARTIAL_MASK / FULL_MASK applied before any write</td>
+</tr>
+<tr>
+<td>All stages</td>
+<td>IAM least-privilege roles; no wildcard <code>Action:*</code>; VPC Endpoints for all AWS service access</td>
+</tr>
 </tbody>
 </table>
-<h3>Entity Resolution Algorithms</h3>
+<h3 id="entity-resolution-algorithms">Entity Resolution Algorithms</h3>
 <table>
-<thead><tr><th>Algorithm</th><th>Purpose</th><th>Implementation</th></tr></thead>
+<thead>
+<tr>
+<th>Algorithm</th>
+<th>Purpose</th>
+<th>Implementation</th>
+</tr>
+</thead>
 <tbody>
-<tr><td><strong>Deterministic exact match</strong></td><td>Email, CRM ID, ERP reference codes</td><td>String normalisation + equality</td></tr>
-<tr><td><strong>Jaro-Winkler similarity</strong></td><td>Name matching (handles abbreviations, transpositions)</td><td>Weighted probabilistic scoring</td></tr>
-<tr><td><strong>Jaccard token-set similarity</strong></td><td>Company name matching (word-level)</td><td>Token overlap ratio</td></tr>
-<tr><td><strong>Blocking</strong></td><td>Reduce comparison space before scoring</td><td>Email domain, phone prefix, name prefix, record ID prefix</td></tr>
+<tr>
+<td><strong>Deterministic exact match</strong></td>
+<td>Email, CRM ID, ERP reference codes</td>
+<td>String normalisation + equality</td>
+</tr>
+<tr>
+<td><strong>Jaro-Winkler similarity</strong></td>
+<td>Name matching (handles abbreviations, transpositions)</td>
+<td>Weighted probabilistic scoring</td>
+</tr>
+<tr>
+<td><strong>Jaccard token-set similarity</strong></td>
+<td>Company name matching (word-level)</td>
+<td>Token overlap ratio</td>
+</tr>
+<tr>
+<td><strong>Blocking</strong></td>
+<td>Reduce comparison space before scoring</td>
+<td>Email domain, phone prefix, name prefix, record ID prefix</td>
+</tr>
 </tbody>
 </table>
-<h3>Infrastructure as Code Reference</h3>
+<h3 id="infrastructure-as-code-reference">Infrastructure as Code Reference</h3>
 <table>
-<thead><tr><th>Resource type</th><th>Terraform module</th><th>Key outputs</th></tr></thead>
+<thead>
+<tr>
+<th>Resource type</th>
+<th>Terraform module</th>
+<th>Key outputs</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>VPC, subnets, NAT, VPC Endpoints</td><td><code>infrastructure/modules/networking/</code></td><td>VPC ID, subnet IDs, endpoint IDs</td></tr>
-<tr><td>S3 buckets (all layers)</td><td><code>infrastructure/modules/storage/</code></td><td>Bucket names, ARNs, Object Lock config</td></tr>
-<tr><td>KMS key</td><td><code>infrastructure/modules/kms/</code></td><td>Key ARN (used as SSE key across all resources)</td></tr>
-<tr><td>IAM roles (5 service roles + CI/CD)</td><td><code>infrastructure/modules/iam/</code></td><td>Role ARNs</td></tr>
-<tr><td>Secrets Manager secrets</td><td><code>infrastructure/modules/secrets/</code></td><td>Secret ARNs, rotation schedules</td></tr>
-<tr><td>DynamoDB tables</td><td><code>infrastructure/modules/metadata_persistence/</code></td><td>Table names, GSI names</td></tr>
-<tr><td>CloudWatch, SNS, X-Ray</td><td><code>infrastructure/modules/observability/</code></td><td>Log group names, alarm ARNs, SNS topic ARN</td></tr>
-<tr><td>Step Functions state machine</td><td><code>infrastructure/modules/orchestration/</code></td><td>State machine ARN</td></tr>
-<tr><td>EventBridge schedules</td><td>Managed at runtime via <code>extraction_schedule_client.py</code></td><td>Schedule names follow <code>{source_id}--{entity_id}</code></td></tr>
+<tr>
+<td>VPC, subnets, NAT, VPC Endpoints</td>
+<td><code>infrastructure/modules/networking/</code></td>
+<td>VPC ID, subnet IDs, endpoint IDs</td>
+</tr>
+<tr>
+<td>S3 buckets (all layers)</td>
+<td><code>infrastructure/modules/storage/</code></td>
+<td>Bucket names, ARNs, Object Lock config</td>
+</tr>
+<tr>
+<td>KMS key</td>
+<td><code>infrastructure/modules/kms/</code></td>
+<td>Key ARN (used as SSE key across all resources)</td>
+</tr>
+<tr>
+<td>IAM roles (5 service roles + CI/CD)</td>
+<td><code>infrastructure/modules/iam/</code></td>
+<td>Role ARNs</td>
+</tr>
+<tr>
+<td>Secrets Manager secrets</td>
+<td><code>infrastructure/modules/secrets/</code></td>
+<td>Secret ARNs, rotation schedules</td>
+</tr>
+<tr>
+<td>DynamoDB tables</td>
+<td><code>infrastructure/modules/metadata_persistence/</code></td>
+<td>Table names, GSI names</td>
+</tr>
+<tr>
+<td>CloudWatch, SNS, X-Ray</td>
+<td><code>infrastructure/modules/observability/</code></td>
+<td>Log group names, alarm ARNs, SNS topic ARN</td>
+</tr>
+<tr>
+<td>Step Functions state machine</td>
+<td><code>infrastructure/modules/orchestration/</code></td>
+<td>State machine ARN</td>
+</tr>
+<tr>
+<td>EventBridge schedules</td>
+<td>Managed at runtime via <code>extraction_schedule_client.py</code></td>
+<td>Schedule names follow <code>{source_id}--{entity_id}</code></td>
+</tr>
 </tbody>
-</table>
-    </article>
-  </main>
+</table></article></main>
 </body>
 </html>

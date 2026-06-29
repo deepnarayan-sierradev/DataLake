@@ -3,146 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cost Analysis &amp; Return on Investment (ROI)</title>
-  <style>
-:root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --muted: #475569;
-  --border: #e2e8f0;
-  --accent: #0f766e;
-  --code-bg: #f1f5f9;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  color: var(--text);
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-}
-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(15, 23, 42, 0.95);
-  color: #fff;
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-.header-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
-.file { font-size: 12px; opacity: 0.9; }
-main {
-  max-width: 1100px;
-  margin: 24px auto 48px;
-  padding: 0 20px;
-}
-article {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
-}
-h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
-h1 { margin-top: 0; font-size: 2rem; }
-h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
-h3 { font-size: 1.2rem; }
-p, li { color: var(--text); line-height: 1.65; }
-ul, ol { padding-left: 1.25rem; }
-code {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.1rem 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 0.92em;
-}
-pre {
-  background: #0b1020;
-  color: #e2e8f0;
-  border-radius: 10px;
-  padding: 14px;
-  overflow-x: auto;
-  border: 1px solid #1e293b;
-}
-pre code {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: inherit;
-}
-blockquote {
-  margin: 1em 0;
-  padding: 0.7em 1em;
-  border-left: 4px solid var(--accent);
-  background: #f0fdfa;
-  color: var(--muted);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1em 0;
-  font-size: 0.95rem;
-}
-th, td {
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-  text-align: left;
-  vertical-align: top;
-}
-th {
-  background: #f8fafc;
-  font-weight: 600;
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
-.toc {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: #f8fafc;
-  margin-bottom: 1rem;
-}
-.footer {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 14px;
-}
-@media (max-width: 760px) {
-  article { padding: 18px; border-radius: 10px; }
-  .header-inner { padding: 10px 14px; }
-  main { margin-top: 16px; padding: 0 12px; }
-}
-</style>
+  <title>Cost Analysis & ROI — Enterprise Data Lake Platform</title>
+  <style>:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#475569;--border:#e2e8f0;--accent:#0f766e;--code-bg:#f1f5f9}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%)}header{position:sticky;top:0;z-index:10;background:rgba(15,23,42,.95);color:#fff;backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,.1)}.header-inner{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:700;letter-spacing:.2px;font-size:14px}.file{font-size:12px;opacity:.9}main{max-width:1100px;margin:24px auto 48px;padding:0 20px}article{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;box-shadow:0 10px 35px rgba(15,23,42,.06)}h1,h2,h3,h4{line-height:1.25;margin-top:1.4em;margin-bottom:.55em}h1{margin-top:0;font-size:2rem}h2{font-size:1.45rem;border-top:1px solid var(--border);padding-top:1em}h3{font-size:1.2rem}p,li{color:var(--text);line-height:1.65}ul,ol{padding-left:1.25rem}code{background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:.92em}pre{background:#0b1020;color:#e2e8f0;border-radius:10px;padding:14px;overflow-x:auto;border:1px solid #1e293b}pre code{background:transparent;border:0;padding:0;color:inherit}blockquote{margin:1em 0;padding:.7em 1em;border-left:4px solid var(--accent);background:#f0fdfa;color:var(--muted)}table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.95rem}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:#f8fafc;font-weight:600}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}hr{border:0;border-top:1px solid var(--border);margin:1.6em 0}.footer{color:var(--muted);font-size:12px;margin-top:14px}@media(max-width:760px){article{padding:18px;border-radius:10px}.header-inner{padding:10px 14px}main{margin-top:16px;padding:0 12px}}</style>
 </head>
 <body>
-  <header>
-    <div class="header-inner">
-      <div class="brand">Enterprise Data Lake Documentation</div>
-      <div class="file">COST_ANALYSIS_AND_ROI.md</div>
-    </div>
-  </header>
-  <main>
-    <article>
-<h1 id="cost-analysis-return-on-investment-roi">Cost Analysis &amp; Return on Investment (ROI)</h1>
-<p><strong>For:</strong> Finance, Leadership, Procurement<br>
-<strong>Document version:</strong> 1.0<br>
-<strong>Date:</strong> 2026-06-17</p>
-<hr>
+  <header><div class="header-inner"><div class="brand">Enterprise Data Lake Documentation</div><div class="file">COST_ANALYSIS_AND_ROI.md</div></div></header>
+  <main><article><h1 id="cost-analysis-return-on-investment-roi">Cost Analysis &amp; Return on Investment (ROI)</h1>
+<p><strong>For:</strong> Finance, Leadership, Procurement<br />
+<strong>Document version:</strong> 1.0<br />
+<strong>Date:</strong> 2026-06-29</p>
+<hr />
 <h2 id="executive-summary">Executive Summary</h2>
 <p>The Enterprise Data Lake Platform pays for itself in labor savings within <strong>2–3 months</strong>, with ongoing monthly savings of <strong>$15K–$25K</strong> from eliminated manual data pipelines and improved analytics velocity.</p>
-<hr>
+<hr />
 <h2 id="cost-breakdown">Cost Breakdown</h2>
 <h3 id="aws-infrastructure-monthly-costs">AWS Infrastructure Monthly Costs</h3>
 <table>
@@ -335,56 +208,56 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tbody>
 </table>
 <p><strong>Savings from automation:</strong> <strong>96 hrs/month</strong> = <strong>$6,300/month</strong> in eliminated labor</p>
-<hr>
+<hr />
 <h2 id="full-cost-analysis">Full Cost Analysis</h2>
 <h3 id="scenario-1-first-year-deployment">Scenario 1: First Year Deployment</h3>
-<p><strong>One-time costs (infrastructure setup):</strong><br>
-- AWS account setup, VPC provisioning, Terraform scaffolding: <strong>$3,000</strong><br>
-- Data platform team training &amp; runbook creation: <strong>$5,000</strong><br>
-- Entity configuration for 5 initial sources: <strong>$2,500</strong><br>
-- Security review &amp; compliance gating: <strong>$2,000</strong><br>
+<p><strong>One-time costs (infrastructure setup):</strong>
+- AWS account setup, VPC provisioning, Terraform scaffolding: <strong>$3,000</strong>
+- Data platform team training &amp; runbook creation: <strong>$5,000</strong>
+- Entity configuration for 5 initial sources: <strong>$2,500</strong>
+- Security review &amp; compliance gating: <strong>$2,000</strong>
 - <strong>Total one-time:</strong> <strong>$12,500</strong></p>
-<p><strong>Year 1 ongoing (Monthly × 12):</strong><br>
-- AWS infrastructure: $699 × 12 = <strong>$8,388</strong><br>
-- Platform operations (staffing): $1,700 × 12 = <strong>$20,400</strong><br>
+<p><strong>Year 1 ongoing (Monthly × 12):</strong>
+- AWS infrastructure: $699 × 12 = <strong>$8,388</strong>
+- Platform operations (staffing): $1,700 × 12 = <strong>$20,400</strong>
 - <strong>Total Year 1 ongoing:</strong> <strong>$28,788</strong></p>
 <p><strong>Year 1 total deployed cost:</strong> <strong>$12,500 + $28,788 = $41,288</strong></p>
-<p><strong>Savings delivered in Year 1:</strong><br>
-- Eliminated manual labor: $6,300 × 12 = <strong>$75,600</strong><br>
-- Reduced developer context-switching: ~$10,000 (estimated from sprint velocity improvements)<br>
+<p><strong>Savings delivered in Year 1:</strong>
+- Eliminated manual labor: $6,300 × 12 = <strong>$75,600</strong>
+- Reduced developer context-switching: ~$10,000 (estimated from sprint velocity improvements)
 - <strong>Total Year 1 savings:</strong> <strong>$85,600</strong></p>
 <p><strong>Year 1 ROI:</strong></p>
 <pre><code>(Savings - Cost) / Cost = ($85,600 - $41,288) / $41,288 = 107% ROI
 Break-even: Month 2–3
 </code></pre>
-<hr>
+<hr />
 <h3 id="scenario-2-ongoing-year-2">Scenario 2: Ongoing (Year 2+)</h3>
 <p>After year 1, costs stabilize:</p>
-<p><strong>Monthly recurring cost:</strong><br>
-- AWS infrastructure: <strong>$699</strong><br>
-- Platform operations (1 FTE distributed across team): <strong>$1,700</strong><br>
+<p><strong>Monthly recurring cost:</strong>
+- AWS infrastructure: <strong>$699</strong>
+- Platform operations (1 FTE distributed across team): <strong>$1,700</strong>
 - <strong>Total monthly:</strong> <strong>$2,399</strong></p>
-<p><strong>Ongoing annual savings:</strong><br>
-- Eliminated manual labor (compounding): <strong>$75,600+</strong><br>
-- Avoidance of ad-hoc data warehouse projects: <strong>~$50,000</strong> (estimated)<br>
+<p><strong>Ongoing annual savings:</strong>
+- Eliminated manual labor (compounding): <strong>$75,600+</strong>
+- Avoidance of ad-hoc data warehouse projects: <strong>~$50,000</strong> (estimated)
 - <strong>Total ongoing annual:</strong> <strong>$125,600+</strong></p>
 <p><strong>Ongoing annual ROI:</strong> <strong>($125,600 - $28,788) / $28,788 = 336% ROI</strong></p>
-<hr>
+<hr />
 <h2 id="sensitivity-analysis">Sensitivity Analysis</h2>
 <h3 id="what-if-extraction-volume-doubles">What if extraction volume doubles?</h3>
-<p><strong>Impact:</strong> Additional S3 storage (~$120/month) + additional Lambda runs (~$50/month)<br>
-<strong>New total:</strong> $699 + $170 = <strong>$869/month</strong><br>
+<p><strong>Impact:</strong> Additional S3 storage (~$120/month) + additional Lambda runs (~$50/month)<br />
+<strong>New total:</strong> $699 + $170 = <strong>$869/month</strong><br />
 <strong>Result:</strong> ROI remains &gt;300% annual</p>
 <h3 id="what-if-we-add-10-more-data-sources">What if we add 10 more data sources?</h3>
-<p><strong>Impact:</strong> <br>
-- Additional Secrets Manager secrets: <strong>+$4/month</strong><br>
-- Additional EventBridge schedules: <strong>+$1/month</strong><br>
-- Additional DynamoDB capacity (on-demand): <strong>~+$50/month</strong><br>
-- <strong>New AWS cost:</strong> <strong>$754/month</strong><br>
+<p><strong>Impact:</strong> 
+- Additional Secrets Manager secrets: <strong>+$4/month</strong>
+- Additional EventBridge schedules: <strong>+$1/month</strong>
+- Additional DynamoDB capacity (on-demand): <strong>~+$50/month</strong>
+- <strong>New AWS cost:</strong> <strong>$754/month</strong>
 - <strong>Additional platform ops (0.25 FTE):</strong> <strong>+$500/month</strong></p>
-<p><strong>New total:</strong> $2,399 + $254 = <strong>$2,653/month</strong> (for 15 sources instead of 5)<br>
+<p><strong>New total:</strong> $2,399 + $254 = <strong>$2,653/month</strong> (for 15 sources instead of 5)<br />
 <strong>Result:</strong> Still <strong>290%+ annual ROI</strong></p>
-<hr>
+<hr />
 <h2 id="financial-comparison-build-vs-buy-vs-this-platform">Financial Comparison: Build vs. Buy vs. This Platform</h2>
 <h3 id="option-a-buy-a-commercial-data-lake-eg-fivetran-stitch">Option A: Buy a Commercial Data Lake (e.g., Fivetran, Stitch)</h3>
 <table>
@@ -499,7 +372,7 @@ Break-even: Month 2–3
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h2 id="hidden-costs-avoided">Hidden Costs Avoided</h2>
 <h3 id="incidents-downtime-before-platform">Incidents &amp; Downtime (Before Platform)</h3>
 <ul>
@@ -517,7 +390,7 @@ Break-even: Month 2–3
 <li>Manual data extracts interrupt developers: <strong>5–10 hrs/week × $2,000/hr = $10,000–$20,000/month</strong></li>
 <li>Platform reduces manual requests by 90% = <strong>$9,000–$18,000/month saved</strong></li>
 </ul>
-<hr>
+<hr />
 <h2 id="recommendation">Recommendation</h2>
 <p><strong>Deploy the platform immediately.</strong> </p>
 <ul>
@@ -526,29 +399,116 @@ Break-even: Month 2–3
 <li><strong>Competitive advantage:</strong> 10× faster data delivery than competitors</li>
 <li><strong>Compliance benefit:</strong> Automated audit trail de-risks regulatory exposure</li>
 </ul>
-<p><strong>Approved signatories:</strong><br>
-- [ ] CFO / Finance Director<br>
-- [ ] Chief Data Officer<br>
-- [ ] Chief Information Security Officer<br>
+<p><strong>Approved signatories:</strong>
+- [ ] CFO / Finance Director
+- [ ] Chief Data Officer
+- [ ] Chief Information Security Officer
 - [ ] VP Engineering</p>
-      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
-
-<hr>
-<h2 id="technology-stack-reference">Technology Stack Reference</h2>
+<hr />
+<h2 id="technology-cost-drivers-reference">Technology Cost Drivers — Reference</h2>
+<p>This section maps each AWS service to its cost driver and the optimisation already applied.</p>
 <table>
-<thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+<thead>
+<tr>
+<th>Service</th>
+<th>Cost driver</th>
+<th>Optimisation applied</th>
+<th>Monthly estimate</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Cloud</td><td><strong>AWS</strong> (EventBridge, Step Functions, Lambda, ECS Fargate, S3, DynamoDB, Secrets Manager, Glue, Athena, RDS MySQL, SQS, CloudWatch, X-Ray, SNS, KMS, IAM, VPC)</td></tr>
-<tr><td>Data format</td><td><strong>Apache Parquet</strong> (Snappy) for data layers; <strong>JSON</strong> for configs and reports</td></tr>
-<tr><td>Source APIs</td><td><strong>Salesforce Bulk API 2.0</strong>; <strong>NetSuite SuiteQL REST</strong>; <strong>MySQL JDBC</strong> via <code>pymysql</code></td></tr>
-<tr><td>Language</td><td><strong>Python 3.14</strong> — Pydantic v2, structlog ≥ 24.4, pyarrow, boto3, pymysql, requests</td></tr>
-<tr><td>Infrastructure</td><td><strong>Terraform</strong> ≥ 1.8 (AWS Provider ~&gt; 5.0); 3 environments: dev / staging / prod</td></tr>
-<tr><td>CI/CD</td><td><strong>GitHub Actions</strong> — 7-stage gate: Ruff → mypy → pytest → bandit → pip-audit → checkov → terraform validate</td></tr>
-<tr><td>Security algorithms</td><td><strong>HMAC-SHA256</strong> (PII tokenisation); <strong>SHA-256</strong> (field fingerprinting); <strong>Jaro-Winkler</strong> + <strong>Jaccard</strong> (entity resolution)</td></tr>
-<tr><td>Testing</td><td><strong>pytest</strong> + <strong>moto</strong> ≥ 5.0 (AWS mocking); ≥ 80% coverage gate enforced in CI</td></tr>
+<tr>
+<td><strong>Amazon S3</strong></td>
+<td>GB stored × storage class</td>
+<td>S3 Intelligent-Tiering on analytics layer; Parquet compression (5–10× vs JSON)</td>
+<td>$120</td>
+</tr>
+<tr>
+<td><strong>S3 Data Transfer</strong></td>
+<td>GB transferred out</td>
+<td>Partitioned Athena scans minimise outbound; S3→Lambda intra-region is free</td>
+<td>$180</td>
+</tr>
+<tr>
+<td><strong>AWS Lambda</strong></td>
+<td>GB-seconds × invocations</td>
+<td>Streaming architecture (constant RAM regardless of dataset size); 512 MB allocation</td>
+<td>$80</td>
+</tr>
+<tr>
+<td><strong>AWS ECS Fargate</strong></td>
+<td>vCPU-hours + GB-hours (large jobs only)</td>
+<td>Only invoked for datasets &gt; 5 M records; otherwise Lambda</td>
+<td>Included in Lambda est.</td>
+</tr>
+<tr>
+<td><strong>Amazon DynamoDB</strong></td>
+<td>Read/write capacity units</td>
+<td>On-demand pricing; PITR adds ~25% to storage cost</td>
+<td>$150</td>
+</tr>
+<tr>
+<td><strong>AWS Step Functions</strong></td>
+<td>State transitions</td>
+<td>16 transitions per pipeline run; Standard Workflow for staging/prod</td>
+<td>$3</td>
+</tr>
+<tr>
+<td><strong>Amazon EventBridge Scheduler</strong></td>
+<td>Invocations</td>
+<td>12 schedules × 1/day × 30 days</td>
+<td>$1</td>
+</tr>
+<tr>
+<td><strong>AWS Secrets Manager</strong></td>
+<td>Secrets stored + API calls</td>
+<td>3 secrets; retrieval cached per Lambda invocation</td>
+<td>$9</td>
+</tr>
+<tr>
+<td><strong>Amazon Athena</strong></td>
+<td>TB scanned</td>
+<td>Year/month/day partitioning limits scan to relevant partition (1–10 GB typical)</td>
+<td>$25</td>
+</tr>
+<tr>
+<td><strong>AWS Glue Data Catalog</strong></td>
+<td>Catalog entries</td>
+<td>Catalog-only cost (no Glue ETL jobs used)</td>
+<td>$0</td>
+</tr>
+<tr>
+<td><strong>Amazon CloudWatch</strong></td>
+<td>Log ingestion + storage + metrics + alarms</td>
+<td>Structured JSON logs (compact); 30-day hot retention; 50 custom metrics</td>
+<td>$70</td>
+</tr>
+<tr>
+<td><strong>AWS KMS</strong></td>
+<td>API calls + CMK storage</td>
+<td>1 shared CMK for all resources (annual rotation)</td>
+<td>$1</td>
+</tr>
+<tr>
+<td><strong>Amazon SQS</strong></td>
+<td>Messages sent</td>
+<td>DLQ only (low volume; triggered only on failures)</td>
+<td>&lt; $1</td>
+</tr>
+<tr>
+<td><strong>Amazon VPC / NAT Gateway</strong></td>
+<td>Data processed + hourly charge</td>
+<td>NAT Gateway optional if all sources reachable via PrivateLink</td>
+<td>$45</td>
+</tr>
+<tr>
+<td><strong>Amazon RDS MySQL</strong></td>
+<td>Instance hours + storage</td>
+<td><code>db.t3.medium</code> dev; <code>db.r6g.large</code> prod; Multi-AZ in prod</td>
+<td>Variable by tier</td>
+</tr>
 </tbody>
 </table>
-    </article>
-  </main>
+<p><strong>Key cost insight:</strong> The Parquet format (Apache Parquet, Snappy compression) is the single biggest cost lever — a 5–10× reduction in S3 storage compared to raw JSON directly reduces S3 storage, data transfer, and Athena scan costs simultaneously.</p></article></main>
 </body>
 </html>

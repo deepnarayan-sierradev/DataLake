@@ -4,143 +4,20 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Enterprise Data Lake Platform — Executive Overview</title>
-  <style>
-:root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --muted: #475569;
-  --border: #e2e8f0;
-  --accent: #0f766e;
-  --code-bg: #f1f5f9;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  color: var(--text);
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-}
-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(15, 23, 42, 0.95);
-  color: #fff;
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-.header-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
-.file { font-size: 12px; opacity: 0.9; }
-main {
-  max-width: 1100px;
-  margin: 24px auto 48px;
-  padding: 0 20px;
-}
-article {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
-}
-h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
-h1 { margin-top: 0; font-size: 2rem; }
-h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
-h3 { font-size: 1.2rem; }
-p, li { color: var(--text); line-height: 1.65; }
-ul, ol { padding-left: 1.25rem; }
-code {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.1rem 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 0.92em;
-}
-pre {
-  background: #0b1020;
-  color: #e2e8f0;
-  border-radius: 10px;
-  padding: 14px;
-  overflow-x: auto;
-  border: 1px solid #1e293b;
-}
-pre code {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: inherit;
-}
-blockquote {
-  margin: 1em 0;
-  padding: 0.7em 1em;
-  border-left: 4px solid var(--accent);
-  background: #f0fdfa;
-  color: var(--muted);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1em 0;
-  font-size: 0.95rem;
-}
-th, td {
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-  text-align: left;
-  vertical-align: top;
-}
-th {
-  background: #f8fafc;
-  font-weight: 600;
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
-.toc {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: #f8fafc;
-  margin-bottom: 1rem;
-}
-.footer {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 14px;
-}
-@media (max-width: 760px) {
-  article { padding: 18px; border-radius: 10px; }
-  .header-inner { padding: 10px 14px; }
-  main { margin-top: 16px; padding: 0 12px; }
-}
-</style>
+  <style>:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#475569;--border:#e2e8f0;--accent:#0f766e;--code-bg:#f1f5f9}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%)}header{position:sticky;top:0;z-index:10;background:rgba(15,23,42,.95);color:#fff;backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,.1)}.header-inner{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:700;letter-spacing:.2px;font-size:14px}.file{font-size:12px;opacity:.9}main{max-width:1100px;margin:24px auto 48px;padding:0 20px}article{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;box-shadow:0 10px 35px rgba(15,23,42,.06)}h1,h2,h3,h4{line-height:1.25;margin-top:1.4em;margin-bottom:.55em}h1{margin-top:0;font-size:2rem}h2{font-size:1.45rem;border-top:1px solid var(--border);padding-top:1em}h3{font-size:1.2rem}p,li{color:var(--text);line-height:1.65}ul,ol{padding-left:1.25rem}code{background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:.92em}pre{background:#0b1020;color:#e2e8f0;border-radius:10px;padding:14px;overflow-x:auto;border:1px solid #1e293b}pre code{background:transparent;border:0;padding:0;color:inherit}blockquote{margin:1em 0;padding:.7em 1em;border-left:4px solid var(--accent);background:#f0fdfa;color:var(--muted)}table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.95rem}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:#f8fafc;font-weight:600}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}hr{border:0;border-top:1px solid var(--border);margin:1.6em 0}.footer{color:var(--muted);font-size:12px;margin-top:14px}@media(max-width:760px){article{padding:18px;border-radius:10px}.header-inner{padding:10px 14px}main{margin-top:16px;padding:0 12px}}</style>
 </head>
 <body>
-  <header>
-    <div class="header-inner">
-      <div class="brand">Enterprise Data Lake Documentation</div>
-      <div class="file">EXECUTIVE_OVERVIEW.md</div>
-    </div>
-  </header>
-  <main>
-    <article>
-<h1 id="enterprise-data-lake-platform-executive-overview">Enterprise Data Lake Platform — Executive Overview</h1>
-<p><strong>Version:</strong> 1.0<br>
-<strong>Date:</strong> 2026-06-15<br>
-<strong>Classification:</strong> Internal — Leadership Review<br>
+  <header><div class="header-inner"><div class="brand">Enterprise Data Lake Documentation</div><div class="file">EXECUTIVE_OVERVIEW.md</div></div></header>
+  <main><article><h1 id="enterprise-data-lake-platform-executive-overview">Enterprise Data Lake Platform — Executive Overview</h1>
+<p><strong>Version:</strong> 2.0<br />
+<strong>Date:</strong> 2026-06-29<br />
+<strong>Classification:</strong> Internal — Leadership Review  </p>
+<blockquote>
+<p><strong>Current Status:</strong> Dev environment fully operational as of 2026-06-29. 34 companies, 49 persons, and 35,971 contracts are live and queryable via Athena. Staging and Production deployments are next.<br />
+For a concise leadership-ready summary, see <a href="LEADERSHIP_BRIEF.md">LEADERSHIP_BRIEF.md</a>.
 <strong>Audience:</strong> Engineering leadership, product leadership, data governance, security, and finance stakeholders</p>
-<hr>
+</blockquote>
+<hr />
 <h2 id="table-of-contents">Table of Contents</h2>
 <ol>
 <li><a href="#1-what-we-built-and-why">What We Built and Why</a></li>
@@ -154,19 +31,20 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><a href="#9-data-layers-explained">Data Layers Explained</a></li>
 <li><a href="#10-data-quality-and-governance">Data Quality and Governance</a></li>
 <li><a href="#11-security-architecture-summary">Security Architecture Summary</a></li>
-<li><a href="#12-operational-resilience">Operational Resilience</a></li>
-<li><a href="#13-scalability-and-cost-profile">Scalability and Cost Profile</a></li>
-<li><a href="#14-adding-new-data-sources--zero-code-changes">Adding New Data Sources — Zero Code Changes</a></li>
-<li><a href="#15-compliance-and-audit-readiness">Compliance and Audit Readiness</a></li>
-<li><a href="#16-key-metrics-and-slos">Key Metrics and SLOs</a></li>
-<li><a href="#17-roadmap">Roadmap</a></li>
+<li><a href="#12-technology-stack-and-tools">Technology Stack and Tools</a></li>
+<li><a href="#13-operational-resilience">Operational Resilience</a></li>
+<li><a href="#14-scalability-and-cost-profile">Scalability and Cost Profile</a></li>
+<li><a href="#15-adding-new-data-sources--zero-code-changes">Adding New Data Sources — Zero Code Changes</a></li>
+<li><a href="#16-compliance-and-audit-readiness">Compliance and Audit Readiness</a></li>
+<li><a href="#17-key-metrics-and-slos">Key Metrics and SLOs</a></li>
+<li><a href="#18-roadmap">Roadmap</a></li>
 </ol>
-<hr>
+<hr />
 <h2 id="1-what-we-built-and-why">1. What We Built and Why</h2>
 <h3 id="the-problem">The Problem</h3>
-<p>Our organisation's data lived in silos:<br>
-- Customer records in <strong>Salesforce</strong> (CRM)<br>
-- Financial and order data in <strong>NetSuite</strong> (ERP)<br>
+<p>Our organisation's data lived in silos:
+- Customer records in <strong>Salesforce</strong> (CRM)
+- Financial and order data in <strong>NetSuite</strong> (ERP)
 - Transactional data in <strong>MySQL RDS</strong> (internal databases)</p>
 <p>Each team had its own extract scripts — inconsistent, brittle, impossible to audit, and carrying serious security risks (credentials in scripts, no access control, no lineage).</p>
 <p>Analytics teams waited days for data. Compliance teams had no record of who accessed what or when. The same customer could appear as three different entities across three systems with no way to resolve them.</p>
@@ -180,7 +58,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li>Provides a full audit trail from source record to business insight</li>
 <li>Requires <strong>zero code changes</strong> to add a new data source or a new entity</li>
 </ul>
-<hr>
+<hr />
 <h2 id="2-business-outcomes">2. Business Outcomes</h2>
 <table>
 <thead>
@@ -233,7 +111,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h2 id="3-how-the-platform-works-functional-walkthrough">3. How the Platform Works — Functional Walkthrough</h2>
 <p>The platform runs as a <strong>scheduled, fully automated pipeline</strong>. The flow is:</p>
 <pre><code>SCHEDULE
@@ -257,7 +135,7 @@ RESOLVE — match the same customer/supplier/product across Salesforce + NetSuit
 SERVE — load into the analytics database for BI tools, dashboards, and ML models
 </code></pre>
 <p>Each step produces a machine-readable audit record. No step is skipped. No data is lost. If anything fails, the platform queues a replay automatically.</p>
-<hr>
+<hr />
 <h2 id="4-data-flow-from-source-to-business-insight">4. Data Flow: From Source to Business Insight</h2>
 <pre><code>┌─────────────────────────────────────────────────────────────────┐
 │                      SOURCE SYSTEMS                             │
@@ -306,7 +184,7 @@ SERVE — load into the analytics database for BI tools, dashboards, and ML mode
                    │  DynamoDB           │    apps, and microservices.
                    └─────────────────────┘
 </code></pre>
-<hr>
+<hr />
 <h2 id="5-connected-data-sources">5. Connected Data Sources</h2>
 <table>
 <thead>
@@ -338,9 +216,9 @@ SERVE — load into the analytics database for BI tools, dashboards, and ML mode
 </tr>
 </tbody>
 </table>
-<p><strong>Planned future sources</strong> (configuration-only addition — no code change):<br>
+<p><strong>Planned future sources</strong> (configuration-only addition — no code change):<br />
 Dynamics 365, HubSpot, SAP, PostgreSQL, REST APIs, CSV/Excel/SFTP</p>
-<hr>
+<hr />
 <h2 id="6-delta-incremental-sync-how-we-stay-current">6. Delta (Incremental) Sync — How We Stay Current</h2>
 <h3 id="the-problem-with-full-loads">The Problem with Full Loads</h3>
 <p>Extracting every record every time a pipeline runs is wasteful and slow. A Salesforce org with 5 million accounts would take hours if extracted in full daily.</p>
@@ -397,7 +275,7 @@ Run #2 (2026-06-15):
 </tbody>
 </table>
 <p>Load type is set per entity in the configuration record — no code change to switch.</p>
-<hr>
+<hr />
 <h2 id="7-extraction-schedules-cron-job-reference">7. Extraction Schedules (Cron Job Reference)</h2>
 <p>Schedules are managed by <strong>AWS EventBridge Scheduler</strong>. Each entity has exactly one schedule. Schedules can be updated at any time without deployment.</p>
 <h3 id="production-schedule-reference">Production Schedule Reference</h3>
@@ -514,7 +392,7 @@ python scripts/trigger_extraction.py --update-schedule \
 <p>Changes take effect on the next trigger window.</p>
 <h3 id="schedule-naming-convention">Schedule Naming Convention</h3>
 <p>Schedule names follow <code>{source_id}--{entity_id}</code> (e.g. <code>salesforce--salesforce-account</code>). Double-hyphen separates source and entity to avoid ambiguity.</p>
-<hr>
+<hr />
 <h2 id="8-least-privilege-access-model-who-can-read-what">8. Least Privilege Access Model — Who Can Read What</h2>
 <p>The platform enforces a <strong>zero-trust, need-to-know</strong> access model. Each pipeline stage runs under a dedicated IAM service role with the minimum permissions required — no shared credentials, no wildcard permissions.</p>
 <h3 id="iam-role-map">IAM Role Map</h3>
@@ -649,12 +527,12 @@ python scripts/trigger_extraction.py --update-schedule \
 </tbody>
 </table>
 <h3 id="source-credential-access">Source Credential Access</h3>
-<p>Each source has its own Secrets Manager secret:<br>
-- Path: <code>{environment}/{source_id}/credentials</code><br>
-- Only the <code>extraction-service-role</code> for that source has <code>GetSecretValue</code> permission.<br>
-- Rotation is scheduled (every 90 days for Salesforce OAuth tokens, every 365 days for MySQL read-only passwords).<br>
+<p>Each source has its own Secrets Manager secret:
+- Path: <code>{environment}/{source_id}/credentials</code>
+- Only the <code>extraction-service-role</code> for that source has <code>GetSecretValue</code> permission.
+- Rotation is scheduled (every 90 days for Salesforce OAuth tokens, every 365 days for MySQL read-only passwords).
 - Credentials are retrieved at runtime, held in memory for the duration of one extraction run, and never logged.</p>
-<hr>
+<hr />
 <h2 id="9-data-layers-explained">9. Data Layers Explained</h2>
 <h3 id="raw-layer-the-source-of-truth-archive">Raw Layer — The Source of Truth Archive</h3>
 <p><strong>Purpose:</strong> Store every record exactly as it came from the source system. Never modified. Never deleted (within retention window).</p>
@@ -686,7 +564,7 @@ python scripts/trigger_extraction.py --update-schedule \
 <li>Two canonical entity types currently defined:</li>
 <li><strong><code>company</code></strong> — merges Salesforce Account + NetSuite Customer into a single trusted company profile</li>
 <li><strong><code>person</code></strong> — normalises Salesforce Contact into a canonical person record</li>
-<li>Every golden record includes <strong>5 system fields</strong> beyond the 14 business <code>output_fields</code>: <code>golden_id</code>, <code>contributing_source_records</code>, <code>survivorship_version</code>, <code>match_run_id</code>, and <code>field_provenance</code>. See <a href="../PLATFORM_FLOW.html#system-fields-in-golden-records">PLATFORM_FLOW: System Fields in Golden Records</a> for details.</li>
+<li>Every golden record includes <strong>5 system fields</strong> beyond the 14 business <code>output_fields</code>: <code>golden_id</code>, <code>contributing_source_records</code>, <code>survivorship_version</code>, <code>match_run_id</code>, and <code>field_provenance</code>. See <a href="../PLATFORM_FLOW.md#system-fields-in-golden-records">PLATFORM_FLOW: System Fields in Golden Records</a> for details.</li>
 <li>Registered in Glue catalog; Athena workgroup configured per team</li>
 <li>Retention: 1 year active; archival to Glacier after</li>
 <li>Access: read-only for approved BI users and ML engineers (prefix-scoped)</li>
@@ -699,7 +577,7 @@ python scripts/trigger_extraction.py --update-schedule \
 <li>Supports both full-replace and incremental-merge load modes</li>
 <li><strong>Not the same as Athena reporting</strong> — Athena is the query engine that runs SQL over the Analytics layer (S3 Parquet) for BI tools, dashboards, and ad-hoc analysis. Serving Store is the operational store for predictable sub-second API reads at high concurrency.</li>
 </ul>
-<hr>
+<hr />
 <h2 id="10-data-quality-and-governance">10. Data Quality and Governance</h2>
 <h3 id="quality-checks-per-entity">Quality Checks Per Entity</h3>
 <p>Every entity has a quality policy that runs before curated publication:</p>
@@ -777,11 +655,11 @@ python scripts/trigger_extraction.py --update-schedule \
 <p>Each gate is recorded and immutably logged. A gate cannot be skipped without a written waiver (minimum 20-character justification, stored in the audit trail).</p>
 <h3 id="declarative-entity-resolution-configuration">Declarative Entity Resolution Configuration</h3>
 <p>Who counts as the "same company" across Salesforce and NetSuite, and which source wins when field values conflict, are declared as <strong>versioned JSON config files</strong> — not embedded in code. The files live in <code>config/entity_resolution/</code> (version-controlled in Git) and are published to S3 before each environment is activated.</p>
-<p>This means:<br>
-- Adding a new entity type or changing a match threshold is a config file change, reviewed and approved like any data governance decision, with no Lambda deployment required<br>
-- Every historical version of the rules is retained; any pipeline run can be replayed with the exact rules that were active at the time<br>
+<p>This means:
+- Adding a new entity type or changing a match threshold is a config file change, reviewed and approved like any data governance decision, with no Lambda deployment required
+- Every historical version of the rules is retained; any pipeline run can be replayed with the exact rules that were active at the time
 - The <code>output_fields</code> list in each survivorship policy is the authoritative schema contract for canonical analytics tables — only declared fields appear in Parquet output</p>
-<hr>
+<hr />
 <h2 id="11-security-architecture-summary">11. Security Architecture Summary</h2>
 <p>The platform is built security-first, with controls embedded at every layer:</p>
 <h3 id="credential-management">Credential Management</h3>
@@ -824,8 +702,384 @@ python scripts/trigger_extraction.py --update-schedule \
 <li>CI/CD deployment role cannot access data buckets</li>
 <li>BI consumers can only read prefix-scoped analytics data</li>
 </ul>
-<hr>
-<h2 id="12-operational-resilience">12. Operational Resilience</h2>
+<hr />
+<h2 id="12-technology-stack-and-tools">12. Technology Stack and Tools</h2>
+<p>The platform is built exclusively on proven, production-grade technologies. Every component is version-pinned, security-scanned, and infrastructure-as-code managed.</p>
+<h3 id="cloud-platform">Cloud Platform</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Technology</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cloud provider</td>
+<td><strong>AWS (Amazon Web Services)</strong></td>
+<td>All services; <code>us-east-1</code> default (configurable per environment)</td>
+</tr>
+<tr>
+<td>Infrastructure as Code</td>
+<td><strong>Terraform</strong> ≥ 1.8, &lt; 2.0</td>
+<td>AWS Provider ~&gt; 5.0; all infrastructure version-controlled</td>
+</tr>
+</tbody>
+</table>
+<h3 id="compute-and-orchestration">Compute and Orchestration</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pipeline orchestration</td>
+<td><strong>AWS Step Functions</strong></td>
+<td>Standard Workflow (staging/prod); Express Workflow (dev)</td>
+</tr>
+<tr>
+<td>Event scheduling</td>
+<td><strong>Amazon EventBridge Scheduler</strong></td>
+<td>Cron per entity; managed at runtime without deployment</td>
+</tr>
+<tr>
+<td>Extraction runtime (small/medium)</td>
+<td><strong>AWS Lambda</strong> (Python 3.14)</td>
+<td>Up to 15-minute timeout; streaming memory model</td>
+</tr>
+<tr>
+<td>Extraction runtime (large volume)</td>
+<td><strong>AWS ECS Fargate</strong></td>
+<td>For datasets &gt; 5 M records/day; no timeout limit</td>
+</tr>
+</tbody>
+</table>
+<h3 id="storage">Storage</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Technology</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Raw data</td>
+<td><strong>Amazon S3</strong> + S3 Object Lock (GOVERNANCE)</td>
+<td>Immutable; 7-year retention; SSE-KMS encrypted</td>
+</tr>
+<tr>
+<td>Curated data</td>
+<td><strong>Amazon S3</strong></td>
+<td>Parquet (Snappy); append-only per <code>run_id</code> partition</td>
+</tr>
+<tr>
+<td>Analytics data</td>
+<td><strong>Amazon S3</strong> + S3 Intelligent-Tiering</td>
+<td>Auto-moves to infrequent access after 90 days</td>
+</tr>
+<tr>
+<td>Schema snapshots</td>
+<td><strong>Amazon S3</strong></td>
+<td>Immutable JSON per run; SHA-256 fingerprinted</td>
+</tr>
+<tr>
+<td>Field mapping / entity resolution config</td>
+<td><strong>Amazon S3</strong></td>
+<td>Versioned JSON; latest-pointer pattern</td>
+</tr>
+<tr>
+<td>Watermark state</td>
+<td><strong>Amazon DynamoDB</strong></td>
+<td>Point-in-time recovery; optimistic concurrency</td>
+</tr>
+<tr>
+<td>Entity configuration</td>
+<td><strong>Amazon DynamoDB</strong></td>
+<td><code>{env}-entity-extraction-config</code>; KMS encrypted</td>
+</tr>
+<tr>
+<td>Run audit log</td>
+<td><strong>Amazon DynamoDB</strong></td>
+<td>TTL-enabled; GSI on source/entity/time</td>
+</tr>
+<tr>
+<td>Serving store</td>
+<td><strong>Amazon RDS MySQL 8</strong></td>
+<td>Private VPC; read-only for analytics consumers</td>
+</tr>
+</tbody>
+</table>
+<h3 id="data-format">Data Format</h3>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Apache Parquet</strong> (Snappy compression)</td>
+<td>All data layer files (raw, curated, analytics) — typically 5–10× smaller than JSON</td>
+</tr>
+<tr>
+<td><strong>JSON</strong></td>
+<td>Config files, schema snapshots, drift reports, quality reports, lineage records</td>
+</tr>
+</tbody>
+</table>
+<h3 id="source-system-connectors">Source System Connectors</h3>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>API / Protocol</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Salesforce CRM</strong></td>
+<td>Bulk API 2.0 (async, high-volume); Describe API for metadata</td>
+<td>Handles millions of records without API timeouts</td>
+</tr>
+<tr>
+<td><strong>NetSuite ERP</strong></td>
+<td>SuiteQL REST API; metadata endpoint</td>
+<td>OAuth 1.0a; parameterised SuiteQL queries</td>
+</tr>
+<tr>
+<td><strong>MySQL RDS</strong></td>
+<td>SQL via <code>pymysql</code>; <code>INFORMATION_SCHEMA</code> introspection</td>
+<td>Read-only credentials; parameterised queries only</td>
+</tr>
+</tbody>
+</table>
+<h3 id="data-catalog-and-query-engine">Data Catalog and Query Engine</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Metadata catalog</td>
+<td><strong>AWS Glue Data Catalog</strong></td>
+<td>Registered after every curated write</td>
+</tr>
+<tr>
+<td>Ad-hoc SQL queries</td>
+<td><strong>Amazon Athena</strong></td>
+<td>Serverless; $5/TB scanned; partitioned datasets minimise scan cost</td>
+</tr>
+<tr>
+<td>BI tool connectivity</td>
+<td>Athena ODBC/JDBC or RDS direct</td>
+<td>Supports Tableau, Power BI, Looker, Metabase</td>
+</tr>
+</tbody>
+</table>
+<h3 id="security-and-secrets">Security and Secrets</h3>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Technology</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Credential storage</td>
+<td><strong>AWS Secrets Manager</strong></td>
+<td>One secret per source per environment; scheduled rotation</td>
+</tr>
+<tr>
+<td>Encryption at rest</td>
+<td><strong>AWS KMS</strong> (customer-managed CMK, SSE-KMS)</td>
+<td>Applied to all S3 buckets, DynamoDB tables, and SQS queues</td>
+</tr>
+<tr>
+<td>Encryption in transit</td>
+<td><strong>TLS 1.2+</strong></td>
+<td>Mandatory; enforced via S3 bucket policy (<code>aws:SecureTransport</code>)</td>
+</tr>
+<tr>
+<td>Network isolation</td>
+<td><strong>Amazon VPC</strong> (private subnets)</td>
+<td>No internet gateway; all AWS traffic via VPC Endpoints</td>
+</tr>
+<tr>
+<td>PII tokenisation</td>
+<td><strong>HMAC-SHA256</strong> (keyed)</td>
+<td>Deterministic pseudonym preserving join-key usability</td>
+</tr>
+<tr>
+<td>Field fingerprinting</td>
+<td><strong>SHA-256</strong></td>
+<td>Schema snapshot identity and drift detection</td>
+</tr>
+<tr>
+<td>Access control</td>
+<td><strong>AWS IAM</strong> (least-privilege roles)</td>
+<td>No wildcard <code>Action:*</code> or <code>Resource:*</code> anywhere</td>
+</tr>
+</tbody>
+</table>
+<h3 id="monitoring-and-observability">Monitoring and Observability</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Structured logging</td>
+<td><strong>structlog</strong> ≥ 24.4</td>
+<td>JSON output; PII-scrubbing processor; forwarded to CloudWatch Logs</td>
+</tr>
+<tr>
+<td>Custom metrics</td>
+<td><strong>Amazon CloudWatch</strong></td>
+<td>Namespace: <code>EnterpriseDatalake</code>; 6 canonical metrics</td>
+</tr>
+<tr>
+<td>Alarms</td>
+<td><strong>Amazon CloudWatch Alarms</strong></td>
+<td>4 platform alarms: extraction failures, breaking drift, watermark lag, activity absent</td>
+</tr>
+<tr>
+<td>Distributed tracing</td>
+<td><strong>AWS X-Ray</strong></td>
+<td>All Lambda and service-to-service calls instrumented</td>
+</tr>
+<tr>
+<td>Alerting</td>
+<td><strong>Amazon SNS</strong></td>
+<td>SNS topic → email / PagerDuty for on-call</td>
+</tr>
+<tr>
+<td>Dead-Letter Queue</td>
+<td><strong>Amazon SQS</strong> (KMS-encrypted)</td>
+<td>14-day retention; replay via <code>RunReplayController</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="python-stack-and-code-quality">Python Stack and Code Quality</h3>
+<table>
+<thead>
+<tr>
+<th>Tool / Library</th>
+<th>Version</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Python</strong></td>
+<td>3.14.x (pyenv)</td>
+<td>Runtime language for all Lambda/ECS task code</td>
+</tr>
+<tr>
+<td><strong>Pydantic</strong></td>
+<td>≥ 2.7</td>
+<td>Data model validation; frozen models; strict <code>extra='forbid'</code></td>
+</tr>
+<tr>
+<td><strong>boto3</strong></td>
+<td>Latest</td>
+<td>AWS SDK — all AWS service calls</td>
+</tr>
+<tr>
+<td><strong>pyarrow</strong></td>
+<td>Latest</td>
+<td>Apache Parquet read/write</td>
+</tr>
+<tr>
+<td><strong>pymysql</strong></td>
+<td>Latest</td>
+<td>MySQL RDS connector</td>
+</tr>
+<tr>
+<td><strong>structlog</strong></td>
+<td>≥ 24.4</td>
+<td>Structured JSON logging with PII scrubbing</td>
+</tr>
+<tr>
+<td><strong>Ruff</strong></td>
+<td>≥ 0.5</td>
+<td>Linter (rules: E, W, F, I, N, S, B, C90, UP, ANN, T20, RUF)</td>
+</tr>
+<tr>
+<td><strong>mypy</strong></td>
+<td>≥ 1.10</td>
+<td>Static type checker (strict mode)</td>
+</tr>
+<tr>
+<td><strong>bandit</strong></td>
+<td>≥ 1.7</td>
+<td>Python SAST scanner (OWASP Top 10)</td>
+</tr>
+<tr>
+<td><strong>pip-audit</strong></td>
+<td>≥ 2.7</td>
+<td>Dependency CVE scanning</td>
+</tr>
+<tr>
+<td><strong>checkov</strong></td>
+<td>Latest</td>
+<td>Terraform IaC security scanner</td>
+</tr>
+<tr>
+<td><strong>pytest</strong></td>
+<td>Latest</td>
+<td>Tests; ≥ 80% coverage gate enforced in CI</td>
+</tr>
+<tr>
+<td><strong>moto</strong></td>
+<td>≥ 5.0</td>
+<td>AWS service mocking for unit tests</td>
+</tr>
+</tbody>
+</table>
+<h3 id="cicd">CI/CD</h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>GitHub Actions</strong></td>
+<td>7-stage CI gate: lint → typecheck → test → SAST → CVE scan → IaC scan → Terraform validate</td>
+</tr>
+<tr>
+<td>SHA-pinned action references</td>
+<td>All <code>uses:</code> entries pinned to commit SHA digest (no mutable <code>@v4</code> tags)</td>
+</tr>
+<tr>
+<td><strong>pre-commit hooks</strong></td>
+<td>Ruff, detect-private-key, no-commit-to-branch, bandit, Terraform fmt/validate/checkov, detect-secrets</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="13-operational-resilience">13. Operational Resilience</h2>
 <h3 id="automated-failure-recovery">Automated Failure Recovery</h3>
 <table>
 <thead>
@@ -869,21 +1123,21 @@ python scripts/trigger_extraction.py --update-schedule \
 </tbody>
 </table>
 <h3 id="circuit-breaker">Circuit Breaker</h3>
-<p>Each source–entity pair has an independent circuit breaker:<br>
-- Tracks consecutive failures<br>
-- Opens after threshold (default: 5 consecutive failures)<br>
-- Open circuit fails fast — does not waste time or API quota hammering a failing source<br>
+<p>Each source–entity pair has an independent circuit breaker:
+- Tracks consecutive failures
+- Opens after threshold (default: 5 consecutive failures)
+- Open circuit fails fast — does not waste time or API quota hammering a failing source
 - Auto-resets on successful run; or manually reset after remediation</p>
 <h3 id="dead-letter-queue">Dead-Letter Queue</h3>
-<p>All terminal pipeline failures produce a structured DLQ message containing:<br>
-- <code>run_id</code>, <code>source_id</code>, <code>entity_id</code>, <code>failed_stage</code><br>
-- <code>error_message</code> (scrubbed of all credentials and PII)<br>
+<p>All terminal pipeline failures produce a structured DLQ message containing:
+- <code>run_id</code>, <code>source_id</code>, <code>entity_id</code>, <code>failed_stage</code>
+- <code>error_message</code> (scrubbed of all credentials and PII)
 - <code>enqueued_at</code> timestamp</p>
 <p>Operations teams consume DLQ messages via CloudWatch alarms and replay using the built-in replay controller.</p>
 <h3 id="idempotency">Idempotency</h3>
 <p>All pipeline writes are <strong>idempotent</strong>: re-running any stage with the same inputs produces the same outputs. S3 <code>put_object</code> replaces existing files; DynamoDB writes use conditional expressions. Replay is safe.</p>
-<hr>
-<h2 id="13-scalability-and-cost-profile">13. Scalability and Cost Profile</h2>
+<hr />
+<h2 id="14-scalability-and-cost-profile">14. Scalability and Cost Profile</h2>
 <h3 id="extraction-scaling">Extraction Scaling</h3>
 <table>
 <thead>
@@ -934,8 +1188,8 @@ python scripts/trigger_extraction.py --update-schedule \
 <p>The analytics layer moves to <strong>S3 Intelligent-Tiering</strong> after 30 days (auto moves to infrequent access after 90 days of no access).</p>
 <h3 id="athena-query-cost">Athena Query Cost</h3>
 <p>Athena charges $5 per TB scanned. Year/month/day partitioning on the analytics layer means a typical dashboard query scans only the relevant partition — typically 1–10 GB rather than the full dataset.</p>
-<hr>
-<h2 id="14-adding-new-data-sources-zero-code-changes">14. Adding New Data Sources — Zero Code Changes</h2>
+<hr />
+<h2 id="15-adding-new-data-sources-zero-code-changes">15. Adding New Data Sources — Zero Code Changes</h2>
 <p>Adding a new data source requires only <strong>configuration</strong> — no code deployment:</p>
 <h3 id="what-is-needed">What is needed</h3>
 <ol>
@@ -999,8 +1253,8 @@ python scripts/trigger_extraction.py --update-schedule \
 </tbody>
 </table>
 <p>Compare: previous approach of writing a new ETL script = 2–4 weeks.</p>
-<hr>
-<h2 id="15-compliance-and-audit-readiness">15. Compliance and Audit Readiness</h2>
+<hr />
+<h2 id="16-compliance-and-audit-readiness">16. Compliance and Audit Readiness</h2>
 <h3 id="regulatory-controls-implemented">Regulatory Controls Implemented</h3>
 <table>
 <thead>
@@ -1075,8 +1329,8 @@ python scripts/trigger_extraction.py --update-schedule \
 </tr>
 </tbody>
 </table>
-<hr>
-<h2 id="16-key-metrics-and-slos">16. Key Metrics and SLOs</h2>
+<hr />
+<h2 id="17-key-metrics-and-slos">17. Key Metrics and SLOs</h2>
 <h3 id="service-level-objectives">Service Level Objectives</h3>
 <table>
 <thead>
@@ -1150,8 +1404,8 @@ python scripts/trigger_extraction.py --update-schedule \
 </tr>
 </tbody>
 </table>
-<hr>
-<h2 id="17-roadmap">17. Roadmap</h2>
+<hr />
+<h2 id="18-roadmap">18. Roadmap</h2>
 <h3 id="near-term-next-quarter">Near-term (next quarter)</h3>
 <table>
 <thead>
@@ -1233,120 +1487,9 @@ python scripts/trigger_extraction.py --update-schedule \
 </tr>
 </tbody>
 </table>
-<hr>
-<p><em>For technical implementation details, see <a href="PLATFORM_FLOW.html">docs/PLATFORM_FLOW.md</a>.</em><br>
-<em>For infrastructure configuration, see <a href="../infrastructure/environments/">infrastructure/environments/</a>.</em><br>
-<em>For source onboarding, see <a href="../governance/source_onboarding_registry.py">governance/source_onboarding_registry.py</a>.</em></p>
-      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
-
-<hr>
-<h2 id="12-technology-stack-and-tools">12. Technology Stack and Tools</h2>
-<p>The platform is built exclusively on proven, production-grade technologies. Every component is version-pinned, security-scanned, and infrastructure-as-code managed.</p>
-<h3>Cloud Platform</h3>
-<table>
-<thead><tr><th>Layer</th><th>Technology</th><th>Notes</th></tr></thead>
-<tbody>
-<tr><td>Cloud provider</td><td><strong>AWS (Amazon Web Services)</strong></td><td>All services; <code>us-east-1</code> default (configurable per environment)</td></tr>
-<tr><td>Infrastructure as Code</td><td><strong>Terraform</strong> ≥ 1.8, &lt; 2.0</td><td>AWS Provider ~&gt; 5.0; all infrastructure version-controlled</td></tr>
-</tbody>
-</table>
-<h3>Compute and Orchestration</h3>
-<table>
-<thead><tr><th>Component</th><th>Technology</th><th>Notes</th></tr></thead>
-<tbody>
-<tr><td>Pipeline orchestration</td><td><strong>AWS Step Functions</strong></td><td>Standard Workflow (staging/prod); Express Workflow (dev)</td></tr>
-<tr><td>Event scheduling</td><td><strong>Amazon EventBridge Scheduler</strong></td><td>Cron per entity; managed at runtime without deployment</td></tr>
-<tr><td>Extraction runtime (small/medium)</td><td><strong>AWS Lambda</strong> (Python 3.14)</td><td>Up to 15-minute timeout; streaming memory model</td></tr>
-<tr><td>Extraction runtime (large volume)</td><td><strong>AWS ECS Fargate</strong></td><td>For datasets &gt; 5&nbsp;M records/day; no timeout limit</td></tr>
-</tbody>
-</table>
-<h3>Storage</h3>
-<table>
-<thead><tr><th>Layer</th><th>Technology</th><th>Notes</th></tr></thead>
-<tbody>
-<tr><td>Raw data</td><td><strong>Amazon S3</strong> + S3 Object Lock (GOVERNANCE)</td><td>Immutable; 7-year retention; SSE-KMS encrypted</td></tr>
-<tr><td>Curated data</td><td><strong>Amazon S3</strong></td><td>Parquet (Snappy); append-only per <code>run_id</code> partition</td></tr>
-<tr><td>Analytics data</td><td><strong>Amazon S3</strong> + S3 Intelligent-Tiering</td><td>Auto-moves to infrequent access after 90 days</td></tr>
-<tr><td>Schema snapshots</td><td><strong>Amazon S3</strong></td><td>Immutable JSON per run; SHA-256 fingerprinted</td></tr>
-<tr><td>Field mapping / ER config</td><td><strong>Amazon S3</strong></td><td>Versioned JSON; latest-pointer pattern</td></tr>
-<tr><td>Watermark state</td><td><strong>Amazon DynamoDB</strong></td><td>Point-in-time recovery; optimistic concurrency</td></tr>
-<tr><td>Entity configuration</td><td><strong>Amazon DynamoDB</strong></td><td><code>{env}-entity-extraction-config</code>; KMS encrypted</td></tr>
-<tr><td>Run audit log</td><td><strong>Amazon DynamoDB</strong></td><td>TTL-enabled; GSI on source/entity/time</td></tr>
-<tr><td>Serving store</td><td><strong>Amazon RDS MySQL 8</strong></td><td>Private VPC; read-only for analytics consumers</td></tr>
-</tbody>
-</table>
-<h3>Source System Connectors</h3>
-<table>
-<thead><tr><th>Source</th><th>API / Protocol</th><th>Notes</th></tr></thead>
-<tbody>
-<tr><td><strong>Salesforce CRM</strong></td><td>Bulk API 2.0 (async, high-volume); Describe API for metadata</td><td>Handles millions of records without API timeouts</td></tr>
-<tr><td><strong>NetSuite ERP</strong></td><td>SuiteQL REST API; metadata endpoint</td><td>OAuth 1.0a; parameterised SuiteQL queries</td></tr>
-<tr><td><strong>MySQL RDS</strong></td><td>SQL via <code>pymysql</code>; <code>INFORMATION_SCHEMA</code> introspection</td><td>Read-only credentials; parameterised queries only</td></tr>
-</tbody>
-</table>
-<h3>Data Catalog and Query Engine</h3>
-<table>
-<thead><tr><th>Component</th><th>Technology</th><th>Notes</th></tr></thead>
-<tbody>
-<tr><td>Metadata catalog</td><td><strong>AWS Glue Data Catalog</strong></td><td>Registered after every curated write</td></tr>
-<tr><td>Ad-hoc SQL queries</td><td><strong>Amazon Athena</strong></td><td>Serverless; $5/TB scanned; partitioned datasets minimise scan cost</td></tr>
-<tr><td>BI tool connectivity</td><td>Athena ODBC/JDBC or RDS direct</td><td>Supports Tableau, Power BI, Looker, Metabase</td></tr>
-</tbody>
-</table>
-<h3>Security and Secrets</h3>
-<table>
-<thead><tr><th>Concern</th><th>Technology</th><th>Notes</th></tr></thead>
-<tbody>
-<tr><td>Credential storage</td><td><strong>AWS Secrets Manager</strong></td><td>One secret per source per environment; scheduled rotation</td></tr>
-<tr><td>Encryption at rest</td><td><strong>AWS KMS</strong> (customer-managed CMK, SSE-KMS)</td><td>Applied to all S3 buckets, DynamoDB tables, and SQS queues</td></tr>
-<tr><td>Encryption in transit</td><td><strong>TLS 1.2+</strong></td><td>Mandatory; enforced via S3 bucket policy (<code>aws:SecureTransport</code>)</td></tr>
-<tr><td>Network isolation</td><td><strong>Amazon VPC</strong> (private subnets)</td><td>No internet gateway; all AWS traffic via VPC Endpoints</td></tr>
-<tr><td>PII tokenisation</td><td><strong>HMAC-SHA256</strong> (keyed)</td><td>Deterministic pseudonym preserving join-key usability</td></tr>
-<tr><td>Field fingerprinting</td><td><strong>SHA-256</strong></td><td>Schema snapshot identity and drift detection</td></tr>
-<tr><td>Access control</td><td><strong>AWS IAM</strong> (least-privilege roles)</td><td>No wildcard <code>Action:*</code> or <code>Resource:*</code> anywhere</td></tr>
-</tbody>
-</table>
-<h3>Monitoring and Observability</h3>
-<table>
-<thead><tr><th>Component</th><th>Technology</th><th>Notes</th></tr></thead>
-<tbody>
-<tr><td>Structured logging</td><td><strong>structlog</strong> ≥ 24.4</td><td>JSON output; PII-scrubbing processor; forwarded to CloudWatch Logs</td></tr>
-<tr><td>Custom metrics</td><td><strong>Amazon CloudWatch</strong></td><td>Namespace: <code>EnterpriseDatalake</code>; 6 canonical metrics</td></tr>
-<tr><td>Alarms</td><td><strong>Amazon CloudWatch Alarms</strong></td><td>4 platform alarms: extraction failures, breaking drift, watermark lag, activity absent</td></tr>
-<tr><td>Distributed tracing</td><td><strong>AWS X-Ray</strong></td><td>All Lambda and service-to-service calls instrumented</td></tr>
-<tr><td>Alerting</td><td><strong>Amazon SNS</strong></td><td>SNS topic → email / PagerDuty for on-call</td></tr>
-<tr><td>Dead-Letter Queue</td><td><strong>Amazon SQS</strong> (KMS-encrypted)</td><td>14-day retention; replay via <code>RunReplayController</code></td></tr>
-</tbody>
-</table>
-<h3>Python Stack and Code Quality</h3>
-<table>
-<thead><tr><th>Tool / Library</th><th>Version</th><th>Purpose</th></tr></thead>
-<tbody>
-<tr><td><strong>Python</strong></td><td>3.14.x (pyenv)</td><td>Runtime language for all Lambda/ECS task code</td></tr>
-<tr><td><strong>Pydantic</strong></td><td>≥ 2.7</td><td>Data model validation; frozen models; strict <code>extra='forbid'</code></td></tr>
-<tr><td><strong>boto3</strong></td><td>Latest</td><td>AWS SDK — all AWS service calls</td></tr>
-<tr><td><strong>pyarrow</strong></td><td>Latest</td><td>Apache Parquet read/write</td></tr>
-<tr><td><strong>pymysql</strong></td><td>Latest</td><td>MySQL RDS connector</td></tr>
-<tr><td><strong>structlog</strong></td><td>≥ 24.4</td><td>Structured JSON logging with PII scrubbing</td></tr>
-<tr><td><strong>Ruff</strong></td><td>≥ 0.5</td><td>Linter (rules: E, W, F, I, N, S, B, C90, UP, ANN, T20, RUF)</td></tr>
-<tr><td><strong>mypy</strong></td><td>≥ 1.10</td><td>Static type checker (strict mode)</td></tr>
-<tr><td><strong>bandit</strong></td><td>≥ 1.7</td><td>Python SAST scanner (OWASP Top 10)</td></tr>
-<tr><td><strong>pip-audit</strong></td><td>≥ 2.7</td><td>Dependency CVE scanning</td></tr>
-<tr><td><strong>checkov</strong></td><td>Latest</td><td>Terraform IaC security scanner</td></tr>
-<tr><td><strong>pytest</strong></td><td>Latest</td><td>Tests; ≥ 80% coverage gate enforced in CI</td></tr>
-<tr><td><strong>moto</strong></td><td>≥ 5.0</td><td>AWS service mocking for unit tests</td></tr>
-</tbody>
-</table>
-<h3>CI/CD</h3>
-<table>
-<thead><tr><th>Tool</th><th>Notes</th></tr></thead>
-<tbody>
-<tr><td><strong>GitHub Actions</strong></td><td>7-stage CI gate: lint → typecheck → test → SAST → CVE scan → IaC scan → Terraform validate</td></tr>
-<tr><td>SHA-pinned action references</td><td>All <code>uses:</code> entries pinned to commit SHA digest (no mutable <code>@v4</code> tags)</td></tr>
-<tr><td><strong>pre-commit hooks</strong></td><td>Ruff, detect-private-key, no-commit-to-branch, bandit, Terraform fmt/validate/checkov, detect-secrets</td></tr>
-</tbody>
-</table>
-    </article>
-  </main>
+<hr />
+<p><em>For technical implementation details, see <a href="PLATFORM_FLOW.md">docs/PLATFORM_FLOW.md</a>.</em><br />
+<em>For infrastructure configuration, see <a href="../infrastructure/environments/">infrastructure/environments/</a>.</em><br />
+<em>For source onboarding, see <a href="../governance/source_onboarding_registry.py">governance/source_onboarding_registry.py</a>.</em></p></article></main>
 </body>
 </html>

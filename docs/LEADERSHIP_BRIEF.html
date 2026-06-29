@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leadership Brief — Enterprise Data Lake Platform</title>
+  <style>
+:root {
+  --bg: #f8fafc; --surface: #ffffff; --text: #0f172a; --muted: #475569;
+  --border: #e2e8f0; --accent: #0f766e; --code-bg: #f1f5f9;
+}
+* { box-sizing: border-box; }
+body { margin:0; font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif; color:var(--text); background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%); }
+header { position:sticky; top:0; z-index:10; background:rgba(15,23,42,0.95); color:#fff; backdrop-filter:blur(6px); border-bottom:1px solid rgba(255,255,255,0.1); }
+.header-inner { max-width:1100px; margin:0 auto; padding:12px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.brand { font-weight:700; letter-spacing:0.2px; font-size:14px; }
+.file { font-size:12px; opacity:0.9; }
+main { max-width:1100px; margin:24px auto 48px; padding:0 20px; }
+article { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:28px; box-shadow:0 10px 35px rgba(15,23,42,0.06); }
+h1,h2,h3,h4 { line-height:1.25; margin-top:1.4em; margin-bottom:0.55em; }
+h1 { margin-top:0; font-size:2rem; }
+h2 { font-size:1.45rem; border-top:1px solid var(--border); padding-top:1em; }
+h3 { font-size:1.2rem; }
+p,li { color:var(--text); line-height:1.65; }
+ul,ol { padding-left:1.25rem; }
+code { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; padding:0.1rem 0.35rem; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace; font-size:0.92em; }
+pre { background:#0b1020; color:#e2e8f0; border-radius:10px; padding:14px; overflow-x:auto; border:1px solid #1e293b; }
+pre code { background:transparent; border:0; padding:0; color:inherit; }
+blockquote { margin:1em 0; padding:0.7em 1em; border-left:4px solid var(--accent); background:#f0fdfa; color:var(--muted); }
+table { width:100%; border-collapse:collapse; margin:1em 0; font-size:0.95rem; }
+th,td { border:1px solid var(--border); padding:8px 10px; text-align:left; vertical-align:top; }
+th { background:#f8fafc; font-weight:600; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
+.footer { color:var(--muted); font-size:12px; margin-top:14px; }
+@media (max-width:760px) { article { padding:18px; border-radius:10px; } .header-inner { padding:10px 14px; } main { margin-top:16px; padding:0 12px; } }
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand">Enterprise Data Lake Documentation</div>
+      <div class="file">LEADERSHIP_BRIEF.md</div>
+    </div>
+  </header>
+  <main>
+    <article>
+<h1 id="enterprise-data-lake-leadership-brief">Enterprise Data Lake — Leadership Brief</h1>
+<p><strong>For:</strong> CTO, CIO, VP Engineering, Product Leadership, Finance<br />
+<strong>Last updated:</strong> 2026-06-29<br />
+<strong>Read time:</strong> 8 minutes</p>
+<hr />
+<h2 id="what-we-built-and-why">What We Built and Why</h2>
+<h3 id="the-problem">The Problem</h3>
+<p>Before this platform, our company's data lived in three completely disconnected systems:</p>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>What it held</th>
+<th>Who used it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Salesforce CRM</strong></td>
+<td>Customer accounts, contacts</td>
+<td>Sales, Customer Success</td>
+</tr>
+<tr>
+<td><strong>MySQL RDS</strong></td>
+<td>Transactional contracts and orders</td>
+<td>Operations, Finance</td>
+</tr>
+<tr>
+<td><strong>NetSuite ERP</strong></td>
+<td>Financials, invoices</td>
+<td>Finance <em>(pending onboarding)</em></td>
+</tr>
+</tbody>
+</table>
+<p>Getting data out of these systems for analysis required:
+- <strong>Manual extraction scripts</strong> — brittle, break when the source schema changes
+- <strong>24–72 hour delays</strong> — by the time data reached analysts it was already stale
+- <strong>No audit trail</strong> — no record of who accessed what, when, or why
+- <strong>Inconsistent customer identity</strong> — the same customer could appear as three different records across three systems
+- <strong>Security risk</strong> — credentials stored in scripts, shared informally, no rotation</p>
+<h3 id="the-solution">The Solution</h3>
+<p>An <strong>Enterprise Data Lake Platform</strong>: a fully automated, security-first, metadata-driven data pipeline that:</p>
+<ul>
+<li>Extracts data from source systems on a nightly schedule</li>
+<li>Stores versioned, immutable copies across three governed data layers</li>
+<li>Resolves the same customer across multiple systems into a single <strong>golden record</strong></li>
+<li>Enforces PII masking and data classification automatically</li>
+<li>Provides a complete audit trail from source record to business insight</li>
+<li>Requires <strong>zero code changes</strong> to add a new data source</li>
+</ul>
+<hr />
+<h2 id="current-status-dev-environment-live">Current Status: Dev Environment Live ✅</h2>
+<p>As of <strong>2026-06-29</strong>, the full pipeline is deployed and operational in the dev environment. Real business data is flowing end-to-end.</p>
+<h3 id="live-data">Live Data</h3>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Records</th>
+<th>Queryable via</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Company golden records (from Salesforce)</td>
+<td><strong>34</strong></td>
+<td>AWS Athena</td>
+</tr>
+<tr>
+<td>Person golden records (from Salesforce)</td>
+<td><strong>49</strong></td>
+<td>AWS Athena</td>
+</tr>
+<tr>
+<td>Contract records (from MySQL RDS)</td>
+<td><strong>35,971</strong></td>
+<td>AWS Athena</td>
+</tr>
+</tbody>
+</table>
+<p>Anyone with Athena access can run standard SQL to query this data today — no exports, no scripts, no waiting.</p>
+<h3 id="what-fully-operational-means">What "Fully Operational" Means</h3>
+<p>The following runs automatically, end-to-end, with no manual intervention:</p>
+<ol>
+<li><strong>Scheduled trigger</strong> — EventBridge fires a nightly cron job per entity</li>
+<li><strong>Extraction</strong> — Lambda reads from Salesforce/MySQL using secure credentials</li>
+<li><strong>Transformation</strong> — Field mapping, quality checks, PII masking applied</li>
+<li><strong>Entity resolution</strong> — Cross-source customer matching produces one golden record per customer</li>
+<li><strong>Analytics delivery</strong> — Clean, partitioned data lands in Athena-queryable tables</li>
+</ol>
+<p>If any step fails: automatic retry with exponential backoff → alerting → dead-letter queue for replay.</p>
+<hr />
+<h2 id="deployment-roadmap">Deployment Roadmap</h2>
+<table>
+<thead>
+<tr>
+<th>Environment</th>
+<th>Status</th>
+<th>ETA</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Dev</strong></td>
+<td>✅ Complete</td>
+<td>Done</td>
+</tr>
+<tr>
+<td><strong>Staging</strong></td>
+<td>🔲 Next</td>
+<td>TBD — requires infrastructure provisioning</td>
+</tr>
+<tr>
+<td><strong>Production</strong></td>
+<td>🔲 Pending staging sign-off</td>
+<td>TBD</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="business-outcomes-delivered">Business Outcomes Delivered</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Time to data availability</td>
+<td>24–72 hours (manual)</td>
+<td>1–4 hours (automated)</td>
+</tr>
+<tr>
+<td>Customer identity resolution</td>
+<td>3 disconnected views</td>
+<td>Single golden record per customer</td>
+</tr>
+<tr>
+<td>PII exposure in analytics</td>
+<td>Uncontrolled</td>
+<td>Masked/tokenised at pipeline level</td>
+</tr>
+<tr>
+<td>Audit trail</td>
+<td>None</td>
+<td>Full lineage from source to serving</td>
+</tr>
+<tr>
+<td>New source onboarding</td>
+<td>2–4 weeks (code change + deployment)</td>
+<td>2–3 days (configuration only)</td>
+</tr>
+<tr>
+<td>Credential security</td>
+<td>Scripts and shared .env files</td>
+<td>AWS Secrets Manager with auto-rotation</td>
+</tr>
+<tr>
+<td>Compliance readiness</td>
+<td>Manual documentation</td>
+<td>Automated lineage + retention enforcement</td>
+</tr>
+<tr>
+<td>Data quality visibility</td>
+<td>No monitoring</td>
+<td>Quality report per entity per run</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="cost-summary">Cost Summary</h2>
+<h3 id="monthly-aws-infrastructure-costs-dev-production-estimate">Monthly AWS Infrastructure Costs (Dev → Production estimate)</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Monthly Cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S3 storage (raw, curated, analytics)</td>
+<td>~$120</td>
+</tr>
+<tr>
+<td>Lambda execution (200 runs/month)</td>
+<td>~$80</td>
+</tr>
+<tr>
+<td>DynamoDB (5 tables, on-demand)</td>
+<td>~$150</td>
+</tr>
+<tr>
+<td>Athena queries</td>
+<td>~$25</td>
+</tr>
+<tr>
+<td>Secrets Manager</td>
+<td>~$9</td>
+</tr>
+<tr>
+<td>CloudWatch logs and metrics</td>
+<td>~$70</td>
+</tr>
+<tr>
+<td>VPC endpoints</td>
+<td>~$15</td>
+</tr>
+<tr>
+<td><strong>Total monthly AWS</strong></td>
+<td><strong>~$469/month</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="roi">ROI</h3>
+<table>
+<thead>
+<tr>
+<th>Comparison</th>
+<th>Cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>This platform (AWS + engineering)</td>
+<td>~$469/month infrastructure</td>
+</tr>
+<tr>
+<td>Commercial SaaS alternative (e.g. Fivetran)</td>
+<td>$3,000–$5,000/month <em>per source</em></td>
+</tr>
+<tr>
+<td>Manual engineering equivalent</td>
+<td>40–60 hrs/month in avoided labour</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Payback period:</strong> Infrastructure cost is recovered within the first month relative to SaaS alternatives, and within 2–3 months relative to manual engineering costs.</p>
+<hr />
+<h2 id="security-and-compliance">Security and Compliance</h2>
+<ul>
+<li><strong>Least privilege IAM</strong> — each Lambda has its own role scoped to exactly the resources it needs</li>
+<li><strong>No credentials in code</strong> — all secrets stored in AWS Secrets Manager with 90-day auto-rotation</li>
+<li><strong>PII masking at pipeline level</strong> — sensitive fields masked before they reach the analytics layer</li>
+<li><strong>Immutable raw layer</strong> — S3 Object Lock prevents accidental or malicious deletion</li>
+<li><strong>Full audit trail</strong> — every pipeline run writes a lineage record (who, what, when, from where, to where)</li>
+<li><strong>Encryption at rest and in transit</strong> — S3 SSE-KMS, TLS for all API calls</li>
+<li><strong>OWASP Top 10 controls</strong> — applied from initial implementation; Bandit SAST and pip-audit in CI pipeline</li>
+</ul>
+<hr />
+<h2 id="whats-next">What's Next</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Staging deployment</strong></td>
+<td>Mirror of dev — validates that the platform promotes cleanly to a production-like environment</td>
+</tr>
+<tr>
+<td><strong>Production deployment</strong></td>
+<td>Live production workloads after staging sign-off</td>
+</tr>
+<tr>
+<td><strong>NetSuite onboarding</strong></td>
+<td>No code changes needed — configuration-only; adds financial data to the lake</td>
+</tr>
+<tr>
+<td><strong>Additional Salesforce entities</strong></td>
+<td>Opportunities, Cases — configuration-only additions</td>
+</tr>
+<tr>
+<td><strong>Self-service analytics</strong></td>
+<td>Business intelligence tooling on top of Athena (e.g. QuickSight, Tableau)</td>
+</tr>
+<tr>
+<td><strong>Data quality dashboards</strong></td>
+<td>CloudWatch-based dashboards surfacing per-entity quality scores to stakeholders</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="technical-architecture-high-level">Technical Architecture (High Level)</h2>
+<pre><code>Source Systems                 Data Lake Layers              Analytics
+──────────────                 ────────────────              ─────────
+Salesforce CRM ──────────────► Raw Layer (S3)                Athena SQL
+MySQL RDS       ── nightly ──► Curated Layer (S3) ─────────► QuickSight (future)
+NetSuite ERP    ── pipeline ►  Analytics Layer (S3)          BI Tools (future)
+(pending)
+
+Orchestration: EventBridge → Step Functions → Lambda (4 stages)
+Governance:    Glue Catalog + DynamoDB lineage records
+Security:      IAM least-privilege + KMS encryption + Secrets Manager
+</code></pre>
+<hr />
+<h2 id="key-contacts">Key Contacts</h2>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Platform Engineering</td>
+<td>Infrastructure, Lambda code, Terraform</td>
+</tr>
+<tr>
+<td>Data Engineering</td>
+<td>Field mappings, entity configs, source onboarding</td>
+</tr>
+<tr>
+<td>Security / Compliance</td>
+<td>IAM policy review, PII classification, audit</td>
+</tr>
+<tr>
+<td>Finance</td>
+<td>AWS cost monitoring, ROI tracking</td>
+</tr>
+</tbody>
+</table>
+    </article>
+  </main>
+</body>
+</html>

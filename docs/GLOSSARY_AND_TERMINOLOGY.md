@@ -2,7 +2,7 @@
 
 **For:** All stakeholders  
 **Purpose:** Define technical and business terms used throughout documentation  
-**Last updated:** 2026-06-17
+**Last updated:** 2026-06-29
 
 ---
 
@@ -475,6 +475,6 @@ Quick-reference definitions for every tool and service used in the platform.
 
 ---
 
-**Last updated:** 2026-06-17  
+**Last updated:** 2026-06-29  
 **Owner:** Data Platform Team
 

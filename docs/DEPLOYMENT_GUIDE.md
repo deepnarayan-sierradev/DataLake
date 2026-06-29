@@ -1,8 +1,10 @@
 # Deployment Guide — Enterprise Data Lake Platform
 
-**Version:** 2.0  
-**Date:** 2026-06-16  
-**Audience:** Platform engineers deploying to AWS for the first time, or promoting to a new environment
+**Version:** 3.0  
+**Date:** 2026-06-29  
+**Audience:** Platform engineers promoting to a new environment (staging/prod)
+
+> **Dev environment is complete.** Local and dev deployments are fully operational as of 2026-06-29. This guide is now focused on promoting to **staging** and **production**. For developer setup, see [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). For current resource names, see [PLATFORM_STATUS.md](PLATFORM_STATUS.md).
 
 ---
 
@@ -1627,7 +1629,7 @@ Complete authoritative version reference for all tools used in deployment.
 
 | Service | Resource name pattern | Deployed by |
 |---|---|---|
-| **S3** | `{env}-raw-layer`, `{env}-curated-layer`, `{env}-analytics-layer`, `{env}-schema-snapshots`, `{env}-governance` | `infrastructure/modules/storage/` |
+| **S3** | `{env}-edl-raw-layer`, `{env}-edl-curated-layer`, `{env}-edl-analytics-layer`, `{env}-edl-schema-snapshots` | `infrastructure/modules/storage/` |
 | **KMS** | alias `{env}-edl-platform-key` | `infrastructure/modules/kms/` |
 | **VPC** | `{env}-edl-vpc`; 3 private subnets; 5 VPC Endpoints | `infrastructure/modules/networking/` |
 | **IAM** | 5 service roles + 1 OIDC CI/CD role | `infrastructure/modules/iam/` |

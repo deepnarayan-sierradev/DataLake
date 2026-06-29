@@ -3,143 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FAQ: Questions Management Will Ask (And Answers)</title>
-  <style>
-:root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --muted: #475569;
-  --border: #e2e8f0;
-  --accent: #0f766e;
-  --code-bg: #f1f5f9;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  color: var(--text);
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-}
-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(15, 23, 42, 0.95);
-  color: #fff;
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-.header-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
-.file { font-size: 12px; opacity: 0.9; }
-main {
-  max-width: 1100px;
-  margin: 24px auto 48px;
-  padding: 0 20px;
-}
-article {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
-}
-h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
-h1 { margin-top: 0; font-size: 2rem; }
-h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
-h3 { font-size: 1.2rem; }
-p, li { color: var(--text); line-height: 1.65; }
-ul, ol { padding-left: 1.25rem; }
-code {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.1rem 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 0.92em;
-}
-pre {
-  background: #0b1020;
-  color: #e2e8f0;
-  border-radius: 10px;
-  padding: 14px;
-  overflow-x: auto;
-  border: 1px solid #1e293b;
-}
-pre code {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: inherit;
-}
-blockquote {
-  margin: 1em 0;
-  padding: 0.7em 1em;
-  border-left: 4px solid var(--accent);
-  background: #f0fdfa;
-  color: var(--muted);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1em 0;
-  font-size: 0.95rem;
-}
-th, td {
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-  text-align: left;
-  vertical-align: top;
-}
-th {
-  background: #f8fafc;
-  font-weight: 600;
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
-.toc {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: #f8fafc;
-  margin-bottom: 1rem;
-}
-.footer {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 14px;
-}
-@media (max-width: 760px) {
-  article { padding: 18px; border-radius: 10px; }
-  .header-inner { padding: 10px 14px; }
-  main { margin-top: 16px; padding: 0 12px; }
-}
-</style>
+  <title>FAQ for Management — Enterprise Data Lake</title>
+  <style>:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#475569;--border:#e2e8f0;--accent:#0f766e;--code-bg:#f1f5f9}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%)}header{position:sticky;top:0;z-index:10;background:rgba(15,23,42,.95);color:#fff;backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,.1)}.header-inner{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:700;letter-spacing:.2px;font-size:14px}.file{font-size:12px;opacity:.9}main{max-width:1100px;margin:24px auto 48px;padding:0 20px}article{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;box-shadow:0 10px 35px rgba(15,23,42,.06)}h1,h2,h3,h4{line-height:1.25;margin-top:1.4em;margin-bottom:.55em}h1{margin-top:0;font-size:2rem}h2{font-size:1.45rem;border-top:1px solid var(--border);padding-top:1em}h3{font-size:1.2rem}p,li{color:var(--text);line-height:1.65}ul,ol{padding-left:1.25rem}code{background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:.92em}pre{background:#0b1020;color:#e2e8f0;border-radius:10px;padding:14px;overflow-x:auto;border:1px solid #1e293b}pre code{background:transparent;border:0;padding:0;color:inherit}blockquote{margin:1em 0;padding:.7em 1em;border-left:4px solid var(--accent);background:#f0fdfa;color:var(--muted)}table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.95rem}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:#f8fafc;font-weight:600}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}hr{border:0;border-top:1px solid var(--border);margin:1.6em 0}.footer{color:var(--muted);font-size:12px;margin-top:14px}@media(max-width:760px){article{padding:18px;border-radius:10px}.header-inner{padding:10px 14px}main{margin-top:16px;padding:0 12px}}</style>
 </head>
 <body>
-  <header>
-    <div class="header-inner">
-      <div class="brand">Enterprise Data Lake Documentation</div>
-      <div class="file">FAQ_FOR_MANAGEMENT.md</div>
-    </div>
-  </header>
-  <main>
-    <article>
-<h1 id="faq-questions-management-will-ask-and-answers">FAQ: Questions Management Will Ask (And Answers)</h1>
-<p><strong>For:</strong> All stakeholder levels<br>
-<strong>Format:</strong> Q&amp;A reference<br>
-<strong>Last updated:</strong> 2026-06-17</p>
-<hr>
+  <header><div class="header-inner"><div class="brand">Enterprise Data Lake Documentation</div><div class="file">FAQ_FOR_MANAGEMENT.md</div></div></header>
+  <main><article><h1 id="faq-questions-management-will-ask-and-answers">FAQ: Questions Management Will Ask (And Answers)</h1>
+<p><strong>For:</strong> All stakeholder levels<br />
+<strong>Format:</strong> Q&amp;A reference<br />
+<strong>Last updated:</strong> 2026-06-29</p>
+<hr />
 <h2 id="business-strategy">Business &amp; Strategy</h2>
 <h3 id="q-how-is-this-different-from-just-buying-a-saas-data-integration-tool">Q: "How is this different from just buying a SaaS data integration tool?"</h3>
 <p><strong>A:</strong> Our platform gives you what commercial tools can't:</p>
@@ -185,7 +58,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tbody>
 </table>
 <p><strong>Bottom line:</strong> For your use case (Salesforce + NetSuite + MySQL with strict compliance), this platform is <strong>10–15× more cost-effective</strong> long-term.</p>
-<hr>
+<hr />
 <h3 id="q-can-we-still-switch-to-a-saas-tool-later-if-we-want">Q: "Can we still switch to a SaaS tool later if we want?"</h3>
 <p><strong>A:</strong> Yes, with one caveat:</p>
 <ul>
@@ -196,7 +69,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </ul>
 <p><strong>Switching cost</strong> if you wanted to migrate away: ~$10K–$15K (data export + mapping transfer), which would break even after 5–6 months on a SaaS tool anyway.</p>
 <p><strong>Realistically?</strong> Once you experience 1–4 hour data freshness vs. days, and zero code changes to add sources, you won't want to switch.</p>
-<hr>
+<hr />
 <h3 id="q-what-happens-if-we-acquire-another-company-with-different-data-systems">Q: "What happens if we acquire another company with different data systems?"</h3>
 <p><strong>A:</strong> This platform scales to that automatically:</p>
 <ul>
@@ -206,7 +79,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><strong>Timeline to integrated data?</strong> 4 days total (vs. 2–4 weeks with manual scripts)</li>
 </ul>
 <p>We're already designed for Dynamics 365, HubSpot, and PostgreSQL addition — just waiting on business prioritization.</p>
-<hr>
+<hr />
 <h2 id="technical-concerns">Technical Concerns</h2>
 <h3 id="q-what-happens-if-the-extraction-breaks-how-long-until-data-is-stale">Q: "What happens if the extraction breaks? How long until data is stale?"</h3>
 <p><strong>A:</strong> Multi-layered safety:</p>
@@ -218,7 +91,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><strong>SLO target</strong> → 99.5% of runs complete (only 1–2 failures per quarter)</li>
 </ol>
 <p><strong>Worst-case scenario:</strong> Day-old data used for reporting (still 10× fresher than before). You're never in a situation where there's "no data."</p>
-<hr>
+<hr />
 <h3 id="q-are-we-secure-what-about-pii-exposure">Q: "Are we secure? What about PII exposure?"</h3>
 <p><strong>A:</strong> Security-first architecture:</p>
 <table>
@@ -260,7 +133,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tbody>
 </table>
 <p><strong>Real data:</strong> Platform has zero data breaches or PII exposures in 12 months of production use at scale.</p>
-<hr>
+<hr />
 <h3 id="q-what-if-theres-a-schema-change-in-the-source-eg-salesforce-adds-a-new-field">Q: "What if there's a schema change in the source (e.g., Salesforce adds a new field)?"</h3>
 <p><strong>A:</strong> Platform handles it gracefully:</p>
 <ol>
@@ -270,7 +143,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </ol>
 <p><strong>No downtime.</strong> No manual intervention needed for non-breaking changes. You choose whether to include the new field in analytics or leave it out.</p>
 <p><strong>Comparison:</strong> With manual scripts, you discover schema changes when the script crashes at 3 AM.</p>
-<hr>
+<hr />
 <h3 id="q-whats-the-query-latency-can-we-use-it-for-real-time-dashboards">Q: "What's the query latency? Can we use it for real-time dashboards?"</h3>
 <p><strong>A:</strong> Depends on the use case:</p>
 <table>
@@ -305,7 +178,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tbody>
 </table>
 <p><strong>Most users:</strong> Stay with 1–4 hour freshness (99% of reporting use cases). It's still 10–100× better than before.</p>
-<hr>
+<hr />
 <h3 id="q-how-much-data-can-it-handle-does-it-scale">Q: "How much data can it handle? Does it scale?"</h3>
 <p><strong>A:</strong> Scales from thousands to billions of records:</p>
 <table>
@@ -333,7 +206,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <p><strong>Memory:</strong> Streaming architecture means you could extract 100M records with same 512 MB Lambda memory (only 50k records in memory at any time).</p>
 <p><strong>S3 bandwidth:</strong> AWS guarantees 3,500 PUT requests/sec and 5.5 GB/sec throughput. We're nowhere near those limits.</p>
 <p><strong>Realistically?</strong> Platform scales to 10–100× current volumes without architectural change.</p>
-<hr>
+<hr />
 <h3 id="q-what-if-our-internet-connection-goes-down-while-extraction-is-running">Q: "What if our internet connection goes down while extraction is running?"</h3>
 <p><strong>A:</strong> Handled automatically:</p>
 <ul>
@@ -343,7 +216,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><strong>If Lambda timeout reached</strong> → Step Functions retries automatically</li>
 </ul>
 <p><strong>No data loss scenario exists</strong> in the architecture.</p>
-<hr>
+<hr />
 <h2 id="operational-governance">Operational &amp; Governance</h2>
 <h3 id="q-whos-responsible-for-keeping-this-running-do-we-need-a-new-team">Q: "Who's responsible for keeping this running? Do we need a new team?"</h3>
 <p><strong>A:</strong> Minimal new staffing required:</p>
@@ -354,7 +227,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><strong>Infrastructure</strong> → Cloud platform team (monthly AWS account reviews; no daily ops)</li>
 </ul>
 <p><strong>Comparison:</strong> Manual extraction scripts required 2 FTE of dedicated development time. This saves that entirely.</p>
-<hr>
+<hr />
 <h3 id="q-how-do-we-govern-who-can-access-what-data">Q: "How do we govern who can access what data?"</h3>
 <p><strong>A:</strong> Fine-grained, role-based access:</p>
 <pre><code>Raw data (PII)
@@ -377,7 +250,7 @@ Serving database (optional, for apps)
   └─ BI tools (read-only connection string, no write)
 </code></pre>
 <p>Each role has <strong>zero permissions outside its scope.</strong> IAM enforces this automatically.</p>
-<hr>
+<hr />
 <h3 id="q-whats-the-approval-process-for-adding-a-new-data-source">Q: "What's the approval process for adding a new data source?"</h3>
 <p><strong>A:</strong> Six gates (takes 4–5 days):</p>
 <ol>
@@ -390,7 +263,7 @@ Serving database (optional, for apps)
 </ol>
 <p>Each gate is logged. No gate can be skipped without a written waiver (20+ character justification).</p>
 <p><strong>New sources:</strong> Onboarded every 2–4 weeks (vs. quarterly with manual processes).</p>
-<hr>
+<hr />
 <h2 id="implementation-risk">Implementation &amp; Risk</h2>
 <h3 id="q-is-this-production-ready-or-is-it-still-experimental">Q: "Is this production-ready, or is it still experimental?"</h3>
 <p><strong>A:</strong> <strong>Fully production-ready:</strong></p>
@@ -403,12 +276,12 @@ Serving database (optional, for apps)
 <li>✅ Passed security architecture review (signed off)</li>
 <li>✅ Passed compliance audit (ready for SOC 2 / GDPR / HIPAA)</li>
 </ul>
-<p><strong>Waiting for:</strong> <br>
-- Board approval (this meeting)<br>
-- Finance sign-off on budget (see COST_ANALYSIS_AND_ROI.md)<br>
+<p><strong>Waiting for:</strong> 
+- Board approval (this meeting)
+- Finance sign-off on budget (see COST_ANALYSIS_AND_ROI.md)
 - VP Ops sign-off on runbook &amp; SLO commitment</p>
 <p>Timeline to go-live: <strong>2 weeks</strong> (once approvals received).</p>
-<hr>
+<hr />
 <h3 id="q-whats-the-worst-case-scenario-what-could-go-wrong">Q: "What's the worst-case scenario? What could go wrong?"</h3>
 <p><strong>A:</strong> Known risks &amp; mitigations:</p>
 <table>
@@ -460,24 +333,24 @@ Serving database (optional, for apps)
 </tbody>
 </table>
 <p><strong>Residual risk:</strong> Low. No single point of failure that would lose data.</p>
-<hr>
+<hr />
 <h3 id="q-how-do-we-know-the-data-quality-is-good">Q: "How do we know the data quality is good?"</h3>
 <p><strong>A:</strong> Three layers of validation:</p>
-<p><strong>Layer 1: Raw extraction</strong><br>
-- Record count check (compared to previous run)<br>
-- Field presence check (all expected fields present?)<br>
+<p><strong>Layer 1: Raw extraction</strong>
+- Record count check (compared to previous run)
+- Field presence check (all expected fields present?)
 - Type validation (integers are integers, dates are dates)</p>
-<p><strong>Layer 2: Transformation</strong><br>
-- Null checks (required fields have values)<br>
-- Pattern checks (emails match email regex, phone is valid)<br>
-- Enum checks (status ∈ {active, inactive, pending})<br>
+<p><strong>Layer 2: Transformation</strong>
+- Null checks (required fields have values)
+- Pattern checks (emails match email regex, phone is valid)
+- Enum checks (status ∈ {active, inactive, pending})
 - Range checks (order amount &gt; 0 and &lt; max)</p>
-<p><strong>Layer 3: Post-publication</strong><br>
-- Quality dashboard (% records passing per entity per run)<br>
-- Row count validation (curated ≈ raw, allowing for filtering)<br>
+<p><strong>Layer 3: Post-publication</strong>
+- Quality dashboard (% records passing per entity per run)
+- Row count validation (curated ≈ raw, allowing for filtering)
 - Lineage validation (can trace every analytics record back to raw source)</p>
 <p><strong>If quality fails:</strong> Alarm fires, analytics not published, previous dataset remains available.</p>
-<hr>
+<hr />
 <h3 id="q-how-do-we-train-the-team-to-use-this">Q: "How do we train the team to use this?"</h3>
 <p><strong>A:</strong> Three-level learning path:</p>
 <table>
@@ -517,7 +390,7 @@ Serving database (optional, for apps)
 </tbody>
 </table>
 <p>We'll deliver pre-recorded videos + live Q&amp;A for each level.</p>
-<hr>
+<hr />
 <h2 id="regulatory-compliance">Regulatory &amp; Compliance</h2>
 <h3 id="q-does-this-meet-our-compliance-requirements-gdpr-ccpa-soc-2-hipaa">Q: "Does this meet our compliance requirements? (GDPR, CCPA, SOC 2, HIPAA?)"</h3>
 <p><strong>A:</strong> Designed to meet or exceed all major standards:</p>
@@ -558,7 +431,7 @@ Serving database (optional, for apps)
 </tbody>
 </table>
 <p><strong>Audit-ready today.</strong> No compliance work needed to go live.</p>
-<hr>
+<hr />
 <h3 id="q-what-about-data-residency-can-we-keep-data-in-a-specific-region">Q: "What about data residency? Can we keep data in a specific region?"</h3>
 <p><strong>A:</strong> Full regional control:</p>
 <ul>
@@ -569,7 +442,7 @@ Serving database (optional, for apps)
 <li>All source connectivity: <strong>Private VPC</strong> (never leaves your region)</li>
 </ul>
 <p><strong>Terraform variable:</strong> <code>aws_region = "eu-west-1"</code> (for example). Changes region for entire deployment.</p>
-<hr>
+<hr />
 <h2 id="final-qa">Final Q&amp;A</h2>
 <h3 id="q-who-do-i-call-if-i-have-questions-or-concerns">Q: "Who do I call if I have questions or concerns?"</h3>
 <p><strong>A:</strong> Escalation path:</p>
@@ -610,24 +483,91 @@ Serving database (optional, for apps)
 </tbody>
 </table>
 <p><strong>Schedule follow-up meeting:</strong> Yes, absolutely. We'll walk through any part of this in detail.</p>
-      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
-
-<hr>
-<h2 id="technology-stack-reference">Technology Stack Reference</h2>
+<hr />
+<h2 id="technology-stack-quick-qa">Technology Stack — Quick Q&amp;A</h2>
+<h3 id="q-what-cloud-does-this-run-on">Q: "What cloud does this run on?"</h3>
+<p><strong>A:</strong> AWS (Amazon Web Services) exclusively. All services are in a single AWS region (default: <code>us-east-1</code>; fully configurable). No multi-cloud dependencies.</p>
+<hr />
+<h3 id="q-what-are-the-main-aws-services">Q: "What are the main AWS services?"</h3>
+<p><strong>A:</strong> The platform uses these AWS services:</p>
 <table>
-<thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+<thead>
+<tr>
+<th>Service</th>
+<th>Role</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Cloud</td><td><strong>AWS</strong> (EventBridge, Step Functions, Lambda, ECS Fargate, S3, DynamoDB, Secrets Manager, Glue, Athena, RDS MySQL, SQS, CloudWatch, X-Ray, SNS, KMS, IAM, VPC)</td></tr>
-<tr><td>Data format</td><td><strong>Apache Parquet</strong> (Snappy) for data layers; <strong>JSON</strong> for configs and reports</td></tr>
-<tr><td>Source APIs</td><td><strong>Salesforce Bulk API 2.0</strong>; <strong>NetSuite SuiteQL REST</strong>; <strong>MySQL JDBC</strong> via <code>pymysql</code></td></tr>
-<tr><td>Language</td><td><strong>Python 3.14</strong> — Pydantic v2, structlog ≥ 24.4, pyarrow, boto3, pymysql, requests</td></tr>
-<tr><td>Infrastructure</td><td><strong>Terraform</strong> ≥ 1.8 (AWS Provider ~&gt; 5.0); 3 environments: dev / staging / prod</td></tr>
-<tr><td>CI/CD</td><td><strong>GitHub Actions</strong> — 7-stage gate: Ruff → mypy → pytest → bandit → pip-audit → checkov → terraform validate</td></tr>
-<tr><td>Security algorithms</td><td><strong>HMAC-SHA256</strong> (PII tokenisation); <strong>SHA-256</strong> (field fingerprinting); <strong>Jaro-Winkler</strong> + <strong>Jaccard</strong> (entity resolution)</td></tr>
-<tr><td>Testing</td><td><strong>pytest</strong> + <strong>moto</strong> ≥ 5.0 (AWS mocking); ≥ 80% coverage gate enforced in CI</td></tr>
+<tr>
+<td><strong>EventBridge Scheduler</strong></td>
+<td>Fires the pipeline on a cron schedule for each entity</td>
+</tr>
+<tr>
+<td><strong>Step Functions</strong></td>
+<td>Manages pipeline stages with retry, branching, and failure routing</td>
+</tr>
+<tr>
+<td><strong>Lambda / ECS Fargate</strong></td>
+<td>Runs the Python extraction and transformation code</td>
+</tr>
+<tr>
+<td><strong>S3</strong></td>
+<td>Stores all data (raw 7-year, curated 3-year, analytics 1-year)</td>
+</tr>
+<tr>
+<td><strong>DynamoDB</strong></td>
+<td>Config, watermark state, run audit log, onboarding records</td>
+</tr>
+<tr>
+<td><strong>Secrets Manager</strong></td>
+<td>Stores Salesforce / NetSuite / MySQL credentials securely</td>
+</tr>
+<tr>
+<td><strong>Glue Data Catalog + Athena</strong></td>
+<td>Makes curated data queryable via SQL from any BI tool</td>
+</tr>
+<tr>
+<td><strong>CloudWatch + X-Ray + SNS</strong></td>
+<td>Logs, metrics, alarms, alerts, tracing</td>
+</tr>
+<tr>
+<td><strong>KMS + IAM + VPC</strong></td>
+<td>Encryption, access control, network isolation</td>
+</tr>
 </tbody>
 </table>
-    </article>
-  </main>
+<hr />
+<h3 id="q-what-programming-language-is-it-written-in">Q: "What programming language is it written in?"</h3>
+<p><strong>A:</strong> Python 3.14, using:
+- <strong>Pydantic v2</strong> — data model validation
+- <strong>structlog</strong> — structured JSON logging (auto-scrubs PII/credentials)
+- <strong>pyarrow</strong> — reads/writes Apache Parquet files
+- <strong>boto3</strong> — AWS SDK
+- <strong>pymysql</strong> — MySQL connector</p>
+<hr />
+<h3 id="q-how-is-infrastructure-managed">Q: "How is infrastructure managed?"</h3>
+<p><strong>A:</strong> <strong>Terraform</strong> (≥ 1.8). Every AWS resource — S3 buckets, DynamoDB tables, IAM roles, VPC, encryption keys — is declared as code in the <code>infrastructure/</code> directory. Changes go through the same code review and CI/CD process as application code.</p>
+<hr />
+<h3 id="q-whats-the-data-file-format">Q: "What's the data file format?"</h3>
+<p><strong>A:</strong> <strong>Apache Parquet</strong> (Snappy-compressed). It is:
+- 5–10× smaller than JSON
+- Columnar — fast for analytics queries
+- Supported natively by Athena, Spark, Pandas, and all major BI tools</p>
+<hr />
+<h3 id="q-how-do-bi-tools-connect">Q: "How do BI tools connect?"</h3>
+<p><strong>A:</strong> Two options:
+1. <strong>Amazon Athena</strong> — connect Tableau / Power BI / Looker via ODBC or JDBC driver; queries run directly against S3 Parquet; no separate database server
+2. <strong>RDS MySQL serving store</strong> — for dashboards requiring sub-second response times at high concurrency; pre-loaded from the analytics layer</p>
+<hr />
+<h3 id="q-what-cicd-and-quality-tools-are-used">Q: "What CI/CD and quality tools are used?"</h3>
+<p><strong>A:</strong> GitHub Actions runs a 7-stage gate on every code change:
+1. <strong>Ruff</strong> — code style and security linting
+2. <strong>mypy</strong> — static type checking (strict mode)
+3. <strong>pytest</strong> — automated tests (≥ 80% coverage required)
+4. <strong>bandit</strong> — Python SAST scan (OWASP Top 10)
+5. <strong>pip-audit</strong> — dependency CVE scan
+6. <strong>checkov</strong> — Terraform security scan
+7. <strong>Terraform validate</strong> — infrastructure syntax and logic validation</p>
+<p>Deploys only proceed after all 7 gates pass.</p></article></main>
 </body>
 </html>

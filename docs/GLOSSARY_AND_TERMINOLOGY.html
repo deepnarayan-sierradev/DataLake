@@ -3,178 +3,51 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Glossary &amp; Key Terminology</title>
-  <style>
-:root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --muted: #475569;
-  --border: #e2e8f0;
-  --accent: #0f766e;
-  --code-bg: #f1f5f9;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  color: var(--text);
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-}
-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(15, 23, 42, 0.95);
-  color: #fff;
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-.header-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 14px; }
-.file { font-size: 12px; opacity: 0.9; }
-main {
-  max-width: 1100px;
-  margin: 24px auto 48px;
-  padding: 0 20px;
-}
-article {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 28px;
-  box-shadow: 0 10px 35px rgba(15,23,42,0.06);
-}
-h1, h2, h3, h4 { line-height: 1.25; margin-top: 1.4em; margin-bottom: 0.55em; }
-h1 { margin-top: 0; font-size: 2rem; }
-h2 { font-size: 1.45rem; border-top: 1px solid var(--border); padding-top: 1em; }
-h3 { font-size: 1.2rem; }
-p, li { color: var(--text); line-height: 1.65; }
-ul, ol { padding-left: 1.25rem; }
-code {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.1rem 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 0.92em;
-}
-pre {
-  background: #0b1020;
-  color: #e2e8f0;
-  border-radius: 10px;
-  padding: 14px;
-  overflow-x: auto;
-  border: 1px solid #1e293b;
-}
-pre code {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: inherit;
-}
-blockquote {
-  margin: 1em 0;
-  padding: 0.7em 1em;
-  border-left: 4px solid var(--accent);
-  background: #f0fdfa;
-  color: var(--muted);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1em 0;
-  font-size: 0.95rem;
-}
-th, td {
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-  text-align: left;
-  vertical-align: top;
-}
-th {
-  background: #f8fafc;
-  font-weight: 600;
-}
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
-.toc {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: #f8fafc;
-  margin-bottom: 1rem;
-}
-.footer {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 14px;
-}
-@media (max-width: 760px) {
-  article { padding: 18px; border-radius: 10px; }
-  .header-inner { padding: 10px 14px; }
-  main { margin-top: 16px; padding: 0 12px; }
-}
-</style>
+  <title>Glossary & Terminology — Enterprise Data Lake</title>
+  <style>:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#475569;--border:#e2e8f0;--accent:#0f766e;--code-bg:#f1f5f9}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%)}header{position:sticky;top:0;z-index:10;background:rgba(15,23,42,.95);color:#fff;backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,.1)}.header-inner{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:700;letter-spacing:.2px;font-size:14px}.file{font-size:12px;opacity:.9}main{max-width:1100px;margin:24px auto 48px;padding:0 20px}article{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;box-shadow:0 10px 35px rgba(15,23,42,.06)}h1,h2,h3,h4{line-height:1.25;margin-top:1.4em;margin-bottom:.55em}h1{margin-top:0;font-size:2rem}h2{font-size:1.45rem;border-top:1px solid var(--border);padding-top:1em}h3{font-size:1.2rem}p,li{color:var(--text);line-height:1.65}ul,ol{padding-left:1.25rem}code{background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:.92em}pre{background:#0b1020;color:#e2e8f0;border-radius:10px;padding:14px;overflow-x:auto;border:1px solid #1e293b}pre code{background:transparent;border:0;padding:0;color:inherit}blockquote{margin:1em 0;padding:.7em 1em;border-left:4px solid var(--accent);background:#f0fdfa;color:var(--muted)}table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.95rem}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:#f8fafc;font-weight:600}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}hr{border:0;border-top:1px solid var(--border);margin:1.6em 0}.footer{color:var(--muted);font-size:12px;margin-top:14px}@media(max-width:760px){article{padding:18px;border-radius:10px}.header-inner{padding:10px 14px}main{margin-top:16px;padding:0 12px}}</style>
 </head>
 <body>
-  <header>
-    <div class="header-inner">
-      <div class="brand">Enterprise Data Lake Documentation</div>
-      <div class="file">GLOSSARY_AND_TERMINOLOGY.md</div>
-    </div>
-  </header>
-  <main>
-    <article>
-<h1 id="glossary-key-terminology">Glossary &amp; Key Terminology</h1>
-<p><strong>For:</strong> All stakeholders<br>
-<strong>Purpose:</strong> Define technical and business terms used throughout documentation<br>
-<strong>Last updated:</strong> 2026-06-17</p>
-<hr>
+  <header><div class="header-inner"><div class="brand">Enterprise Data Lake Documentation</div><div class="file">GLOSSARY_AND_TERMINOLOGY.md</div></div></header>
+  <main><article><h1 id="glossary-key-terminology">Glossary &amp; Key Terminology</h1>
+<p><strong>For:</strong> All stakeholders<br />
+<strong>Purpose:</strong> Define technical and business terms used throughout documentation<br />
+<strong>Last updated:</strong> 2026-06-29</p>
+<hr />
 <h2 id="core-concepts">Core Concepts</h2>
 <h3 id="data-lake">Data Lake</h3>
 <p>A centralized repository that stores raw, structured data from multiple sources in its native format, enabling analytics, reporting, and machine learning at scale.</p>
 <p><strong>In our context:</strong> S3 buckets (raw, curated, analytics layers) + metadata repository (DynamoDB) + query engine (Athena).</p>
-<hr>
+<hr />
 <h3 id="etl-elt">ETL / ELT</h3>
-<p><strong>ETL</strong> = Extract → Transform → Load (traditional approach; transform before storage)<br>
+<p><strong>ETL</strong> = Extract → Transform → Load (traditional approach; transform before storage)<br />
 <strong>ELT</strong> = Extract → Load → Transform (modern approach; load raw first, transform later)</p>
-<p><strong>Our platform uses ELT:</strong><br>
-- Extract raw data → Load to S3 (immutable)<br>
+<p><strong>Our platform uses ELT:</strong>
+- Extract raw data → Load to S3 (immutable)
 - Later → Transform (field mapping, quality checks) → Load to curated layer</p>
 <p><strong>Benefit:</strong> If transformation logic changes, replay from raw without re-extracting from source.</p>
-<hr>
+<hr />
 <h3 id="extraction">Extraction</h3>
 <p>The process of retrieving data from a source system (Salesforce, NetSuite, MySQL) and copying it to the data lake's raw layer.</p>
-<p><strong>Types:</strong><br>
-- <strong>Full extract:</strong> All records from source (e.g., first-time load, or reference data)<br>
+<p><strong>Types:</strong>
+- <strong>Full extract:</strong> All records from source (e.g., first-time load, or reference data)
 - <strong>Incremental extract:</strong> Only records changed since last extraction (faster, using watermark)</p>
-<hr>
+<hr />
 <h3 id="transformation">Transformation</h3>
 <p>Process of converting raw source data into standardized, business-ready format.</p>
-<p><strong>Steps:</strong><br>
-1. Field mapping (rename <code>Account_Name__c</code> → <code>account_name</code>)<br>
-2. Type casting (convert strings to numbers/dates)<br>
-3. PII masking (redact sensitive fields)<br>
+<p><strong>Steps:</strong>
+1. Field mapping (rename <code>Account_Name__c</code> → <code>account_name</code>)
+2. Type casting (convert strings to numbers/dates)
+3. PII masking (redact sensitive fields)
 4. Quality validation (reject bad records)</p>
-<hr>
+<hr />
 <h3 id="watermark">Watermark</h3>
 <p>A timestamp bookmark that records exactly where an incremental extraction last stopped.</p>
-<p><strong>Example:</strong><br>
-- Last successful extraction: 2026-06-15 02:00 UTC<br>
-- Watermark stored: "2026-06-15T02:00:00Z"<br>
+<p><strong>Example:</strong>
+- Last successful extraction: 2026-06-15 02:00 UTC
+- Watermark stored: "2026-06-15T02:00:00Z"
 - Next extraction: pull records modified after that timestamp</p>
 <p><strong>Benefit:</strong> Avoids re-extracting entire dataset on each run (delta sync).</p>
-<hr>
+<hr />
 <h3 id="schema">Schema</h3>
 <p>The structure of data — list of field names, types, sizes, and nullability.</p>
 <p><strong>Example (Salesforce Account):</strong></p>
@@ -186,38 +59,38 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
   ]
 }
 </code></pre>
-<hr>
+<hr />
 <h3 id="schema-drift">Schema Drift</h3>
 <p>A change in source system schema compared to the previous extraction.</p>
-<p><strong>Types:</strong><br>
-- <strong>No drift:</strong> Schema unchanged (expected)<br>
-- <strong>Non-breaking drift:</strong> New optional field added (safe to ignore)<br>
-- <strong>Potentially breaking drift:</strong> Field length reduced (may cause data loss)<br>
+<p><strong>Types:</strong>
+- <strong>No drift:</strong> Schema unchanged (expected)
+- <strong>Non-breaking drift:</strong> New optional field added (safe to ignore)
+- <strong>Potentially breaking drift:</strong> Field length reduced (may cause data loss)
 - <strong>Breaking drift:</strong> Field removed or made mandatory (stops pipeline; requires review)</p>
-<hr>
+<hr />
 <h3 id="golden-record">Golden Record</h3>
 <p>A single, authoritative, consolidated view of an entity (customer, company, product) across all source systems.</p>
-<p><strong>Example:</strong> "John Smith" appears as:<br>
-- <code>Contact</code> in Salesforce<br>
-- <code>CustomerName</code> in NetSuite<br>
+<p><strong>Example:</strong> "John Smith" appears as:
+- <code>Contact</code> in Salesforce
+- <code>CustomerName</code> in NetSuite
 - <code>user_name</code> in MySQL Orders</p>
-<p>Platform matches them → creates one "golden record" with:<br>
-- Unified ID (<code>golden_id</code>)<br>
-- Merged fields (address from Salesforce, phone from NetSuite)<br>
+<p>Platform matches them → creates one "golden record" with:
+- Unified ID (<code>golden_id</code>)
+- Merged fields (address from Salesforce, phone from NetSuite)
 - Survivorship rules (which source's data wins for each field)</p>
-<hr>
+<hr />
 <h3 id="entity-resolution">Entity Resolution</h3>
 <p>The process of identifying and matching the same real-world entity (person, company, product) across multiple source systems.</p>
-<p><strong>Methods:</strong><br>
-- <strong>Deterministic:</strong> Exact match (e.g., SSN matches exactly → same person)<br>
+<p><strong>Methods:</strong>
+- <strong>Deterministic:</strong> Exact match (e.g., SSN matches exactly → same person)
 - <strong>Probabilistic:</strong> Score-based match (e.g., name similarity &gt; 95% + address match → likely same person)</p>
-<hr>
+<hr />
 <h3 id="pii-personally-identifiable-information">PII (Personally Identifiable Information)</h3>
 <p>Data that can identify an individual (name, email, phone, SSN, credit card, address).</p>
-<p><strong>Our approach:</strong><br>
-- Raw layer: Stores PII (secured; only extraction team + compliance access)<br>
+<p><strong>Our approach:</strong>
+- Raw layer: Stores PII (secured; only extraction team + compliance access)
 - Curated + Analytics layers: PII masked/redacted (safe for broader analyst access)</p>
-<hr>
+<hr />
 <h3 id="masking-strategy">Masking Strategy</h3>
 <p>How PII is obfuscated to prevent identification while preserving some utility.</p>
 <table>
@@ -256,44 +129,44 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h3 id="lineage">Lineage</h3>
 <p>A complete record of data's journey from source to final destination, showing every transformation and processing step.</p>
-<p><strong>Captured automatically:</strong><br>
-- Source system → Raw layer (extraction lineage)<br>
-- Raw layer → Curated layer (transformation lineage)<br>
+<p><strong>Captured automatically:</strong>
+- Source system → Raw layer (extraction lineage)
+- Raw layer → Curated layer (transformation lineage)
 - Curated → Analytics / Golden records (resolution lineage)</p>
 <p><strong>Benefit:</strong> Audit trail; ability to explain why an analytics number differs from source.</p>
-<hr>
+<hr />
 <h2 id="aws-services-used">AWS Services Used</h2>
 <h3 id="s3-simple-storage-service">S3 (Simple Storage Service)</h3>
 <p>Cloud object storage (files, not databases).</p>
-<p><strong>Our usage:</strong><br>
-- Raw layer bucket: <code>{env}-raw-layer</code> (immutable, 7-year retention)<br>
-- Curated layer bucket: <code>{env}-curated-layer</code> (transformation outputs)<br>
-- Analytics layer bucket: <code>{env}-analytics-layer</code> (BI-ready data)<br>
+<p><strong>Our usage:</strong>
+- Raw layer bucket: <code>{env}-raw-layer</code> (immutable, 7-year retention)
+- Curated layer bucket: <code>{env}-curated-layer</code> (transformation outputs)
+- Analytics layer bucket: <code>{env}-analytics-layer</code> (BI-ready data)
 - Schema snapshots bucket: <code>{env}-schema-snapshots</code> (field schemas per run)</p>
-<hr>
+<hr />
 <h3 id="dynamodb">DynamoDB</h3>
 <p>Fully managed NoSQL database (key-value store).</p>
-<p><strong>Our usage:</strong><br>
-- <strong>Configuration table:</strong> Entity extraction configs (what to extract, watermark field, etc.)<br>
-- <strong>Watermark table:</strong> Last successful extraction timestamp per entity<br>
-- <strong>Audit log table:</strong> Every pipeline stage records an entry (immutable log)<br>
+<p><strong>Our usage:</strong>
+- <strong>Configuration table:</strong> Entity extraction configs (what to extract, watermark field, etc.)
+- <strong>Watermark table:</strong> Last successful extraction timestamp per entity
+- <strong>Audit log table:</strong> Every pipeline stage records an entry (immutable log)
 - <strong>Onboarding registry:</strong> 6-gate source onboarding approval status</p>
-<hr>
+<hr />
 <h3 id="lambda">Lambda</h3>
 <p>Serverless compute (run code without managing servers).</p>
-<p><strong>Our usage:</strong><br>
-- Extraction Lambda: Pulls data from Salesforce/NetSuite/MySQL, writes raw Parquet<br>
-- Transformation Lambda: Applies field mapping, PII masking, quality checks<br>
-- Entity resolution Lambda: Matches records across sources, creates golden records<br>
+<p><strong>Our usage:</strong>
+- Extraction Lambda: Pulls data from Salesforce/NetSuite/MySQL, writes raw Parquet
+- Transformation Lambda: Applies field mapping, PII masking, quality checks
+- Entity resolution Lambda: Matches records across sources, creates golden records
 - Serving store Lambda: Loads analytics data into RDS/DynamoDB</p>
-<p><strong>Limits:</strong><br>
-- Max execution time: 15 minutes<br>
-- Max memory: 10 GB<br>
+<p><strong>Limits:</strong>
+- Max execution time: 15 minutes
+- Max memory: 10 GB
 - For very large extractions (&gt; 10M records/day): Use ECS Fargate instead</p>
-<hr>
+<hr />
 <h3 id="step-functions">Step Functions</h3>
 <p>Serverless workflow orchestration (chains Lambda calls together).</p>
 <p><strong>Our usage:</strong> Defines the pipeline flow:</p>
@@ -306,48 +179,48 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
             → Serving Store Load Lambda
 </code></pre>
 <p>Handles retries, branching logic, and failure routing automatically.</p>
-<hr>
+<hr />
 <h3 id="eventbridge-scheduler">EventBridge Scheduler</h3>
 <p>Cron job scheduling service (triggers tasks on schedule).</p>
 <p><strong>Our usage:</strong> Triggers extraction pipeline on schedule (e.g., 02:00 UTC daily for Salesforce Account).</p>
-<hr>
+<hr />
 <h3 id="secrets-manager">Secrets Manager</h3>
 <p>Centralized secret storage with encryption and rotation.</p>
-<p><strong>Our usage:</strong> Stores source system credentials:<br>
-- <code>prod/sources/salesforce/credentials</code> (OAuth tokens)<br>
-- <code>prod/sources/netsuite/credentials</code> (API keys)<br>
+<p><strong>Our usage:</strong> Stores source system credentials:
+- <code>prod/sources/salesforce/credentials</code> (OAuth tokens)
+- <code>prod/sources/netsuite/credentials</code> (API keys)
 - <code>prod/sources/mysql-rds/credentials</code> (DB password)</p>
 <p>Credentials auto-rotated every 90 days; never logged or exposed in code.</p>
-<hr>
+<hr />
 <h3 id="athena">Athena</h3>
 <p>Serverless SQL query engine over S3 data.</p>
 <p><strong>Our usage:</strong> BI tools query analytics layer via Athena:</p>
 <pre><code class="language-sql">SELECT account_name, revenue FROM analytics.salesforce_account WHERE region = 'EMEA'
 </code></pre>
 <p>Charges: $5 per TB scanned (year/month/day partitioning reduces scan volume).</p>
-<hr>
+<hr />
 <h3 id="glue-catalog">Glue Catalog</h3>
 <p>AWS metadata repository (like a data dictionary).</p>
-<p><strong>Our usage:</strong><br>
-- Registers all curated and analytics tables<br>
-- Provides schema discovery (columns, types, partitions)<br>
+<p><strong>Our usage:</strong>
+- Registers all curated and analytics tables
+- Provides schema discovery (columns, types, partitions)
 - Integrates with Athena (Athena knows table schema automatically)</p>
-<hr>
+<hr />
 <h3 id="cloudwatch">CloudWatch</h3>
 <p>AWS monitoring &amp; observability service.</p>
-<p><strong>Our usage:</strong><br>
-- <strong>Logs:</strong> Structured JSON logs from Lambda (searchable, alertable)<br>
-- <strong>Metrics:</strong> Custom metrics (RecordsExtracted, QualityFailureRate, WatermarkLag)<br>
-- <strong>Alarms:</strong> Triggers SNS notifications when threshold exceeded (e.g., extraction failure)<br>
+<p><strong>Our usage:</strong>
+- <strong>Logs:</strong> Structured JSON logs from Lambda (searchable, alertable)
+- <strong>Metrics:</strong> Custom metrics (RecordsExtracted, QualityFailureRate, WatermarkLag)
+- <strong>Alarms:</strong> Triggers SNS notifications when threshold exceeded (e.g., extraction failure)
 - <strong>Dashboard:</strong> Unified view of pipeline health</p>
-<hr>
+<hr />
 <h3 id="kms-key-management-service">KMS (Key Management Service)</h3>
 <p>Hardware-backed encryption key management.</p>
-<p><strong>Our usage:</strong><br>
-- One customer-managed CMK per environment<br>
-- All S3 buckets encrypted with this key<br>
+<p><strong>Our usage:</strong>
+- One customer-managed CMK per environment
+- All S3 buckets encrypted with this key
 - Only authorized IAM roles can decrypt data</p>
-<hr>
+<hr />
 <h2 id="data-lake-layers-explained">Data Lake Layers Explained</h2>
 <h3 id="raw-layer">Raw Layer</h3>
 <p><strong>Purpose:</strong> Immutable archive of source data, exactly as received.</p>
@@ -361,7 +234,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><strong>Partition:</strong> source → entity → extraction_date → run_id</li>
 </ul>
 <p><strong>Why?</strong> If transformation logic is wrong, replay from raw instead of re-extracting from source (which may be slow or API-rate-limited).</p>
-<hr>
+<hr />
 <h3 id="curated-layer">Curated Layer</h3>
 <p><strong>Purpose:</strong> Per-source standardized, quality-checked data ready for analysis.</p>
 <ul>
@@ -375,7 +248,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><strong>Partition:</strong> source → entity → extraction_date → run_id</li>
 </ul>
 <p><strong>Data is here:</strong> Ready for BI queries, but organized per source. (E.g., separate <code>curated.salesforce_customer</code> from <code>curated.netsuite_customer</code>).</p>
-<hr>
+<hr />
 <h3 id="analytics-layer">Analytics Layer</h3>
 <p><strong>Purpose:</strong> Consumption-optimized datasets for BI, dashboards, ML models.</p>
 <ul>
@@ -391,7 +264,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </ul>
 <p><strong>Data here:</strong> What analysts query for dashboards.</p>
 <p><strong>Example:</strong> Query one <code>canonical.company</code> table that merges Salesforce Accounts + NetSuite Customers (no need to join).</p>
-<hr>
+<hr />
 <h3 id="serving-store-optional">Serving Store (Optional)</h3>
 <p><strong>Purpose:</strong> Operational database for APIs and apps requiring sub-second queries.</p>
 <ul>
@@ -401,7 +274,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><strong>Use cases:</strong> Low-latency API responses, mobile app backends, real-time dashboards</li>
 </ul>
 <p><strong>Not used for:</strong> Report generation (use Athena instead; cheaper, doesn't require database).</p>
-<hr>
+<hr />
 <h2 id="governance-compliance">Governance &amp; Compliance</h2>
 <h3 id="data-classification">Data Classification</h3>
 <p>Categorizing data fields by sensitivity level.</p>
@@ -441,7 +314,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h3 id="data-retention">Data Retention</h3>
 <p>How long data is kept before deletion.</p>
 <table>
@@ -475,7 +348,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
 <h3 id="source-onboarding">Source Onboarding</h3>
 <p>Six-gate approval process before a new data source can be extracted.</p>
 <table>
@@ -520,20 +393,20 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tbody>
 </table>
 <p>No extraction can begin without all 6 gates passed.</p>
-<hr>
+<hr />
 <h3 id="audit-trail">Audit Trail</h3>
 <p>Immutable record of every extraction, transformation, and data access.</p>
-<p><strong>Captured:</strong><br>
-- Who ran what pipeline stage, when, with what inputs<br>
-- How many records processed, how many failed<br>
-- What schema changes detected<br>
-- Who accessed what data, when<br>
+<p><strong>Captured:</strong>
+- Who ran what pipeline stage, when, with what inputs
+- How many records processed, how many failed
+- What schema changes detected
+- Who accessed what data, when
 - Every field mapping, PII masking decision</p>
-<p><strong>Stored:</strong><br>
-- DynamoDB audit-log table (real-time queries)<br>
-- S3 lineage bucket (long-term archive, Glacier)<br>
+<p><strong>Stored:</strong>
+- DynamoDB audit-log table (real-time queries)
+- S3 lineage bucket (long-term archive, Glacier)
 - CloudWatch Logs (searchable for 30 days, then archive)</p>
-<hr>
+<hr />
 <h2 id="common-abbreviations">Common Abbreviations</h2>
 <table>
 <thead>
@@ -621,7 +494,221 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 </tr>
 </tbody>
 </table>
-<hr>
+<hr />
+<h2 id="technology-and-tools-glossary">Technology and Tools Glossary</h2>
+<p>Quick-reference definitions for every tool and service used in the platform.</p>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Full Name</th>
+<th>Role in Platform</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>EventBridge</strong></td>
+<td>Amazon EventBridge Scheduler</td>
+<td>Fires cron-based pipeline triggers per entity</td>
+</tr>
+<tr>
+<td><strong>Step Functions</strong></td>
+<td>AWS Step Functions</td>
+<td>Orchestrates the 5-stage pipeline; handles retries and branching</td>
+</tr>
+<tr>
+<td><strong>Lambda</strong></td>
+<td>AWS Lambda</td>
+<td>Serverless Python compute for all pipeline stages</td>
+</tr>
+<tr>
+<td><strong>Fargate</strong></td>
+<td>AWS ECS Fargate</td>
+<td>Container compute for large-volume extractions (&gt; 5 M records/day)</td>
+</tr>
+<tr>
+<td><strong>S3</strong></td>
+<td>Amazon Simple Storage Service</td>
+<td>Stores all data layers: raw, curated, analytics, snapshots, configs</td>
+</tr>
+<tr>
+<td><strong>Object Lock</strong></td>
+<td>S3 Object Lock (GOVERNANCE mode)</td>
+<td>Makes raw data immutable; enforces 7-year retention</td>
+</tr>
+<tr>
+<td><strong>Intelligent-Tiering</strong></td>
+<td>S3 Intelligent-Tiering</td>
+<td>Auto-moves analytics data to cheaper storage after 90 days of inactivity</td>
+</tr>
+<tr>
+<td><strong>DynamoDB</strong></td>
+<td>Amazon DynamoDB</td>
+<td>NoSQL database for config, watermark state, audit log, onboarding records</td>
+</tr>
+<tr>
+<td><strong>Secrets Manager</strong></td>
+<td>AWS Secrets Manager</td>
+<td>Secure credential store; auto-rotation; never in code or logs</td>
+</tr>
+<tr>
+<td><strong>Glue Catalog</strong></td>
+<td>AWS Glue Data Catalog</td>
+<td>Metadata registry for curated and analytics tables</td>
+</tr>
+<tr>
+<td><strong>Athena</strong></td>
+<td>Amazon Athena</td>
+<td>Serverless SQL query engine over S3 Parquet files</td>
+</tr>
+<tr>
+<td><strong>RDS</strong></td>
+<td>Amazon Relational Database Service (MySQL 8)</td>
+<td>Serving store for operational apps and low-latency reads</td>
+</tr>
+<tr>
+<td><strong>SQS</strong></td>
+<td>Amazon Simple Queue Service</td>
+<td>Dead-Letter Queue for failed pipeline runs; KMS-encrypted</td>
+</tr>
+<tr>
+<td><strong>CloudWatch</strong></td>
+<td>Amazon CloudWatch</td>
+<td>Logs, custom metrics, alarms, dashboards</td>
+</tr>
+<tr>
+<td><strong>X-Ray</strong></td>
+<td>AWS X-Ray</td>
+<td>Distributed tracing across all Lambda/service calls</td>
+</tr>
+<tr>
+<td><strong>SNS</strong></td>
+<td>Amazon Simple Notification Service</td>
+<td>Alert fanout to email / PagerDuty</td>
+</tr>
+<tr>
+<td><strong>KMS</strong></td>
+<td>AWS Key Management Service</td>
+<td>Customer-managed CMK; SSE-KMS encryption for all data at rest</td>
+</tr>
+<tr>
+<td><strong>IAM</strong></td>
+<td>AWS Identity and Access Management</td>
+<td>Least-privilege service roles; no wildcard permissions</td>
+</tr>
+<tr>
+<td><strong>VPC</strong></td>
+<td>Amazon Virtual Private Cloud</td>
+<td>Private network; no internet gateway; VPC Endpoints for AWS services</td>
+</tr>
+<tr>
+<td><strong>Terraform</strong></td>
+<td>HashiCorp Terraform ≥ 1.8</td>
+<td>Infrastructure as Code; provisions all AWS resources</td>
+</tr>
+<tr>
+<td><strong>Python</strong></td>
+<td>Python 3.14.x</td>
+<td>Runtime language for all platform code</td>
+</tr>
+<tr>
+<td><strong>Pydantic</strong></td>
+<td>Pydantic v2</td>
+<td>Data model validation library; frozen, strict models</td>
+</tr>
+<tr>
+<td><strong>structlog</strong></td>
+<td>structlog ≥ 24.4</td>
+<td>Structured JSON logging with PII-scrubbing processor</td>
+</tr>
+<tr>
+<td><strong>boto3</strong></td>
+<td>AWS SDK for Python</td>
+<td>Python library for all AWS service calls</td>
+</tr>
+<tr>
+<td><strong>pyarrow</strong></td>
+<td>Apache Arrow Python</td>
+<td>Parquet file read/write</td>
+</tr>
+<tr>
+<td><strong>pymysql</strong></td>
+<td>PyMySQL</td>
+<td>Python MySQL connector for RDS</td>
+</tr>
+<tr>
+<td><strong>Ruff</strong></td>
+<td>Ruff ≥ 0.5</td>
+<td>Python linter (enforces code style + security rules)</td>
+</tr>
+<tr>
+<td><strong>mypy</strong></td>
+<td>mypy ≥ 1.10</td>
+<td>Python static type checker (strict mode)</td>
+</tr>
+<tr>
+<td><strong>bandit</strong></td>
+<td>bandit ≥ 1.7</td>
+<td>Python SAST scanner (OWASP Top 10)</td>
+</tr>
+<tr>
+<td><strong>pip-audit</strong></td>
+<td>pip-audit ≥ 2.7</td>
+<td>Dependency CVE scanner</td>
+</tr>
+<tr>
+<td><strong>checkov</strong></td>
+<td>Checkov</td>
+<td>Terraform IaC security scanner</td>
+</tr>
+<tr>
+<td><strong>moto</strong></td>
+<td>moto ≥ 5.0</td>
+<td>AWS service mocking library for unit tests</td>
+</tr>
+<tr>
+<td><strong>Bulk API 2.0</strong></td>
+<td>Salesforce Bulk API 2.0</td>
+<td>High-throughput async Salesforce data extraction API</td>
+</tr>
+<tr>
+<td><strong>SuiteQL</strong></td>
+<td>NetSuite SuiteQL REST API</td>
+<td>SQL-like query API for NetSuite ERP</td>
+</tr>
+<tr>
+<td><strong>HMAC-SHA256</strong></td>
+<td>Hash-based Message Authentication Code</td>
+<td>PII tokenisation algorithm (keyed; deterministic pseudonym)</td>
+</tr>
+<tr>
+<td><strong>SHA-256</strong></td>
+<td>Secure Hash Algorithm 256-bit</td>
+<td>Field schema fingerprinting; irreversible hash masking</td>
+</tr>
+<tr>
+<td><strong>Jaro-Winkler</strong></td>
+<td>Jaro-Winkler string similarity</td>
+<td>Name fuzzy-matching algorithm in entity resolution</td>
+</tr>
+<tr>
+<td><strong>Jaccard</strong></td>
+<td>Jaccard token-set similarity</td>
+<td>Company-name word-overlap scoring in entity resolution</td>
+</tr>
+<tr>
+<td><strong>Parquet</strong></td>
+<td>Apache Parquet</td>
+<td>Columnar binary file format (Snappy-compressed for curated/analytics; large_utf8 for raw)</td>
+</tr>
+<tr>
+<td><strong>SOQL</strong></td>
+<td>Salesforce Object Query Language</td>
+<td>SQL-like query language for Salesforce data</td>
+</tr>
+</tbody>
+</table>
+<hr />
 <h2 id="pronunciation-guide">Pronunciation Guide</h2>
 <ul>
 <li><strong>Parquet:</strong> "par-KAY" (not "PAR-quet")</li>
@@ -632,27 +719,8 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 <li><strong>KMS:</strong> "KAY-em-ess" (not "kim-us")</li>
 <li><strong>IAM:</strong> "eye-AM" (not "ee-AM")</li>
 </ul>
-<hr>
-<p><strong>Last updated:</strong> 2026-06-17<br>
-<strong>Owner:</strong> Data Platform Team</p>
-      <div class="footer">Generated from Markdown source for in-repo doc parity.</div>
-
-<hr>
-<h2 id="technology-stack-reference">Technology Stack Reference</h2>
-<table>
-<thead><tr><th>Layer</th><th>Technology</th></tr></thead>
-<tbody>
-<tr><td>Cloud</td><td><strong>AWS</strong> (EventBridge, Step Functions, Lambda, ECS Fargate, S3, DynamoDB, Secrets Manager, Glue, Athena, RDS MySQL, SQS, CloudWatch, X-Ray, SNS, KMS, IAM, VPC)</td></tr>
-<tr><td>Data format</td><td><strong>Apache Parquet</strong> (Snappy) for data layers; <strong>JSON</strong> for configs and reports</td></tr>
-<tr><td>Source APIs</td><td><strong>Salesforce Bulk API 2.0</strong>; <strong>NetSuite SuiteQL REST</strong>; <strong>MySQL JDBC</strong> via <code>pymysql</code></td></tr>
-<tr><td>Language</td><td><strong>Python 3.14</strong> — Pydantic v2, structlog ≥ 24.4, pyarrow, boto3, pymysql, requests</td></tr>
-<tr><td>Infrastructure</td><td><strong>Terraform</strong> ≥ 1.8 (AWS Provider ~&gt; 5.0); 3 environments: dev / staging / prod</td></tr>
-<tr><td>CI/CD</td><td><strong>GitHub Actions</strong> — 7-stage gate: Ruff → mypy → pytest → bandit → pip-audit → checkov → terraform validate</td></tr>
-<tr><td>Security algorithms</td><td><strong>HMAC-SHA256</strong> (PII tokenisation); <strong>SHA-256</strong> (field fingerprinting); <strong>Jaro-Winkler</strong> + <strong>Jaccard</strong> (entity resolution)</td></tr>
-<tr><td>Testing</td><td><strong>pytest</strong> + <strong>moto</strong> ≥ 5.0 (AWS mocking); ≥ 80% coverage gate enforced in CI</td></tr>
-</tbody>
-</table>
-    </article>
-  </main>
+<hr />
+<p><strong>Last updated:</strong> 2026-06-29<br />
+<strong>Owner:</strong> Data Platform Team</p></article></main>
 </body>
 </html>
