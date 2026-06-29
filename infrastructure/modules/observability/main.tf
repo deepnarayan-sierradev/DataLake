@@ -19,11 +19,12 @@ locals {
 
   # Service log group definitions: name → retention
   log_groups = {
-    "connector-runtime"  = var.log_retention_days
-    "transformation"     = var.log_retention_days
-    "entity-resolution"  = var.log_retention_days
-    "orchestration"      = var.log_retention_days
-    "schema-drift"       = var.log_retention_days
+    "connector-runtime"   = var.log_retention_days
+    "transformation"      = var.log_retention_days
+    "entity-resolution"   = var.log_retention_days
+    "analytics-publisher" = var.log_retention_days
+    "orchestration"       = var.log_retention_days
+    "schema-drift"        = var.log_retention_days
   }
 }
 

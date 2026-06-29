@@ -4,9 +4,9 @@
   "rule_set_version": "v1",
 
   "blocking": {
-    "_comment": "Pre-partition by email domain before pairwise comparison. Reduces O(n²) to O(b·k²).",
-    "key_type": "email_domain",
-    "source_field": "email_address",
+    "_comment": "Pre-partition by first 3 chars of normalised company name. Works regardless of which sources are present (Salesforce, NetSuite, or both). Email-domain blocking was removed because Salesforce Account does not carry an email field; name-prefix blocking is source-agnostic.",
+    "key_type": "name_first3",
+    "source_field": "full_name",
     "max_block_size": 500
   },
 

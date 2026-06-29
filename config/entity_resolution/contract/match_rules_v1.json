@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "Match rules for the contract entity type.",
+    "Current source: mysql-rds (Contracts table) only.",
+    "",
+    "Because contracts have a stable system-assigned primary key (contract_id),",
+    "deterministic exact matching on that key is sufficient. No probabilistic",
+    "fuzzy matching is needed — two records with different contract_ids are",
+    "definitively different contracts.",
+    "",
+    "Blocking: RECORD_ID_PREFIX on contract_id groups records by the first 8",
+    "chars of the ID, keeping block sizes manageable while preserving correctness",
+    "for deterministic matching (records in different blocks share no ID prefix",
+    "and therefore cannot match deterministically).",
+    "",
+    "When a second source (e.g. DocuSign, CLM system) is added in future, add",
+    "a second probabilistic rule here for cross-source matching on contract_name",
+    "or external_ref_id. No changes to survivorship_v1.json or code required."
+  ],
+  "entity_type": "contract",
+  "rule_set_version": "v1",
+
+  "blocking": {
+    "_comment": "Partition by first 8 chars of contract_id. Ensures each block contains only records that could share the same ID prefix — bounding O(n²) comparison within blocks.",
+    "key_type": "record_id_prefix",
+    "source_field": "contract_id",
+    "max_block_size": 500
+  },
+
+  "rules": [
+    {
+      "_comment": "Rule 1 — Deterministic: identical contract_id = same contract. This is the primary system key from the source database.",
+      "rule_id": "contract-id-exact",
+      "strategy": "deterministic",
+      "fields": [
+        { "field_name": "contract_id", "normalise": false }
+      ]
+    }
+  ]
+}

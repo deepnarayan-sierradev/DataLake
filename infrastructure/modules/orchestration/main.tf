@@ -20,6 +20,46 @@ locals {
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.name
 
+  # Whether the serving store stage is active (ARN provided) or skipped (Pass state).
+  serving_store_enabled = var.serving_store_loader_lambda_arn != ""
+
+  # Build each branch as a JSON string first (both are type `string`), then
+  # jsondecode to `any`.  This makes the conditional type-consistent — Terraform
+  # cannot infer structural types through a string → jsondecode boundary.
+  _serving_store_task_json = jsonencode({
+    Type     = "Task"
+    Resource = var.serving_store_loader_lambda_arn
+    Parameters = {
+      "source_id.$"           = "$.source_id"
+      "entity_id.$"           = "$.entity_id"
+      "environment.$"         = "$.environment"
+      "run_id.$"              = "$.extraction.run_id"
+      "analytics_s3_prefix.$" = "$.analytics.analytics_s3_prefix"
+    }
+    ResultPath = "$.serving"
+    Retry = [
+      {
+        ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "TransientServingError"]
+        IntervalSeconds = 20
+        MaxAttempts     = 2
+        BackoffRate     = 2.0
+        JitterStrategy  = "FULL"
+      }
+    ]
+    End = true
+  })
+  _serving_store_pass_json = jsonencode({
+    Type    = "Pass"
+    Comment = "Serving store loader not yet deployed. Pipeline ends successfully after analytics publication."
+    End     = true
+  })
+  # Conditional between two strings is type-consistent; jsondecode returns `any`.
+  load_serving_store_state = jsondecode(
+    local.serving_store_enabled ?
+    local._serving_store_task_json :
+    local._serving_store_pass_json
+  )
+
   # Step Functions state machine name
   state_machine_name = "${var.environment}-extraction-pipeline"
 
@@ -283,38 +323,8 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
         Next = "LoadServingStore"
       }
 
-      # ── Stage E: Serving Store Load ─────────────────────────────────────────
-      # Reads analytics Parquet, retrieves DB credentials from Secrets Manager,
-      # performs idempotent REPLACE INTO upsert into MySQL RDS serving tables.
-      LoadServingStore = {
-        Type     = "Task"
-        Resource = var.serving_store_loader_lambda_arn
-        Parameters = {
-          "source_id.$"              = "$.source_id"
-          "entity_id.$"              = "$.entity_id"
-          "environment.$"            = "$.environment"
-          "run_id.$"                 = "$.extraction.run_id"
-          "analytics_s3_prefix.$"   = "$.analytics.analytics_s3_prefix"
-        }
-        ResultPath = "$.serving"
-        Retry = [
-          {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "TransientServingError"]
-            IntervalSeconds = 20
-            MaxAttempts     = 2
-            BackoffRate     = 2.0
-            JitterStrategy  = "FULL"
-          }
-        ]
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            Next        = "ServingStoreFailed"
-            ResultPath  = "$.error"
-          }
-        ]
-        End = true
-      }
+      # ── Stage E: Serving Store Load (conditional — Pass if no ARN) ────────────
+      LoadServingStore = local.load_serving_store_state
 
       # ── Failure terminal states ─────────────────────────────────────────────
       # Each failure state records the terminal failure in Step Functions
@@ -343,12 +353,6 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
         Type  = "Fail"
         Error = "AnalyticsPublishFailed"
         Cause = "Analytics layer publish failed after all retry attempts. See DLQ and CloudWatch Logs."
-      }
-
-      ServingStoreFailed = {
-        Type  = "Fail"
-        Error = "ServingStoreFailed"
-        Cause = "Serving store load failed after all retry attempts. See DLQ and CloudWatch Logs."
       }
     }
   })

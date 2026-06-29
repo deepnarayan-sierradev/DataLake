@@ -134,6 +134,34 @@ class EntityExtractionConfig(BaseModel):
         description="Output file format for raw layer writes.",
     )
 
+    # ── Connector ─────────────────────────────────────────────────────────────
+    connector_params: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Source-specific parameters passed to the extraction connector. "
+            "MySQL: {'table_name': 'Contracts'}. "
+            "Salesforce: {'object_name': 'Account'}."
+        ),
+    )
+
+    # ── Schedule ──────────────────────────────────────────────────────────────
+    schedule_cron: str | None = Field(
+        default=None,
+        description=(
+            "EventBridge Scheduler cron expression for automatic extraction. "
+            "None means the entity is triggered manually only. "
+            "Example: 'cron(0 2 * * ? *)' = daily at 02:00 UTC."
+        ),
+    )
+    schedule_enabled: bool = Field(
+        default=True,
+        description="Whether the EventBridge schedule should be active. Ignored when schedule_cron is None.",
+    )
+    schedule_timezone: str = Field(
+        default="UTC",
+        description="IANA timezone for the cron schedule (e.g. 'America/New_York'). Defaults to UTC.",
+    )
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
     active: bool = Field(
         default=True,

@@ -234,6 +234,68 @@ module "transformation_lambda" {
 }
 
 # ---------------------------------------------------------------------------
+# Lambda — Entity Resolution Pipeline
+# ---------------------------------------------------------------------------
+
+module "entity_resolution_lambda" {
+  source      = "../../modules/entity_resolution_lambda"
+  environment = local.environment
+
+  kms_key_arn        = module.kms_logs.key_arn
+  execution_role_arn = module.iam.entity_resolution_runtime_role_arn
+
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  curated_s3_bucket_name   = module.storage.curated_layer_bucket_id
+  analytics_s3_bucket_name = module.storage.analytics_layer_bucket_id
+
+  subnet_ids         = module.networking.private_subnet_ids
+  security_group_ids = []
+
+  cloudwatch_log_group_arn = module.observability.log_group_arns["entity-resolution"]
+  log_retention_days       = 365
+  memory_size_mb           = 1024
+  timeout_seconds          = 900
+
+  tags = local.common_tags
+
+  depends_on = [module.iam, module.storage, module.networking]
+}
+
+# ---------------------------------------------------------------------------
+# Lambda — Analytics Publisher
+# ---------------------------------------------------------------------------
+
+module "analytics_publisher_lambda" {
+  source      = "../../modules/analytics_publisher_lambda"
+  environment = local.environment
+
+  kms_key_arn        = module.kms_logs.key_arn
+  execution_role_arn = module.iam.analytics_publisher_runtime_role_arn
+
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  analytics_s3_bucket_name = module.storage.analytics_layer_bucket_id
+  glue_catalog_database    = module.glue.analytics_database_name
+
+  subnet_ids         = module.networking.private_subnet_ids
+  security_group_ids = []
+
+  cloudwatch_log_group_arn = module.observability.log_group_arns["analytics-publisher"]
+  log_retention_days       = 365
+  memory_size_mb           = 512
+  timeout_seconds          = 300
+
+  tags = local.common_tags
+
+  depends_on = [module.iam, module.storage, module.networking, module.glue]
+}
+
+# ---------------------------------------------------------------------------
 # Orchestration module — full chained pipeline state machine
 #
 # State machine type: STANDARD for prod (execution history preserved for
@@ -256,8 +318,8 @@ module "orchestration" {
 
   extraction_pipeline_lambda_arn     = var.extraction_pipeline_lambda_arn
   transformation_pipeline_lambda_arn = module.transformation_lambda.lambda_function_arn
-  entity_resolution_lambda_arn       = var.entity_resolution_lambda_arn
-  analytics_publisher_lambda_arn     = var.analytics_publisher_lambda_arn
+  entity_resolution_lambda_arn       = module.entity_resolution_lambda.lambda_function_arn
+  analytics_publisher_lambda_arn     = module.analytics_publisher_lambda.lambda_function_arn
   serving_store_loader_lambda_arn    = var.serving_store_loader_lambda_arn
 
   tags = local.common_tags

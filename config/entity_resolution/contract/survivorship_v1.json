@@ -1,0 +1,136 @@
+{
+  "_comment": [
+    "Survivorship policy for the contract entity type.",
+    "Current source: mysql-rds (Contracts table) only.",
+    "",
+    "With a single source, survivorship is a direct pass-through — there are no",
+    "conflicts to resolve. The default_strategy first_non_null handles any",
+    "occasional null field within a record set.",
+    "",
+    "output_fields defines the canonical contract schema exposed to BI/analytics.",
+    "Only these fields appear in the analytics-layer Parquet for this entity.",
+    "System fields (golden_id, contributing_source_records, survivorship_version,",
+    "match_run_id) are always added by the publisher regardless of this list.",
+    "",
+    "When a second contract source is integrated, add it to source_priority for",
+    "each attribute_rule and the engine will handle conflicts automatically at",
+    "runtime. No code changes required.",
+    "",
+    "Source IDs in source_priority must match entity extraction config source_id:",
+    "  'mysql-rds'  — MySQL RDS Contracts table"
+  ],
+  "entity_type": "contract",
+  "policy_version": "v1",
+
+  "output_fields": [
+    "contract_id",
+    "contract_name",
+    "description",
+    "version",
+    "contract_type_id",
+    "tenant_id",
+    "is_deleted",
+    "is_parent",
+    "is_reprocess_required",
+    "error_message",
+    "ds_request",
+    "created_by",
+    "created_at",
+    "modified_by",
+    "updated_at"
+  ],
+
+  "default_strategy": "first_non_null",
+
+  "attribute_rules": [
+    {
+      "_comment": "Primary key — always from mysql-rds, never null (raise_error in field mapping).",
+      "canonical_field": "contract_id",
+      "strategy": "source_priority",
+      "source_priority": ["mysql-rds"]
+    },
+    {
+      "_comment": "Contract name. mysql-rds is authoritative. Future CLM source would take higher priority.",
+      "canonical_field": "contract_name",
+      "strategy": "source_priority",
+      "source_priority": ["mysql-rds"]
+    },
+    {
+      "_comment": "Free-text description. Most recently modified source wins when multi-source.",
+      "canonical_field": "description",
+      "strategy": "most_recent",
+      "timestamp_field": "updated_at"
+    },
+    {
+      "_comment": "Schema version of the contract record in source system.",
+      "canonical_field": "version",
+      "strategy": "source_priority",
+      "source_priority": ["mysql-rds"]
+    },
+    {
+      "_comment": "Contract type classifier. mysql-rds is the system of record.",
+      "canonical_field": "contract_type_id",
+      "strategy": "source_priority",
+      "source_priority": ["mysql-rds"]
+    },
+    {
+      "_comment": "Tenant ownership — mysql-rds is authoritative.",
+      "canonical_field": "tenant_id",
+      "strategy": "source_priority",
+      "source_priority": ["mysql-rds"]
+    },
+    {
+      "_comment": "Soft-delete flag. mysql-rds is authoritative.",
+      "canonical_field": "is_deleted",
+      "strategy": "source_priority",
+      "source_priority": ["mysql-rds"]
+    },
+    {
+      "_comment": "Parent contract indicator.",
+      "canonical_field": "is_parent",
+      "strategy": "source_priority",
+      "source_priority": ["mysql-rds"]
+    },
+    {
+      "_comment": "Reprocessing flag — take the most recently updated value.",
+      "canonical_field": "is_reprocess_required",
+      "strategy": "most_recent",
+      "timestamp_field": "updated_at"
+    },
+    {
+      "_comment": "Processing error message. Prefer longest (most informative) value when multi-source.",
+      "canonical_field": "error_message",
+      "strategy": "longest"
+    },
+    {
+      "_comment": "Downstream service request payload.",
+      "canonical_field": "ds_request",
+      "strategy": "source_priority",
+      "source_priority": ["mysql-rds"]
+    },
+    {
+      "_comment": "Originating author. mysql-rds is the system of record.",
+      "canonical_field": "created_by",
+      "strategy": "source_priority",
+      "source_priority": ["mysql-rds"]
+    },
+    {
+      "_comment": "Creation timestamp — earliest across sources represents true creation time.",
+      "canonical_field": "created_at",
+      "strategy": "most_recent",
+      "timestamp_field": "created_at"
+    },
+    {
+      "_comment": "Last modifier.",
+      "canonical_field": "modified_by",
+      "strategy": "most_recent",
+      "timestamp_field": "updated_at"
+    },
+    {
+      "_comment": "Last modification timestamp. Most recently updated source wins.",
+      "canonical_field": "updated_at",
+      "strategy": "most_recent",
+      "timestamp_field": "updated_at"
+    }
+  ]
+}

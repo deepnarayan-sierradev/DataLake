@@ -38,8 +38,9 @@ variable "analytics_publisher_lambda_arn" {
 }
 
 variable "serving_store_loader_lambda_arn" {
-  description = "ARN of the Lambda function that loads analytics datasets into the MySQL RDS serving store."
+  description = "ARN of the Lambda function that loads analytics datasets into the MySQL RDS serving store. Leave empty to skip this stage (pipeline ends successfully after analytics publication)."
   type        = string
+  default     = ""
 }
 
 variable "state_machine_type" {

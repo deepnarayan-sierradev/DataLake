@@ -1,0 +1,5 @@
+{
+  "_comment": "Version pointer for the person entity type. Update these when publishing a new config version.",
+  "match_rules_version": "v1",
+  "survivorship_version": "v1"
+}

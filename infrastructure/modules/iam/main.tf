@@ -332,6 +332,227 @@ resource "aws_iam_role_policy" "transformation_runtime" {
 }
 
 # ---------------------------------------------------------------------------
+# Entity Resolution Runtime Role
+# Assumed by the entity resolution pipeline Lambda.  Reads curated layer
+# (canonical Parquet + resolution configs), writes golden records to the
+# analytics layer.  No raw layer access — entity resolution operates only
+# on already-transformed curated data.
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "entity_resolution_runtime_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "entity_resolution_runtime" {
+  name               = "${var.environment}-entity-resolution-runtime-role"
+  assume_role_policy = data.aws_iam_policy_document.entity_resolution_runtime_assume_role.json
+  description        = "Role assumed by the entity resolution pipeline Lambda for golden record production."
+  tags               = local.common_tags
+}
+
+data "aws_iam_policy_document" "entity_resolution_runtime_permissions" {
+  # Read curated layer — canonical Parquet + entity resolution config JSON files.
+  statement {
+    sid     = "ReadCuratedLayer"
+    effect  = "Allow"
+    actions = ["s3:GetObject", "s3:ListBucket"]
+    resources = [
+      var.curated_layer_bucket_arn,
+      "${var.curated_layer_bucket_arn}/*",
+    ]
+  }
+
+  # Write analytics layer — golden records Parquet + match decision audit trail.
+  statement {
+    sid     = "WriteAnalyticsLayer"
+    effect  = "Allow"
+    actions = ["s3:PutObject", "s3:ListBucket"]
+    resources = [
+      var.analytics_layer_bucket_arn,
+      "${var.analytics_layer_bucket_arn}/*",
+    ]
+  }
+
+  # KMS: decrypt curated data keys and generate new data keys for analytics writes.
+  # Reuses the same storage KMS key used by transformation (curated + analytics
+  # buckets share the storage key).
+  statement {
+    sid     = "KmsDecryptEncrypt"
+    effect  = "Allow"
+    actions = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    resources = var.kms_key_arns_for_transformation
+  }
+
+  # CloudWatch Logs — write Lambda execution logs.
+  statement {
+    sid    = "WriteLambdaExecutionLogs"
+    effect = "Allow"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-entity-resolution-pipeline",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-entity-resolution-pipeline:log-stream:*",
+    ]
+  }
+
+  # CloudWatch Metrics — emit entity resolution pipeline metrics.
+  statement {
+    sid     = "PutEntityResolutionMetrics"
+    effect  = "Allow"
+    actions = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["EnterpriseDatalake"]
+    }
+  }
+
+  # VPC — create and destroy elastic network interfaces for VPC-deployed Lambda.
+  statement {
+    sid    = "VpcNetworkInterfaceAccess"
+    effect = "Allow"
+    actions = [
+      "ec2:CreateNetworkInterface",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DeleteNetworkInterface",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "entity_resolution_runtime" {
+  name   = "${var.environment}-entity-resolution-runtime-policy"
+  role   = aws_iam_role.entity_resolution_runtime.id
+  policy = data.aws_iam_policy_document.entity_resolution_runtime_permissions.json
+}
+
+# ---------------------------------------------------------------------------
+# Analytics Publisher Runtime Role
+# Assumed by the analytics publisher Lambda.  Reads golden records from the
+# analytics S3 layer, writes BI-ready Parquet to the same layer, and
+# registers Glue catalog tables.  No raw or curated layer write access.
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "analytics_publisher_runtime_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "analytics_publisher_runtime" {
+  name               = "${var.environment}-analytics-publisher-runtime-role"
+  assume_role_policy = data.aws_iam_policy_document.analytics_publisher_runtime_assume_role.json
+  description        = "Role assumed by the analytics publisher Lambda for BI Parquet production and Glue catalog registration."
+  tags               = local.common_tags
+}
+
+data "aws_iam_policy_document" "analytics_publisher_runtime_permissions" {
+  # Read and write analytics layer — golden records are read, BI Parquet is written.
+  statement {
+    sid     = "ReadWriteAnalyticsLayer"
+    effect  = "Allow"
+    actions = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
+    resources = [
+      var.analytics_layer_bucket_arn,
+      "${var.analytics_layer_bucket_arn}/*",
+    ]
+  }
+
+  # KMS: decrypt golden record data keys and generate new keys for BI writes.
+  statement {
+    sid     = "KmsDecryptEncrypt"
+    effect  = "Allow"
+    actions = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    resources = var.kms_key_arns_for_transformation
+  }
+
+  # CloudWatch Logs — write Lambda execution logs.
+  statement {
+    sid    = "WriteLambdaExecutionLogs"
+    effect = "Allow"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-analytics-layer-publisher",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-analytics-layer-publisher:log-stream:*",
+    ]
+  }
+
+  # CloudWatch Metrics — emit analytics publisher pipeline metrics.
+  statement {
+    sid     = "PutAnalyticsPublisherMetrics"
+    effect  = "Allow"
+    actions = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["EnterpriseDatalake"]
+    }
+  }
+
+  # Glue Data Catalog — register and update analytics layer tables.
+  statement {
+    sid    = "GlueCatalogAccess"
+    effect = "Allow"
+    actions = [
+      "glue:GetDatabase",
+      "glue:CreateDatabase",
+      "glue:GetTable",
+      "glue:CreateTable",
+      "glue:UpdateTable",
+      "glue:GetPartition",
+      "glue:CreatePartition",
+      "glue:BatchCreatePartition",
+    ]
+    resources = [
+      "arn:aws:glue:${local.region}:${local.account_id}:catalog",
+      "arn:aws:glue:${local.region}:${local.account_id}:database/${var.environment}_edl_analytics",
+      "arn:aws:glue:${local.region}:${local.account_id}:table/${var.environment}_edl_analytics/*",
+    ]
+  }
+
+  # VPC — create and destroy elastic network interfaces for VPC-deployed Lambda.
+  statement {
+    sid    = "VpcNetworkInterfaceAccess"
+    effect = "Allow"
+    actions = [
+      "ec2:CreateNetworkInterface",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DeleteNetworkInterface",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "analytics_publisher_runtime" {
+  name   = "${var.environment}-analytics-publisher-runtime-policy"
+  role   = aws_iam_role.analytics_publisher_runtime.id
+  policy = data.aws_iam_policy_document.analytics_publisher_runtime_permissions.json
+}
+
+# ---------------------------------------------------------------------------
 # Transformation Job Role
 # Assumed by AWS Glue jobs for curated layer processing.
 # ---------------------------------------------------------------------------

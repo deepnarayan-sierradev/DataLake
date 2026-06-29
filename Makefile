@@ -126,7 +126,7 @@ lambda-package:
 		--only-binary=:all: \
 		pydantic boto3 botocore structlog python-dateutil requests pyarrow pymysql
 	# Copy platform source packages into build directory
-	@for pkg in contracts connector_runtime schema_management watermark_management observability orchestration transformation governance; do \
+	@for pkg in contracts connector_runtime schema_management watermark_management observability orchestration transformation governance entity_resolution analytics_publisher; do \
 		cp -r $$pkg $(LAMBDA_BUILD_DIR)/$$pkg; \
 	done
 	@mkdir -p dist

@@ -12,10 +12,17 @@
     },
     {
       "source_fields": ["Name"],
-      "canonical_field": "account_name",
+      "canonical_field": "full_name",
       "transformation": "rename",
       "transformation_params": {},
       "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["Phone"],
+      "canonical_field": "phone_number",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
     },
     {
       "source_fields": ["Type"],
