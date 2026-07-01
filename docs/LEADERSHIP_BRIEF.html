@@ -78,6 +78,16 @@ hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
 <td>Financials, invoices</td>
 <td>Finance <em>(pending onboarding)</em></td>
 </tr>
+<tr>
+<td><strong>Sage Intacct</strong></td>
+<td>Accounts receivable invoices, AP bills, vendors</td>
+<td>Finance</td>
+</tr>
+<tr>
+<td><strong>Sage X3</strong></td>
+<td>Supplier records, ERP data</td>
+<td>Finance, Procurement</td>
+</tr>
 </tbody>
 </table>
 <p>Getting data out of these systems for analysis required:
@@ -131,7 +141,7 @@ hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
 <p>The following runs automatically, end-to-end, with no manual intervention:</p>
 <ol>
 <li><strong>Scheduled trigger</strong> — EventBridge fires a nightly cron job per entity</li>
-<li><strong>Extraction</strong> — Lambda reads from Salesforce/MySQL using secure credentials</li>
+<li><strong>Extraction</strong> — Lambda reads from Salesforce/MySQL/Sage using secure credentials</li>
 <li><strong>Transformation</strong> — Field mapping, quality checks, PII masking applied</li>
 <li><strong>Entity resolution</strong> — Cross-source customer matching produces one golden record per customer</li>
 <li><strong>Analytics delivery</strong> — Clean, partitioned data lands in Athena-queryable tables</li>
@@ -321,6 +331,10 @@ hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
 <td>No code changes needed — configuration-only; adds financial data to the lake</td>
 </tr>
 <tr>
+<td><strong>Sage Intacct + Sage X3 onboarding</strong></td>
+<td>Connectors fully implemented; configuration-only activation; adds AR invoices, AP bills, vendor and supplier golden records</td>
+</tr>
+<tr>
 <td><strong>Additional Salesforce entities</strong></td>
 <td>Opportunities, Cases — configuration-only additions</td>
 </tr>
@@ -340,8 +354,8 @@ hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
 ──────────────                 ────────────────              ─────────
 Salesforce CRM ──────────────► Raw Layer (S3)                Athena SQL
 MySQL RDS       ── nightly ──► Curated Layer (S3) ─────────► QuickSight (future)
-NetSuite ERP    ── pipeline ►  Analytics Layer (S3)          BI Tools (future)
-(pending)
+NetSuite ERP    ── pipeline ►  Analytics Layer (S3)          BI Tools (future)Sage Intacct    ─────────┉
+Sage X3         ─────────┉(pending)
 
 Orchestration: EventBridge → Step Functions → Lambda (4 stages)
 Governance:    Glue Catalog + DynamoDB lineage records

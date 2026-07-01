@@ -38,6 +38,7 @@ from typing import Any, Final
 # and register_builder() calls execute at Lambda cold-start time.
 import connector_runtime.adapters.mysql_rds.mysql_rds_connector
 import connector_runtime.adapters.netsuite.netsuite_connector
+import connector_runtime.adapters.sage.sage_connector  # noqa: F401
 import connector_runtime.adapters.salesforce.salesforce_connector  # noqa: F401
 from connector_runtime.configuration_repository.configuration_repository import (
     ConfigurationRepositoryClient,

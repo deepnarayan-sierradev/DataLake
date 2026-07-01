@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "Match rules for the ar_invoice entity type.",
+    "Current source: sage (sage-intacct-arinvoice) only.",
+    "",
+    "AR invoices have a system-assigned numeric primary key (invoice_id) that",
+    "is stable and unique within an Intacct company.  Because there is only",
+    "one source, deterministic exact matching on invoice_id is sufficient.",
+    "No probabilistic or cross-source fuzzy matching is needed.",
+    "",
+    "Blocking: RECORD_ID_PREFIX on invoice_id groups records by the first 8",
+    "chars of the ID, keeping block sizes manageable while preserving correctness",
+    "for deterministic matching.",
+    "",
+    "When a second AR source is integrated (e.g. Sage X3 SINVOICE), add a",
+    "probabilistic rule here matching on customer_id + invoice_date + invoice_amount.",
+    "No changes to survivorship_v1.json or code required."
+  ],
+  "entity_type": "ar_invoice",
+  "rule_set_version": "v1",
+
+  "blocking": {
+    "_comment": "Partition by first 8 chars of invoice_id.",
+    "key_type": "record_id_prefix",
+    "source_field": "invoice_id",
+    "max_block_size": 1000
+  },
+
+  "rules": [
+    {
+      "_comment": "Rule 1 — Deterministic: identical invoice_id = same invoice.",
+      "rule_id": "invoice-id-exact",
+      "strategy": "deterministic",
+      "fields": [
+        { "field_name": "invoice_id", "normalise": false }
+      ]
+    }
+  ]
+}

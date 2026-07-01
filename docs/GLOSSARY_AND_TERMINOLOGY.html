@@ -189,7 +189,9 @@
 <p><strong>Our usage:</strong> Stores source system credentials:
 - <code>prod/sources/salesforce/credentials</code> (OAuth tokens)
 - <code>prod/sources/netsuite/credentials</code> (API keys)
-- <code>prod/sources/mysql-rds/credentials</code> (DB password)</p>
+- <code>prod/sources/mysql-rds/credentials</code> (DB password)
+- <code>prod/sources/sage/intacct/credentials</code> (Intacct OAuth 2.0 client credentials)
+- <code>prod/sources/sage/x3/credentials</code> (X3 OAuth 2.0 client credentials + folder name)</p>
 <p>Credentials auto-rotated every 90 days; never logged or exposed in code.</p>
 <hr />
 <h3 id="athena">Athena</h3>
@@ -675,6 +677,21 @@
 <td><strong>SuiteQL</strong></td>
 <td>NetSuite SuiteQL REST API</td>
 <td>SQL-like query API for NetSuite ERP</td>
+</tr>
+<tr>
+<td><strong>Intacct REST API</strong></td>
+<td>Sage Intacct REST API</td>
+<td>JSON-POST query API with OAuth 2.0 client credentials; <code>ia::meta.next</code> cursor pagination</td>
+</tr>
+<tr>
+<td><strong>OData v4</strong></td>
+<td>Open Data Protocol version 4</td>
+<td>REST-based query standard used by Sage X3; supports <code>$select</code>, <code>$filter</code>, <code>$orderby</code>, <code>$top</code>; <code>@odata.nextLink</code> cursor pagination</td>
+</tr>
+<tr>
+<td><strong>Sage ERP</strong></td>
+<td>Sage Group ERP products</td>
+<td>Family of enterprise accounting/ERP products; platform supports Intacct (cloud accounting) and X3 (enterprise ERP)</td>
 </tr>
 <tr>
 <td><strong>HMAC-SHA256</strong></td>

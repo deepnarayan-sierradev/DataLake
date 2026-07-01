@@ -41,6 +41,7 @@ Our organisation's data lived in silos:
 - Customer records in **Salesforce** (CRM)
 - Financial and order data in **NetSuite** (ERP)
 - Transactional data in **MySQL RDS** (internal databases)
+- ERP financial records in **Sage Intacct** (cloud accounting) and **Sage X3** (enterprise ERP)
 
 Each team had its own extract scripts — inconsistent, brittle, impossible to audit, and carrying serious security risks (credentials in scripts, no access control, no lineage).
 
@@ -94,7 +95,7 @@ TRANSFORM — map source fields to standard names, check data quality, mask PII
 CURATE — publish a clean, trusted, business-ready version of the data
     │
     ▼
-RESOLVE — match the same customer/supplier/product across Salesforce + NetSuite + MySQL
+RESOLVE — match the same customer/supplier/product across Salesforce + NetSuite + MySQL + Sage
     │
     ▼
 SERVE — load into the analytics database for BI tools, dashboards, and ML models
@@ -109,7 +110,7 @@ Each step produces a machine-readable audit record. No step is skipped. No data 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      SOURCE SYSTEMS                             │
-│   Salesforce (CRM) │ NetSuite (ERP) │ MySQL RDS (Transactional) │
+│   Salesforce (CRM) │ NetSuite (ERP) │ MySQL RDS (Transactional) │ Sage (Intacct + X3) │
 └────────────┬────────┴───────┬────────┴──────────┬───────────────┘
              │                │                   │
              └───────────────►▼◄──────────────────┘
@@ -164,6 +165,8 @@ Each step produces a machine-readable audit record. No step is skipped. No data 
 | **Salesforce** | CRM | Account, Contact, Opportunity, Lead, Case (configurable — no hardcoded list) | Salesforce Bulk API 2.0 (high-volume, async) |
 | **NetSuite** | ERP | Customer, Vendor, Invoice, Purchase Order, GL Journal (configurable) | SuiteQL REST API |
 | **MySQL RDS** | Transactional DB | Orders, Products, Inventory, Users (configurable) | JDBC / SQLAlchemy read-only connection |
+| **Sage Intacct** | Cloud Accounting ERP | AR Customer, AP Vendor, AR Invoice, AP Bill (configured — extensible to GL, journal entries, etc.) | Intacct REST API (OAuth 2.0; JSON-POST; `ia::meta.next` cursor pagination) |
+| **Sage X3** | Enterprise ERP | Customer (BPCUSTOMER), Supplier (BPSUPPLIER); extensible to orders, invoices | OData v4 REST API (OAuth 2.0; `@odata.nextLink` pagination) |
 
 **Planned future sources** (configuration-only addition — no code change):  
 Dynamics 365, HubSpot, SAP, PostgreSQL, REST APIs, CSV/Excel/SFTP
@@ -287,9 +290,9 @@ The platform enforces a **zero-trust, need-to-know** access model. Each pipeline
 ### Source Credential Access
 
 Each source has its own Secrets Manager secret:
-- Path: `{environment}/{source_id}/credentials`
+- Path: `{environment}/sources/{source_id}/credentials` (or `{environment}/sources/sage/{product}/credentials` for Sage)
 - Only the `extraction-service-role` for that source has `GetSecretValue` permission.
-- Rotation is scheduled (every 90 days for Salesforce OAuth tokens, every 365 days for MySQL read-only passwords).
+- Rotation is scheduled (every 90 days for Salesforce/Sage OAuth tokens, every 365 days for MySQL read-only passwords).
 - Credentials are retrieved at runtime, held in memory for the duration of one extraction run, and never logged.
 
 ---
@@ -329,8 +332,11 @@ Each source has its own Secrets Manager secret:
 - Year/month/day partitioned for efficient time-range queries
 - Contains **curated domain datasets** and **canonical entity records** (entity-resolved golden records)
 - Two canonical entity types currently defined:
-  - **`company`** — merges Salesforce Account + NetSuite Customer into a single trusted company profile
+  - **`company`** — merges Salesforce Account + NetSuite Customer + Sage Intacct Customer + Sage X3 Customer into a single trusted company profile
   - **`person`** — normalises Salesforce Contact into a canonical person record
+  - **`supplier`** — merges Sage Intacct Vendor + Sage X3 Supplier into a single trusted supplier profile
+  - **`ar_invoice`** — Sage Intacct AR invoices (receivables); extensible to additional AR sources
+  - **`ap_bill`** — Sage Intacct AP bills (payables); extensible to additional AP sources
 - Every golden record includes **5 system fields** beyond the 14 business `output_fields`: `golden_id`, `contributing_source_records`, `survivorship_version`, `match_run_id`, and `field_provenance`. See [PLATFORM_FLOW: System Fields in Golden Records](../PLATFORM_FLOW.md#system-fields-in-golden-records) for details.
 - Registered in Glue catalog; Athena workgroup configured per team
 - Retention: 1 year active; archival to Glacier after

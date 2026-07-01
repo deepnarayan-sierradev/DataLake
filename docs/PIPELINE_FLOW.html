@@ -37,7 +37,7 @@ hr { border:0;border-top:1px solid var(--border);margin:1.6em 0; }
   <main><article><h1 id="enterprise-data-lake-full-pipeline-flow">Enterprise Data Lake — Full Pipeline Flow</h1>
 <blockquote>
 <p><strong>Spec version:</strong> 2.0 | <strong>Last updated:</strong> 2026-06-29</p>
-<p><strong>Dev status:</strong> ✅ All stages deployed and live. Data flowing end-to-end: Salesforce (Account, Contact) + MySQL RDS (Contracts). Entity resolution and analytics publisher both operational.</p>
+<p><strong>Dev status:</strong> ✅ All stages deployed and live. Data flowing end-to-end: Salesforce (Account, Contact) + MySQL RDS (Contracts) + Sage Intacct (Customer, Vendor, AR Invoice, AP Bill) + Sage X3 (Customer, Supplier). Entity resolution and analytics publisher both operational.</p>
 </blockquote>
 <hr />
 <h2 id="table-of-contents">Table of Contents</h2>
@@ -75,7 +75,7 @@ hr { border:0;border-top:1px solid var(--border);margin:1.6em 0; }
 <p>The Enterprise Data Lake platform ingests data from multiple source systems (Salesforce, NetSuite, MySQL RDS), transforms it through three distinct data lake layers, resolves cross-source entity identity, and delivers trusted canonical records to analytics and serving stores.</p>
 <pre><code>┌──────────────────────────────────────────────────────────────────────────────┐
 │  SOURCE SYSTEMS                                                              │
-│  Salesforce CRM ✅  │  NetSuite ERP 🔲  │  MySQL RDS ✅  │  Future connectors  │
+│  Salesforce CRM ✅  │  NetSuite ERP 🔲  │  MySQL RDS ✅  │  Sage ERP (Intacct + X3) ✅  │
 └────────────────────────────────┬─────────────────────────────────────────────┘
                                  │ full/incremental extraction (watermark-based)
                                  ▼
@@ -292,18 +292,18 @@ Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 <strong>Failure behaviour:</strong> Raises credential error → classified as <code>DETERMINISTIC_INVALID_CREDENTIALS</code> → no retry.</p>
 <hr />
 <h3 id="stage-5-metadata-discovery">Stage 5 — Metadata Discovery</h3>
-<p><strong>Component:</strong> Connector-specific metadata client (<code>SalesforceMetadataDiscoveryClient</code>, <code>NetSuiteMetadataAdapter</code>, <code>MySqlSchemaIntrospectionClient</code>)<br />
+<p><strong>Component:</strong> Connector-specific metadata client (<code>SalesforceMetadataDiscoveryClient</code>, <code>NetSuiteMetadataAdapter</code>, <code>MySqlSchemaIntrospectionClient</code>, <code>SageIntacctMetadataClient</code>, <code>X3MetadataClient</code>)<br />
 <strong>Purpose:</strong> Discovers all queryable fields from the source at runtime — no hardcoded schema. Produces a <code>FieldContract</code> used by query builder and schema snapshot.<br />
 <strong>Key output:</strong> <code>FieldContract</code> — list of <code>FieldDescriptor</code> objects (name, type, precision, nullable, queryable flags)<br />
 <strong>Failure behaviour:</strong> Raises metadata error → pipeline aborts.</p>
 <hr />
 <h3 id="stage-6-query-construction">Stage 6 — Query Construction</h3>
-<p><strong>Component:</strong> <code>SalesforceSoqlQueryBuilder</code>, <code>NetSuiteIncrementalQueryPlanner</code>, MySQL parameterized query<br />
+<p><strong>Component:</strong> <code>SalesforceSoqlQueryBuilder</code>, <code>NetSuiteIncrementalQueryPlanner</code>, MySQL parameterized query, <code>SageIntacctQueryEngine</code> (JSON-POST), <code>X3QueryEngine</code> (OData v4 GET)<br />
 <strong>Purpose:</strong> Builds a parameterized extraction query incorporating watermark bounds for incremental loads. Values are <strong>never string-interpolated</strong> — always bound as parameters (SQL injection prevention).<br />
 <strong>Key output:</strong> <code>QueryContract</code> — <code>query_text</code> with named placeholders + <code>query_parameters</code> dict</p>
 <hr />
 <h3 id="stage-7-extraction">Stage 7 — Extraction</h3>
-<p><strong>Component:</strong> <code>SalesforceBulkQueryJobController</code> (Bulk API 2.0), <code>NetSuiteConnector</code> (SuiteQL REST), <code>MySqlRdsConnector</code> (pymysql)<br />
+<p><strong>Component:</strong> <code>SalesforceBulkQueryJobController</code> (Bulk API 2.0), <code>NetSuiteConnector</code> (SuiteQL REST), <code>MySqlRdsConnector</code> (pymysql), <code>SageConnector</code> (Strategy pattern — dispatches to Intacct JSON-POST or X3 OData v4 GET based on <code>connector_params.sage_product</code>)<br />
 <strong>Purpose:</strong> Executes the extraction query, streams records, writes raw Parquet to S3.<br />
 <strong>S3 partition scheme:</strong> <code>s3://{bucket}/{source}/{entity_id}/extraction_date={YYYY-MM-DD}/run_id={run_id}/data.parquet</code><br />
 <strong>Key properties:</strong>
@@ -405,13 +405,28 @@ s3://{curated-bucket}/entity-resolution/{entity_type}/latest.json  ← version p
 <tbody>
 <tr>
 <td><code>company</code></td>
-<td>Salesforce Account + NetSuite Customer</td>
+<td>Salesforce Account + NetSuite Customer + Sage Intacct Customer + Sage X3 Customer</td>
 <td><code>canonical/company/</code></td>
 </tr>
 <tr>
 <td><code>person</code></td>
 <td>Salesforce Contact</td>
 <td><code>canonical/person/</code></td>
+</tr>
+<tr>
+<td><code>supplier</code></td>
+<td>Sage Intacct Vendor + Sage X3 Supplier</td>
+<td><code>canonical/supplier/</code></td>
+</tr>
+<tr>
+<td><code>ar_invoice</code></td>
+<td>Sage Intacct AR Invoice</td>
+<td><code>canonical/ar_invoice/</code></td>
+</tr>
+<tr>
+<td><code>ap_bill</code></td>
+<td>Sage Intacct AP Bill</td>
+<td><code>canonical/ap_bill/</code></td>
 </tr>
 </tbody>
 </table>
@@ -477,6 +492,13 @@ s3://{analytics-layer}/canonical/{entity_type}/match-decisions/{run_id}/decision
     netsuite-customer/v1.json
   mysql-rds/
     mysql-rds-orders/v1.json
+  sage/
+    sage-intacct-customer/v1.json
+    sage-intacct-vendor/v1.json
+    sage-intacct-arinvoice/v1.json
+    sage-intacct-apbill/v1.json
+    sage-x3-customer/v1.json
+    sage-x3-supplier/v1.json
 </code></pre>
 <h3 id="s3-location-runtime">S3 location (runtime)</h3>
 <pre><code>s3://{curated-bucket}/field-mappings/{source_id}/{entity_id}/{version}.json
@@ -560,6 +582,15 @@ python scripts/seed_field_mappings.py --environment dev \
   person/
     match_rules_v1.json     ← who is the same person? (email-exact + name-account-fuzzy)
     survivorship_v1.json    ← output schema + per-field source priority
+  supplier/
+    match_rules_v1.json     ← deterministic on vendor_id; fuzzy name for cross-source (Intacct vs X3)
+    survivorship_v1.json    ← output schema + Intacct-preferred contact fields
+  ar_invoice/
+    match_rules_v1.json     ← deterministic on invoice_id (Intacct sole source — pass-through)
+    survivorship_v1.json    ← AR invoice output schema
+  ap_bill/
+    match_rules_v1.json     ← deterministic on bill_id (Intacct sole source — pass-through)
+    survivorship_v1.json    ← AP bill output schema
 </code></pre>
 <h3 id="s3-location-runtime_1">S3 location (runtime)</h3>
 <pre><code>s3://{curated-bucket}/entity-resolution/{entity_type}/match_rules_{version}.json
@@ -871,6 +902,7 @@ aws s3 cp s3://dev-edl-curated-layer/quality-reports/salesforce/salesforce-accou
 <li>[ ] <code>seed_entity_resolution_configs.py</code> run against target environment (dry-run first)</li>
 <li>[ ] <code>seed_entity_config.py</code> run against target environment (dry-run first)</li>
 <li>[ ] Source credentials created in Secrets Manager for target environment</li>
+<li>[ ] Sage credentials created: <code>{env}/sources/sage/intacct/credentials</code> and <code>{env}/sources/sage/x3/credentials</code></li>
 <li>[ ] NAT Gateway public IPs added to Salesforce/NetSuite IP allowlists</li>
 <li>[ ] CloudWatch alarms reviewed and SNS alert email set</li>
 <li>[ ] DLQ URL verified accessible by replay operator role</li>
@@ -982,6 +1014,14 @@ aws s3 cp s3://dev-edl-curated-layer/quality-reports/salesforce/salesforce-accou
 <tr>
 <td>MySQL RDS connector</td>
 <td><code>pymysql</code>; <code>INFORMATION_SCHEMA</code> introspection</td>
+</tr>
+<tr>
+<td>Sage connector (Intacct)</td>
+<td><code>requests</code> (OAuth 2.0 client credentials); JSON-POST pagination with <code>ia::meta.next</code> cursor</td>
+</tr>
+<tr>
+<td>Sage connector (X3)</td>
+<td><code>requests</code> (OAuth 2.0 client credentials); OData v4 GET with <code>@odata.nextLink</code> cursor then <code>$skip</code>-based fallback</td>
 </tr>
 <tr>
 <td>Watermark / Schema / Config repositories</td>

@@ -48,7 +48,7 @@ hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
     <article>
 <h1 id="developer-guide-enterprise-data-lake-platform">Developer Guide — Enterprise Data Lake Platform</h1>
 <p><strong>Audience:</strong> Engineers new to the codebase, or anyone setting up a fresh workstation<br />
-<strong>Last updated:</strong> 2026-06-29<br />
+<strong>Last updated:</strong> 2026-07-01<br />
 <strong>Status:</strong> Dev environment is live and fully operational</p>
 <hr />
 <h2 id="table-of-contents">Table of Contents</h2>
@@ -69,9 +69,10 @@ hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
 </ol>
 <hr />
 <h2 id="1-what-this-platform-does">1. What This Platform Does</h2>
-<p>The Enterprise Data Lake Platform automatically extracts data from three source systems, transforms and governs it through three S3 layers, resolves customer identity across systems, and delivers trusted analytics-ready records queryable via Athena.</p>
+<p>The Enterprise Data Lake Platform automatically extracts data from multiple source systems, transforms and governs it through three S3 layers, resolves customer identity across systems, and delivers trusted analytics-ready records queryable via Athena.</p>
 <pre><code>Salesforce CRM ──┐
-MySQL RDS ───────┼──► Raw Layer (S3) ──► Curated Layer (S3) ──► Analytics Layer (S3)
+MySQL RDS ────── ┤
+Sage ERP ────────┼──► Raw Layer (S3) ──► Curated Layer (S3) ──► Analytics Layer (S3)
 NetSuite ERP ────┘         │                     │                      │
  (pending)            Immutable           Field-mapped           Golden records
                       Parquet             Quality-checked        Athena-queryable
@@ -264,6 +265,8 @@ dev-watermark-repository
 <p>Expected:</p>
 <pre><code>dev/sources/salesforce/credentials
 dev/sources/mysql-rds/credentials
+dev/sources/sage/intacct/credentials
+dev/sources/sage/x3/credentials
 </code></pre>
 <h3 id="lambda-functions">Lambda Functions</h3>
 <pre><code class="language-bash">aws lambda list-functions --region us-east-1 --query 'Functions[?starts_with(FunctionName, `dev-`)].FunctionName'
@@ -325,6 +328,12 @@ python scripts/run_salesforce_connector_local.py \
 
 python scripts/run_salesforce_connector_local.py \
   --entity-id salesforce-contact --dry-run
+
+python scripts/run_sage_connector_local.py \
+  --entity-id sage-intacct-customer --dry-run
+
+python scripts/run_sage_connector_local.py \
+  --entity-id sage-x3-customer --dry-run
 </code></pre>
 <h3 id="trigger-full-pipeline-via-step-functions">Trigger full pipeline via Step Functions</h3>
 <pre><code class="language-bash">export AWS_PROFILE=dev
@@ -355,16 +364,79 @@ python scripts/trigger_extraction.py \
   --region us-east-1 \
   --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
   --param object_name=Contact
+
+# Sage Intacct — Customer (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-intacct-customer \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=intacct --param object_path=accounts-receivable/customer
+
+# Sage Intacct — Vendor (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-intacct-vendor \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=intacct --param object_path=accounts-payable/vendor
+
+# Sage Intacct — AR Invoice (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-intacct-arinvoice \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=intacct --param object_path=accounts-receivable/invoice
+
+# Sage Intacct — AP Bill (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-intacct-apbill \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=intacct --param object_path=accounts-payable/bill
+
+# Sage X3 — Customer (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-x3-customer \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=x3 --param object_path=BPCUSTOMER
+
+# Sage X3 — Supplier (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-x3-supplier \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=x3 --param object_path=BPSUPPLIER
 </code></pre>
 <h3 id="query-analytics-output-via-athena">Query analytics output via Athena</h3>
 <pre><code class="language-sql">-- Latest companies
-SELECT * FROM dev_edl_analytics.company WHERE analytics_date='2026-06-29';
+SELECT * FROM dev_edl_analytics.company   WHERE analytics_date='2026-06-29';
 
 -- Latest persons
-SELECT * FROM dev_edl_analytics.person WHERE analytics_date='2026-06-29';
+SELECT * FROM dev_edl_analytics.person    WHERE analytics_date='2026-06-29';
 
 -- Latest contracts
-SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.contract   WHERE analytics_date='2026-06-29';
+
+-- Latest suppliers (Sage Intacct vendors + Sage X3 suppliers merged)
+SELECT COUNT(*) FROM dev_edl_analytics.supplier   WHERE analytics_date='2026-06-29';
+
+-- Latest AR invoices
+SELECT COUNT(*) FROM dev_edl_analytics.ar_invoice  WHERE analytics_date='2026-06-29';
+
+-- Latest AP bills
+SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06-29';
 </code></pre>
 <hr />
 <h2 id="9-terraform-workflow">9. Terraform Workflow</h2>
@@ -509,6 +581,30 @@ Step Functions (dev-data-pipeline)
 <td><code>mysql-rds-contracts</code></td>
 <td><code>contract</code></td>
 </tr>
+<tr>
+<td><code>sage-intacct-customer</code></td>
+<td><code>company</code></td>
+</tr>
+<tr>
+<td><code>sage-x3-customer</code></td>
+<td><code>company</code></td>
+</tr>
+<tr>
+<td><code>sage-intacct-vendor</code></td>
+<td><code>supplier</code></td>
+</tr>
+<tr>
+<td><code>sage-x3-supplier</code></td>
+<td><code>supplier</code></td>
+</tr>
+<tr>
+<td><code>sage-intacct-arinvoice</code></td>
+<td><code>ar_invoice</code></td>
+</tr>
+<tr>
+<td><code>sage-intacct-apbill</code></td>
+<td><code>ap_bill</code></td>
+</tr>
 </tbody>
 </table>
 <hr />
@@ -546,8 +642,21 @@ Step Functions (dev-data-pipeline)
 </li>
 <li>
 <p><strong>Salesforce Bulk API returns <code>""</code> for null fields</strong> — treated as missing (becomes <code>None</code> via <code>use_default</code>). This is intentional. A genuine empty string in a Salesforce field will also be treated as missing.</p>
+</li><li>
+<p><strong>Sage <code>connector_params</code> must include <code>sage_product</code> and <code>object_path</code></strong> — e.g. <code>{&quot;sage_product&quot;: &quot;intacct&quot;, &quot;object_path&quot;: &quot;accounts-receivable/customer&quot;}</code>. Missing either key raises <code>ValueError</code> at runtime. Valid <code>sage_product</code> values are <code>&quot;intacct&quot;</code> and <code>&quot;x3&quot;</code>.</p>
 </li>
-</ol>
+<li>
+<p><strong>Sage X3 field names must be UPPERCASE</strong> — e.g. <code>BPCNUM_0</code>, <code>MODDAT_0</code>. The X3 query engine validates against <code>^[A-Z][A-Z0-9_]{0,63}$</code>. Lowercase field names in <code>include_fields</code> are rejected with <code>X3QueryBuildError</code>.</p>
+</li>
+<li>
+<p><strong>Sage Intacct incremental watermark field is <code>auditInfo.modifiedAt</code></strong> — dot-notation key returned flat in query responses. Set <code>watermark_field</code> to this exact string in the entity config.</p>
+</li>
+<li>
+<p><strong>Sage uses per-product secret paths</strong> — <code>{env}/sources/sage/intacct/credentials</code> and <code>{env}/sources/sage/x3/credentials</code> are separate Secrets Manager secrets. Intacct requires <code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>company_id</code>. X3 requires the same plus <code>folder</code> (the X3 company folder, e.g. <code>&quot;SEED&quot;</code>).</p>
+</li>
+<li>
+<p><strong>Sage X3 OData discriminant</strong> — the X3 query engine embeds <code>&quot;_x3_odata&quot;: true</code> in <code>query_text</code> JSON. <code>SageConnector.execute_extraction()</code> dispatches on this key to the OData GET path. Do not set this key manually in entity configs.</p>
+</li></ol>
     </article>
   </main>
 </body>

@@ -1,0 +1,95 @@
+{
+  "_comment": [
+    "Survivorship policy for the supplier entity type.",
+    "Sources: sage (sage-intacct-vendor) and sage (sage-x3-supplier).",
+    "",
+    "Source priority rationale:",
+    "  sage-intacct is preferred for contact fields (email, phone) because",
+    "  Intacct's AP module tends to capture richer contact data than X3.",
+    "  For identity fields (vendor_id, full_name) both sources are authoritative",
+    "  for their own records; first_non_null handles any nulls.",
+    "",
+    "output_fields defines the canonical supplier schema exposed to BI/analytics.",
+    "System fields (golden_id, contributing_source_records, survivorship_version,",
+    "match_run_id) are always added by the publisher regardless of this list.",
+    "",
+    "When a third supplier source is integrated, add it to source_priority for",
+    "each attribute_rule.  No code changes required.",
+    "",
+    "Source IDs in source_priority must match entity extraction config source_id:",
+    "  'sage'  — covers both sage-intacct-vendor and sage-x3-supplier"
+  ],
+  "entity_type": "supplier",
+  "policy_version": "v1",
+
+  "output_fields": [
+    "vendor_id",
+    "full_name",
+    "email_address",
+    "phone_number",
+    "billing_country",
+    "currency_code",
+    "is_active",
+    "created_date",
+    "last_modified_date"
+  ],
+
+  "default_strategy": "first_non_null",
+
+  "attribute_rules": [
+    {
+      "_comment": "Primary key — always from the originating source, never null (raise_error in field mappings).",
+      "canonical_field": "vendor_id",
+      "strategy": "source_priority",
+      "source_priority": ["sage"]
+    },
+    {
+      "_comment": "Legal name of the supplier. Both sources are authoritative; prefer Intacct as it is more frequently updated.",
+      "canonical_field": "full_name",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    },
+    {
+      "_comment": "Email address. Intacct captures AP contact emails more reliably.",
+      "canonical_field": "email_address",
+      "strategy": "source_priority",
+      "source_priority": ["sage"]
+    },
+    {
+      "_comment": "Phone number. Prefer most recently updated.",
+      "canonical_field": "phone_number",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    },
+    {
+      "_comment": "Billing country — ISO country code. Prefer Intacct (billing address is AP-managed).",
+      "canonical_field": "billing_country",
+      "strategy": "source_priority",
+      "source_priority": ["sage"]
+    },
+    {
+      "_comment": "Transaction currency. Take most recently modified.",
+      "canonical_field": "currency_code",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    },
+    {
+      "_comment": "Active flag. If either source marks supplier inactive, treat as inactive (most conservative).",
+      "canonical_field": "is_active",
+      "strategy": "source_priority",
+      "source_priority": ["sage"]
+    },
+    {
+      "_comment": "Creation timestamp — earliest represents true first-seen date.",
+      "canonical_field": "created_date",
+      "strategy": "most_recent",
+      "timestamp_field": "created_date"
+    },
+    {
+      "_comment": "Last modification timestamp. Most recently updated source wins.",
+      "canonical_field": "last_modified_date",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    }
+  ]
+}

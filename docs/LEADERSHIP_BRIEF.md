@@ -17,6 +17,8 @@ Before this platform, our company's data lived in three completely disconnected 
 | **Salesforce CRM** | Customer accounts, contacts | Sales, Customer Success |
 | **MySQL RDS** | Transactional contracts and orders | Operations, Finance |
 | **NetSuite ERP** | Financials, invoices | Finance *(pending onboarding)* |
+| **Sage Intacct** | Accounts receivable invoices, AP bills, vendors | Finance |
+| **Sage X3** | Supplier records, ERP data | Finance, Procurement |
 
 Getting data out of these systems for analysis required:
 - **Manual extraction scripts** — brittle, break when the source schema changes
@@ -57,7 +59,7 @@ Anyone with Athena access can run standard SQL to query this data today — no e
 The following runs automatically, end-to-end, with no manual intervention:
 
 1. **Scheduled trigger** — EventBridge fires a nightly cron job per entity
-2. **Extraction** — Lambda reads from Salesforce/MySQL using secure credentials
+2. **Extraction** — Lambda reads from Salesforce/MySQL/Sage using secure credentials
 3. **Transformation** — Field mapping, quality checks, PII masking applied
 4. **Entity resolution** — Cross-source customer matching produces one golden record per customer
 5. **Analytics delivery** — Clean, partitioned data lands in Athena-queryable tables
@@ -137,6 +139,7 @@ If any step fails: automatic retry with exponential backoff → alerting → dea
 | **Staging deployment** | Mirror of dev — validates that the platform promotes cleanly to a production-like environment |
 | **Production deployment** | Live production workloads after staging sign-off |
 | **NetSuite onboarding** | No code changes needed — configuration-only; adds financial data to the lake |
+| **Sage Intacct + Sage X3 onboarding** | Connectors fully implemented; configuration-only activation; adds AR invoices, AP bills, vendor and supplier golden records |
 | **Additional Salesforce entities** | Opportunities, Cases — configuration-only additions |
 | **Self-service analytics** | Business intelligence tooling on top of Athena (e.g. QuickSight, Tableau) |
 | **Data quality dashboards** | CloudWatch-based dashboards surfacing per-entity quality scores to stakeholders |
@@ -150,8 +153,8 @@ Source Systems                 Data Lake Layers              Analytics
 ──────────────                 ────────────────              ─────────
 Salesforce CRM ──────────────► Raw Layer (S3)                Athena SQL
 MySQL RDS       ── nightly ──► Curated Layer (S3) ─────────► QuickSight (future)
-NetSuite ERP    ── pipeline ►  Analytics Layer (S3)          BI Tools (future)
-(pending)
+NetSuite ERP    ── pipeline ►  Analytics Layer (S3)          BI Tools (future)Sage Intacct    ─────────┉
+Sage X3         ─────────┉(pending)
 
 Orchestration: EventBridge → Step Functions → Lambda (4 stages)
 Governance:    Glue Catalog + DynamoDB lineage records

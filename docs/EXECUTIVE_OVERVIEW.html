@@ -45,7 +45,8 @@ For a concise leadership-ready summary, see <a href="LEADERSHIP_BRIEF.md">LEADER
 <p>Our organisation's data lived in silos:
 - Customer records in <strong>Salesforce</strong> (CRM)
 - Financial and order data in <strong>NetSuite</strong> (ERP)
-- Transactional data in <strong>MySQL RDS</strong> (internal databases)</p>
+- Transactional data in <strong>MySQL RDS</strong> (internal databases)
+- ERP financial records in <strong>Sage Intacct</strong> (cloud accounting) and <strong>Sage X3</strong> (enterprise ERP)</p>
 <p>Each team had its own extract scripts — inconsistent, brittle, impossible to audit, and carrying serious security risks (credentials in scripts, no access control, no lineage).</p>
 <p>Analytics teams waited days for data. Compliance teams had no record of who accessed what or when. The same customer could appear as three different entities across three systems with no way to resolve them.</p>
 <h3 id="what-we-built">What We Built</h3>
@@ -129,7 +130,7 @@ TRANSFORM — map source fields to standard names, check data quality, mask PII
 CURATE — publish a clean, trusted, business-ready version of the data
     │
     ▼
-RESOLVE — match the same customer/supplier/product across Salesforce + NetSuite + MySQL
+RESOLVE — match the same customer/supplier/product across Salesforce + NetSuite + MySQL + Sage
     │
     ▼
 SERVE — load into the analytics database for BI tools, dashboards, and ML models
@@ -139,7 +140,7 @@ SERVE — load into the analytics database for BI tools, dashboards, and ML mode
 <h2 id="4-data-flow-from-source-to-business-insight">4. Data Flow: From Source to Business Insight</h2>
 <pre><code>┌─────────────────────────────────────────────────────────────────┐
 │                      SOURCE SYSTEMS                             │
-│   Salesforce (CRM) │ NetSuite (ERP) │ MySQL RDS (Transactional) │
+│   Salesforce (CRM) │ NetSuite (ERP) │ MySQL RDS (Transactional) │ Sage (Intacct + X3) │
 └────────────┬────────┴───────┬────────┴──────────┬───────────────┘
              │                │                   │
              └───────────────►▼◄──────────────────┘
@@ -213,6 +214,18 @@ SERVE — load into the analytics database for BI tools, dashboards, and ML mode
 <td>Transactional DB</td>
 <td>Orders, Products, Inventory, Users (configurable)</td>
 <td>JDBC / SQLAlchemy read-only connection</td>
+</tr>
+<tr>
+<td><strong>Sage Intacct</strong></td>
+<td>Cloud Accounting ERP</td>
+<td>AR Customer, AP Vendor, AR Invoice, AP Bill (configured — extensible to GL, journal entries, etc.)</td>
+<td>Intacct REST API (OAuth 2.0; JSON-POST; <code>ia::meta.next</code> cursor pagination)</td>
+</tr>
+<tr>
+<td><strong>Sage X3</strong></td>
+<td>Enterprise ERP</td>
+<td>Customer (BPCUSTOMER), Supplier (BPSUPPLIER); extensible to orders, invoices</td>
+<td>OData v4 REST API (OAuth 2.0; <code>@odata.nextLink</code> pagination)</td>
 </tr>
 </tbody>
 </table>
@@ -528,9 +541,9 @@ python scripts/trigger_extraction.py --update-schedule \
 </table>
 <h3 id="source-credential-access">Source Credential Access</h3>
 <p>Each source has its own Secrets Manager secret:
-- Path: <code>{environment}/{source_id}/credentials</code>
+- Path: <code>{environment}/sources/{source_id}/credentials</code> (or <code>{environment}/sources/sage/{product}/credentials</code> for Sage)
 - Only the <code>extraction-service-role</code> for that source has <code>GetSecretValue</code> permission.
-- Rotation is scheduled (every 90 days for Salesforce OAuth tokens, every 365 days for MySQL read-only passwords).
+- Rotation is scheduled (every 90 days for Salesforce/Sage OAuth tokens, every 365 days for MySQL read-only passwords).
 - Credentials are retrieved at runtime, held in memory for the duration of one extraction run, and never logged.</p>
 <hr />
 <h2 id="9-data-layers-explained">9. Data Layers Explained</h2>
@@ -561,9 +574,15 @@ python scripts/trigger_extraction.py --update-schedule \
 <ul>
 <li>Year/month/day partitioned for efficient time-range queries</li>
 <li>Contains <strong>curated domain datasets</strong> and <strong>canonical entity records</strong> (entity-resolved golden records)</li>
-<li>Two canonical entity types currently defined:</li>
-<li><strong><code>company</code></strong> — merges Salesforce Account + NetSuite Customer into a single trusted company profile</li>
+<li>Canonical entity types defined:
+<ul>
+<li><strong><code>company</code></strong> — merges Salesforce Account + NetSuite Customer + Sage Intacct Customer + Sage X3 Customer into a single trusted company profile</li>
 <li><strong><code>person</code></strong> — normalises Salesforce Contact into a canonical person record</li>
+<li><strong><code>supplier</code></strong> — merges Sage Intacct Vendor + Sage X3 Supplier into a single trusted supplier profile</li>
+<li><strong><code>ar_invoice</code></strong> — Sage Intacct AR invoices (receivables); extensible to additional AR sources</li>
+<li><strong><code>ap_bill</code></strong> — Sage Intacct AP bills (payables); extensible to additional AP sources</li>
+</ul>
+</li>
 <li>Every golden record includes <strong>5 system fields</strong> beyond the 14 business <code>output_fields</code>: <code>golden_id</code>, <code>contributing_source_records</code>, <code>survivorship_version</code>, <code>match_run_id</code>, and <code>field_provenance</code>. See <a href="../PLATFORM_FLOW.md#system-fields-in-golden-records">PLATFORM_FLOW: System Fields in Golden Records</a> for details.</li>
 <li>Registered in Glue catalog; Athena workgroup configured per team</li>
 <li>Retention: 1 year active; archival to Glacier after</li>

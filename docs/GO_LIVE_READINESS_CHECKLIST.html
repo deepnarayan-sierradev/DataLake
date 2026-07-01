@@ -25,7 +25,7 @@ Items marked ✅ are already verified in the dev environment. Use this checklist
 <li>[ ] S3 buckets provisioned: raw-layer, curated-layer, analytics-layer, schema-snapshots</li>
 <li>[ ] DynamoDB tables created: config, watermark, audit-log, onboarding-registry</li>
 <li>[ ] IAM roles created for extraction, transformation, entity-resolution, serving</li>
-<li>[ ] Secrets Manager namespaces created for Salesforce, NetSuite, MySQL credentials</li>
+<li>[ ] Secrets Manager namespaces created for Salesforce, NetSuite, MySQL, Sage Intacct, and Sage X3 credentials</li>
 <li>[ ] CloudWatch log groups created; retention set to 30 days (hot storage)</li>
 <li>[ ] KMS key created for S3 encryption</li>
 <li>[ ] VPC endpoints configured for S3, DynamoDB, Secrets Manager, CloudWatch, Glue</li>
@@ -94,6 +94,14 @@ Items marked ✅ are already verified in the dev environment. Use this checklist
 <li>[ ] <code>host</code> is prod database endpoint</li>
 <li>[ ] <code>username</code> is read-only user</li>
 <li>[ ] Network connectivity verified (MySQL from Lambda in VPC)</li>
+<li>[ ] Sage Intacct credentials stored: <code>prod/sources/sage/intacct/credentials</code></li>
+<li>[ ] <code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>company_id</code> all set</li>
+<li>[ ] OAuth token endpoint reachable from Lambda VPC (outbound HTTPS)</li>
+<li>[ ] Intacct API user has read-only query access to configured modules</li>
+<li>[ ] Sage X3 credentials stored: <code>prod/sources/sage/x3/credentials</code></li>
+<li>[ ] <code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>folder</code> all set</li>
+<li>[ ] X3 <code>folder</code> is the correct company folder name (e.g. <code>SEED</code> or <code>PROD</code>)</li>
+<li>[ ] OData v4 endpoint reachable from Lambda VPC</li>
 <li>[ ] All credentials rotated within 90 days (prior to go-live)</li>
 <li>[ ] Secrets Manager rotation schedule configured (auto-rotate every 90 days)</li>
 <li>[ ] KMS key policy grants extraction service role <code>kms:Decrypt</code> permission</li>
@@ -104,12 +112,18 @@ Items marked ✅ are already verified in the dev environment. Use this checklist
 <hr />
 <h3 id="entity-configuration-dynamodb">Entity Configuration (DynamoDB)</h3>
 <ul>
-<li>[ ] Configuration table populated with 5 initial entities</li>
+<li>[ ] Configuration table populated with 11 initial entities</li>
 <li>[ ] <code>salesforce-account</code> (incremental, SystemModstamp watermark, 1 day window)</li>
 <li>[ ] <code>salesforce-contact</code> (incremental, SystemModstamp watermark, 1 day window)</li>
 <li>[ ] <code>salesforce-opportunity</code> (incremental, CloseDate watermark, 1 day window)</li>
 <li>[ ] <code>netsuite-customer</code> (incremental, dateCreated watermark, 1 day window)</li>
 <li>[ ] <code>mysql-orders</code> (incremental, updated_at watermark, 4 hour window)</li>
+<li>[ ] <code>sage-intacct-customer</code> (incremental, auditInfo.modifiedAt watermark, 1 day window)</li>
+<li>[ ] <code>sage-intacct-vendor</code> (incremental, auditInfo.modifiedAt watermark, 1 day window)</li>
+<li>[ ] <code>sage-intacct-arinvoice</code> (incremental, auditInfo.modifiedAt watermark, 1 day window)</li>
+<li>[ ] <code>sage-intacct-apbill</code> (incremental, auditInfo.modifiedAt watermark, 1 day window)</li>
+<li>[ ] <code>sage-x3-customer</code> (incremental, MODDAT_0 watermark, 1 day window)</li>
+<li>[ ] <code>sage-x3-supplier</code> (incremental, MODDAT_0 watermark, 1 day window)</li>
 <li>[ ] Each entity record includes: <code>source_id</code>, <code>entity_id</code>, <code>load_type</code>, <code>watermark_field</code>, <code>extraction_window_days</code>, <code>field_mode</code>, <code>exclude_fields</code></li>
 <li>[ ] All entities marked <code>active: True</code> (ready to extract)</li>
 <li>[ ] All entities have <code>created_at</code> timestamp (audit trail)</li>
@@ -379,7 +393,7 @@ Items marked ✅ are already verified in the dev environment. Use this checklist
 <li>[ ] <strong>ECS Fargate</strong> — Task definition registered; cluster created; capacity provider set; correct IAM task role</li>
 <li>[ ] <strong>S3 buckets</strong> — All 5 buckets created (<code>raw</code>, <code>curated</code>, <code>analytics</code>, <code>schema-snapshots</code>, <code>governance</code>); Object Lock confirmed on raw; SSE-KMS on all; TLS-only bucket policy applied</li>
 <li>[ ] <strong>DynamoDB tables</strong> — All 4 tables created; PITR enabled; KMS encryption confirmed; GSI names match code expectations</li>
-<li>[ ] <strong>Secrets Manager</strong> — 3 secrets created (<code>salesforce</code>, <code>netsuite</code>, <code>mysql-rds</code>); initial values set; rotation schedule configured</li>
+<li>[ ] <strong>Secrets Manager</strong> — 5 secrets created (<code>salesforce</code>, <code>netsuite</code>, <code>mysql-rds</code>, <code>sage/intacct</code>, <code>sage/x3</code>); initial values set; rotation schedule configured</li>
 <li>[ ] <strong>Glue Data Catalog</strong> — Database <code>{env}_curated</code> created; IAM permissions allow <code>glue:CreateTable</code> and <code>glue:UpdateTable</code> from transformation role</li>
 <li>[ ] <strong>Athena</strong> — Workgroup <code>{env}-analytics</code> created; output bucket set; per-query cost limit configured</li>
 <li>[ ] <strong>SQS (DLQ)</strong> — Queue <code>{env}-extraction-dlq</code> created; KMS encrypted; 14-day retention; DLQ URL accessible from extraction Lambda</li>
@@ -401,6 +415,8 @@ Items marked ✅ are already verified in the dev environment. Use this checklist
 <li>[ ] <strong>Salesforce</strong> — OAuth 2.0 client credentials tested; NAT Gateway IP added to Salesforce trusted IP allowlist; Bulk API 2.0 quota confirmed (API edition supports high-volume jobs)</li>
 <li>[ ] <strong>NetSuite</strong> — OAuth 1.0a credentials tested; SuiteQL endpoint reachable from Lambda VPC; query timeout verified</li>
 <li>[ ] <strong>MySQL RDS</strong> — Read-only credentials tested; VPC peering or PrivateLink to RDS established; <code>INFORMATION_SCHEMA</code> queries succeed</li>
+<li>[ ] <strong>Sage Intacct</strong> — OAuth 2.0 client credentials tested (<code>prod/sources/sage/intacct/credentials</code>); Intacct REST API reachable from Lambda VPC; dry-run with <code>run_sage_connector_local.py --entity-id sage-intacct-customer --dry-run</code> passes</li>
+<li>[ ] <strong>Sage X3</strong> — OAuth 2.0 client credentials tested (<code>prod/sources/sage/x3/credentials</code>); X3 OData v4 endpoint reachable from Lambda VPC; <code>folder</code> value confirmed; dry-run passes</li>
 </ul>
 <hr />
 <p><strong>Prepared by:</strong> Platform Engineering Lead<br />

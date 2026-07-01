@@ -1,0 +1,80 @@
+{
+  "entity_id": "sage-x3-customer",
+  "source_id": "sage",
+  "version": "1",
+  "field_mappings": [
+    {
+      "source_field": "BPCNUM_0",
+      "target_field": "account_id",
+      "data_type": "string",
+      "nullable": false,
+      "on_null": "raise_error"
+    },
+    {
+      "source_field": "BPCNAM_0",
+      "target_field": "full_name",
+      "data_type": "string",
+      "nullable": false,
+      "on_null": "raise_error"
+    },
+    {
+      "source_field": "EACNUM_0",
+      "target_field": "email_address",
+      "data_type": "string",
+      "nullable": true,
+      "on_null": "set_null"
+    },
+    {
+      "source_field": "TEL_0",
+      "target_field": "phone_number",
+      "data_type": "string",
+      "nullable": true,
+      "on_null": "set_null"
+    },
+    {
+      "source_field": "CRY_0",
+      "target_field": "billing_country",
+      "data_type": "string",
+      "nullable": true,
+      "on_null": "set_null"
+    },
+    {
+      "source_field": "CUR_0",
+      "target_field": "currency_code",
+      "data_type": "string",
+      "nullable": true,
+      "on_null": "set_null"
+    },
+    {
+      "source_field": "IPTFLG_0",
+      "target_field": "is_active",
+      "data_type": "boolean",
+      "nullable": true,
+      "on_null": "set_null"
+    },
+    {
+      "source_field": "CREDAT_0",
+      "target_field": "created_date",
+      "data_type": "date",
+      "nullable": true,
+      "on_null": "set_null",
+      "transform": {
+        "type": "date_format",
+        "input_format": "%Y-%m-%dT%H:%M:%S",
+        "output_format": "iso8601"
+      }
+    },
+    {
+      "source_field": "MODDAT_0",
+      "target_field": "last_modified_date",
+      "data_type": "date",
+      "nullable": true,
+      "on_null": "set_null",
+      "transform": {
+        "type": "date_format",
+        "input_format": "%Y-%m-%dT%H:%M:%S",
+        "output_format": "iso8601"
+      }
+    }
+  ]
+}

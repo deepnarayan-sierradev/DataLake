@@ -1,0 +1,123 @@
+{
+  "source_id": "sage",
+  "entity_id": "sage-intacct-customer",
+  "mapping_version": "v1",
+  "_comment": [
+    "Canonical mapping for Sage Intacct accounts-receivable/customer object.",
+    "",
+    "Field name conventions:",
+    "  - Intacct REST API returns dot-notation sub-resource fields (e.g. 'auditInfo.modifiedAt')",
+    "    as flat string keys in the query response when requested in the fields array.",
+    "  - Top-level fields (id, name, email1, etc.) are always flat string keys.",
+    "",
+    "PK alignment: 'id' (Intacct customer code) maps to 'account_id' so that",
+    "  entity resolution can use a single PK field name ('account_id') across",
+    "  all company sources (Salesforce, NetSuite, Sage Intacct).",
+    "",
+    "is_active note: Intacct returns status as 'active'/'inactive' string.",
+    "  The boolean cast maps 'true'/'yes'/'1' → true; 'active' is NOT in that set.",
+    "  A dedicated value_map transformation is tracked in the implementation plan.",
+    "  For now, status is mapped as a raw string to 'customer_status'.",
+    "",
+    "Nested address fields (billingAddress.country etc.) require the full",
+    "  dot-notation key to match the Intacct response format.  These are mapped",
+    "  with 'drop_field' on missing so partial address data does not drop records."
+  ],
+  "rules": [
+    {
+      "source_fields": ["id"],
+      "canonical_field": "account_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["name"],
+      "canonical_field": "full_name",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["email1"],
+      "canonical_field": "email_address",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["phone1"],
+      "canonical_field": "phone_number",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["creditLimit"],
+      "canonical_field": "credit_limit",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["totalDue"],
+      "canonical_field": "outstanding_balance",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["currency"],
+      "canonical_field": "currency_code",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "_comment": "Raw status string ('active'/'inactive'). Tracked for value_map transformation in Phase 6.",
+      "source_fields": ["status"],
+      "canonical_field": "customer_status",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "_comment": "Billing country — returned as 'billingAddress.country' flat key in query response.",
+      "source_fields": ["billingAddress.country"],
+      "canonical_field": "billing_country",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["billingAddress.state"],
+      "canonical_field": "billing_state",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "_comment": "Intacct REST API returns timestamps in ISO-8601 UTC: 2024-01-15T10:30:00Z",
+      "source_fields": ["auditInfo.createdAt"],
+      "canonical_field": "created_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%SZ",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["auditInfo.modifiedAt"],
+      "canonical_field": "last_modified_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%SZ",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    }
+  ]
+}

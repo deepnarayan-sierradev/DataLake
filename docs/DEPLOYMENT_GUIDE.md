@@ -781,6 +781,36 @@ aws secretsmanager put-secret-value \
 
 > **Security note:** The `extraction-service-role` IAM role created by Terraform has `GetSecretValue` permission on these exact secret ARNs only. No other role can read these credentials.
 
+**Sage Intacct credentials:**
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id "dev/sources/sage/intacct/credentials" \
+  --region us-east-1 \
+  --secret-string '{
+    "token_url":   "https://api.intacct.com/ia/api/v1/auth/oauth2/token",
+    "client_id":  "YOUR_INTACCT_CLIENT_ID",
+    "client_secret": "YOUR_INTACCT_CLIENT_SECRET",
+    "base_url":   "https://api.intacct.com/ia/api/v1",
+    "company_id": "YOUR_INTACCT_COMPANY_ID"
+  }'
+```
+
+**Sage X3 credentials:**
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id "dev/sources/sage/x3/credentials" \
+  --region us-east-1 \
+  --secret-string '{
+    "token_url":   "https://YOUR_X3_SERVER/auth/realms/sage/protocol/openid-connect/token",
+    "client_id":  "YOUR_X3_CLIENT_ID",
+    "client_secret": "YOUR_X3_CLIENT_SECRET",
+    "base_url":   "https://YOUR_X3_SERVER/api",
+    "folder":     "YOUR_X3_COMPANY_FOLDER"
+  }'
+```
+
 ### Step 6.2 — Seed entity configuration records into DynamoDB
 
 ```bash
@@ -789,7 +819,7 @@ python scripts/seed_entity_config.py \
   --region us-east-1
 ```
 
-This writes the default entity configuration records for `salesforce-account`, `salesforce-contact`, `netsuite-customer`, and `mysql-rds-orders`. All records are idempotent (safe to run multiple times).
+This writes the default entity configuration records for `salesforce-account`, `salesforce-contact`, `netsuite-customer`, `mysql-rds-orders`, `sage-intacct-customer`, `sage-intacct-vendor`, `sage-intacct-arinvoice`, `sage-intacct-apbill`, `sage-x3-customer`, and `sage-x3-supplier`. All records are idempotent (safe to run multiple times).
 
 To add a new entity, edit `scripts/seed_entity_config.py` and add a record to the `_RECORDS` list, then re-run the script. No Terraform changes needed.
 

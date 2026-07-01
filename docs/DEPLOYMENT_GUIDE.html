@@ -806,12 +806,35 @@ aws s3 ls s3://${ENV}-edl-analytics/ --recursive
 <blockquote>
 <p><strong>Security note:</strong> The <code>extraction-service-role</code> IAM role created by Terraform has <code>GetSecretValue</code> permission on these exact secret ARNs only. No other role can read these credentials.</p>
 </blockquote>
-<h3 id="step-62-seed-entity-configuration-records-into-dynamodb">Step 6.2 — Seed entity configuration records into DynamoDB</h3>
+<p><strong>Sage Intacct credentials:</strong></p>
+<pre><code class="language-bash">aws secretsmanager put-secret-value \
+  --secret-id &quot;dev/sources/sage/intacct/credentials&quot; \
+  --region us-east-1 \
+  --secret-string '{
+    &quot;token_url&quot;:   &quot;https://api.intacct.com/ia/api/v1/auth/oauth2/token&quot;,
+    &quot;client_id&quot;:  &quot;YOUR_INTACCT_CLIENT_ID&quot;,
+    &quot;client_secret&quot;: &quot;YOUR_INTACCT_CLIENT_SECRET&quot;,
+    &quot;base_url&quot;:   &quot;https://api.intacct.com/ia/api/v1&quot;,
+    &quot;company_id&quot;: &quot;YOUR_INTACCT_COMPANY_ID&quot;
+  }'
+</code></pre>
+<p><strong>Sage X3 credentials:</strong></p>
+<pre><code class="language-bash">aws secretsmanager put-secret-value \
+  --secret-id &quot;dev/sources/sage/x3/credentials&quot; \
+  --region us-east-1 \
+  --secret-string '{
+    &quot;token_url&quot;:   &quot;https://YOUR_X3_SERVER/auth/realms/sage/protocol/openid-connect/token&quot;,
+    &quot;client_id&quot;:  &quot;YOUR_X3_CLIENT_ID&quot;,
+    &quot;client_secret&quot;: &quot;YOUR_X3_CLIENT_SECRET&quot;,
+    &quot;base_url&quot;:   &quot;https://YOUR_X3_SERVER/api&quot;,
+    &quot;folder&quot;:     &quot;YOUR_X3_COMPANY_FOLDER&quot;
+  }'
+</code></pre>
 <pre><code class="language-bash">python scripts/seed_entity_config.py \
   --environment dev \
   --region us-east-1
 </code></pre>
-<p>This writes the default entity configuration records for <code>salesforce-account</code>, <code>salesforce-contact</code>, <code>netsuite-customer</code>, and <code>mysql-rds-orders</code>. All records are idempotent (safe to run multiple times).</p>
+<p>This writes the default entity configuration records for <code>salesforce-account</code>, <code>salesforce-contact</code>, <code>netsuite-customer</code>, <code>mysql-rds-orders</code>, <code>sage-intacct-customer</code>, <code>sage-intacct-vendor</code>, <code>sage-intacct-arinvoice</code>, <code>sage-intacct-apbill</code>, <code>sage-x3-customer</code>, and <code>sage-x3-supplier</code>. All records are idempotent (safe to run multiple times).</p>
 <p>To add a new entity, edit <code>scripts/seed_entity_config.py</code> and add a record to the <code>_RECORDS</code> list, then re-run the script. No Terraform changes needed.</p>
 <p><strong>Entity configuration fields explained:</strong></p>
 <pre><code class="language-python">{

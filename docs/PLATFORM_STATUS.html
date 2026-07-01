@@ -47,7 +47,7 @@ hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
   <main>
     <article>
 <h1 id="platform-status-enterprise-data-lake">Platform Status — Enterprise Data Lake</h1>
-<p><strong>Last updated:</strong> 2026-06-29<br />
+<p><strong>Last updated:</strong> 2026-07-01<br />
 <strong>Prepared by:</strong> Platform Engineering</p>
 <hr />
 <h2 id="current-status-dev-staging-production">Current Status: Dev ✅ | Staging 🔲 | Production 🔲</h2>
@@ -106,9 +106,12 @@ hr { border:0; border-top:1px solid var(--border); margin:1.6em 0; }
 </tbody>
 </table>
 <p><strong>Query in Athena (AWS Console → Athena → database: <code>dev_edl_analytics</code>):</strong></p>
-<pre><code class="language-sql">SELECT * FROM dev_edl_analytics.company   WHERE analytics_date='2026-06-29';
-SELECT * FROM dev_edl_analytics.person    WHERE analytics_date='2026-06-29';
-SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29';
+<pre><code class="language-sql">SELECT * FROM dev_edl_analytics.company    WHERE analytics_date='2026-06-29';
+SELECT * FROM dev_edl_analytics.person     WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.contract   WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.supplier   WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.ar_invoice  WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06-29';
 </code></pre>
 <hr />
 <h2 id="connected-data-sources">Connected Data Sources</h2>
@@ -130,6 +133,16 @@ SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29
 <td><strong>MySQL RDS</strong></td>
 <td>✅ Connected</td>
 <td><code>mysql-rds-contracts</code> (contracts)</td>
+</tr>
+<tr>
+<td><strong>Sage Intacct</strong></td>
+<td>✅ Connected</td>
+<td><code>sage-intacct-customer</code> (companies), <code>sage-intacct-vendor</code> (suppliers), <code>sage-intacct-arinvoice</code> (AR invoices), <code>sage-intacct-apbill</code> (AP bills)</td>
+</tr>
+<tr>
+<td><strong>Sage X3</strong></td>
+<td>✅ Connected</td>
+<td><code>sage-x3-customer</code> (companies), <code>sage-x3-supplier</code> (suppliers)</td>
 </tr>
 <tr>
 <td><strong>NetSuite ERP</strong></td>
@@ -296,7 +309,7 @@ SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29
 <tbody>
 <tr>
 <td><code>dev_edl_analytics</code></td>
-<td><code>company</code>, <code>person</code>, <code>contract</code></td>
+<td><code>company</code>, <code>person</code>, <code>contract</code>, <code>supplier</code>, <code>ar_invoice</code>, <code>ap_bill</code></td>
 </tr>
 </tbody>
 </table>
@@ -316,6 +329,14 @@ SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29
 <tr>
 <td><code>dev/sources/mysql-rds/credentials</code></td>
 <td><code>host</code>, <code>port</code>, <code>username</code>, <code>password</code>, <code>database</code></td>
+</tr>
+<tr>
+<td><code>dev/sources/sage/intacct/credentials</code></td>
+<td><code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>company_id</code></td>
+</tr>
+<tr>
+<td><code>dev/sources/sage/x3/credentials</code></td>
+<td><code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>folder</code></td>
 </tr>
 </tbody>
 </table>
@@ -349,6 +370,13 @@ SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29
 </table>
 <hr />
 <h2 id="next-steps">Next Steps</h2>
+<h3 id="activate-sage-schedules">Activate Sage Intacct and Sage X3 Schedules</h3>
+<p>Entity configs for all 6 Sage entities are already seeded. To enable live extraction:</p>
+<ul>
+<li>Create Secrets Manager secrets: <code>dev/sources/sage/intacct/credentials</code> and <code>dev/sources/sage/x3/credentials</code></li>
+<li>Set <code>schedule_enabled=True</code> for Sage entities in DynamoDB via <code>seed_entity_config.py</code></li>
+<li>Trigger a dry-run: <code>python scripts/run_sage_connector_local.py --entity-id sage-intacct-customer --dry-run</code></li>
+</ul>
 <h3 id="deploy-staging-environment">Deploy Staging Environment</h3>
 <p>Pre-requisites:
 - Staging AWS credentials configured

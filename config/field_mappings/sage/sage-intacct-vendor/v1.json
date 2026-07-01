@@ -1,0 +1,93 @@
+{
+  "source_id": "sage",
+  "entity_id": "sage-intacct-vendor",
+  "mapping_version": "v1",
+  "_comment": [
+    "Canonical mapping for Sage Intacct accounts-payable/vendor object.",
+    "",
+    "Vendors are AP counterparts to AR customers.  They do not participate in",
+    "the 'company' entity resolution workflow in Phase 5 (Intacct only).  A",
+    "separate 'supplier' entity type is tracked for Phase 6.",
+    "",
+    "PK: 'id' (Intacct vendor code) mapped to 'vendor_id'.",
+    "No entity resolution integration yet — this is raw-to-curated only."
+  ],
+  "rules": [
+    {
+      "source_fields": ["id"],
+      "canonical_field": "vendor_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["name"],
+      "canonical_field": "full_name",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["email1"],
+      "canonical_field": "email_address",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["phone1"],
+      "canonical_field": "phone_number",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["currency"],
+      "canonical_field": "currency_code",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["status"],
+      "canonical_field": "vendor_status",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["billingAddress.country"],
+      "canonical_field": "billing_country",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["billingAddress.state"],
+      "canonical_field": "billing_state",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["auditInfo.createdAt"],
+      "canonical_field": "created_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%SZ",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["auditInfo.modifiedAt"],
+      "canonical_field": "last_modified_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%SZ",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    }
+  ]
+}

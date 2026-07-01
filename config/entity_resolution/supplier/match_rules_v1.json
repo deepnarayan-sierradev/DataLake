@@ -1,0 +1,52 @@
+{
+  "_comment": [
+    "Match rules for the supplier entity type.",
+    "Current sources: sage-intacct-vendor and sage-x3-supplier.",
+    "",
+    "Suppliers have a stable vendor code (vendor_id) assigned in the source ERP.",
+    "Intacct and X3 are separate company environments so the same real-world",
+    "supplier may have different codes in each system.  Without a shared external",
+    "ID (e.g. tax ID, D-U-N-S), deterministic matching alone cannot reliably",
+    "link records across products.",
+    "",
+    "Phase 5 approach: deterministic match on vendor_id within a single source.",
+    "  Cross-source fuzzy matching on full_name is included as a probabilistic",
+    "  rule for candidate generation; downstream analysts review low-confidence",
+    "  matches before golden records are produced.",
+    "",
+    "Blocking: RECORD_ID_PREFIX on vendor_id bounds intra-source block sizes",
+    "  while the name-based fuzzy rule uses a separate token-block strategy.",
+    "",
+    "When a third supplier source is integrated (e.g. NetSuite), add it to",
+    "source_priority in survivorship_v1.json.  No code changes required."
+  ],
+  "entity_type": "supplier",
+  "rule_set_version": "v1",
+
+  "blocking": {
+    "_comment": "Partition by first 8 chars of vendor_id for intra-source deterministic matching.",
+    "key_type": "record_id_prefix",
+    "source_field": "vendor_id",
+    "max_block_size": 500
+  },
+
+  "rules": [
+    {
+      "_comment": "Rule 1 — Deterministic: same vendor_id within the same source = same supplier.",
+      "rule_id": "vendor-id-exact",
+      "strategy": "deterministic",
+      "fields": [
+        { "field_name": "vendor_id", "normalise": false }
+      ]
+    },
+    {
+      "_comment": "Rule 2 — Probabilistic: normalised name similarity for cross-source candidate matching.",
+      "rule_id": "vendor-name-fuzzy",
+      "strategy": "probabilistic",
+      "fields": [
+        { "field_name": "full_name", "normalise": true, "similarity": "trigram", "threshold": 0.85 }
+      ],
+      "confidence_threshold": 0.80
+    }
+  ]
+}

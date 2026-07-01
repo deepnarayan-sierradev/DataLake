@@ -21,7 +21,7 @@
 | **Onboarding time** | 3–5 days (per source) | 2–3 days configuration-only; zero code |
 | **Suitable for** | High-confidence, low-customization | High-compliance, complex transformations, rapid scaling |
 
-**Bottom line:** For your use case (Salesforce + NetSuite + MySQL with strict compliance), this platform is **10–15× more cost-effective** long-term.
+**Bottom line:** For your use case (Salesforce + NetSuite + MySQL + Sage Intacct + Sage X3 with strict compliance), this platform is **10–15× more cost-effective** long-term.
 
 ---
 
@@ -356,7 +356,7 @@ We'll deliver pre-recorded videos + live Q&A for each level.
 | **Lambda / ECS Fargate** | Runs the Python extraction and transformation code |
 | **S3** | Stores all data (raw 7-year, curated 3-year, analytics 1-year) |
 | **DynamoDB** | Config, watermark state, run audit log, onboarding records |
-| **Secrets Manager** | Stores Salesforce / NetSuite / MySQL credentials securely |
+| **Secrets Manager** | Stores Salesforce / NetSuite / MySQL / Sage Intacct / Sage X3 credentials securely |
 | **Glue Data Catalog + Athena** | Makes curated data queryable via SQL from any BI tool |
 | **CloudWatch + X-Ray + SNS** | Logs, metrics, alarms, alerts, tracing |
 | **KMS + IAM + VPC** | Encryption, access control, network isolation |

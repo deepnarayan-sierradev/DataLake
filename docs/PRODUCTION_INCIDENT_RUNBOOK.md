@@ -84,6 +84,8 @@ aws secretsmanager describe-secret \
 - **Salesforce:** Check https://status.salesforce.com/ (Bulk API 2.0 or REST API down?)
 - **NetSuite:** Check https://netsuite.status.io/ (REST API down?)
 - **MySQL RDS:** Check AWS RDS dashboard (instance available? CPU/memory normal?)
+- **Sage Intacct:** Check https://status.intacct.com/ (API or authentication service down?)
+- **Sage X3:** Check your X3 server's OData service endpoint reachability (no public status page — contact Sage X3 admin)
 
 ### Step 3: Resolution
 

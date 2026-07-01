@@ -17,7 +17,7 @@
 - [ ] S3 buckets provisioned: raw-layer, curated-layer, analytics-layer, schema-snapshots
 - [ ] DynamoDB tables created: config, watermark, audit-log, onboarding-registry
 - [ ] IAM roles created for extraction, transformation, entity-resolution, serving
-- [ ] Secrets Manager namespaces created for Salesforce, NetSuite, MySQL credentials
+- [ ] Secrets Manager namespaces created for Salesforce, NetSuite, MySQL, Sage Intacct, and Sage X3 credentials
 - [ ] CloudWatch log groups created; retention set to 30 days (hot storage)
 - [ ] KMS key created for S3 encryption
 - [ ] VPC endpoints configured for S3, DynamoDB, Secrets Manager, CloudWatch, Glue
@@ -91,6 +91,14 @@
   - [ ] `host` is prod database endpoint
   - [ ] `username` is read-only user
   - [ ] Network connectivity verified (MySQL from Lambda in VPC)
+- [ ] Sage Intacct credentials stored: `prod/sources/sage/intacct/credentials`
+  - [ ] `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` all set
+  - [ ] OAuth token endpoint reachable from Lambda VPC (outbound HTTPS)
+  - [ ] Intacct API user has read-only query access to configured modules
+- [ ] Sage X3 credentials stored: `prod/sources/sage/x3/credentials`
+  - [ ] `token_url`, `client_id`, `client_secret`, `base_url`, `folder` all set
+  - [ ] X3 `folder` is the correct company folder name (e.g. `SEED` or `PROD`)
+  - [ ] OData v4 endpoint reachable from Lambda VPC
 - [ ] All credentials rotated within 90 days (prior to go-live)
 - [ ] Secrets Manager rotation schedule configured (auto-rotate every 90 days)
 - [ ] KMS key policy grants extraction service role `kms:Decrypt` permission
@@ -108,6 +116,12 @@
   - [ ] `salesforce-opportunity` (incremental, CloseDate watermark, 1 day window)
   - [ ] `netsuite-customer` (incremental, dateCreated watermark, 1 day window)
   - [ ] `mysql-orders` (incremental, updated_at watermark, 4 hour window)
+  - [ ] `sage-intacct-customer` (incremental, auditInfo.modifiedAt watermark, 1 day window)
+  - [ ] `sage-intacct-vendor` (incremental, auditInfo.modifiedAt watermark, 1 day window)
+  - [ ] `sage-intacct-arinvoice` (incremental, auditInfo.modifiedAt watermark, 1 day window)
+  - [ ] `sage-intacct-apbill` (incremental, auditInfo.modifiedAt watermark, 1 day window)
+  - [ ] `sage-x3-customer` (incremental, MODDAT_0 watermark, 1 day window)
+  - [ ] `sage-x3-supplier` (incremental, MODDAT_0 watermark, 1 day window)
 - [ ] Each entity record includes: `source_id`, `entity_id`, `load_type`, `watermark_field`, `extraction_window_days`, `field_mode`, `exclude_fields`
 - [ ] All entities marked `active: True` (ready to extract)
 - [ ] All entities have `created_at` timestamp (audit trail)
@@ -407,7 +421,7 @@ Verify that all required technologies are correctly configured before go-live.
 - [ ] **ECS Fargate** — Task definition registered; cluster created; capacity provider set; correct IAM task role
 - [ ] **S3 buckets** — All 5 buckets created (`raw`, `curated`, `analytics`, `schema-snapshots`, `governance`); Object Lock confirmed on raw; SSE-KMS on all; TLS-only bucket policy applied
 - [ ] **DynamoDB tables** — All 4 tables created; PITR enabled; KMS encryption confirmed; GSI names match code expectations
-- [ ] **Secrets Manager** — 3 secrets created (`salesforce`, `netsuite`, `mysql-rds`); initial values set; rotation schedule configured
+- [ ] **Secrets Manager** — 5 secrets created (`salesforce`, `netsuite`, `mysql-rds`, `sage/intacct`, `sage/x3`); initial values set; rotation schedule configured
 - [ ] **Glue Data Catalog** — Database `{env}_curated` created; IAM permissions allow `glue:CreateTable` and `glue:UpdateTable` from transformation role
 - [ ] **Athena** — Workgroup `{env}-analytics` created; output bucket set; per-query cost limit configured
 - [ ] **SQS (DLQ)** — Queue `{env}-extraction-dlq` created; KMS encrypted; 14-day retention; DLQ URL accessible from extraction Lambda
@@ -429,6 +443,8 @@ Verify that all required technologies are correctly configured before go-live.
 - [ ] **Salesforce** — OAuth 2.0 client credentials tested; NAT Gateway IP added to Salesforce trusted IP allowlist; Bulk API 2.0 quota confirmed (API edition supports high-volume jobs)
 - [ ] **NetSuite** — OAuth 1.0a credentials tested; SuiteQL endpoint reachable from Lambda VPC; query timeout verified
 - [ ] **MySQL RDS** — Read-only credentials tested; VPC peering or PrivateLink to RDS established; `INFORMATION_SCHEMA` queries succeed
+- [ ] **Sage Intacct** — OAuth 2.0 client credentials tested (`prod/sources/sage/intacct/credentials`); Intacct REST API reachable from Lambda VPC; dry-run with `run_sage_connector_local.py --entity-id sage-intacct-customer --dry-run` passes
+- [ ] **Sage X3** — OAuth 2.0 client credentials tested (`prod/sources/sage/x3/credentials`); X3 OData v4 endpoint reachable from Lambda VPC; `folder` value confirmed; dry-run passes
 
 ---
 

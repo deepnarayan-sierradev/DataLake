@@ -1,6 +1,6 @@
 # Platform Status — Enterprise Data Lake
 
-**Last updated:** 2026-06-29  
+**Last updated:** 2026-07-01  
 **Prepared by:** Platform Engineering
 
 ---
@@ -26,9 +26,12 @@
 **Query in Athena (AWS Console → Athena → database: `dev_edl_analytics`):**
 
 ```sql
-SELECT * FROM dev_edl_analytics.company   WHERE analytics_date='2026-06-29';
-SELECT * FROM dev_edl_analytics.person    WHERE analytics_date='2026-06-29';
-SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29';
+SELECT * FROM dev_edl_analytics.company    WHERE analytics_date='2026-06-29';
+SELECT * FROM dev_edl_analytics.person     WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.contract   WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.supplier   WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.ar_invoice  WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06-29';
 ```
 
 ---
@@ -39,6 +42,8 @@ SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29
 |---|---|---|
 | **Salesforce CRM** | ✅ Connected | `salesforce-account` (companies), `salesforce-contact` (persons) |
 | **MySQL RDS** | ✅ Connected | `mysql-rds-contracts` (contracts) |
+| **Sage Intacct** | ✅ Connected | `sage-intacct-customer` (companies), `sage-intacct-vendor` (suppliers), `sage-intacct-arinvoice` (AR invoices), `sage-intacct-apbill` (AP bills) |
+| **Sage X3** | ✅ Connected | `sage-x3-customer` (companies), `sage-x3-supplier` (suppliers) |
 | **NetSuite ERP** | 🔲 Pending | Not yet onboarded |
 
 ---
@@ -99,7 +104,7 @@ All four Lambdas are deployed from the **same zip**: `s3://dev-edl-terraform-sta
 
 | Database | Tables |
 |---|---|
-| `dev_edl_analytics` | `company`, `person`, `contract` |
+| `dev_edl_analytics` | `company`, `person`, `contract`, `supplier`, `ar_invoice`, `ap_bill` |
 
 ### Secrets Manager
 
@@ -107,6 +112,8 @@ All four Lambdas are deployed from the **same zip**: `s3://dev-edl-terraform-sta
 |---|---|
 | `dev/sources/salesforce/credentials` | `instance_url`, `client_id`, `client_secret` |
 | `dev/sources/mysql-rds/credentials` | `host`, `port`, `username`, `password`, `database` |
+| `dev/sources/sage/intacct/credentials` | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
+| `dev/sources/sage/x3/credentials` | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
 
 ---
 
@@ -122,6 +129,14 @@ All four Lambdas are deployed from the **same zip**: `s3://dev-edl-terraform-sta
 ---
 
 ## Next Steps
+
+### Activate Sage Intacct and Sage X3 Schedules
+
+Entity configs for all 6 Sage entities are already seeded. To enable live extraction:
+
+- Create Secrets Manager secrets: `dev/sources/sage/intacct/credentials` and `dev/sources/sage/x3/credentials`
+- Set `schedule_enabled=True` for Sage entities in DynamoDB via `seed_entity_config.py`
+- Trigger a dry-run: `python scripts/run_sage_connector_local.py --entity-id sage-intacct-customer --dry-run`
 
 ### Deploy Staging Environment
 

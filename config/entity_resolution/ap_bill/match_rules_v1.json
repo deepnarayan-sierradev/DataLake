@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "Match rules for the ap_bill entity type.",
+    "Current source: sage (sage-intacct-apbill) only.",
+    "",
+    "AP bills have a system-assigned numeric primary key (bill_id) that is",
+    "stable and unique within an Intacct company.  With a single source,",
+    "deterministic exact matching on bill_id is sufficient.",
+    "",
+    "Blocking: RECORD_ID_PREFIX on bill_id groups records by the first 8",
+    "chars of the ID, keeping block sizes manageable.",
+    "",
+    "When a second AP source is integrated (e.g. Sage X3 PORDER), add a",
+    "probabilistic rule matching on vendor_id + bill_date + bill_amount.",
+    "No changes to survivorship_v1.json or code required."
+  ],
+  "entity_type": "ap_bill",
+  "rule_set_version": "v1",
+
+  "blocking": {
+    "_comment": "Partition by first 8 chars of bill_id.",
+    "key_type": "record_id_prefix",
+    "source_field": "bill_id",
+    "max_block_size": 1000
+  },
+
+  "rules": [
+    {
+      "_comment": "Rule 1 — Deterministic: identical bill_id = same bill.",
+      "rule_id": "bill-id-exact",
+      "strategy": "deterministic",
+      "fields": [
+        { "field_name": "bill_id", "normalise": false }
+      ]
+    }
+  ]
+}

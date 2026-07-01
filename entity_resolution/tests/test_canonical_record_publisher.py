@@ -229,7 +229,7 @@ class TestPublisherWithLineageEmission:
             region_name=_REGION,
             governance_s3_bucket="test-governance-bucket",
             curated_s3_bucket="test-curated-bucket",
-            curated_s3_prefix="curated/customer/",
+            curated_s3_prefixes=("curated/customer/",),
         )
         records = [
             {"record_id": "sf-001", "source_id": "salesforce", "email": "a@x.com", "name": "Alice"},
@@ -257,7 +257,7 @@ class TestPublisherWithLineageEmission:
             region_name=_REGION,
             governance_s3_bucket="nonexistent-bucket",  # S3 write will fail
             curated_s3_bucket="test-curated-bucket",
-            curated_s3_prefix="curated/customer/",
+            curated_s3_prefixes=("curated/customer/",),
         )
         records = [
             {"record_id": "sf-001", "source_id": "salesforce", "email": "b@x.com", "name": "Bob"},

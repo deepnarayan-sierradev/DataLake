@@ -2,12 +2,123 @@
   "_comment": [
     "Survivorship policy for dim_company.",
     "Defines: (1) the exact output schema — only output_fields appear in canonical/company/ Parquet,",
-    "         (2) per-field winner rules when Salesforce and NetSuite disagree.",
+    "         (2) per-field winner rules when Salesforce, NetSuite, and Sage Intacct disagree.",
     "",
     "Source IDs used in source_priority must match the source_id values in entity extraction config:",
     "  'salesforce'  — Salesforce CRM (Account)",
-    "  'netsuite'    — NetSuite ERP (Customer)"
+    "  'netsuite'    — NetSuite ERP (Customer)",
+    "  'sage'        — Sage Intacct ERP (accounts-receivable/customer)"
   ],
+  "entity_type": "company",
+  "policy_version": "v1",
+
+  "output_fields": [
+    "full_name",
+    "email_address",
+    "phone_number",
+    "annual_revenue",
+    "employee_count",
+    "credit_limit",
+    "outstanding_balance",
+    "currency_code",
+    "billing_country",
+    "billing_state",
+    "industry",
+    "is_active",
+    "created_date",
+    "last_modified_date"
+  ],
+
+  "default_strategy": "first_non_null",
+
+  "attribute_rules": [
+    {
+      "_comment": "Legal / trading name. NetSuite / Sage Intacct is system of record for registered name; Salesforce last.",
+      "canonical_field": "full_name",
+      "strategy": "source_priority",
+      "source_priority": ["netsuite", "sage", "salesforce"]
+    },
+    {
+      "_comment": "Primary billing email. NetSuite owns the billing relationship; Sage Intacct is second.",
+      "canonical_field": "email_address",
+      "strategy": "source_priority",
+      "source_priority": ["netsuite", "sage", "salesforce"]
+    },
+    {
+      "_comment": "Phone. NetSuite / Sage win; Salesforce may hold a sales contact number.",
+      "canonical_field": "phone_number",
+      "strategy": "source_priority",
+      "source_priority": ["netsuite", "sage", "salesforce"]
+    },
+    {
+      "_comment": "Annual revenue is a Salesforce-reported figure (CRM opportunity data). Neither NetSuite nor Sage stores this.",
+      "canonical_field": "annual_revenue",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce", "netsuite", "sage"]
+    },
+    {
+      "_comment": "Employee count is CRM data from Salesforce.",
+      "canonical_field": "employee_count",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce", "netsuite", "sage"]
+    },
+    {
+      "_comment": "Credit limit is set by finance in NetSuite or Sage Intacct AR; prefer Sage Intacct as the operational AR system.",
+      "canonical_field": "credit_limit",
+      "strategy": "source_priority",
+      "source_priority": ["sage", "netsuite", "salesforce"]
+    },
+    {
+      "_comment": "Outstanding balance is a live AR figure. Sage Intacct is the operational AR ledger; NetSuite is secondary.",
+      "canonical_field": "outstanding_balance",
+      "strategy": "source_priority",
+      "source_priority": ["sage", "netsuite", "salesforce"]
+    },
+    {
+      "_comment": "Currency of the billing relationship. Sage Intacct (AR) and NetSuite are authoritative; Salesforce is last resort.",
+      "canonical_field": "currency_code",
+      "strategy": "source_priority",
+      "source_priority": ["sage", "netsuite", "salesforce"]
+    },
+    {
+      "_comment": "Billing country from NetSuite (legal address) or Sage (AR address). Salesforce may be the sales office address.",
+      "canonical_field": "billing_country",
+      "strategy": "source_priority",
+      "source_priority": ["netsuite", "sage", "salesforce"]
+    },
+    {
+      "_comment": "Billing state. Same rationale as billing_country.",
+      "canonical_field": "billing_state",
+      "strategy": "source_priority",
+      "source_priority": ["netsuite", "sage", "salesforce"]
+    },
+    {
+      "_comment": "Industry classification. Salesforce CRM is the system of record for market segmentation.",
+      "canonical_field": "industry",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce", "netsuite", "sage"]
+    },
+    {
+      "_comment": "Active status. Sage Intacct operational status ('active'/'inactive') is authoritative for billing; NetSuite second.",
+      "canonical_field": "is_active",
+      "strategy": "source_priority",
+      "source_priority": ["sage", "netsuite", "salesforce"]
+    },
+    {
+      "_comment": "Earliest created_date across systems — company may have existed in Sage/NetSuite before Salesforce.",
+      "canonical_field": "created_date",
+      "strategy": "most_recent",
+      "timestamp_field": "created_date"
+    },
+    {
+      "_comment": "Most recently updated record wins — ensures freshest modification timestamp.",
+      "canonical_field": "last_modified_date",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    }
+  ]
+}
+
   "entity_type": "company",
   "policy_version": "v1",
 

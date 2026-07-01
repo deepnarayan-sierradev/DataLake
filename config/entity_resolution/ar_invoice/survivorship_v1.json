@@ -1,0 +1,108 @@
+{
+  "_comment": [
+    "Survivorship policy for the ar_invoice entity type.",
+    "Current source: sage (sage-intacct-arinvoice) only.",
+    "",
+    "With a single source, survivorship is a direct pass-through — there are no",
+    "conflicts to resolve.  The default_strategy first_non_null handles any",
+    "occasional null within a record set.",
+    "",
+    "output_fields defines the canonical AR invoice schema exposed to BI/analytics.",
+    "Only these fields appear in the analytics-layer Parquet for this entity.",
+    "System fields (golden_id, contributing_source_records, survivorship_version,",
+    "match_run_id) are always added by the publisher regardless of this list.",
+    "",
+    "When a second AR source is integrated, add it to source_priority for each",
+    "attribute_rule.  The engine handles conflicts at runtime with no code changes.",
+    "",
+    "Source IDs in source_priority must match entity extraction config source_id:",
+    "  'sage'  — Sage Intacct AR invoice"
+  ],
+  "entity_type": "ar_invoice",
+  "policy_version": "v1",
+
+  "output_fields": [
+    "invoice_id",
+    "customer_id",
+    "invoice_status",
+    "currency_code",
+    "invoice_amount",
+    "amount_paid",
+    "amount_due",
+    "invoice_date",
+    "due_date",
+    "created_date",
+    "last_modified_date"
+  ],
+
+  "default_strategy": "first_non_null",
+
+  "attribute_rules": [
+    {
+      "_comment": "Primary key — always from Intacct, never null (raise_error in field mapping).",
+      "canonical_field": "invoice_id",
+      "strategy": "source_priority",
+      "source_priority": ["sage"]
+    },
+    {
+      "_comment": "Customer FK — joins to sage-intacct-customer / account_id.",
+      "canonical_field": "customer_id",
+      "strategy": "source_priority",
+      "source_priority": ["sage"]
+    },
+    {
+      "_comment": "Invoice lifecycle state.",
+      "canonical_field": "invoice_status",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    },
+    {
+      "_comment": "Transaction currency code.",
+      "canonical_field": "currency_code",
+      "strategy": "source_priority",
+      "source_priority": ["sage"]
+    },
+    {
+      "_comment": "Original invoice total.  Intacct is the system of record.",
+      "canonical_field": "invoice_amount",
+      "strategy": "source_priority",
+      "source_priority": ["sage"]
+    },
+    {
+      "_comment": "Amount paid to date.  Most recently updated value is authoritative.",
+      "canonical_field": "amount_paid",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    },
+    {
+      "_comment": "Outstanding balance.  Most recently updated value is authoritative.",
+      "canonical_field": "amount_due",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    },
+    {
+      "_comment": "Invoice issue date — immutable after creation.",
+      "canonical_field": "invoice_date",
+      "strategy": "source_priority",
+      "source_priority": ["sage"]
+    },
+    {
+      "_comment": "Payment due date.",
+      "canonical_field": "due_date",
+      "strategy": "source_priority",
+      "source_priority": ["sage"]
+    },
+    {
+      "_comment": "Creation timestamp — earliest represents true creation time.",
+      "canonical_field": "created_date",
+      "strategy": "most_recent",
+      "timestamp_field": "created_date"
+    },
+    {
+      "_comment": "Last modification timestamp.",
+      "canonical_field": "last_modified_date",
+      "strategy": "most_recent",
+      "timestamp_field": "last_modified_date"
+    }
+  ]
+}

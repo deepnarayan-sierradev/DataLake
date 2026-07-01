@@ -1,7 +1,7 @@
 # Developer Guide — Enterprise Data Lake Platform
 
 **Audience:** Engineers new to the codebase, or anyone setting up a fresh workstation  
-**Last updated:** 2026-06-29  
+**Last updated:** 2026-07-01  
 **Status:** Dev environment is live and fully operational
 
 ---
@@ -30,7 +30,8 @@ The Enterprise Data Lake Platform automatically extracts data from three source 
 
 ```
 Salesforce CRM ──┐
-MySQL RDS ───────┼──► Raw Layer (S3) ──► Curated Layer (S3) ──► Analytics Layer (S3)
+MySQL RDS ────── ┤
+Sage ERP ────────┼──► Raw Layer (S3) ──► Curated Layer (S3) ──► Analytics Layer (S3)
 NetSuite ERP ────┘         │                     │                      │
  (pending)            Immutable           Field-mapped           Golden records
                       Parquet             Quality-checked        Athena-queryable
@@ -189,6 +190,8 @@ Expected:
 ```
 dev/sources/salesforce/credentials
 dev/sources/mysql-rds/credentials
+dev/sources/sage/intacct/credentials
+dev/sources/sage/x3/credentials
 ```
 
 ### Lambda Functions
@@ -278,6 +281,12 @@ python scripts/run_salesforce_connector_local.py \
 
 python scripts/run_salesforce_connector_local.py \
   --entity-id salesforce-contact --dry-run
+
+python scripts/run_sage_connector_local.py \
+  --entity-id sage-intacct-customer --dry-run
+
+python scripts/run_sage_connector_local.py \
+  --entity-id sage-x3-customer --dry-run
 ```
 
 ### Trigger full pipeline via Step Functions
@@ -311,6 +320,60 @@ python scripts/trigger_extraction.py \
   --region us-east-1 \
   --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
   --param object_name=Contact
+
+# Sage Intacct — Customer (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-intacct-customer \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=intacct --param object_path=accounts-receivable/customer
+
+# Sage Intacct — Vendor (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-intacct-vendor \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=intacct --param object_path=accounts-payable/vendor
+
+# Sage Intacct — AR Invoice (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-intacct-arinvoice \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=intacct --param object_path=accounts-receivable/invoice
+
+# Sage Intacct — AP Bill (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-intacct-apbill \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=intacct --param object_path=accounts-payable/bill
+
+# Sage X3 — Customer (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-x3-customer \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=x3 --param object_path=BPCUSTOMER
+
+# Sage X3 — Supplier (incremental)
+python scripts/trigger_extraction.py \
+  --source-id sage \
+  --entity-id sage-x3-supplier \
+  --environment dev \
+  --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --param sage_product=x3 --param object_path=BPSUPPLIER
 ```
 
 ### Query analytics output via Athena
@@ -323,7 +386,16 @@ SELECT * FROM dev_edl_analytics.company WHERE analytics_date='2026-06-29';
 SELECT * FROM dev_edl_analytics.person WHERE analytics_date='2026-06-29';
 
 -- Latest contracts
-SELECT COUNT(*) FROM dev_edl_analytics.contract WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.contract   WHERE analytics_date='2026-06-29';
+
+-- Latest suppliers (Sage Intacct vendors + Sage X3 suppliers merged)
+SELECT COUNT(*) FROM dev_edl_analytics.supplier   WHERE analytics_date='2026-06-29';
+
+-- Latest AR invoices
+SELECT COUNT(*) FROM dev_edl_analytics.ar_invoice  WHERE analytics_date='2026-06-29';
+
+-- Latest AP bills
+SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06-29';
 ```
 
 ---
@@ -458,6 +530,12 @@ Step Functions (dev-data-pipeline)
 | `salesforce-account` | `company` |
 | `salesforce-contact` | `person` |
 | `mysql-rds-contracts` | `contract` |
+| `sage-intacct-customer` | `company` |
+| `sage-x3-customer` | `company` |
+| `sage-intacct-vendor` | `supplier` |
+| `sage-x3-supplier` | `supplier` |
+| `sage-intacct-arinvoice` | `ar_invoice` |
+| `sage-intacct-apbill` | `ap_bill` |
 
 ---
 
@@ -484,3 +562,23 @@ Step Functions (dev-data-pipeline)
 10. **S3 Hive partition paths require `=` in prefix pattern** — paths like `extraction_date=2026-06-29` contain `=`. The `_SAFE_S3_PREFIX_PATTERN` regex must allow it.
 
 11. **Salesforce Bulk API returns `""` for null fields** — treated as missing (becomes `None` via `use_default`). This is intentional. A genuine empty string in a Salesforce field will also be treated as missing.
+
+12. **Sage `connector_params` must include `sage_product` and `object_path`** — e.g. `{"sage_product": "intacct", "object_path": "accounts-receivable/customer"}`. Missing either key raises `ValueError` at runtime. Valid `sage_product` values are `"intacct"` and `"x3"`.
+
+13. **Sage X3 field names must be UPPERCASE** — e.g. `BPCNUM_0`, `MODDAT_0`. The X3 query engine validates against `^[A-Z][A-Z0-9_]{0,63}$`. Lowercase field names in `include_fields` are rejected with `X3QueryBuildError`.
+
+14. **Sage Intacct incremental watermark field is `auditInfo.modifiedAt`** — dot-notation key returned flat in query responses. Set `watermark_field` to this exact string in the entity config.
+
+15. **Sage uses per-product secret paths** — `{env}/sources/sage/intacct/credentials` and `{env}/sources/sage/x3/credentials` are separate Secrets Manager secrets. Intacct requires `token_url`, `client_id`, `client_secret`, `base_url`, `company_id`. X3 requires the same plus `folder` (the X3 company folder, e.g. `"SEED"`).
+
+16. **Sage X3 OData discriminant** — the X3 query engine embeds `"_x3_odata": true` in `query_text` JSON. `SageConnector.execute_extraction()` dispatches on this key to the OData GET path. Do not set this key manually in entity configs.
+
+12. **Sage `connector_params` must include `sage_product` and `object_path`** — e.g. `{"sage_product": "intacct", "object_path": "accounts-receivable/customer"}`. Missing either key raises `ValueError` at runtime. Valid `sage_product` values are `"intacct"` and `"x3"`.
+
+13. **Sage X3 field names are UPPERCASE** — e.g. `BPCNUM_0`, `MODDAT_0`. The X3 query engine validates against `^[A-Z][A-Z0-9_]{0,63}$`. Lowercase field names in `include_fields` will be rejected with a `X3QueryBuildError`.
+
+14. **Sage Intacct incremental watermark field is `auditInfo.modifiedAt`** — this dot-notation key is returned flat in query responses. Set `watermark_field` to this exact string in the entity config.
+
+15. **Sage credentials use per-product secret paths** — `{env}/sources/sage/intacct/credentials` and `{env}/sources/sage/x3/credentials` are separate Secrets Manager secrets. Intacct requires keys: `token_url`, `client_id`, `client_secret`, `base_url`, `company_id`. X3 requires the same plus `folder` (the X3 company folder, e.g. `"SEED"`).
+
+16. **Sage X3 OData discriminant** — the X3 query engine embeds `"_x3_odata": true` in `query_text` JSON. The `SageConnector.execute_extraction()` dispatches on this key to the OData GET path. Never set this key manually in entity configs.

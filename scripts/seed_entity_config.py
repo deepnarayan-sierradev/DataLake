@@ -13,10 +13,16 @@ Prerequisite:
     The DynamoDB table must already exist (provisioned by Terraform metadata_persistence module).
 
 Records seeded:
-    salesforce / salesforce-account    (full load, all fields)
-    salesforce / salesforce-contact    (incremental, watermark on SystemModstamp)
-    netsuite   / netsuite-customer     (incremental, watermark on lastModifiedDate)
-    mysql-rds  / mysql-rds-contracts   (full load, table: Contracts)
+    salesforce / salesforce-account         (full load, all fields)
+    salesforce / salesforce-contact         (incremental, watermark on SystemModstamp)
+    netsuite   / netsuite-customer          (incremental, watermark on lastModifiedDate)
+    mysql-rds  / mysql-rds-contracts        (full load, table: Contracts)
+    sage       / sage-intacct-customer      (incremental, watermark on auditInfo.modifiedAt)
+    sage       / sage-intacct-vendor        (incremental, watermark on auditInfo.modifiedAt)
+    sage       / sage-intacct-arinvoice     (incremental, watermark on auditInfo.modifiedAt)
+    sage       / sage-intacct-apbill        (incremental, watermark on auditInfo.modifiedAt)
+    sage       / sage-x3-customer           (incremental, watermark on MODDAT_0)
+    sage       / sage-x3-supplier           (incremental, watermark on MODDAT_0, disabled)
 """
 
 from __future__ import annotations
@@ -34,6 +40,16 @@ def _table_name(environment: str) -> str:
 def _raw_prefix(environment: str, source_id: str, entity_id: str) -> str:
     """Full s3:// URI for the raw layer partition root (no run-specific suffix)."""
     return f"s3://{environment}-edl-raw-layer/raw/{source_id}/{entity_id}/"
+
+
+def _sage_raw_prefix(environment: str, product_name: str, entity_id: str) -> str:
+    """
+    Full s3:// URI for Sage raw layer partition root.
+
+    SageRawLayerWriter writes to sage/{product_name}/{entity_id}/ — the
+    product_name segment is inserted by the writer so the path must match here.
+    """
+    return f"s3://{environment}-edl-raw-layer/sage/{product_name}/{entity_id}/"
 
 
 def _snapshot_prefix(environment: str, source_id: str, entity_id: str) -> str:
@@ -121,6 +137,128 @@ def _build_records(environment: str) -> list[dict[str, object]]:
             "connector_params": {"table_name": "Contracts"},
             "schedule_cron": "cron(30 2 * * ? *)",
             "schedule_enabled": True,
+            "schedule_timezone": "UTC",
+            "active": True,
+        },
+        # ── Sage Intacct ─────────────────────────────────────────────────────
+        {
+            "source_id": "sage",
+            "entity_id": "sage-intacct-customer",
+            "config_version": "1.0.0",
+            "load_type": "incremental",
+            "watermark_field": "auditInfo.modifiedAt",
+            "extraction_window_days": 1,
+            "watermark_overlap_hours": 1,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": [],
+            "target_raw_s3_prefix": _sage_raw_prefix(environment, "intacct", "sage-intacct-customer"),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-intacct-customer"),
+            "output_format": "parquet",
+            "connector_params": {"sage_product": "intacct", "object_path": "accounts-receivable/customer"},
+            "schedule_cron": "cron(45 2 * * ? *)",
+            "schedule_enabled": True,
+            "schedule_timezone": "UTC",
+            "active": True,
+        },
+        {
+            "source_id": "sage",
+            "entity_id": "sage-intacct-vendor",
+            "config_version": "1.0.0",
+            "load_type": "incremental",
+            "watermark_field": "auditInfo.modifiedAt",
+            "extraction_window_days": 1,
+            "watermark_overlap_hours": 1,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": [],
+            "target_raw_s3_prefix": _sage_raw_prefix(environment, "intacct", "sage-intacct-vendor"),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-intacct-vendor"),
+            "output_format": "parquet",
+            "connector_params": {"sage_product": "intacct", "object_path": "accounts-payable/vendor"},
+            "schedule_cron": "cron(50 2 * * ? *)",
+            "schedule_enabled": True,
+            "schedule_timezone": "UTC",
+            "active": True,
+        },
+        {
+            "source_id": "sage",
+            "entity_id": "sage-intacct-arinvoice",
+            "config_version": "1.0.0",
+            "load_type": "incremental",
+            "watermark_field": "auditInfo.modifiedAt",
+            "extraction_window_days": 1,
+            "watermark_overlap_hours": 1,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": [],
+            "target_raw_s3_prefix": _sage_raw_prefix(environment, "intacct", "sage-intacct-arinvoice"),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-intacct-arinvoice"),
+            "output_format": "parquet",
+            "connector_params": {"sage_product": "intacct", "object_path": "accounts-receivable/invoice"},
+            "schedule_cron": "cron(55 2 * * ? *)",
+            "schedule_enabled": True,
+            "schedule_timezone": "UTC",
+            "active": True,
+        },
+        {
+            "source_id": "sage",
+            "entity_id": "sage-intacct-apbill",
+            "config_version": "1.0.0",
+            "load_type": "incremental",
+            "watermark_field": "auditInfo.modifiedAt",
+            "extraction_window_days": 1,
+            "watermark_overlap_hours": 1,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": [],
+            "target_raw_s3_prefix": _sage_raw_prefix(environment, "intacct", "sage-intacct-apbill"),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-intacct-apbill"),
+            "output_format": "parquet",
+            "connector_params": {"sage_product": "intacct", "object_path": "accounts-payable/bill"},
+            "schedule_cron": "cron(5 3 * * ? *)",
+            "schedule_enabled": True,
+            "schedule_timezone": "UTC",
+            "active": True,
+        },
+        # ── Sage X3 ────────────────────────────────────────────────────────────
+        {
+            "source_id": "sage",
+            "entity_id": "sage-x3-customer",
+            "config_version": "1.0.0",
+            "load_type": "incremental",
+            "watermark_field": "MODDAT_0",
+            "extraction_window_days": 1,
+            "watermark_overlap_hours": 1,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": [],
+            "target_raw_s3_prefix": _sage_raw_prefix(environment, "x3", "sage-x3-customer"),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-x3-customer"),
+            "output_format": "parquet",
+            "connector_params": {"sage_product": "x3", "object_path": "BPCUSTOMER"},
+            "schedule_cron": "cron(55 2 * * ? *)",
+            "schedule_enabled": True,
+            "schedule_timezone": "UTC",
+            "active": True,
+        },
+        {
+            "source_id": "sage",
+            "entity_id": "sage-x3-supplier",
+            "config_version": "1.0.0",
+            "load_type": "incremental",
+            "watermark_field": "MODDAT_0",
+            "extraction_window_days": 1,
+            "watermark_overlap_hours": 1,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": [],
+            "target_raw_s3_prefix": _sage_raw_prefix(environment, "x3", "sage-x3-supplier"),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-x3-supplier"),
+            "output_format": "parquet",
+            "connector_params": {"sage_product": "x3", "object_path": "BPSUPPLIER"},
+            "schedule_cron": "cron(0 3 * * ? *)",
+            "schedule_enabled": False,
             "schedule_timezone": "UTC",
             "active": True,
         },

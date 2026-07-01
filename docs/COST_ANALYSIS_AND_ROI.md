@@ -22,7 +22,7 @@ The Enterprise Data Lake Platform pays for itself in labor savings within **2–
 | **S3 Data Transfer** | 4 TB outbound to Athena / analytics tools | $180 | Inbound to S3 is free; outbound charges apply |
 | **Lambda execution** | ~200 runs/month × 5–10 min avg × 512 MB memory | $80 | Streaming architecture keeps memory flat regardless of dataset size |
 | **DynamoDB** | 5 tables (config, watermark, audit log, onboarding, telemetry); ~2 GB | $150 | On-demand pricing; easily upgrades to provisioned if DLQ depth grows |
-| **Secrets Manager** | 3 secrets (Salesforce, NetSuite, MySQL); 90-day rotation | $9 | $0.40/secret/month × 3 + $6/month secret retrieval charges |
+| **Secrets Manager** | 5 secrets (Salesforce, NetSuite, MySQL, Sage Intacct, Sage X3); 90-day rotation | $10 | $0.40/secret/month × 5 + $6/month secret retrieval charges |
 | **CloudWatch Logs** | ~50 MB/day × 30 days (structured logging) | $30 | Log retention: 30 days in hot storage, then archive to S3 |
 | **CloudWatch Metrics & Alarms** | 50 custom metrics + 15 alarm instances | $40 | Custom metrics beyond standard Lambda/S3 metrics |
 | **AWS Glue Catalog** | Data catalog entries (~100 tables); no compute cost | $0 | Only catalog storage; query compute runs on Athena |
@@ -220,7 +220,7 @@ This section maps each AWS service to its cost driver and the optimisation alrea
 | **Amazon DynamoDB** | Read/write capacity units | On-demand pricing; PITR adds ~25% to storage cost | $150 |
 | **AWS Step Functions** | State transitions | 16 transitions per pipeline run; Standard Workflow for staging/prod | $3 |
 | **Amazon EventBridge Scheduler** | Invocations | 12 schedules × 1/day × 30 days | $1 |
-| **AWS Secrets Manager** | Secrets stored + API calls | 3 secrets; retrieval cached per Lambda invocation | $9 |
+| **AWS Secrets Manager** | Secrets stored + API calls | 5 secrets (Salesforce, NetSuite, MySQL, Sage Intacct, Sage X3); retrieval cached per Lambda invocation | $10 |
 | **Amazon Athena** | TB scanned | Year/month/day partitioning limits scan to relevant partition (1–10 GB typical) | $25 |
 | **AWS Glue Data Catalog** | Catalog entries | Catalog-only cost (no Glue ETL jobs used) | $0 |
 | **Amazon CloudWatch** | Log ingestion + storage + metrics + alarms | Structured JSON logs (compact); 30-day hot retention; 50 custom metrics | $70 |

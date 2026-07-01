@@ -134,7 +134,9 @@ aws secretsmanager describe-secret \
 <p><strong>Check source system status:</strong>
 - <strong>Salesforce:</strong> Check https://status.salesforce.com/ (Bulk API 2.0 or REST API down?)
 - <strong>NetSuite:</strong> Check https://netsuite.status.io/ (REST API down?)
-- <strong>MySQL RDS:</strong> Check AWS RDS dashboard (instance available? CPU/memory normal?)</p>
+- <strong>MySQL RDS:</strong> Check AWS RDS dashboard (instance available? CPU/memory normal?)
+- <strong>Sage Intacct:</strong> Check https://status.intacct.com/ (API or authentication service down?)
+- <strong>Sage X3:</strong> Check your X3 server's OData service endpoint reachability (no public status page — contact Sage X3 admin)</p>
 <h3 id="step-3-resolution">Step 3: Resolution</h3>
 <p><strong>If source API is temporarily down:</strong></p>
 <pre><code>Action: Wait 15 minutes, manually trigger re-run

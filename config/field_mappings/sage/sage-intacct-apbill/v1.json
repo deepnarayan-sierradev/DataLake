@@ -1,0 +1,124 @@
+{
+  "source_id": "sage",
+  "entity_id": "sage-intacct-apbill",
+  "mapping_version": "v1",
+  "_comment": [
+    "Canonical mapping for Sage Intacct accounts-payable/bill object.",
+    "",
+    "AP bills are transactional records — one row per bill received from a",
+    "vendor.  The Intacct REST API returns these as a collection under the",
+    "accounts-payable/bill endpoint with incremental extraction on",
+    "auditInfo.modifiedAt.",
+    "",
+    "PK: 'id' (Intacct bill record number) → 'bill_id'.",
+    "  This is the system-assigned numeric identifier that uniquely identifies",
+    "  a bill within a given Intacct company.  No cross-source deduplication",
+    "  is performed — Intacct is the sole source of truth for AP bills.",
+    "",
+    "Financial totals: Intacct returns monetary amounts as strings in the REST",
+    "  API.  All amount fields are cast to decimal for downstream analytics.",
+    "",
+    "State values: 'Draft', 'Pending', 'Posted', 'Paid', 'Reversed', 'Voided'.",
+    "  Mapped as a raw string to 'bill_status'.",
+    "",
+    "Vendor FK: 'vendorId' is the Intacct vendor code that joins to the",
+    "  'vendor_id' field in the sage-intacct-vendor curated dataset."
+  ],
+  "rules": [
+    {
+      "source_fields": ["id"],
+      "canonical_field": "bill_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["vendorId"],
+      "canonical_field": "vendor_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["state"],
+      "canonical_field": "bill_status",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["currency"],
+      "canonical_field": "currency_code",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["totalEntered"],
+      "canonical_field": "bill_amount",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["totalPaid"],
+      "canonical_field": "amount_paid",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "source_fields": ["totalDue"],
+      "canonical_field": "amount_due",
+      "transformation": "cast",
+      "transformation_params": { "type": "decimal" },
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
+    },
+    {
+      "_comment": "Bill date — the date the bill was received / recorded.",
+      "source_fields": ["billDate"],
+      "canonical_field": "bill_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%d",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "_comment": "Payment due date — used for aging and cash-flow calculations.",
+      "source_fields": ["dueDate"],
+      "canonical_field": "due_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%d",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "_comment": "Intacct REST API returns timestamps in ISO-8601 UTC: 2024-01-15T10:30:00Z",
+      "source_fields": ["auditInfo.createdAt"],
+      "canonical_field": "created_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%SZ",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    },
+    {
+      "source_fields": ["auditInfo.modifiedAt"],
+      "canonical_field": "last_modified_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%SZ",
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
+    }
+  ]
+}

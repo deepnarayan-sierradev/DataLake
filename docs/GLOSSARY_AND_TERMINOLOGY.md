@@ -217,6 +217,8 @@ Centralized secret storage with encryption and rotation.
 - `prod/sources/salesforce/credentials` (OAuth tokens)
 - `prod/sources/netsuite/credentials` (API keys)
 - `prod/sources/mysql-rds/credentials` (DB password)
+- `prod/sources/sage/intacct/credentials` (Intacct OAuth 2.0 client credentials)
+- `prod/sources/sage/x3/credentials` (X3 OAuth 2.0 client credentials + folder name)
 
 Credentials auto-rotated every 90 days; never logged or exposed in code.
 
@@ -454,6 +456,9 @@ Quick-reference definitions for every tool and service used in the platform.
 | **moto** | moto ≥ 5.0 | AWS service mocking library for unit tests |
 | **Bulk API 2.0** | Salesforce Bulk API 2.0 | High-throughput async Salesforce data extraction API |
 | **SuiteQL** | NetSuite SuiteQL REST API | SQL-like query API for NetSuite ERP |
+| **Intacct REST API** | Sage Intacct REST API | JSON-POST query API with OAuth 2.0 client credentials; `ia::meta.next` cursor pagination |
+| **OData v4** | Open Data Protocol version 4 | REST-based query standard used by Sage X3; supports `$select`, `$filter`, `$orderby`, `$top`; `@odata.nextLink` cursor pagination |
+| **Sage ERP** | Sage Group ERP products | Family of enterprise accounting/ERP products; platform supports Intacct (cloud accounting) and X3 (enterprise ERP) |
 | **HMAC-SHA256** | Hash-based Message Authentication Code | PII tokenisation algorithm (keyed; deterministic pseudonym) |
 | **SHA-256** | Secure Hash Algorithm 256-bit | Field schema fingerprinting; irreversible hash masking |
 | **Jaro-Winkler** | Jaro-Winkler string similarity | Name fuzzy-matching algorithm in entity resolution |

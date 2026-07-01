@@ -80,19 +80,29 @@ _logger = get_platform_logger(__name__)
 # Maps entity_id → canonical entity type used in analytics S3 paths and
 # resolution config lookups.  New entity IDs must be added here when onboarded.
 _ENTITY_ID_TO_TYPE: Final[dict[str, str]] = {
-    "salesforce-account":   "company",
-    "netsuite-customer":    "company",   # ready for NetSuite onboarding
-    "salesforce-contact":   "person",
-    "mysql-rds-contracts":  "contract",
+    "salesforce-account":    "company",
+    "netsuite-customer":     "company",      # ready for NetSuite onboarding
+    "sage-intacct-customer": "company",      # Sage Intacct AR customer
+    "sage-x3-customer":      "company",      # Sage X3 business partner (customer)
+    "salesforce-contact":    "person",
+    "mysql-rds-contracts":   "contract",
+    "sage-intacct-vendor":   "supplier",     # Sage Intacct AP vendor
+    "sage-x3-supplier":      "supplier",     # Sage X3 business partner (supplier)
+    "sage-intacct-arinvoice": "ar_invoice",  # Sage Intacct AR invoice
+    "sage-intacct-apbill":   "ap_bill",      # Sage Intacct AP bill
 }
 
 # Maps entity_type → canonical primary-key field name in curated records.
 # Used to construct the cross-source _record_id without ambiguity.
+# All company sources must produce 'account_id' in their curated field mapping.
 _ENTITY_TYPE_PK_FIELD: Final[dict[str, str]] = {
-    "company":  "account_id",   # Salesforce Account; NetSuite mapping must also
-                                #   produce account_id once field mapping is added
-    "person":   "contact_id",
-    "contract": "contract_id",
+    "company":    "account_id",   # Salesforce Account, NetSuite Customer, Sage Intacct Customer,
+                                  #   Sage X3 Customer — each map their native ID to account_id
+    "person":     "contact_id",
+    "contract":   "contract_id",
+    "supplier":   "vendor_id",    # Sage Intacct Vendor, Sage X3 Supplier
+    "ar_invoice": "invoice_id",   # Sage Intacct AR Invoice
+    "ap_bill":    "bill_id",       # Sage Intacct AP Bill
 }
 
 # Maps entity_type → ordered list of (source_id, entity_id) pairs that
@@ -102,13 +112,25 @@ _ENTITY_TYPE_PK_FIELD: Final[dict[str, str]] = {
 _ENTITY_TYPE_SOURCES: Final[dict[str, list[tuple[str, str]]]] = {
     "company": [
         ("salesforce", "salesforce-account"),
-        ("netsuite",   "netsuite-customer"),   # loaded only when curated data exists
+        ("netsuite",   "netsuite-customer"),     # loaded only when curated data exists
+        ("sage",       "sage-intacct-customer"), # loaded only when curated data exists
+        ("sage",       "sage-x3-customer"),      # loaded only when curated data exists
     ],
     "person": [
         ("salesforce", "salesforce-contact"),
     ],
     "contract": [
         ("mysql-rds", "mysql-rds-contracts"),
+    ],
+    "supplier": [
+        ("sage", "sage-intacct-vendor"),   # Intacct preferred for contact richness
+        ("sage", "sage-x3-supplier"),
+    ],
+    "ar_invoice": [
+        ("sage", "sage-intacct-arinvoice"),
+    ],
+    "ap_bill": [
+        ("sage", "sage-intacct-apbill"),
     ],
 }
 
