@@ -63,8 +63,6 @@ SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06
 | `dev-edl-s3-access-logs` | All stages (passive) | AWS S3 service (automatic) | Security & compliance audits | Receives S3 server access logs from every other data lake bucket. Never written to directly by pipeline code. Used for access auditing, cost attribution, and compliance. Retention: 30 days (dev). |
 | `dev-edl-terraform-state` | Infrastructure (deploy time only) | Terraform CLI, `make lambda-upload` | Terraform CLI, Lambda service at deploy | Dual-purpose: (1) Terraform remote state file (`environments/dev/terraform.tfstate`) with DynamoDB lock for single-writer safety. (2) Lambda artifact store — `lambda/extraction-pipeline.zip` uploaded here by `make lambda-upload` and pulled by Lambda on every `terraform apply`. Not accessed at pipeline runtime. |
 
-> **Legacy bucket — `dev-schema-snapshots`**: Created manually on 2026-06-26 before Terraform standardised the `dev-edl-*` naming convention. Contains early test snapshots only. The active bucket is `dev-edl-schema-snapshots`. This bucket is safe to archive and delete.
-
 ### S3 Key Patterns
 
 | Layer | Pattern |
@@ -99,8 +97,7 @@ All four Lambdas are deployed from the **same zip**: `s3://dev-edl-terraform-sta
 
 | State Machine | Purpose |
 |---|---|
-| `dev-data-pipeline` | Full end-to-end pipeline (extraction → analytics) |
-| `dev-extraction-pipeline` | Extraction stage only (used for manual triggers) |
+| `dev-extraction-pipeline` | Full end-to-end pipeline: extraction → transformation → entity resolution → analytics → serving store (optional). Single state machine for all four stages. |
 
 ### Glue Catalog
 

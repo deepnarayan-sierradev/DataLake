@@ -210,9 +210,6 @@ SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06
 </tr>
 </tbody>
 </table>
-<blockquote>
-<p><strong>Legacy bucket — <code>dev-schema-snapshots</code>:</strong> Created manually on 2026-06-26 before Terraform standardised the <code>dev-edl-*</code> naming convention. Contains early test snapshots only. The active bucket is <code>dev-edl-schema-snapshots</code>. This bucket is safe to archive and delete.</p>
-</blockquote>
 <h3 id="s3-key-patterns">S3 Key Patterns</h3>
 <table>
 <thead>
@@ -313,12 +310,8 @@ SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06
 </thead>
 <tbody>
 <tr>
-<td><code>dev-data-pipeline</code></td>
-<td>Full end-to-end pipeline (extraction → analytics)</td>
-</tr>
-<tr>
 <td><code>dev-extraction-pipeline</code></td>
-<td>Extraction stage only (used for manual triggers)</td>
+<td>Full end-to-end pipeline: extraction → transformation → entity resolution → analytics → serving store (optional). Single state machine for all four stages.</td>
 </tr>
 </tbody>
 </table>
