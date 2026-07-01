@@ -26,7 +26,7 @@ from schema_management.snapshot_repository.snapshot_repository import (
 )
 
 _REGION = "us-east-1"
-_BUCKET = "dev-schema-snapshots"
+_BUCKET = "dev-edl-schema-snapshots"
 
 
 def _make_snapshot(

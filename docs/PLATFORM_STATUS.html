@@ -159,36 +159,60 @@ SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06
 <thead>
 <tr>
 <th>Bucket</th>
+<th>Pipeline stage</th>
+<th>Written by</th>
+<th>Read by</th>
 <th>Purpose</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>dev-edl-raw-layer</code></td>
-<td>Immutable raw Parquet from extraction</td>
+<td>Stage A — Extraction</td>
+<td>Extraction Lambda</td>
+<td>Transformation Lambda</td>
+<td>Immutable raw Parquet files written once per extraction run. One Hive-partitioned prefix per entity per date. Never overwritten; watermark prevents re-extraction of unchanged data.</td>
 </tr>
 <tr>
 <td><code>dev-edl-curated-layer</code></td>
-<td>Field-mapped, quality-checked Parquet; also hosts field-mapping JSON</td>
+<td>Stage B — Transformation</td>
+<td>Transformation Lambda</td>
+<td>Entity Resolution Lambda, Athena</td>
+<td>Field-mapped, quality-checked Parquet (canonical column names). Also stores field-mapping JSON config files under <code>field-mappings/{source_id}/{entity_id}/</code>.</td>
 </tr>
 <tr>
 <td><code>dev-edl-analytics-layer</code></td>
-<td>Golden records + analytics-ready Parquet (Athena-queryable)</td>
+<td>Stages C &amp; D — Entity Resolution + Analytics</td>
+<td>Entity Resolution Lambda, Analytics Publisher Lambda</td>
+<td>Athena, downstream BI tools</td>
+<td>Golden (de-duplicated) records from entity resolution and consumption-optimised Parquet for analytics. Registered in Glue Catalog for Athena queries.</td>
 </tr>
 <tr>
 <td><code>dev-edl-schema-snapshots</code></td>
-<td>Schema snapshot files per entity per run</td>
+<td>Stage A — Extraction (post-extract)</td>
+<td>Extraction Lambda</td>
+<td>Drift Evaluation (same Lambda)</td>
+<td>JSON schema fingerprints captured after every extraction. The drift evaluator compares the new snapshot against <code>latest.json</code> to detect breaking changes (added/removed/type-changed columns). Path: <code>{source_id}/{entity_id}/{schema_hash}/YYYY-MM-DD.json</code> + <code>drift-report-YYYY-MM-DD.json</code>.</td>
 </tr>
 <tr>
 <td><code>dev-edl-s3-access-logs</code></td>
-<td>S3 server access logs</td>
+<td>All stages (passive)</td>
+<td>AWS S3 service (automatic)</td>
+<td>Security &amp; compliance audits</td>
+<td>Receives S3 server access logs from every other data lake bucket. Never written to directly by pipeline code. Used for access auditing, cost attribution, and compliance. Retention: 30 days (dev).</td>
 </tr>
 <tr>
 <td><code>dev-edl-terraform-state</code></td>
-<td>Terraform remote state + Lambda zip artifacts</td>
+<td>Infrastructure (deploy time only)</td>
+<td>Terraform CLI, <code>make lambda-upload</code></td>
+<td>Terraform CLI, Lambda service at deploy</td>
+<td>Dual-purpose: (1) Terraform remote state file (<code>environments/dev/terraform.tfstate</code>) with DynamoDB lock for single-writer safety. (2) Lambda artifact store — <code>lambda/extraction-pipeline.zip</code> uploaded here by <code>make lambda-upload</code> and pulled by Lambda on every <code>terraform apply</code>. Not accessed at pipeline runtime.</td>
 </tr>
 </tbody>
 </table>
+<blockquote>
+<p><strong>Legacy bucket — <code>dev-schema-snapshots</code>:</strong> Created manually on 2026-06-26 before Terraform standardised the <code>dev-edl-*</code> naming convention. Contains early test snapshots only. The active bucket is <code>dev-edl-schema-snapshots</code>. This bucket is safe to archive and delete.</p>
+</blockquote>
 <h3 id="s3-key-patterns">S3 Key Patterns</h3>
 <table>
 <thead>

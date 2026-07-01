@@ -120,6 +120,9 @@ def _build_records(environment: str) -> list[dict[str, object]]:
             "schedule_timezone": "UTC",
             "active": False,
         },
+        # ── Add new MySQL tables here — copy this block and adjust entity_id,
+        # ── connector_params["table_name"], schedule_cron, and load_type.
+        # ── After adding: make seed-entity-config && make seed-schedules
         {
             "source_id": "mysql-rds",
             "entity_id": "mysql-rds-contracts",

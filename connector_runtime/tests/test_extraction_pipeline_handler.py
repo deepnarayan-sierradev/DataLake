@@ -35,7 +35,7 @@ _ENTITY = "salesforce-account"
 _ENV = "dev"
 _REGION = "us-east-1"
 _RAW_BUCKET = "dev-raw-layer"
-_SNAPSHOT_BUCKET = "dev-schema-snapshots"
+_SNAPSHOT_BUCKET = "dev-edl-schema-snapshots"
 
 _VALID_EVENT: dict[str, object] = {
     "source_id": _SOURCE,

@@ -796,7 +796,7 @@ data "aws_iam_policy_document" "eventbridge_scheduler_permissions" {
     effect  = "Allow"
     actions = ["states:StartExecution"]
     resources = [
-      "arn:aws:states:${local.region}:${local.account_id}:stateMachine:${var.environment}-edl-*",
+      "arn:aws:states:${local.region}:${local.account_id}:stateMachine:${var.environment}-extraction-pipeline",
     ]
   }
 }

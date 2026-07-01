@@ -1,7 +1,7 @@
 .PHONY: install lint format typecheck test banned-names security-scan audit \
         iac-validate iac-scan iac-fmt-check iac-fmt \
         lambda-package lambda-upload lambda-deploy \
-        seed-entity-config clean help
+        seed-entity-config seed-schedules clean help
 
 # ─── Help ────────────────────────────────────────────────────────────────────
 help:
@@ -22,9 +22,11 @@ help:
 	@echo "  lambda-upload       Upload Lambda zip to S3 artifacts bucket"
 	@echo "  lambda-deploy       Package + upload + terraform apply (Lambda only)"
 	@echo ""
-	@echo "  seed-entity-config  Write a sample entity config record to DynamoDB (dev)"
+	@echo "  seed-entity-config  Write entity config records to DynamoDB (dev)"
+	@echo "  seed-schedules      Create/sync EventBridge Scheduler schedules from DynamoDB (dev)"
+	@echo "                      REQUIRED after every terraform apply — without it no cron triggers exist"
 	@echo ""
-	@echo "Required env vars for lambda-upload / seed-entity-config:"
+	@echo "Required env vars for lambda-upload / seed-entity-config / seed-schedules:"
 	@echo "  ARTIFACTS_BUCKET    S3 bucket for Lambda zip (e.g. dev-edl-terraform-state)"
 	@echo "  AWS_PROFILE         AWS CLI profile to use (or leave unset for default)"
 	@echo "  AWS_REGION          Default: us-east-1"
@@ -158,11 +160,21 @@ lambda-deploy: lambda-upload
 # ─── Entity Config Seeder ────────────────────────────────────────────────────
 
 seed-entity-config:
-	@echo "Writing sample entity config records to DynamoDB (dev)..."
+	@echo "Writing entity config records to DynamoDB (dev)..."
 	python scripts/seed_entity_config.py \
 		--environment dev \
 		--region $(AWS_REGION)
-	@echo "Seed complete. Run 'make test-pipeline-manual' to trigger an extraction."
+	@echo "Entity config seed complete. Run 'make seed-schedules' to sync EventBridge schedules."
+
+# Sync EventBridge Scheduler schedules from DynamoDB entity config.
+# Must be run after every terraform apply (creates the schedule group)
+# and after seed-entity-config (populates schedule_cron / schedule_enabled fields).
+# Without this step, no cron triggers exist and the pipeline never runs automatically.
+seed-schedules:
+	@echo "Syncing EventBridge Scheduler schedules from DynamoDB (dev)..."
+	python scripts/seed_schedules.py \
+		--environment dev
+	@echo "Schedule sync complete."
 
 # ─── Clean ───────────────────────────────────────────────────────────────────
 clean:

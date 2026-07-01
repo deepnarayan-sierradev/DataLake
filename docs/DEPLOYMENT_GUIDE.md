@@ -639,46 +639,22 @@ Expected output:
 
 ### Step 4.4 — Create extraction schedules per entity
 
-Each entity needs an EventBridge schedule pointing at the state machine. Schedules are **data** — managed by `ExtractionScheduleClient` at runtime, not by Terraform:
+Each entity needs an EventBridge schedule pointing at the state machine. Schedules are **data** — managed by `ExtractionScheduleClient` at runtime, not by Terraform.
+
+`seed_schedules.py` reads every active entity from DynamoDB that has `schedule_cron` set and `schedule_enabled=True`, then creates or updates the corresponding EventBridge Scheduler schedules in one pass. **This must be run after every `terraform apply` and after any `seed_entity_config.py` run.**
 
 ```bash
-python scripts/trigger_extraction.py \
-  --create-schedule \
-  --source-id salesforce \
-  --entity-id salesforce-account \
-  --schedule "cron(0 2 * * ? *)" \
-  --param object_name=Account \
-  --environment dev \
-  --region us-east-1
+# Preview what will be created without making AWS API calls:
+python scripts/seed_schedules.py --environment dev --dry-run
 
-# Repeat for each entity
-python scripts/trigger_extraction.py \
-  --create-schedule \
-  --source-id salesforce \
-  --entity-id salesforce-contact \
-  --schedule "cron(0 2 * * ? *)" \
-  --param object_name=Contact \
-  --environment dev \
-  --region us-east-1
+# Create / update all schedules:
+python scripts/seed_schedules.py --environment dev
 
-python scripts/trigger_extraction.py \
-  --create-schedule \
-  --source-id netsuite \
-  --entity-id netsuite-customer \
-  --schedule "cron(0 3 * * ? *)" \
-  --param record_type=customer \
-  --environment dev \
-  --region us-east-1
-
-python scripts/trigger_extraction.py \
-  --create-schedule \
-  --source-id mysql-rds \
-  --entity-id mysql-rds-orders \
-  --schedule "cron(0 4 * * ? *)" \
-  --param table_name=orders \
-  --environment dev \
-  --region us-east-1
+# Or via Makefile:
+make seed-schedules
 ```
+
+> **Note:** Terraform only creates the schedule *group* (`dev-extraction-schedules`). The individual cron triggers inside the group are created entirely by `seed_schedules.py`. If you skip this step, the group is empty and the pipeline never runs automatically.
 
 ### Step 4.5 — Test the full pipeline with a manual trigger
 
@@ -844,21 +820,14 @@ To add a new entity, edit `scripts/seed_entity_config.py` and add a record to th
 
 ### Step 6.3 — Create EventBridge extraction schedules
 
-```bash
-python scripts/trigger_extraction.py \
-  --create-schedule \
-  --source-id salesforce \
-  --entity-id salesforce-account \
-  --schedule "cron(0 2 * * ? *)" \
-  --environment dev \
-  --region us-east-1
-```
-
-Repeat for each entity. To see all available options:
+Run `seed_schedules.py` to create all schedules in one pass (reads from DynamoDB — no per-entity CLI calls needed):
 
 ```bash
-python scripts/trigger_extraction.py --help
+python scripts/seed_schedules.py --environment dev
+# or: make seed-schedules
 ```
+
+To add a schedule for a new entity: set `schedule_cron` and `schedule_enabled=True` in `seed_entity_config.py`, re-run `seed_entity_config.py`, then re-run `seed_schedules.py`.
 
 ---
 
@@ -1210,17 +1179,17 @@ Prefix: `field-mappings/{source_id}/{entity_id}/`
 
 ### F. EventBridge Scheduler — Extraction schedules
 
-Schedule group: `{environment}-edl-extraction-schedules` (created by Terraform)
+Schedule group: `{environment}-extraction-schedules` (created by Terraform)
 
 | Setting | How to set | Example |
 |---|---|---|
-| Schedule expression | `python scripts/trigger_extraction.py --create-schedule` | `"cron(0 2 * * ? *)"` |
-| Time zone | UTC (all schedules are UTC) | — |
-| Target | Step Functions state machine ARN (set by Terraform automatically) | — |
-| Input payload | `{"source_id": "...", "entity_id": "..."}` | Set by the schedule client |
+| Schedule expression | Set `schedule_cron` in `seed_entity_config.py`, then run `seed_schedules.py` | `"cron(0 2 * * ? *)"` |
+| Time zone | Set `schedule_timezone` in entity config (default: `UTC`) | — |
+| Target | Step Functions state machine ARN (wired automatically by `seed_schedules.py`) | — |
+| Input payload | `{"source_id": "...", "entity_id": "...", "connector_params": {...}}` | Built from entity config |
 
-**To update a schedule:** `python scripts/trigger_extraction.py --update-schedule ...`  
-**To disable a schedule:** `python scripts/trigger_extraction.py --disable-schedule ...`  
+**To update a schedule:** Edit `schedule_cron` in `seed_entity_config.py`, re-run `seed_entity_config.py`, then re-run `seed_schedules.py`.  
+**To disable a schedule:** Set `schedule_enabled=False` in `seed_entity_config.py`, re-run both scripts.  
 **No Terraform change needed** for schedule changes.
 
 ### G. Lambda environment variables
@@ -1416,10 +1385,8 @@ python scripts/seed_entity_resolution_configs.py --environment staging --region 
 ### Step 11.10 — Create extraction schedules for staging
 
 ```bash
-for entity in salesforce-account salesforce-contact netsuite-customer mysql-rds-orders; do
-  source_id=$(echo ${entity} | cut -d'-' -f1,2 | sed 's/-[^-]*$//')
-  # Repeat trigger_extraction.py --create-schedule calls from Phase 4, Step 4.4 with --environment staging
-done
+python scripts/seed_schedules.py --environment staging
+# or: make seed-schedules ENVIRONMENT=staging
 ```
 
 ### Step 11.11 — Production promotion checklist
