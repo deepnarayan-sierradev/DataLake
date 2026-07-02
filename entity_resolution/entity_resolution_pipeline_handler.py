@@ -59,6 +59,7 @@ from typing import Any, Final
 
 import boto3
 import pyarrow.parquet as pq
+import structlog
 
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from entity_resolution.canonical_record_publisher.canonical_record_publisher import (
@@ -69,70 +70,15 @@ from entity_resolution.resolution_config.resolution_config_registry import (
     ResolutionConfigNotFoundError,
     ResolutionConfigRegistry,
 )
+from entity_resolution.entity_type_registry import (
+    ENTITY_ID_TO_TYPE as _ENTITY_ID_TO_TYPE,
+    ENTITY_TYPE_PK_FIELD as _ENTITY_TYPE_PK_FIELD,
+    ENTITY_TYPE_SOURCES as _ENTITY_TYPE_SOURCES,
+)
 from observability.structured_logger import get_platform_logger
+from observability.lambda_utils import require_env, check_lambda_timeout
 
 _logger = get_platform_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# Entity type registry
-# ---------------------------------------------------------------------------
-
-# Maps entity_id → canonical entity type used in analytics S3 paths and
-# resolution config lookups.  New entity IDs must be added here when onboarded.
-_ENTITY_ID_TO_TYPE: Final[dict[str, str]] = {
-    "salesforce-account":    "company",
-    "netsuite-customer":     "company",      # ready for NetSuite onboarding
-    "sage-intacct-customer": "company",      # Sage Intacct AR customer
-    "sage-x3-customer":      "company",      # Sage X3 business partner (customer)
-    "salesforce-contact":    "person",
-    "mysql-rds-contracts":   "contract",
-    "sage-intacct-vendor":   "supplier",     # Sage Intacct AP vendor
-    "sage-x3-supplier":      "supplier",     # Sage X3 business partner (supplier)
-    "sage-intacct-arinvoice": "ar_invoice",  # Sage Intacct AR invoice
-    "sage-intacct-apbill":   "ap_bill",      # Sage Intacct AP bill
-}
-
-# Maps entity_type → canonical primary-key field name in curated records.
-# Used to construct the cross-source _record_id without ambiguity.
-# All company sources must produce 'account_id' in their curated field mapping.
-_ENTITY_TYPE_PK_FIELD: Final[dict[str, str]] = {
-    "company":    "account_id",   # Salesforce Account, NetSuite Customer, Sage Intacct Customer,
-                                  #   Sage X3 Customer — each map their native ID to account_id
-    "person":     "contact_id",
-    "contract":   "contract_id",
-    "supplier":   "vendor_id",    # Sage Intacct Vendor, Sage X3 Supplier
-    "ar_invoice": "invoice_id",   # Sage Intacct AR Invoice
-    "ap_bill":    "bill_id",       # Sage Intacct AP Bill
-}
-
-# Maps entity_type → ordered list of (source_id, entity_id) pairs that
-# contribute curated records to that entity type.
-# Order determines which source's curated prefix is preferred for "other sources"
-# S3 scanning — does not affect survivorship (that is policy-controlled).
-_ENTITY_TYPE_SOURCES: Final[dict[str, list[tuple[str, str]]]] = {
-    "company": [
-        ("salesforce", "salesforce-account"),
-        ("netsuite",   "netsuite-customer"),     # loaded only when curated data exists
-        ("sage",       "sage-intacct-customer"), # loaded only when curated data exists
-        ("sage",       "sage-x3-customer"),      # loaded only when curated data exists
-    ],
-    "person": [
-        ("salesforce", "salesforce-contact"),
-    ],
-    "contract": [
-        ("mysql-rds", "mysql-rds-contracts"),
-    ],
-    "supplier": [
-        ("sage", "sage-intacct-vendor"),   # Intacct preferred for contact richness
-        ("sage", "sage-x3-supplier"),
-    ],
-    "ar_invoice": [
-        ("sage", "sage-intacct-arinvoice"),
-    ],
-    "ap_bill": [
-        ("sage", "sage-intacct-apbill"),
-    ],
-}
 
 # ---------------------------------------------------------------------------
 # Validation constants (OWASP A03)
@@ -175,16 +121,27 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     _validate_event(event)
 
+    # Abort early if insufficient Lambda time remains.
+    # Lambda timeout is 900 s; 60 s margin is sufficient for this stage.
+    check_lambda_timeout(context, min_remaining_ms=60_000)
+
     source_id: str = event["source_id"]
     entity_id: str = event["entity_id"]
     environment: str = event["environment"]
     run_id: str = event["run_id"]
     curated_s3_prefix: str = event["curated_s3_prefix"]
 
+    # Bind run context to every log line emitted in this Lambda invocation.
+    structlog.contextvars.bind_contextvars(
+        run_id=run_id,
+        source_id=source_id,
+        entity_id=entity_id,
+    )
+
     # ── Env vars ─────────────────────────────────────────────────────────────
-    region_name = _require_env("AWS_REGION")
-    curated_s3_bucket = _require_env("CURATED_S3_BUCKET")
-    analytics_s3_bucket = _require_env("ANALYTICS_S3_BUCKET")
+    region_name = require_env("AWS_REGION")
+    curated_s3_bucket = require_env("CURATED_S3_BUCKET")
+    analytics_s3_bucket = require_env("ANALYTICS_S3_BUCKET")
     governance_s3_bucket: str | None = os.environ.get("GOVERNANCE_S3_BUCKET") or None
 
     # ── Resolve entity type ───────────────────────────────────────────────────
@@ -192,7 +149,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if entity_type is None:
         raise ValueError(
             f"No entity type mapping found for entity_id={entity_id!r}. "
-            "Add it to _ENTITY_ID_TO_TYPE in entity_resolution_pipeline_handler.py."
+            "Add it to ENTITY_ID_TO_TYPE in entity_resolution/entity_type_registry.py."
         )
     pk_field = _ENTITY_TYPE_PK_FIELD[entity_type]
 
@@ -403,17 +360,6 @@ def _load_curated_records(
             del table  # release memory before next file
 
     return records
-
-
-def _require_env(name: str) -> str:
-    """Return environment variable value or raise RuntimeError if absent."""
-    value = os.environ.get(name, "").strip()
-    if not value:
-        raise RuntimeError(
-            f"Required environment variable {name!r} is not set. "
-            "Configure it in the Lambda function's environment variables."
-        )
-    return value
 
 
 def _validate_event(event: dict[str, Any]) -> None:

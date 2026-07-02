@@ -59,7 +59,7 @@ class WatermarkRecord(BaseModel):
     watermark, pass the record to WatermarkRepository.advance_watermark().
     """
 
-    model_config = {"frozen": True, "extra": "forbid"}
+    model_config = {"frozen": True, "extra": "ignore"}
 
     source_id: str
     entity_id: str

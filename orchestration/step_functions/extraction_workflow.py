@@ -41,6 +41,7 @@ Security (OWASP A03, A07, A09):
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -164,15 +165,11 @@ class ExtractionWorkflowResult:
 class _StageTimer:
     """Lightweight monotonic timer for per-stage duration_ms tracking."""
 
-    import time as _time_module
-
     def __init__(self) -> None:
-        import time
         self._start = time.monotonic()
 
     def elapsed_ms(self) -> int:
         """Return elapsed milliseconds since construction (integer)."""
-        import time
         return int((time.monotonic() - self._start) * 1_000)
 
 

@@ -202,7 +202,7 @@ class SalesforceAuthClient:
             code = exc.response["Error"]["Code"]
             raise SalesforceCredentialError(
                 f"Failed to retrieve Salesforce credentials from Secrets Manager "
-                f"(secret={secret_id!r}, code={code!r})."
+                f"(error_code={code!r})."
             ) from None
 
         raw = response.get("SecretString") or ""
@@ -210,7 +210,7 @@ class SalesforceAuthClient:
             payload: dict[str, str] = json.loads(raw)
         except (json.JSONDecodeError, ValueError) as exc:
             raise SalesforceCredentialError(
-                f"Salesforce credentials secret is not valid JSON (secret={secret_id!r})."
+                "Salesforce credentials secret is not valid JSON."
             ) from exc
 
         missing = [k for k in ("instance_url", "client_id", "client_secret") if k not in payload]

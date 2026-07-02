@@ -102,9 +102,6 @@ class PatternCheck:
     pattern: str
     kind: QualityCheckKind = field(default=QualityCheckKind.PATTERN_CHECK, init=False)
 
-    def compiled_pattern(self) -> re.Pattern[str]:
-        return re.compile(self.pattern)
-
 
 @dataclass(frozen=True)
 class AllowedValuesCheck:

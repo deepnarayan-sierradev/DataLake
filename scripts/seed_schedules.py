@@ -150,6 +150,7 @@ def main() -> None:
         schedule_group_name=cfg["schedule_group_name"],
         target_arn=cfg["state_machine_arn"],
         execution_role_arn=cfg["execution_role_arn"],
+        environment=env,
         region_name=cfg["region"],
     )
 

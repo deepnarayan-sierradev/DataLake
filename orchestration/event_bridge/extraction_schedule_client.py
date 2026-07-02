@@ -71,6 +71,9 @@ class ExtractionScheduleClient:
       target_arn           Step Functions state machine ARN to invoke.
       execution_role_arn   IAM role ARN that EventBridge assumes to start SFN
                            executions.  Must have sfn:StartExecution permission.
+      environment          Deployment environment (dev / staging / prod).  Passed
+                           as the 'environment' field in the Step Functions input
+                           payload — required by the extraction Lambda handler.
       region_name          AWS region.
     """
 
@@ -79,6 +82,7 @@ class ExtractionScheduleClient:
         schedule_group_name: str,
         target_arn: str,
         execution_role_arn: str,
+        environment: str,
         region_name: str,
     ) -> None:
         if not schedule_group_name:
@@ -87,9 +91,12 @@ class ExtractionScheduleClient:
             raise ValueError("target_arn must not be empty.")
         if not execution_role_arn:
             raise ValueError("execution_role_arn must not be empty.")
+        if not environment:
+            raise ValueError("environment must not be empty.")
         self._group_name = schedule_group_name
         self._target_arn = target_arn
         self._execution_role_arn = execution_role_arn
+        self._environment = environment
         self._scheduler = boto3.client("scheduler", region_name=region_name)
 
     # ── Public API ──────────────────────────────────────────────────────────
@@ -139,6 +146,7 @@ class ExtractionScheduleClient:
             {
                 "source_id": source_id,
                 "entity_id": entity_id,
+                "environment": self._environment,
                 "connector_params": connector_params,
                 "is_replay": False,
             },

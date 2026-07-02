@@ -31,7 +31,6 @@ Security (OWASP A03, A07, A09):
 from __future__ import annotations
 
 import dataclasses
-import os
 from typing import Any, Final
 
 # Import adapter modules so their @connector_registry.register() decorators
@@ -47,6 +46,7 @@ from connector_runtime.registry import connector_registry
 from connector_runtime.run_lifecycle.run_lifecycle import RunCoordinator
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from observability.structured_logger import get_platform_logger
+from observability.lambda_utils import require_env, check_lambda_timeout
 from orchestration.step_functions.extraction_retry_policy import ExtractionRetryPolicy
 from orchestration.step_functions.extraction_workflow import ExtractionWorkflow
 from schema_management.drift_evaluation.drift_evaluator import SchemaDriftEvaluator
@@ -93,6 +93,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     _validate_event(event)
 
+    # Abort early if insufficient Lambda time remains to run the full pipeline.
+    # Lambda timeout is 900 s; 120 s margin prevents starting a run that cannot
+    # complete, which would be killed without a DLQ entry or audit record.
+    check_lambda_timeout(context, min_remaining_ms=120_000)
+
     source_id: str = event["source_id"]
     entity_id: str = event["entity_id"]
     environment: str = event["environment"]
@@ -100,9 +105,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     is_replay: bool = bool(event.get("is_replay", False))
     replay_of_run_id: str | None = event.get("replay_of_run_id")
 
-    region_name = _require_env("AWS_REGION")
-    raw_s3_bucket = _require_env("RAW_S3_BUCKET")
-    snapshot_s3_bucket = _require_env("SCHEMA_SNAPSHOT_S3_BUCKET")
+    region_name = require_env("AWS_REGION")
+    raw_s3_bucket = require_env("RAW_S3_BUCKET")
+    snapshot_s3_bucket = require_env("SCHEMA_SNAPSHOT_S3_BUCKET")
 
     _logger.info(
         "extraction_pipeline_handler_invoked",
@@ -212,19 +217,3 @@ def _validate_event(event: dict[str, Any]) -> None:
         )
     if not isinstance(event.get("connector_params", {}), dict):
         raise ValueError("connector_params must be a JSON object (dict).")
-
-
-def _require_env(name: str) -> str:
-    """
-    Return the value of a required environment variable.
-
-    Raises:
-        RuntimeError: When the variable is absent or empty.
-    """
-    value = os.environ.get(name, "")
-    if not value:
-        raise RuntimeError(
-            f"Required Lambda environment variable '{name}' is not set. "
-            "Ensure the extraction pipeline Lambda is deployed with this variable configured."
-        )
-    return value

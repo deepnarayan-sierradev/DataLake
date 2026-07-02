@@ -165,7 +165,19 @@ class DataCatalogRegistrationClient:
             return "created"
         except self._glue.exceptions.AlreadyExistsException:
             # Table exists (either pre-existing or created by a concurrent invocation).
-            self._glue.update_table(DatabaseName=spec.database_name, TableInput=table_input)
+            try:
+                self._glue.update_table(DatabaseName=spec.database_name, TableInput=table_input)
+            except Exception as exc:
+                _logger.error(
+                    "glue_table_update_failed",
+                    database=spec.database_name,
+                    table=table_input["Name"],
+                    error=type(exc).__name__,
+                )
+                raise CatalogRegistrationError(
+                    f"Failed to update Glue table "
+                    f"{spec.database_name!r}.{table_input['Name']!r}: {type(exc).__name__}"
+                ) from exc
             return "updated"
 
     @staticmethod

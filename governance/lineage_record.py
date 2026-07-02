@@ -103,7 +103,7 @@ class LineageEmitter:
             )
         except Exception as exc:
             raise LineageEmissionError(
-                f"Failed to write lineage record for run_id={record.run_id!r}: {exc}"
+                f"Failed to write lineage record for run_id={record.run_id!r}: {type(exc).__name__}"
             ) from exc
 
         _logger.info(

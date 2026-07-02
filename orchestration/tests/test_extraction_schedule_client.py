@@ -36,6 +36,7 @@ _GROUP = "dev-extraction-schedules"
 _TARGET_ARN = "arn:aws:states:us-east-1:123456789012:stateMachine:extraction-pipeline"
 _ROLE_ARN = "arn:aws:iam::123456789012:role/dev-eventbridge-scheduler-role"
 _REGION = "us-east-1"
+_ENV = "dev"
 _SOURCE = "mysql-rds"
 _ENTITY = "mysql-rds-orders"
 _CRON = "cron(0 1 * * ? *)"
@@ -62,6 +63,7 @@ def _make_client() -> tuple[ExtractionScheduleClient, MagicMock]:
             schedule_group_name=_GROUP,
             target_arn=_TARGET_ARN,
             execution_role_arn=_ROLE_ARN,
+            environment=_ENV,
             region_name=_REGION,
         )
     return client, mock_scheduler
@@ -117,6 +119,17 @@ class TestCreateOrUpdateSchedule:
         assert target_input["source_id"] == _SOURCE
         assert target_input["entity_id"] == _ENTITY
         assert target_input["is_replay"] is False
+
+    def test_environment_in_sfn_input(self) -> None:
+        client, mock_scheduler = _make_client()
+        mock_scheduler.update_schedule.side_effect = _resource_not_found_error()
+        mock_scheduler.create_schedule.return_value = {"ScheduleArn": _SCHEDULE_ARN}
+
+        client.create_or_update_schedule(_SOURCE, _ENTITY, _CRON, _CONNECTOR_PARAMS)
+
+        call_kwargs = mock_scheduler.create_schedule.call_args[1]
+        target_input = json.loads(call_kwargs["Target"]["Input"])
+        assert target_input["environment"] == _ENV
 
     def test_cron_expression_passed_to_api(self) -> None:
         client, mock_scheduler = _make_client()
@@ -249,6 +262,7 @@ class TestConstructorValidation:
                 schedule_group_name="",
                 target_arn=_TARGET_ARN,
                 execution_role_arn=_ROLE_ARN,
+                environment=_ENV,
                 region_name=_REGION,
             )
 
@@ -258,6 +272,7 @@ class TestConstructorValidation:
                 schedule_group_name=_GROUP,
                 target_arn="",
                 execution_role_arn=_ROLE_ARN,
+                environment=_ENV,
                 region_name=_REGION,
             )
 
@@ -267,5 +282,16 @@ class TestConstructorValidation:
                 schedule_group_name=_GROUP,
                 target_arn=_TARGET_ARN,
                 execution_role_arn="",
+                environment=_ENV,
+                region_name=_REGION,
+            )
+
+    def test_empty_environment_raises(self) -> None:
+        with pytest.raises(ValueError, match="environment"):
+            ExtractionScheduleClient(
+                schedule_group_name=_GROUP,
+                target_arn=_TARGET_ARN,
+                execution_role_arn=_ROLE_ARN,
+                environment="",
                 region_name=_REGION,
             )

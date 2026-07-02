@@ -28,6 +28,7 @@ from enum import StrEnum
 from typing import Any, Final
 
 import boto3
+from botocore.exceptions import ClientError
 
 from observability.structured_logger import get_platform_logger
 
@@ -242,7 +243,15 @@ class FieldMappingRegistryClient:
             response = self._s3.get_object(Bucket=self._s3_bucket, Key=pointer_key)
             pointer: dict[str, str] = json.loads(response["Body"].read().decode("utf-8"))
             return pointer["mapping_version"]
-        except Exception as exc:
+        except self._s3.exceptions.NoSuchKey:
+            raise MappingRuleSetNotFoundError(source_id, entity_id, "latest") from None
+        except ClientError as exc:
+            code = exc.response["Error"]["Code"]
+            if code in ("NoSuchKey", "404"):
+                raise MappingRuleSetNotFoundError(source_id, entity_id, "latest") from exc
+            raise  # access denied, throttling, network errors — propagate, do not hide
+        except (json.JSONDecodeError, KeyError) as exc:
+            # Malformed or incomplete pointer file — treat as not found.
             raise MappingRuleSetNotFoundError(source_id, entity_id, "latest") from exc
 
     def publish_rule_set(self, rule_set: FieldMappingRuleSet) -> str:

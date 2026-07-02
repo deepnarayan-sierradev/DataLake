@@ -166,10 +166,12 @@ class MySqlRdsRawLayerWriter:
                 "Cannot write empty record batch — at least one record is required."
             )
 
+        seen: set[str] = set()
         all_keys: list[str] = []
         for record in records:
             for key in record.payload:
-                if key not in all_keys:
+                if key not in seen:
+                    seen.add(key)
                     all_keys.append(key)
 
         columns: dict[str, list[str | None]] = {key: [] for key in all_keys}

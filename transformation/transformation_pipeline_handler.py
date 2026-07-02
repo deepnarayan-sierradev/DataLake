@@ -50,6 +50,7 @@ from typing import Any, Final
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
+from observability.lambda_utils import require_env, check_lambda_timeout
 from transformation.curated_layer_writer import CuratedLayerWriter
 from transformation.field_mapping.field_mapping_registry import FieldMappingRegistryClient
 from transformation.quality_evaluation.quality_policy_evaluator import QualityPolicyEvaluator
@@ -91,6 +92,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     _validate_event(event)
 
+    # Abort early if insufficient Lambda time remains to run the full pipeline.
+    # Lambda timeout is 900 s; 60 s margin prevents a wasted invocation.
+    check_lambda_timeout(context, min_remaining_ms=60_000)
+
     source_id: str = event["source_id"]
     entity_id: str = event["entity_id"]
     environment: str = event["environment"]
@@ -105,10 +110,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
 
     # ── Env vars ─────────────────────────────────────────────────────────────
-    region_name = _require_env("AWS_REGION")
-    raw_s3_bucket = _require_env("RAW_S3_BUCKET")
-    curated_s3_bucket = _require_env("CURATED_S3_BUCKET")
-    field_mapping_s3_bucket = _require_env("FIELD_MAPPING_S3_BUCKET")
+    region_name = require_env("AWS_REGION")
+    raw_s3_bucket = require_env("RAW_S3_BUCKET")
+    curated_s3_bucket = require_env("CURATED_S3_BUCKET")
+    field_mapping_s3_bucket = require_env("FIELD_MAPPING_S3_BUCKET")
 
     # Optional governance / catalog wiring — disabled when not configured.
     governance_s3_bucket: str | None = os.environ.get("GOVERNANCE_S3_BUCKET") or None
@@ -178,7 +183,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     )
 
     # ── Execute pipeline ──────────────────────────────────────────────────────
-    result = pipeline.execute(ctx)
+    try:
+        result = pipeline.execute(ctx)
+    finally:
+        # Flush buffered CloudWatch metrics regardless of success or failure.
+        # flush() is designed to never raise — it swallows ClientError internally.
+        metrics_emitter.flush()
 
     _logger.info(
         "transformation_pipeline_handler_completed",
@@ -235,22 +245,6 @@ def _validate_event(event: dict[str, Any]) -> None:
             f"environment={environment!r} is not a known deployment environment. "
             f"Expected one of {sorted(_KNOWN_ENVIRONMENTS)}."
         )
-
-
-def _require_env(name: str) -> str:
-    """
-    Return the value of a required Lambda environment variable.
-
-    Raises:
-        RuntimeError: When the variable is absent or empty.
-    """
-    value = os.environ.get(name, "")
-    if not value:
-        raise RuntimeError(
-            f"Required Lambda environment variable '{name}' is not set. "
-            "Ensure the transformation pipeline Lambda is deployed with this variable configured."
-        )
-    return value
 
 
 def _source_id_to_domain(source_id: str) -> str:

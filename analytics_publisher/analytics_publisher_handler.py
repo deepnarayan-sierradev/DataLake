@@ -53,6 +53,7 @@ from typing import Any, Final
 import boto3
 import pyarrow as pa
 import pyarrow.parquet as pq
+import structlog
 
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from governance.data_catalog_registration import (
@@ -60,20 +61,11 @@ from governance.data_catalog_registration import (
     DataCatalogRegistrationClient,
     DataLayer,
 )
+from entity_resolution.entity_type_registry import ENTITY_ID_TO_TYPE as _ENTITY_ID_TO_TYPE
 from observability.structured_logger import get_platform_logger
+from observability.lambda_utils import require_env, check_lambda_timeout
 
 _logger = get_platform_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# Entity type registry — mirrors entity_resolution_pipeline_handler.py
-# ---------------------------------------------------------------------------
-
-_ENTITY_ID_TO_TYPE: Final[dict[str, str]] = {
-    "salesforce-account":  "company",
-    "netsuite-customer":   "company",
-    "salesforce-contact":  "person",
-    "mysql-rds-contracts": "contract",
-}
 
 # ---------------------------------------------------------------------------
 # Fields removed from golden records before writing the BI analytics layer.
@@ -143,16 +135,27 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     _validate_event(event)
 
+    # Abort early if insufficient Lambda time remains.
+    # Lambda timeout is 300 s; 60 s margin prevents a wasted invocation.
+    check_lambda_timeout(context, min_remaining_ms=60_000)
+
     source_id: str = event["source_id"]
     entity_id: str = event["entity_id"]
     environment: str = event["environment"]
     run_id: str = event["run_id"]
     canonical_prefix: str = event["canonical_prefix"]
 
+    # Bind run context to every log line emitted in this Lambda invocation.
+    structlog.contextvars.bind_contextvars(
+        run_id=run_id,
+        source_id=source_id,
+        entity_id=entity_id,
+    )
+
     # ── Env vars ─────────────────────────────────────────────────────────────
-    region_name = _require_env("AWS_REGION")
-    analytics_s3_bucket = _require_env("ANALYTICS_S3_BUCKET")
-    glue_catalog_database = _require_env("GLUE_CATALOG_DATABASE")
+    region_name = require_env("AWS_REGION")
+    analytics_s3_bucket = require_env("ANALYTICS_S3_BUCKET")
+    glue_catalog_database = require_env("GLUE_CATALOG_DATABASE")
     governance_s3_bucket: str | None = os.environ.get("GOVERNANCE_S3_BUCKET") or None
 
     # ── Resolve entity type ───────────────────────────────────────────────────
@@ -160,7 +163,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if entity_type is None:
         raise ValueError(
             f"No entity type mapping found for entity_id={entity_id!r}. "
-            "Add it to _ENTITY_ID_TO_TYPE in analytics_publisher_handler.py."
+            "Add it to ENTITY_ID_TO_TYPE in entity_resolution/entity_type_registry.py."
         )
 
     analytics_date = datetime.now(UTC).date()
@@ -371,17 +374,6 @@ def _arrow_type_to_glue(arrow_type: pa.DataType) -> str:
     if type_str.startswith("timestamp"):
         return "timestamp"
     return _ARROW_TO_GLUE_TYPE.get(type_str, "string")
-
-
-def _require_env(name: str) -> str:
-    """Return environment variable value or raise RuntimeError if absent."""
-    value = os.environ.get(name, "").strip()
-    if not value:
-        raise RuntimeError(
-            f"Required environment variable {name!r} is not set. "
-            "Configure it in the Lambda function's environment variables."
-        )
-    return value
 
 
 def _validate_event(event: dict[str, Any]) -> None:
