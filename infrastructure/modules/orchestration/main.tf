@@ -238,7 +238,7 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
         Next = "CheckPublicationBlocked"
       }
 
-      # Guard: blocking quality violation stops entity resolution and downstream.
+      # Guard: blocking quality violation OR zero records stops entity resolution.
       CheckPublicationBlocked = {
         Type = "Choice"
         Choices = [
@@ -246,6 +246,11 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
             Variable      = "$.transformation.is_publication_blocked"
             BooleanEquals = true
             Next          = "TransformationCompletePublicationBlocked"
+          },
+          {
+            Variable = "$.transformation.curated_s3_prefix"
+            IsNull   = true
+            Next     = "TransformationCompleteNoRecords"
           }
         ]
         Default = "RunEntityResolution"
@@ -253,6 +258,11 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
 
       # Terminal: transformation succeeded but quality gate blocked publication.
       TransformationCompletePublicationBlocked = {
+        Type = "Succeed"
+      }
+
+      # Terminal: extraction returned 0 records — nothing to transform or resolve.
+      TransformationCompleteNoRecords = {
         Type = "Succeed"
       }
 

@@ -716,9 +716,8 @@ data "aws_iam_policy_document" "orchestration_sfn_permissions" {
     resources = [
       "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-extraction-pipeline",
       "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-transformation-pipeline",
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-entity-resolution",
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-analytics-publisher",
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-serving-store-loader",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-entity-resolution-pipeline",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-analytics-layer-publisher",
     ]
   }
 

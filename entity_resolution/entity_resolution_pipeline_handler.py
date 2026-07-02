@@ -178,6 +178,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if contrib_source_id == source_id and contrib_entity_id == entity_id:
             # Current run — load from the exact prefix passed in by Step Functions.
             prefix = curated_s3_prefix
+            if prefix is None:
+                # Transformation wrote no records (empty extract) — nothing to load.
+                _logger.info(
+                    "entity_resolution_source_skipped_no_records",
+                    contrib_source_id=contrib_source_id,
+                    contrib_entity_id=contrib_entity_id,
+                )
+                continue
         else:
             # Other source — find the latest curated partition in the bucket.
             prefix = _find_latest_curated_prefix(
