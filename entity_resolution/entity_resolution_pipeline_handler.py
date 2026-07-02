@@ -52,13 +52,11 @@ Security (OWASP A03, A07, A09):
 
 from __future__ import annotations
 
-import io
 import os
 import re
 from typing import Any, Final
 
 import boto3
-import pyarrow.parquet as pq
 import structlog
 
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
@@ -77,6 +75,12 @@ from entity_resolution.entity_type_registry import (
 )
 from observability.structured_logger import get_platform_logger
 from observability.lambda_utils import require_env, check_lambda_timeout
+from transformation.curated_utils import (
+    find_latest_curated_prefix,
+    load_curated_records,
+    SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN,
+    source_id_to_domain as _source_id_to_domain,
+)
 
 _logger = get_platform_logger(__name__)
 
@@ -188,7 +192,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 continue
         else:
             # Other source — find the latest curated partition in the bucket.
-            prefix = _find_latest_curated_prefix(
+            prefix = find_latest_curated_prefix(
                 s3, curated_s3_bucket, contrib_domain, contrib_entity_id
             )
             if prefix is None:
@@ -199,7 +203,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 )
                 continue
 
-        records = _load_curated_records(s3, curated_s3_bucket, prefix)
+        records = load_curated_records(s3, curated_s3_bucket, prefix)
         _logger.info(
             "entity_resolution_source_loaded",
             contrib_source_id=contrib_source_id,
@@ -281,93 +285,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _source_id_to_domain(source_id: str) -> str:
-    """Convert source_id to S3/Glue-safe domain string.
-
-    "mysql-rds" → "mysql_rds", "salesforce" → "salesforce", etc.
-    Mirrors the same function in transformation_pipeline_handler.py.
-    """
-    return source_id.replace("-", "_")
-
-
-def _find_latest_curated_prefix(
-    s3: Any, bucket: str, domain: str, entity_id: str
-) -> str | None:
-    """
-    Scan the curated bucket for the most recent partition for (domain, entity_id).
-
-    Curated path structure:
-      curated/{domain}/{entity_id}/curated_date={YYYY-MM-DD}/run_id={run_id}/
-
-    Returns the full prefix string (with trailing slash) for the latest run, or
-    None if no curated data exists for this source yet.
-    """
-    base_prefix = f"curated/{domain}/{entity_id}/"
-    paginator = s3.get_paginator("list_objects_v2")
-    # Collect all curated_date= partition prefixes using the delimiter trick.
-    date_prefixes: list[str] = []
-    for page in paginator.paginate(
-        Bucket=bucket, Prefix=base_prefix, Delimiter="/"
-    ):
-        for cp in page.get("CommonPrefixes", []):
-            pfx: str = cp["Prefix"]
-            if "curated_date=" in pfx:
-                date_prefixes.append(pfx)
-
-    if not date_prefixes:
-        return None
-
-    # Latest date partition — ISO format sorts lexicographically.
-    latest_date_prefix = sorted(date_prefixes)[-1]
-
-    # Within the date partition, find the latest run_id sub-prefix.
-    run_prefixes: list[str] = []
-    for page in paginator.paginate(
-        Bucket=bucket, Prefix=latest_date_prefix, Delimiter="/"
-    ):
-        for cp in page.get("CommonPrefixes", []):
-            pfx = cp["Prefix"]
-            if "run_id=" in pfx:
-                run_prefixes.append(pfx)
-
-    if not run_prefixes:
-        return None
-
-    return sorted(run_prefixes)[-1]
-
-
-def _load_curated_records(
-    s3: Any, bucket: str, prefix: str
-) -> list[dict[str, Any]]:
-    """
-    Load all Parquet files from a curated S3 prefix into a list of dicts.
-
-    Validates prefix for path traversal before use (OWASP A03 / CWE-22).
-    """
-    clean_prefix = prefix.strip()
-    if ".." in clean_prefix or clean_prefix.startswith("/"):
-        raise ValueError(f"Unsafe curated_s3_prefix rejected: {clean_prefix!r}")
-    if not _SAFE_S3_PREFIX_PATTERN.match(clean_prefix.rstrip("/")):
-        raise ValueError(
-            f"curated_s3_prefix {clean_prefix!r} contains disallowed characters."
-        )
-
-    paginator = s3.get_paginator("list_objects_v2")
-    records: list[dict[str, Any]] = []
-
-    for page in paginator.paginate(Bucket=bucket, Prefix=clean_prefix.rstrip("/") + "/"):
-        for obj in page.get("Contents", []):
-            if not obj["Key"].endswith(".parquet"):
-                continue
-            raw = s3.get_object(Bucket=bucket, Key=obj["Key"])
-            buf = io.BytesIO(raw["Body"].read())
-            table = pq.read_table(buf)  # type: ignore[no-untyped-call]
-            records.extend(table.to_pylist())
-            del table  # release memory before next file
-
-    return records
 
 
 def _validate_event(event: dict[str, Any]) -> None:

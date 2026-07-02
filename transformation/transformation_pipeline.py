@@ -49,7 +49,9 @@ from governance.lineage_record import (
 )
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
+from transformation.curated_accumulator import CuratedAccumulator
 from transformation.curated_layer_writer import CuratedLayerWriter
+from transformation.curated_utils import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from transformation.field_mapping.field_mapping_registry import (
     FieldMappingApplicator,
     FieldMappingRegistryClient,
@@ -64,17 +66,11 @@ from transformation.quality_evaluation.quality_policy_evaluator import (
 
 _logger = get_platform_logger(__name__)
 
-# S3 prefix safety: no path traversal sequences, no leading slash, bounded length (OWASP A03)
-# Hive-style partition paths (extraction_date=2026-06-29) require '=' in the allowed set.
-_SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[a-zA-Z0-9][a-zA-Z0-9\-_/=]{0,511}$"
-)
+# _SAFE_S3_PREFIX_PATTERN imported from curated_utils — single definition, no duplication.
 # Domain must be a lowercase safe identifier suitable for Glue table name construction (OWASP A03)
 _SAFE_DOMAIN_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 # Max prefix segment length to prevent S3 path traversal (OWASP A03)
 _MAX_PREFIX_SEGMENT_LEN: Final[int] = 256
-
-
 @dataclass(frozen=True)
 class TransformationContext:
     """Input parameters for one transformation pipeline run."""
@@ -148,6 +144,7 @@ class TransformationPipeline:
         quality_policy: QualityPolicy | None,
         classification_policy: EntityClassificationPolicy | None = None,
         metrics_emitter: CloudWatchMetricsEmitter | None = None,
+        curated_accumulator: CuratedAccumulator | None = None,
     ) -> None:
         self._mapping_registry = mapping_registry_client
         self._quality_evaluator = quality_evaluator
@@ -155,6 +152,9 @@ class TransformationPipeline:
         self._quality_policy = quality_policy
         self._classification_policy = classification_policy
         self._metrics_emitter = metrics_emitter
+        # Optional — injected only for incremental entities with primary_key_field set.
+        # When None, pipeline behaviour is identical to the original (no merge).
+        self._curated_accumulator = curated_accumulator
 
     def execute(self, ctx: TransformationContext) -> TransformationResult:
         """Execute the full transformation pipeline for one extraction run."""
@@ -214,7 +214,10 @@ class TransformationPipeline:
                 canonical_records, self._classification_policy
             )
 
-        # Quality evaluation
+        # Quality evaluation — runs on the delta (today's extracted records only).
+        # Checking quality on the full merged state would re-evaluate unchanged
+        # records from previous runs against potentially updated quality rules,
+        # which could unexpectedly block the pipeline for records already accepted.
         curated_prefix: str | None = None
         quality_report_key: str | None = None
         is_blocked = False
@@ -227,10 +230,25 @@ class TransformationPipeline:
             quality_report_key = _write_quality_report(s3, ctx.mapping_bucket, ctx, quality_report)
             is_blocked = quality_report.is_publication_blocked
 
+        # SCD Type 1 merge — runs AFTER quality check on delta (so quality only
+        # gates today's changes), BEFORE write (so the full current state is
+        # persisted).  Only active when a CuratedAccumulator is injected
+        # (incremental entities with primary_key_field set).  Full-load entities
+        # never reach this branch — their accumulator is always None.
+        records_to_write = canonical_records
+        if not is_blocked and canonical_records and self._curated_accumulator is not None:
+            acc_result = self._curated_accumulator.accumulate(
+                delta_records=canonical_records,
+                domain=ctx.domain,
+                entity_id=ctx.entity_id,
+                run_id=ctx.run_id,
+            )
+            records_to_write = acc_result.merged_records
+
         # Write curated layer (only when not blocked and records exist)
-        if not is_blocked and canonical_records:
+        if not is_blocked and records_to_write:
             write_result = self._curated_writer.write(
-                records=canonical_records,
+                records=records_to_write,
                 domain=ctx.domain,
                 entity_id=ctx.entity_id,
                 run_id=ctx.run_id,
@@ -254,7 +272,7 @@ class TransformationPipeline:
             source_id=ctx.source_id,
             entity_id=ctx.entity_id,
             raw_record_count=raw_record_count,
-            canonical_record_count=len(canonical_records),
+            canonical_record_count=len(records_to_write),
             mapping_failures=mapping_failures,
             curated_s3_prefix=curated_prefix,
             quality_report_s3_key=quality_report_key,
@@ -270,9 +288,11 @@ class TransformationPipeline:
             source_id=ctx.source_id,
             entity_id=ctx.entity_id,
             raw_records=raw_record_count,
-            canonical_records=len(canonical_records),
+            delta_records=len(canonical_records),
+            canonical_records=len(records_to_write),
             mapping_failures=mapping_failures,
             is_publication_blocked=is_blocked,
+            accumulator_active=self._curated_accumulator is not None,
         )
 
         # Emit CloudWatch metrics (spec §6.3)

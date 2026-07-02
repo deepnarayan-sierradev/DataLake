@@ -166,3 +166,80 @@ class TestEntityExtractionConfigValidationErrors:
                 target_raw_s3_prefix=bad_prefix,
                 schema_snapshot_s3_prefix="s3://schema-snapshots/salesforce/account/",
             )
+
+
+class TestEntityExtractionConfigMergeFields:
+    """Tests for the new primary_key_field and soft_delete_field (incremental merge)."""
+
+    def _base(self) -> dict[str, object]:
+        return {
+            "source_id": "salesforce",
+            "entity_id": "salesforce-contact",
+            "config_version": "1.0.0",
+            "load_type": LoadType.INCREMENTAL,
+            "watermark_field": "SystemModstamp",
+            "target_raw_s3_prefix": "s3://raw/sf/contact/",
+            "schema_snapshot_s3_prefix": "s3://snaps/sf/contact/",
+        }
+
+    def test_primary_key_field_none_by_default(self):
+        config = EntityExtractionConfig(**self._base())
+        assert config.primary_key_field is None
+        assert config.soft_delete_field is None
+
+    def test_valid_primary_key_field_accepted(self):
+        config = EntityExtractionConfig(**self._base(), primary_key_field="Id")
+        assert config.primary_key_field == "Id"
+
+    def test_valid_underscore_field_name_accepted(self):
+        config = EntityExtractionConfig(**self._base(), primary_key_field="contact_id")
+        assert config.primary_key_field == "contact_id"
+
+    def test_both_fields_set_together(self):
+        config = EntityExtractionConfig(
+            **self._base(),
+            primary_key_field="Id",
+            soft_delete_field="IsDelete",
+        )
+        assert config.primary_key_field == "Id"
+        assert config.soft_delete_field == "IsDelete"
+
+    def test_soft_delete_without_primary_key_raises(self):
+        """soft_delete_field requires primary_key_field."""
+        with pytest.raises(ValidationError, match="soft_delete_field requires primary_key_field"):
+            EntityExtractionConfig(**self._base(), soft_delete_field="IsDelete")
+
+    def test_dotted_field_name_rejected(self):
+        """Dotted paths not allowed — record.get() only does top-level lookup."""
+        with pytest.raises(ValidationError, match="invalid"):
+            EntityExtractionConfig(**self._base(), primary_key_field="nested.id")
+
+    def test_empty_string_field_name_rejected(self):
+        with pytest.raises(ValidationError, match="invalid"):
+            EntityExtractionConfig(**self._base(), primary_key_field="")
+
+    def test_field_name_with_spaces_rejected(self):
+        with pytest.raises(ValidationError, match="invalid"):
+            EntityExtractionConfig(**self._base(), primary_key_field="My Field")
+
+    def test_field_name_starting_with_digit_rejected(self):
+        with pytest.raises(ValidationError, match="invalid"):
+            EntityExtractionConfig(**self._base(), primary_key_field="1Id")
+
+    def test_primary_key_field_none_explicit(self):
+        """Explicitly setting None is valid (same as default)."""
+        config = EntityExtractionConfig(**self._base(), primary_key_field=None)
+        assert config.primary_key_field is None
+
+    def test_full_load_entity_with_primary_key_accepted(self):
+        """Full-load entities can optionally set primary_key_field for future use."""
+        config = EntityExtractionConfig(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            config_version="1.0.0",
+            load_type=LoadType.FULL,
+            target_raw_s3_prefix="s3://raw/sf/account/",
+            schema_snapshot_s3_prefix="s3://snaps/sf/account/",
+            primary_key_field="Id",
+        )
+        assert config.primary_key_field == "Id"

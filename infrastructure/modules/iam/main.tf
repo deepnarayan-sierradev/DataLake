@@ -233,6 +233,18 @@ resource "aws_iam_role" "transformation_runtime" {
 }
 
 data "aws_iam_policy_document" "transformation_runtime_permissions" {
+  # DynamoDB — read entity extraction config to determine merge behaviour.
+  # Scoped to the single entity-extraction-config table for this environment.
+  # GetItem only — transformation never writes configuration records.
+  statement {
+    sid     = "ReadEntityExtractionConfig"
+    effect  = "Allow"
+    actions = ["dynamodb:GetItem"]
+    resources = [
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.environment}-entity-extraction-config",
+    ]
+  }
+
   # Read raw layer (source data for transformation) — no write permission
   statement {
     sid     = "ReadRawLayer"

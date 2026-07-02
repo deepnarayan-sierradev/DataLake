@@ -41,6 +41,7 @@ Security (OWASP A03, A07, A09):
 
 from __future__ import annotations
 
+import boto3
 import dataclasses
 import os
 import re
@@ -48,10 +49,16 @@ from datetime import UTC, datetime
 from typing import Any, Final
 
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from connector_runtime.configuration_repository.configuration_repository import (
+    ConfigurationNotFoundError,
+    ConfigurationRepositoryClient,
+)
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
 from observability.lambda_utils import require_env, check_lambda_timeout
+from transformation.curated_accumulator import CuratedAccumulator
 from transformation.curated_layer_writer import CuratedLayerWriter
+from transformation.curated_utils import source_id_to_domain as _source_id_to_domain
 from transformation.field_mapping.field_mapping_registry import FieldMappingRegistryClient
 from transformation.quality_evaluation.quality_policy_evaluator import QualityPolicyEvaluator
 from transformation.transformation_pipeline import TransformationContext, TransformationPipeline
@@ -152,16 +159,66 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     metrics_emitter = CloudWatchMetricsEmitter(region_name=region_name)
 
+    # ── Load entity config (for incremental merge settings) ───────────────────
+    # Reads primary_key_field and soft_delete_field from the entity config record
+    # stored in DynamoDB.  These fields drive SCD Type 1 merge behaviour.
+    # For entities without primary_key_field set (all full-load entities and
+    # incremental entities not yet migrated), config loading succeeds but returns
+    # None for both fields — accumulator is not created and pipeline is unchanged.
+    #
+    # Security: table name is constructed server-side from the validated
+    # environment string; never interpolated from user event input (OWASP A03).
+    curated_accumulator: CuratedAccumulator | None = None
+    try:
+        config_table = f"{environment}-entity-extraction-config"
+        config_repo = ConfigurationRepositoryClient(
+            table_name=config_table,
+            region_name=region_name,
+        )
+        entity_config = config_repo.load_config(
+            source_id=source_id,
+            entity_id=entity_id,
+        )
+        if entity_config.primary_key_field is not None:
+            curated_accumulator = CuratedAccumulator(
+                s3=boto3.client("s3", region_name=region_name),
+                curated_s3_bucket=curated_s3_bucket,
+                primary_key_field=entity_config.primary_key_field,
+                soft_delete_field=entity_config.soft_delete_field,
+            )
+            _logger.info(
+                "curated_accumulator_wired",
+                source_id=source_id,
+                entity_id=entity_id,
+                primary_key_field=entity_config.primary_key_field,
+                soft_delete_field=entity_config.soft_delete_field,
+            )
+    except ConfigurationNotFoundError:
+        # Entity config not found — not a blocker for transformation.
+        # Pipeline runs in append-only mode (accumulator remains None).
+        _logger.warning(
+            "entity_config_not_found_accumulator_disabled",
+            source_id=source_id,
+            entity_id=entity_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Config load failure must never block transformation — append-only
+        # fallback is safe (data is written, merge is simply skipped).
+        _logger.warning(
+            "entity_config_load_failed_accumulator_disabled",
+            source_id=source_id,
+            entity_id=entity_id,
+            error=str(exc),
+        )
+
     pipeline = TransformationPipeline(
         mapping_registry_client=mapping_registry,
         quality_evaluator=quality_evaluator,
         curated_writer=curated_writer,
-        quality_policy=None,          # No quality gate configured by default;
-                                      # entities opt-in by populating the entity
-                                      # config with a quality policy definition.
-        classification_policy=None,   # Classification policy injected per-entity
-                                      # when PII masking is required (future work).
+        quality_policy=None,
+        classification_policy=None,
         metrics_emitter=metrics_emitter,
+        curated_accumulator=curated_accumulator,
     )
 
     # ── Build context ─────────────────────────────────────────────────────────
@@ -245,18 +302,3 @@ def _validate_event(event: dict[str, Any]) -> None:
             f"environment={environment!r} is not a known deployment environment. "
             f"Expected one of {sorted(_KNOWN_ENVIRONMENTS)}."
         )
-
-
-def _source_id_to_domain(source_id: str) -> str:
-    """
-    Derive the pipeline domain identifier from a stable source_id.
-
-    Converts hyphens to underscores so the result satisfies the Glue table
-    naming constraint (^[a-z][a-z0-9_]{0,63}$) used by TransformationContext.
-
-    Examples:
-        "mysql-rds"   → "mysql_rds"
-        "salesforce"  → "salesforce"
-        "netsuite"    → "netsuite"
-    """
-    return source_id.replace("-", "_")

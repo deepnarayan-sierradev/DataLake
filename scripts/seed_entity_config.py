@@ -63,11 +63,11 @@ def _build_records(environment: str) -> list[dict[str, object]]:
         {
             "source_id": "salesforce",
             "entity_id": "salesforce-account",
-            "config_version": "1.0.0",
-            "load_type": "full",
-            "watermark_field": None,
+            "config_version": "1.1.0",
+            "load_type": "incremental",
+            "watermark_field": "SystemModstamp",
             "extraction_window_days": 1,
-            "watermark_overlap_hours": 0,
+            "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
@@ -78,6 +78,15 @@ def _build_records(environment: str) -> list[dict[str, object]]:
             "schedule_cron": "cron(0 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
+            # SCD Type 1 merge with tombstone soft-delete.
+            # Salesforce hard-deletes: deleted accounts disappear from the API
+            # and are not captured in the incremental delta.  They persist in
+            # the curated layer as tombstones (last-known state, is_active=False
+            # if deactivated before deletion).  soft_delete_field is None because
+            # there is no deletion flag in the extracted data — a future enhancement
+            # will add IsDeleted=true ALL ROWS SOQL support to track hard-deletes.
+            "primary_key_field": "Id",
+            "soft_delete_field": None,
             "active": True,
         },
         {
@@ -98,6 +107,12 @@ def _build_records(environment: str) -> list[dict[str, object]]:
             "schedule_cron": "cron(15 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
+            # SCD Type 1 merge: curated layer always holds full current state.
+            # Salesforce Contact uses hard-delete (records disappear from API),
+            # so soft_delete_field is None — deletions tracked via full-load
+            # when the entity is eventually switched to full load for that need.
+            "primary_key_field": "Id",
+            "soft_delete_field": None,
             "active": True,
         },
         {
@@ -126,11 +141,11 @@ def _build_records(environment: str) -> list[dict[str, object]]:
         {
             "source_id": "mysql-rds",
             "entity_id": "mysql-rds-contracts",
-            "config_version": "1.0.0",
-            "load_type": "full",
-            "watermark_field": None,
+            "config_version": "1.1.0",
+            "load_type": "incremental",
+            "watermark_field": "ModifiedOn",
             "extraction_window_days": 1,
-            "watermark_overlap_hours": 0,
+            "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
@@ -141,6 +156,14 @@ def _build_records(environment: str) -> list[dict[str, object]]:
             "schedule_cron": "cron(30 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
+            # SCD Type 1 merge with tombstone soft-delete.
+            # MySQL Contracts uses a soft-delete flag (IsDelete → canonical is_deleted).
+            # soft_delete_field is intentionally None: deleted contracts are KEPT in
+            # the curated layer and analytics with is_deleted=True as a tombstone,
+            # never physically removed.  BI queries filter WHERE is_deleted = false
+            # to see only active contracts.  This preserves the full audit trail.
+            "primary_key_field": "Id",
+            "soft_delete_field": None,
             "active": True,
         },
         # ── Sage Intacct ─────────────────────────────────────────────────────

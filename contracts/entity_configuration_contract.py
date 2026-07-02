@@ -16,7 +16,9 @@ Enforcement:
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
+from typing import Final
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -25,6 +27,15 @@ from contracts.identifier_policy import (
 )
 from contracts.identifier_policy import (
     STABLE_ID_PATTERN as _STABLE_ID_PATTERN,
+)
+
+# Field name pattern: letters, digits, underscore only — no dots.
+# pk_field and soft_delete_field must be flat canonical field names because
+# record.get(field) performs top-level dict lookup only.  Dotted paths like
+# 'auditInfo.id' would silently return None and break merge logic.
+# Sourced from server-side entity config only — never from event input (OWASP A03).
+_FIELD_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^[a-zA-Z_][a-zA-Z0-9_]{0,127}$"
 )
 
 
@@ -168,6 +179,28 @@ class EntityExtractionConfig(BaseModel):
         description="Whether this entity is active for scheduled extraction.",
     )
 
+    # ── Incremental merge ─────────────────────────────────────────────────────
+    primary_key_field: str | None = Field(
+        default=None,
+        description=(
+            "Canonical field name used as the primary key for curated-layer MERGE. "
+            "Required for incremental entities to maintain a full current-state "
+            "snapshot in the curated layer (SCD Type 1). "
+            "Example: 'Id' for Salesforce entities, 'id' for MySQL tables. "
+            "None means append-only behaviour (no merge) — correct for full-load entities."
+        ),
+    )
+    soft_delete_field: str | None = Field(
+        default=None,
+        description=(
+            "Canonical field name whose truthy value marks a record as soft-deleted. "
+            "When set, records where this field is truthy are removed from the merged "
+            "curated snapshot rather than upserted. "
+            "Example: 'is_delete' for MySQL tables that use a deletion flag. "
+            "None means deletions are not tracked via a flag (hard-delete or N/A)."
+        ),
+    )
+
     # ── Validators ────────────────────────────────────────────────────────────
 
     @field_validator("source_id", "entity_id", mode="before")
@@ -223,4 +256,32 @@ class EntityExtractionConfig(BaseModel):
                 f"Entity '{self.entity_id}': fields appear in both include_fields "
                 f"and exclude_fields: {sorted(overlap)}. Remove the conflict."
             )
+        if self.soft_delete_field is not None and self.primary_key_field is None:
+            raise ValueError(
+                f"Entity '{self.entity_id}': soft_delete_field requires primary_key_field "
+                "to be set. A primary key is needed to identify and remove deleted records "
+                "from the merged curated state."
+            )
         return self
+
+    @field_validator("primary_key_field", "soft_delete_field", mode="before")
+    @classmethod
+    def validate_field_name(cls, value: str | None) -> str | None:
+        """
+        Validate that primary_key_field and soft_delete_field are safe field names.
+
+        Allows letters, digits, underscores, and dots (for nested paths).
+        Rejects empty strings, path traversal characters, and excessively long names.
+        Values originate from server-side entity config only (OWASP A03).
+        """
+        if value is None:
+            return None
+        if not _FIELD_NAME_PATTERN.match(value):
+            raise ValueError(
+                f"Field name '{value}' is invalid. Must start with a letter or underscore "
+                "and contain only letters, digits, or underscores (max 128 chars). "
+                "Must be a flat canonical field name — dotted paths are not supported "
+                "(record.get() performs top-level lookup only). "
+                "Examples: 'Id', 'SystemModstamp', 'is_delete'."
+            )
+        return value
