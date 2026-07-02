@@ -1,6 +1,6 @@
 # Platform Status — Enterprise Data Lake
 
-**Last updated:** 2026-07-01  
+**Last updated:** 2026-07-02  
 **Prepared by:** Platform Engineering
 
 ---
@@ -15,36 +15,40 @@
 
 ---
 
-## Live Data (Dev — as of 2026-06-29)
+## Live Data (Dev — as of 2026-07-02)
 
-| Entity | Records | Location |
-|---|---|---|
-| Companies (Salesforce Accounts) | 34 | `dev_edl_analytics.company` |
-| Persons (Salesforce Contacts) | 49 | `dev_edl_analytics.person` |
-| Contracts (MySQL RDS) | 35,971 | `dev_edl_analytics.contract` |
+| Entity | Records | Latest analytics_date | Location |
+|---|---|---|---|
+| Companies (Salesforce Accounts) | 34 | `2026-07-02` | `dev_edl_analytics.company` |
+| Persons (Salesforce Contacts) | 49 | `2026-06-29` | `dev_edl_analytics.person` |
+| Contracts (MySQL RDS) | 35,971+ | `2026-07-02` | `dev_edl_analytics.contract` |
 
-**Query in Athena (AWS Console → Athena → database: `dev_edl_analytics`):**
+**Query in Athena (AWS Console → Athena → database: `dev_edl_analytics`, workgroup: `dev-edl-analytics`):**
 
 ```sql
-SELECT * FROM dev_edl_analytics.company    WHERE analytics_date='2026-06-29';
+-- Always filter by the latest analytics_date for current state
+SELECT * FROM dev_edl_analytics.company    WHERE analytics_date='2026-07-02';
 SELECT * FROM dev_edl_analytics.person     WHERE analytics_date='2026-06-29';
-SELECT COUNT(*) FROM dev_edl_analytics.contract   WHERE analytics_date='2026-06-29';
-SELECT COUNT(*) FROM dev_edl_analytics.supplier   WHERE analytics_date='2026-06-29';
-SELECT COUNT(*) FROM dev_edl_analytics.ar_invoice  WHERE analytics_date='2026-06-29';
-SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM dev_edl_analytics.contract   WHERE analytics_date='2026-07-02';
+
+-- For contracts: filter out soft-deleted records
+SELECT COUNT(*) FROM dev_edl_analytics.contract
+WHERE analytics_date='2026-07-02' AND is_deleted = false;
 ```
+
+> **Note:** Use the fully-qualified table name (`dev_edl_analytics.company`) or select `dev_edl_analytics` as the database in the Athena console before running queries. The workgroup must be `dev-edl-analytics`.
 
 ---
 
 ## Connected Data Sources
 
-| Source | Status | Entities |
-|---|---|---|
-| **Salesforce CRM** | ✅ Connected | `salesforce-account` (companies), `salesforce-contact` (persons) |
-| **MySQL RDS** | ✅ Connected | `mysql-rds-contracts` (contracts) |
-| **Sage Intacct** | ✅ Connected | `sage-intacct-customer` (companies), `sage-intacct-vendor` (suppliers), `sage-intacct-arinvoice` (AR invoices), `sage-intacct-apbill` (AP bills) |
-| **Sage X3** | ✅ Connected | `sage-x3-customer` (companies), `sage-x3-supplier` (suppliers) |
-| **NetSuite ERP** | 🔲 Pending | Not yet onboarded |
+| Source | Status | Entities | Extraction mode |
+|---|---|---|---|
+| **Salesforce CRM** | ✅ Connected | `salesforce-account` (companies), `salesforce-contact` (persons) | Incremental (watermark: `SystemModstamp`) |
+| **MySQL RDS** | ✅ Connected | `mysql-rds-contracts` (contracts) | Incremental (watermark: `ModifiedOn`, tombstone soft-delete on `is_deleted`) |
+| **Sage Intacct** | ✅ Connected | `sage-intacct-customer` (companies), `sage-intacct-vendor` (suppliers), `sage-intacct-arinvoice` (AR invoices), `sage-intacct-apbill` (AP bills) | Incremental |
+| **Sage X3** | ✅ Connected | `sage-x3-customer` (companies), `sage-x3-supplier` (suppliers) | Incremental |
+| **NetSuite ERP** | 🔲 Pending | Not yet onboarded | — |
 
 ---
 
@@ -68,9 +72,11 @@ SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06
 | Layer | Pattern |
 |---|---|
 | Raw | `s3://dev-edl-raw-layer/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/part-NNNNN.parquet` |
-| Curated | `s3://dev-edl-curated-layer/curated/{source_id}/{entity_id}/run_id={run_id}/data.parquet` |
+| Curated | `s3://dev-edl-curated-layer/curated/{domain}/{entity_id}/curated_date=YYYY-MM-DD/run_id={run_id}/data.parquet` |
 | Golden records | `s3://dev-edl-analytics-layer/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet` |
 | Analytics | `s3://dev-edl-analytics-layer/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet` |
+
+> **Curated layer — SCD Type 1 merge:** For incremental entities with `primary_key_field` set, each curated partition holds the **full current state** of all records (not just the day's delta). This ensures entity resolution always sees complete data. Deleted records are retained as tombstones (`is_deleted=True`) rather than physically removed.
 
 ### DynamoDB Tables
 

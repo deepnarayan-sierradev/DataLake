@@ -1,43 +1,64 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Deployment Guide — Enterprise Data Lake Platform</title>
-  <style>:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#475569;--border:#e2e8f0;--accent:#0f766e;--code-bg:#f1f5f9}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%)}header{position:sticky;top:0;z-index:10;background:rgba(15,23,42,.95);color:#fff;backdrop-filter:blur(6px);border-bottom:1px solid rgba(255,255,255,.1)}.header-inner{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:700;letter-spacing:.2px;font-size:14px}.file{font-size:12px;opacity:.9}main{max-width:1100px;margin:24px auto 48px;padding:0 20px}article{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px;box-shadow:0 10px 35px rgba(15,23,42,.06)}h1,h2,h3,h4{line-height:1.25;margin-top:1.4em;margin-bottom:.55em}h1{margin-top:0;font-size:2rem}h2{font-size:1.45rem;border-top:1px solid var(--border);padding-top:1em}h3{font-size:1.2rem}p,li{color:var(--text);line-height:1.65}ul,ol{padding-left:1.25rem}code{background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:.1rem .35rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:.92em}pre{background:#0b1020;color:#e2e8f0;border-radius:10px;padding:14px;overflow-x:auto;border:1px solid #1e293b}pre code{background:transparent;border:0;padding:0;color:inherit}blockquote{margin:1em 0;padding:.7em 1em;border-left:4px solid var(--accent);background:#f0fdfa;color:var(--muted)}table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.95rem}th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}th{background:#f8fafc;font-weight:600}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}hr{border:0;border-top:1px solid var(--border);margin:1.6em 0}.footer{color:var(--muted);font-size:12px;margin-top:14px}@media(max-width:760px){article{padding:18px;border-radius:10px}.header-inner{padding:10px 14px}main{margin-top:16px;padding:0 12px}}</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deployment Guide — Enterprise Data Lake Platform</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         max-width: 1100px; margin: 40px auto; padding: 0 24px;
+         color: #24292e; line-height: 1.6; }
+  h1,h2,h3,h4 { border-bottom: 1px solid #eee; padding-bottom: 8px; margin-top: 32px; }
+  code { background: #f6f8fa; padding: 2px 6px; border-radius: 4px;
+         font-family: monospace; font-size: 0.9em; }
+  pre  { background: #f6f8fa; padding: 16px; border-radius: 6px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  td,th { border: 1px solid #dfe2e5; padding: 8px 13px; }
+  tr:nth-child(even) { background: #f6f8fa; }
+  blockquote { border-left: 4px solid #dfe2e5; margin: 0;
+               padding: 8px 16px; color: #6a737d; }
+  hr { border: none; border-top: 1px solid #eee; margin: 32px 0; }
+  a { color: #0366d6; }
+</style>
 </head>
 <body>
-  <header><div class="header-inner"><div class="brand">Enterprise Data Lake Documentation</div><div class="file">DEPLOYMENT_GUIDE.md</div></div></header>
-  <main><article><h1 id="deployment-guide-enterprise-data-lake-platform">Deployment Guide — Enterprise Data Lake Platform</h1>
-<p><strong>Version:</strong> 3.0<br />
-<strong>Date:</strong> 2026-06-29<br />
-<strong>Audience:</strong> Platform engineers promoting to a new environment (staging/prod)</p>
-<blockquote>
-<p><strong>Dev environment is complete.</strong> Local and dev deployments are fully operational as of 2026-06-29. This guide is now focused on promoting to <strong>staging</strong> and <strong>production</strong>. For developer setup, see <a href="DEVELOPER_GUIDE.md">DEVELOPER_GUIDE.md</a>. For current resource names, see <a href="PLATFORM_STATUS.md">PLATFORM_STATUS.md</a>.</p>
-</blockquote>
-<hr />
-<h2 id="table-of-contents">Table of Contents</h2>
-<ol>
-<li><a href="#1-prerequisites">Prerequisites</a></li>
-<li><a href="#2-aws-prerequisites--must-exist-before-terraform">AWS Prerequisites — Must Exist Before Terraform</a></li>
-<li><a href="#3-deployment-overview--the-six-phases">Deployment Overview — The Six Phases</a></li>
-<li><a href="#4-phase-1--bootstrap-one-time-only">Phase 1 — Bootstrap (One-time Only)</a></li>
-<li><a href="#5-phase-2--infrastructure-deployment-terraform">Phase 2 — Infrastructure Deployment (Terraform)</a></li>
-<li><a href="#6-phase-3--application-deployment-lambda">Phase 3 — Application Deployment (Lambda)</a></li>
-<li><a href="#7-phase-4--automatic-pipeline-configuration-step-functions">Phase 4 — Automatic Pipeline Configuration (Step Functions)</a></li>
-<li><a href="#8-phase-5--data-configuration-dynamodb-seeds--secrets">Phase 5 — Data Configuration (DynamoDB Seeds + Secrets)</a></li>
-<li><a href="#9-phase-6--field-mapping-configuration">Phase 6 — Field Mapping Configuration</a></li>
-<li><a href="#10-phase-7--entity-resolution-config">Phase 7 — Entity Resolution Config</a></li>
-<li><a href="#11-all-aws-settings-reference--what-to-set-and-where">All AWS Settings Reference — What to Set and Where</a></li>
-<li><a href="#12-promoting-to-staging-and-production">Promoting to Staging and Production</a></li>
-<li><a href="#13-verification-checklist">Verification Checklist</a></li>
-<li><a href="#14-troubleshooting">Troubleshooting</a></li>
-</ol>
-<hr />
-<h2 id="1-prerequisites">1. Prerequisites</h2>
-<h3 id="tools-required">Tools Required</h3>
-<p>Install the following on your workstation before proceeding:</p>
-<pre><code class="language-bash"># Check versions after installing
+<h1>Deployment Guide — Enterprise Data Lake Platform</h1>
+
+<strong>Version:</strong> 3.0  
+<strong>Date:</strong> 2026-06-29  
+<strong>Audience:</strong> Platform engineers promoting to a new environment (staging/prod)
+
+<blockquote><strong>Dev environment is complete.</strong> Local and dev deployments are fully operational as of 2026-06-29. This guide is now focused on promoting to <strong>staging</strong> and <strong>production</strong>. For developer setup, see <a href="DEVELOPER_GUIDE.md">DEVELOPER_GUIDE.md</a>. For current resource names, see <a href="PLATFORM_STATUS.md">PLATFORM_STATUS.md</a>.</blockquote>
+
+<hr/>
+
+<h2>Table of Contents</h2>
+
+1. <a href="#1-prerequisites">Prerequisites</a>
+2. <a href="#2-aws-prerequisites--must-exist-before-terraform">AWS Prerequisites — Must Exist Before Terraform</a>
+3. <a href="#3-deployment-overview--the-six-phases">Deployment Overview — The Six Phases</a>
+4. <a href="#4-phase-1--bootstrap-one-time-only">Phase 1 — Bootstrap (One-time Only)</a>
+5. <a href="#5-phase-2--infrastructure-deployment-terraform">Phase 2 — Infrastructure Deployment (Terraform)</a>
+6. <a href="#6-phase-3--application-deployment-lambda">Phase 3 — Application Deployment (Lambda)</a>
+7. <a href="#7-phase-4--automatic-pipeline-configuration-step-functions">Phase 4 — Automatic Pipeline Configuration (Step Functions)</a>
+8. <a href="#8-phase-5--data-configuration-dynamodb-seeds--secrets">Phase 5 — Data Configuration (DynamoDB Seeds + Secrets)</a>
+9. <a href="#9-phase-6--field-mapping-configuration">Phase 6 — Field Mapping Configuration</a>
+10. <a href="#10-phase-7--entity-resolution-config">Phase 7 — Entity Resolution Config</a>
+11. <a href="#11-all-aws-settings-reference--what-to-set-and-where">All AWS Settings Reference — What to Set and Where</a>
+12. <a href="#12-promoting-to-staging-and-production">Promoting to Staging and Production</a>
+13. <a href="#13-verification-checklist">Verification Checklist</a>
+14. <a href="#14-troubleshooting">Troubleshooting</a>
+
+<hr/>
+
+<h2>1. Prerequisites</h2>
+
+<h3>Tools Required</h3>
+
+Install the following on your workstation before proceeding:
+
+<pre><code># Check versions after installing
 terraform version    # must be &gt;= 1.8, &lt; 2.0
 aws --version        # AWS CLI v2 — any recent version
 python --version     # 3.14.x (managed by pyenv)
@@ -45,17 +66,22 @@ make --version       # GNU Make &gt;= 3.8
 zip --version        # standard zip utility
 openssl version      # for SHA-256 hash of Lambda package
 </code></pre>
-<p><strong>Install links:</strong>
-- Terraform: https://developer.hashicorp.com/terraform/install
-- AWS CLI v2: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
-- pyenv + Python 3.14: see <a href="../README.md#developer-setup">README.md</a></p>
-<h3 id="aws-account-requirements">AWS Account Requirements</h3>
-<p>You need an AWS account with:
-- An IAM user or role with <code>AdministratorAccess</code> <strong>for the bootstrap step only</strong> — after bootstrap you use the least-privilege CI/CD role
-- AWS CLI configured: <code>aws configure</code> (sets <code>~/.aws/credentials</code> and <code>~/.aws/config</code>)
-- Your account ID: <code>aws sts get-caller-identity --query Account --output text</code></p>
-<h3 id="repository-setup">Repository Setup</h3>
-<pre><code class="language-bash">git clone https://github.com/YOUR_ORG/enterprise-data-lake.git
+
+<strong>Install links:</strong>
+<ul><li>Terraform: https://developer.hashicorp.com/terraform/install</li>
+<li>AWS CLI v2: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html</li>
+<li>pyenv + Python 3.14: see <a href="../README.md#developer-setup">README.md</a></li></ul>
+
+<h3>AWS Account Requirements</h3>
+
+You need an AWS account with:
+<ul><li>An IAM user or role with <code>AdministratorAccess</code> <strong>for the bootstrap step only</strong> — after bootstrap you use the least-privilege CI/CD role</li>
+<li>AWS CLI configured: <code>aws configure</code> (sets <code>~/.aws/credentials</code> and <code>~/.aws/config</code>)</li>
+<li>Your account ID: <code>aws sts get-caller-identity --query Account --output text</code></li></ul>
+
+<h3>Repository Setup</h3>
+
+<pre><code>git clone https://github.com/YOUR_ORG/enterprise-data-lake.git
 cd enterprise-data-lake
 
 # Install Python dev dependencies
@@ -66,221 +92,195 @@ make install
 # Confirm all tests pass (safety check before deploy)
 make test
 </code></pre>
-<hr />
-<h2 id="2-aws-prerequisites-must-exist-before-terraform">2. AWS Prerequisites — Must Exist Before Terraform</h2>
-<blockquote>
-<p><strong>Critical:</strong> Terraform manages almost all AWS resources in this platform, but a small set of resources <strong>must be created manually before <code>terraform init</code> can run</strong>. These are bootstrapping dependencies — Terraform cannot create its own remote state backend using itself.</p>
-<p>Additionally, several resources must exist <strong>before</strong> specific Terraform modules are applied, because those modules reference them as data sources (<code>data "aws_..."</code>).</p>
-</blockquote>
-<hr />
-<h3 id="21-terraform-remote-state-backend-per-environment">2.1 Terraform Remote State Backend (per environment)</h3>
-<p>These three resources must exist <strong>before</strong> <code>terraform init</code>. They hold Terraform's own state file and prevent concurrent applies from corrupting it.</p>
+
+<hr/>
+
+<h2>2. AWS Prerequisites — Must Exist Before Terraform</h2>
+
+<blockquote><strong>Critical:</strong> Terraform manages almost all AWS resources in this platform, but a small set of resources <strong>must be created manually before <code>terraform init</code> can run</strong>. These are bootstrapping dependencies — Terraform cannot create its own remote state backend using itself.</blockquote>
+>
+<blockquote>Additionally, several resources must exist <strong>before</strong> specific Terraform modules are applied, because those modules reference them as data sources (<code>data "aws_..."</code>).</blockquote>
+
+<hr/>
+
+<h3>2.1 Terraform Remote State Backend (per environment)</h3>
+
+These three resources must exist <strong>before</strong> <code>terraform init</code>. They hold Terraform's own state file and prevent concurrent applies from corrupting it.
+
 <table>
-<thead>
-<tr>
-<th>Resource</th>
-<th>Name pattern</th>
-<th>How to create</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>S3 bucket (state file)</td>
-<td><code>{env}-edl-terraform-state</code></td>
-<td><code>aws s3api create-bucket</code> (see Phase 1, Step 1.2)</td>
-</tr>
-<tr>
-<td>DynamoDB table (state lock)</td>
-<td><code>{env}-edl-terraform-state-lock</code></td>
-<td><code>aws dynamodb create-table</code> (see Phase 1, Step 1.3)</td>
-</tr>
-<tr>
-<td>KMS key (state encryption)</td>
-<td>alias <code>{env}-terraform-state</code></td>
-<td><code>aws kms create-key</code> + <code>aws kms create-alias</code> (see Phase 1, Step 1.4)</td>
-</tr>
-</tbody>
+<tr><td>Resource</td><td>Name pattern</td><td>How to create</td></tr>
+<tr><td>S3 bucket (state file)</td><td><code>{env}-edl-terraform-state</code></td><td><code>aws s3api create-bucket</code> (see Phase 1, Step 1.2)</td></tr>
+<tr><td>DynamoDB table (state lock)</td><td><code>{env}-edl-terraform-state-lock</code></td><td><code>aws dynamodb create-table</code> (see Phase 1, Step 1.3)</td></tr>
+<tr><td>KMS key (state encryption)</td><td>alias <code>{env}-terraform-state</code></td><td><code>aws kms create-key</code> + <code>aws kms create-alias</code> (see Phase 1, Step 1.4)</td></tr>
 </table>
-<p><strong>Why Terraform cannot create these itself:</strong> The S3 backend configuration in <code>backend.tf</code> is resolved <em>before</em> any Terraform resources are applied. If the bucket doesn't exist, <code>terraform init</code> fails immediately with <code>NoSuchBucket</code>. There is no way around this — it is a fundamental constraint of how Terraform remote state works.</p>
-<hr />
-<h3 id="22-github-actions-oidc-provider">2.2 GitHub Actions OIDC Provider</h3>
-<p>The CI/CD deployment role (created by the <code>iam</code> Terraform module) trusts GitHub Actions via OIDC federation. The OIDC provider must be registered in your AWS account <strong>once</strong> before Terraform applies the IAM module.</p>
-<p><strong>Why Terraform cannot create this automatically:</strong> The OIDC provider is an account-level resource. Creating it inside the <code>iam</code> module would create a separate provider per environment (<code>dev</code>, <code>staging</code>, <code>prod</code>) which would conflict. It must be registered once at the account level.</p>
-<p><strong>Check if it already exists:</strong></p>
-<pre><code class="language-bash">aws iam list-open-id-connect-providers --query \
-  &quot;OpenIDConnectProviderList[?contains(Arn,'token.actions.githubusercontent.com')]&quot;
+
+<strong>Why Terraform cannot create these itself:</strong> The S3 backend configuration in <code>backend.tf</code> is resolved _before_ any Terraform resources are applied. If the bucket doesn't exist, <code>terraform init</code> fails immediately with <code>NoSuchBucket</code>. There is no way around this — it is a fundamental constraint of how Terraform remote state works.
+
+<hr/>
+
+<h3>2.2 GitHub Actions OIDC Provider</h3>
+
+The CI/CD deployment role (created by the <code>iam</code> Terraform module) trusts GitHub Actions via OIDC federation. The OIDC provider must be registered in your AWS account <strong>once</strong> before Terraform applies the IAM module.
+
+<strong>Why Terraform cannot create this automatically:</strong> The OIDC provider is an account-level resource. Creating it inside the <code>iam</code> module would create a separate provider per environment (<code>dev</code>, <code>staging</code>, <code>prod</code>) which would conflict. It must be registered once at the account level.
+
+<strong>Check if it already exists:</strong>
+
+<pre><code>aws iam list-open-id-connect-providers --query \
+  "OpenIDConnectProviderList[?contains(Arn,'token.actions.githubusercontent.com')]"
 </code></pre>
-<p><strong>If it does not exist, create it:</strong></p>
-<pre><code class="language-bash">aws iam create-open-id-connect-provider \
+
+<strong>If it does not exist, create it:</strong>
+
+<pre><code>aws iam create-open-id-connect-provider \
   --url https://token.actions.githubusercontent.com \
   --client-id-list sts.amazonaws.com \
   --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
 </code></pre>
-<blockquote>
-<p><strong>Note:</strong> The thumbprint <code>6938fd4d98bab03faadb97b34396831e3780aea1</code> is the GitHub Actions OIDC thumbprint as of 2026. Verify it against <a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect">GitHub's current documentation</a> before registering.</p>
-</blockquote>
-<hr />
-<h3 id="23-lambda-deployment-package-in-s3">2.3 Lambda Deployment Package in S3</h3>
-<p>The <code>lambda_pipeline</code> Terraform module references a Lambda zip file in S3 via <code>var.lambda_package_s3_bucket</code> and <code>var.lambda_package_s3_key</code>. If the zip does not exist in S3 at <code>terraform apply</code> time, the <code>aws_lambda_function</code> resource will fail.</p>
-<p><strong>Correct order:</strong></p>
+
+<blockquote><strong>Note:</strong> The thumbprint <code>6938fd4d98bab03faadb97b34396831e3780aea1</code> is the GitHub Actions OIDC thumbprint as of 2026. Verify it against <a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect">GitHub's current documentation</a> before registering.</blockquote>
+
+<hr/>
+
+<h3>2.3 Lambda Deployment Package in S3</h3>
+
+The <code>lambda_pipeline</code> Terraform module references a Lambda zip file in S3 via <code>var.lambda_package_s3_bucket</code> and <code>var.lambda_package_s3_key</code>. If the zip does not exist in S3 at <code>terraform apply</code> time, the <code>aws_lambda_function</code> resource will fail.
+
+<strong>Correct order:</strong>
+
 <pre><code>make lambda-package          # build the zip (Phase 3, Step 3.1)
 make lambda-upload           # upload to S3  (Phase 3, Step 3.2)
 terraform apply              # now safe to apply
 </code></pre>
-<p><strong>If you run <code>terraform apply</code> before uploading:</strong> You will get:</p>
+
+<strong>If you run <code>terraform apply</code> before uploading:</strong> You will get:
 <pre><code>Error: error creating Lambda Function: InvalidParameterValueException:
   Error occurred while GetObject.
   S3 Error Code: NoSuchKey
 </code></pre>
-<p>Fix: upload the zip first, then re-run <code>terraform apply</code>.</p>
-<hr />
-<h3 id="24-vpc-tagged-with-environment-name">2.4 VPC Tagged with Environment Name</h3>
-<p>The <code>lambda_pipeline</code> module locates the VPC to place Lambda into using a tag filter:</p>
-<pre><code class="language-hcl">data &quot;aws_vpc&quot; &quot;selected&quot; {
+
+Fix: upload the zip first, then re-run <code>terraform apply</code>.
+
+<hr/>
+
+<h3>2.4 VPC Tagged with Environment Name</h3>
+
+The <code>lambda_pipeline</code> module locates the VPC to place Lambda into using a tag filter:
+
+<pre><code>data "aws_vpc" "selected" {
   filter {
-    name   = &quot;tag:Environment&quot;
+    name   = "tag:Environment"
     values = [var.environment]
   }
 }
 </code></pre>
-<p>The <code>networking</code> module creates this VPC and tags it correctly. This means:</p>
-<p><strong>Networking module must be applied before the lambda_pipeline module.</strong></p>
-<p>The environment <code>main.tf</code> files already enforce this via <code>depends_on = [module.networking]</code>. However if you are selectively applying modules (e.g. <code>terraform apply -target=module.lambda_pipeline</code>), the networking module must have been applied first.</p>
-<p><strong>To verify the VPC exists and is tagged:</strong></p>
-<pre><code class="language-bash">aws ec2 describe-vpcs \
-  --filters &quot;Name=tag:Environment,Values=dev&quot; \
-  --query &quot;Vpcs[*].{VpcId:VpcId,State:State,CIDR:CidrBlock}&quot;
+
+The <code>networking</code> module creates this VPC and tags it correctly. This means:
+
+<strong>Networking module must be applied before the lambda_pipeline module.</strong>
+
+The environment <code>main.tf</code> files already enforce this via <code>depends_on = [module.networking]</code>. However if you are selectively applying modules (e.g. <code>terraform apply -target=module.lambda_pipeline</code>), the networking module must have been applied first.
+
+<strong>To verify the VPC exists and is tagged:</strong>
+
+<pre><code>aws ec2 describe-vpcs \
+  --filters "Name=tag:Environment,Values=dev" \
+  --query "Vpcs[*].{VpcId:VpcId,State:State,CIDR:CidrBlock}"
 </code></pre>
-<hr />
-<h3 id="25-five-pipeline-lambda-arns-for-step-functions-state-machine">2.5 Five Pipeline Lambda ARNs (for Step Functions state machine)</h3>
-<p>The orchestration module's Step Functions state machine references <strong>five Lambda function ARNs</strong> — one per pipeline stage. These are passed in as Terraform variables (<code>var.extraction_pipeline_lambda_arn</code>, etc.).</p>
-<p><strong>These must be deployed Lambda functions before <code>terraform apply</code> is run for the orchestration module.</strong></p>
-<p>The correct order is:</p>
+
+<hr/>
+
+<h3>2.5 Five Pipeline Lambda ARNs (for Step Functions state machine)</h3>
+
+The orchestration module's Step Functions state machine references <strong>five Lambda function ARNs</strong> — one per pipeline stage. These are passed in as Terraform variables (<code>var.extraction_pipeline_lambda_arn</code>, etc.).
+
+<strong>These must be deployed Lambda functions before <code>terraform apply</code> is run for the orchestration module.</strong>
+
+The correct order is:
+
 <pre><code>1. terraform apply module.lambda_pipeline    ← creates extraction Lambda
 2. Deploy remaining four Lambda packages     ← transformation, entity-resolution, analytics, serving-store
 3. terraform apply module.orchestration      ← wires them into Step Functions
 </code></pre>
-<p>In practice, the full <code>terraform apply</code> (no <code>-target</code>) handles this automatically because <code>module.orchestration</code> has <code>depends_on = [module.iam, module.observability]</code> and the Lambda ARNs are passed as variables from outside Terraform — set them in <code>terraform.tfvars</code> after Step 2.</p>
-<p><strong>If you apply before Lambda ARNs exist:</strong> <code>terraform apply</code> will fail validation because the variables are required with no default. You will see:</p>
+
+In practice, the full <code>terraform apply</code> (no <code>-target</code>) handles this automatically because <code>module.orchestration</code> has <code>depends_on = [module.iam, module.observability]</code> and the Lambda ARNs are passed as variables from outside Terraform — set them in <code>terraform.tfvars</code> after Step 2.
+
+<strong>If you apply before Lambda ARNs exist:</strong> <code>terraform apply</code> will fail validation because the variables are required with no default. You will see:
 <pre><code>Error: No value for required variable
   var.transformation_pipeline_lambda_arn
 </code></pre>
-<p>Fix: deploy the Lambda functions first, then set the ARNs in <code>terraform.tfvars</code>.</p>
-<hr />
-<h3 id="26-source-system-network-access">2.6 Source System Network Access</h3>
-<p>The extraction Lambda runs inside a private VPC and reaches external source systems (Salesforce, NetSuite) via NAT Gateway. Before the first extraction run:</p>
+
+Fix: deploy the Lambda functions first, then set the ARNs in <code>terraform.tfvars</code>.
+
+<hr/>
+
+<h3>2.6 Source System Network Access</h3>
+
+The extraction Lambda runs inside a private VPC and reaches external source systems (Salesforce, NetSuite) via NAT Gateway. Before the first extraction run:
+
 <table>
-<thead>
-<tr>
-<th>Requirement</th>
-<th>What to do</th>
-<th>Where to get the value</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Salesforce Connected App IP allowlist</td>
-<td>Add NAT Gateway public IPs to the Connected App's IP ranges in Salesforce Setup</td>
-<td><code>terraform output nat_gateway_public_ips</code></td>
-</tr>
-<tr>
-<td>NetSuite IP restrictions</td>
-<td>Add NAT Gateway public IPs to the Integration record's IP address restriction</td>
-<td><code>terraform output nat_gateway_public_ips</code></td>
-</tr>
-<tr>
-<td>MySQL RDS security group</td>
-<td>Ensure RDS security group allows inbound port 3306 from Lambda security group ID</td>
-<td><code>terraform output lambda_security_group_id</code></td>
-</tr>
-</tbody>
+<tr><td>Requirement</td><td>What to do</td><td>Where to get the value</td></tr>
+<tr><td>Salesforce Connected App IP allowlist</td><td>Add NAT Gateway public IPs to the Connected App's IP ranges in Salesforce Setup</td><td><code>terraform output nat_gateway_public_ips</code></td></tr>
+<tr><td>NetSuite IP restrictions</td><td>Add NAT Gateway public IPs to the Integration record's IP address restriction</td><td><code>terraform output nat_gateway_public_ips</code></td></tr>
+<tr><td>MySQL RDS security group</td><td>Ensure RDS security group allows inbound port 3306 from Lambda security group ID</td><td><code>terraform output lambda_security_group_id</code></td></tr>
 </table>
-<p><strong>Get NAT Gateway IPs after Terraform apply:</strong></p>
-<pre><code class="language-bash">cd infrastructure/environments/dev
+
+<strong>Get NAT Gateway IPs after Terraform apply:</strong>
+
+<pre><code>cd infrastructure/environments/dev
 terraform output nat_gateway_public_ips
-# Output: [&quot;1.2.3.4&quot;, &quot;5.6.7.8&quot;, &quot;9.10.11.12&quot;]
+# Output: ["1.2.3.4", "5.6.7.8", "9.10.11.12"]
 </code></pre>
-<blockquote>
-<p><strong>Important:</strong> If you ever recreate the NAT Gateways (e.g. by destroying and recreating networking), the public IPs change and you must update all source system allowlists before extractions will succeed.</p>
-</blockquote>
-<hr />
-<h3 id="27-sns-email-subscription-confirmation">2.7 SNS Email Subscription Confirmation</h3>
-<p>Terraform creates the SNS alert topic and subscribes <code>var.alert_email</code> to it. AWS sends a confirmation email to that address. <strong>CloudWatch alarms will not deliver notifications until the subscription is confirmed.</strong></p>
-<p><strong>After <code>terraform apply</code>:</strong> Check the inbox for <code>alert_email</code> and click "Confirm subscription" within 72 hours. If the email expires, re-subscribe:</p>
-<pre><code class="language-bash">aws sns subscribe \
-  --topic-arn &quot;$(cd infrastructure/environments/dev &amp;&amp; terraform output platform_alerts_topic_arn)&quot; \
+
+<blockquote><strong>Important:</strong> If you ever recreate the NAT Gateways (e.g. by destroying and recreating networking), the public IPs change and you must update all source system allowlists before extractions will succeed.</blockquote>
+
+<hr/>
+
+<h3>2.7 SNS Email Subscription Confirmation</h3>
+
+Terraform creates the SNS alert topic and subscribes <code>var.alert_email</code> to it. AWS sends a confirmation email to that address. <strong>CloudWatch alarms will not deliver notifications until the subscription is confirmed.</strong>
+
+<strong>After <code>terraform apply</code>:</strong> Check the inbox for <code>alert_email</code> and click "Confirm subscription" within 72 hours. If the email expires, re-subscribe:
+
+<pre><code>aws sns subscribe \
+  --topic-arn "$(cd infrastructure/environments/dev &amp;&amp; terraform output platform_alerts_topic_arn)" \
   --protocol email \
-  --notification-endpoint &quot;ops@yourcompany.com&quot; \
+  --notification-endpoint "ops@yourcompany.com" \
   --region us-east-1
 </code></pre>
-<hr />
-<h3 id="28-aws-service-limits-to-check">2.8 AWS Service Limits to Check</h3>
-<p>For production deployments, verify these service limits in your AWS account <strong>before applying</strong>. The defaults are sufficient for dev but may need increasing for staging/prod.</p>
+
+<hr/>
+
+<h3>2.8 AWS Service Limits to Check</h3>
+
+For production deployments, verify these service limits in your AWS account <strong>before applying</strong>. The defaults are sufficient for dev but may need increasing for staging/prod.
+
 <table>
-<thead>
-<tr>
-<th>Service</th>
-<th>Limit to check</th>
-<th>Default</th>
-<th>Recommended for prod</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Lambda</td>
-<td>Concurrent executions per region</td>
-<td>1,000</td>
-<td>Request increase to 3,000+</td>
-</tr>
-<tr>
-<td>Step Functions</td>
-<td>Express Workflow starts per second</td>
-<td>6,000</td>
-<td>Sufficient for current scale</td>
-</tr>
-<tr>
-<td>Step Functions</td>
-<td>Standard Workflow execution history</td>
-<td>25,000 executions</td>
-<td>Sufficient</td>
-</tr>
-<tr>
-<td>DynamoDB</td>
-<td>Read/Write capacity (on-demand mode)</td>
-<td>No hard limit</td>
-<td>Monitor with CloudWatch</td>
-</tr>
-<tr>
-<td>S3</td>
-<td>PUT requests per prefix per second</td>
-<td>3,500</td>
-<td>Sufficient for current scale</td>
-</tr>
-<tr>
-<td>Secrets Manager</td>
-<td>API calls per second</td>
-<td>500</td>
-<td>Sufficient</td>
-</tr>
-<tr>
-<td>KMS</td>
-<td>Requests per second</td>
-<td>10,000 per key</td>
-<td>Sufficient</td>
-</tr>
-</tbody>
+<tr><td>Service</td><td>Limit to check</td><td>Default</td><td>Recommended for prod</td></tr>
+<tr><td>Lambda</td><td>Concurrent executions per region</td><td>1,000</td><td>Request increase to 3,000+</td></tr>
+<tr><td>Step Functions</td><td>Express Workflow starts per second</td><td>6,000</td><td>Sufficient for current scale</td></tr>
+<tr><td>Step Functions</td><td>Standard Workflow execution history</td><td>25,000 executions</td><td>Sufficient</td></tr>
+<tr><td>DynamoDB</td><td>Read/Write capacity (on-demand mode)</td><td>No hard limit</td><td>Monitor with CloudWatch</td></tr>
+<tr><td>S3</td><td>PUT requests per prefix per second</td><td>3,500</td><td>Sufficient for current scale</td></tr>
+<tr><td>Secrets Manager</td><td>API calls per second</td><td>500</td><td>Sufficient</td></tr>
+<tr><td>KMS</td><td>Requests per second</td><td>10,000 per key</td><td>Sufficient</td></tr>
 </table>
-<p><strong>Check current limits:</strong></p>
-<pre><code class="language-bash">aws service-quotas list-service-quotas \
+
+<strong>Check current limits:</strong>
+
+<pre><code>aws service-quotas list-service-quotas \
   --service-code lambda \
-  --query &quot;Quotas[?QuotaName=='Concurrent executions'].[Value,QuotaArn]&quot; \
+  --query "Quotas[?QuotaName=='Concurrent executions'].[Value,QuotaArn]" \
   --region us-east-1
 </code></pre>
-<hr />
-<h3 id="summary-complete-prerequisites-checklist">Summary — Complete Prerequisites Checklist</h3>
-<p>Before running <code>terraform init</code> for any environment:</p>
-<ul>
-<li>[ ] AWS account with admin access available (bootstrap only)</li>
+
+<hr/>
+
+<h3>Summary — Complete Prerequisites Checklist</h3>
+
+Before running <code>terraform init</code> for any environment:
+
+<ul><li>[ ] AWS account with admin access available (bootstrap only)</li>
 <li>[ ] Terraform state S3 bucket created (<code>{env}-edl-terraform-state</code>)</li>
 <li>[ ] Terraform state DynamoDB lock table created (<code>{env}-edl-terraform-state-lock</code>)</li>
 <li>[ ] Bootstrap KMS key created (<code>alias/{env}-terraform-state</code>)</li>
@@ -291,10 +291,12 @@ terraform output nat_gateway_public_ips
 <li>[ ] NAT Gateway IPs whitelisted in Salesforce and NetSuite (after networking apply)</li>
 <li>[ ] MySQL RDS security group allows inbound from Lambda SG (after networking apply)</li>
 <li>[ ] SNS subscription confirmation email clicked (after first Terraform apply)</li>
-<li>[ ] AWS service limits reviewed for production</li>
-</ul>
-<hr />
-<h2 id="3-deployment-overview-the-six-phases">3. Deployment Overview — The Six Phases</h2>
+<li>[ ] AWS service limits reviewed for production</li></ul>
+
+<hr/>
+
+<h2>3. Deployment Overview — The Six Phases</h2>
+
 <pre><code>PHASE 1             PHASE 2                  PHASE 3              PHASE 4
 BOOTSTRAP           INFRASTRUCTURE           APPLICATION          PIPELINE CONFIG
 (one-time)          (Terraform)              (Lambda)             (Step Functions)
@@ -315,16 +317,23 @@ python scripts/seed_entity_config.py       (publishes JSON files from config/ to
 Set EventBridge schedules               → Verify first automated end-to-end run
 (ExtractionScheduleClient)
 </code></pre>
-<hr />
-<h2 id="4-phase-1-bootstrap-one-time-only">4. Phase 1 — Bootstrap (One-time Only)</h2>
-<p>The Terraform remote state backend (S3 bucket + DynamoDB lock table) must exist <strong>before</strong> <code>terraform init</code> can run. This is a manual one-time step.</p>
-<h3 id="step-11-set-environment-variables">Step 1.1 — Set environment variables</h3>
-<pre><code class="language-bash">export AWS_PROFILE=your-admin-profile    # or set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY
+
+<hr/>
+
+<h2>4. Phase 1 — Bootstrap (One-time Only)</h2>
+
+The Terraform remote state backend (S3 bucket + DynamoDB lock table) must exist <strong>before</strong> <code>terraform init</code> can run. This is a manual one-time step.
+
+<h3>Step 1.1 — Set environment variables</h3>
+
+<pre><code>export AWS_PROFILE=your-admin-profile    # or set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY
 export AWS_REGION=us-east-1
 export ENV=dev                           # change to staging or prod when promoting
 </code></pre>
-<h3 id="step-12-create-the-terraform-state-bucket">Step 1.2 — Create the Terraform state bucket</h3>
-<pre><code class="language-bash">aws s3api create-bucket \
+
+<h3>Step 1.2 — Create the Terraform state bucket</h3>
+
+<pre><code>aws s3api create-bucket \
   --bucket ${ENV}-edl-terraform-state \
   --region ${AWS_REGION} \
   --create-bucket-configuration LocationConstraint=${AWS_REGION}
@@ -338,25 +347,29 @@ aws s3api put-bucket-versioning \
 aws s3api put-public-access-block \
   --bucket ${ENV}-edl-terraform-state \
   --public-access-block-configuration \
-    &quot;BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true&quot;
+    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 
 # Enable default SSE-S3 encryption (upgraded to KMS after bootstrap)
 aws s3api put-bucket-encryption \
   --bucket ${ENV}-edl-terraform-state \
   --server-side-encryption-configuration \
-    '{&quot;Rules&quot;:[{&quot;ApplyServerSideEncryptionByDefault&quot;:{&quot;SSEAlgorithm&quot;:&quot;AES256&quot;}}]}'
+    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 </code></pre>
-<h3 id="step-13-create-the-dynamodb-state-lock-table">Step 1.3 — Create the DynamoDB state lock table</h3>
-<pre><code class="language-bash">aws dynamodb create-table \
+
+<h3>Step 1.3 — Create the DynamoDB state lock table</h3>
+
+<pre><code>aws dynamodb create-table \
   --table-name ${ENV}-edl-terraform-state-lock \
   --attribute-definitions AttributeName=LockID,AttributeType=S \
   --key-schema AttributeName=LockID,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST \
   --region ${AWS_REGION}
 </code></pre>
-<h3 id="step-14-create-the-bootstrap-kms-key-for-state-encryption">Step 1.4 — Create the bootstrap KMS key for state encryption</h3>
-<pre><code class="language-bash">KEY_ID=$(aws kms create-key \
-  --description &quot;${ENV} Terraform state encryption&quot; \
+
+<h3>Step 1.4 — Create the bootstrap KMS key for state encryption</h3>
+
+<pre><code>KEY_ID=$(aws kms create-key \
+  --description "${ENV} Terraform state encryption" \
   --region ${AWS_REGION} \
   --query KeyMetadata.KeyId \
   --output text)
@@ -366,260 +379,173 @@ aws kms create-alias \
   --target-key-id ${KEY_ID} \
   --region ${AWS_REGION}
 
-echo &quot;KMS key ID: ${KEY_ID}&quot;
+echo "KMS key ID: ${KEY_ID}"
 </code></pre>
-<h3 id="step-15-update-backendtf">Step 1.5 — Update backend.tf</h3>
-<p>Open <code>infrastructure/environments/${ENV}/backend.tf</code> and confirm the values match what you just created:</p>
-<pre><code class="language-hcl">terraform {
-  backend &quot;s3&quot; {
-    bucket         = &quot;dev-edl-terraform-state&quot;      # ← your bucket name
-    key            = &quot;environments/dev/terraform.tfstate&quot;
-    region         = &quot;us-east-1&quot;                    # ← your region
+
+<h3>Step 1.5 — Update backend.tf</h3>
+
+Open <code>infrastructure/environments/${ENV}/backend.tf</code> and confirm the values match what you just created:
+
+<pre><code>terraform {
+  backend "s3" {
+    bucket         = "dev-edl-terraform-state"      # ← your bucket name
+    key            = "environments/dev/terraform.tfstate"
+    region         = "us-east-1"                    # ← your region
     encrypt        = true
-    kms_key_id     = &quot;alias/dev-terraform-state&quot;    # ← your KMS alias
-    dynamodb_table = &quot;dev-edl-terraform-state-lock&quot; # ← your lock table
+    kms_key_id     = "alias/dev-terraform-state"    # ← your KMS alias
+    dynamodb_table = "dev-edl-terraform-state-lock" # ← your lock table
   }
 }
 </code></pre>
-<hr />
-<h2 id="5-phase-2-infrastructure-deployment-terraform">5. Phase 2 — Infrastructure Deployment (Terraform)</h2>
-<h3 id="step-21-configure-terraformtfvars">Step 2.1 — Configure terraform.tfvars</h3>
-<p>Edit <code>infrastructure/environments/dev/terraform.tfvars</code>:</p>
-<pre><code class="language-hcl"># infrastructure/environments/dev/terraform.tfvars
 
-aws_region  = &quot;us-east-1&quot;               # ← Your AWS region
-cost_center = &quot;engineering&quot;             # ← Your cost center tag
-github_org  = &quot;your-github-org&quot;         # ← Your GitHub org name (for OIDC CI/CD role)
-github_repo = &quot;enterprise-data-lake&quot;    # ← Your GitHub repo name
-alert_email = &quot;ops-team@yourcompany.com&quot; # ← Ops team email for CloudWatch alarms
+<hr/>
+
+<h2>5. Phase 2 — Infrastructure Deployment (Terraform)</h2>
+
+<h3>Step 2.1 — Configure terraform.tfvars</h3>
+
+Edit <code>infrastructure/environments/dev/terraform.tfvars</code>:
+
+<pre><code># infrastructure/environments/dev/terraform.tfvars
+
+aws_region  = "us-east-1"               # ← Your AWS region
+cost_center = "engineering"             # ← Your cost center tag
+github_org  = "your-github-org"         # ← Your GitHub org name (for OIDC CI/CD role)
+github_repo = "enterprise-data-lake"    # ← Your GitHub repo name
+alert_email = "ops-team@yourcompany.com" # ← Ops team email for CloudWatch alarms
 
 # Set AFTER running make lambda-package (Step 5.1 below)
-lambda_package_s3_bucket   = &quot;dev-edl-terraform-state&quot;
-lambda_package_s3_key      = &quot;lambda/extraction-pipeline.zip&quot;
-lambda_package_source_hash = &quot;&quot;   # Fill in after running make lambda-package
+lambda_package_s3_bucket   = "dev-edl-terraform-state"
+lambda_package_s3_key      = "lambda/extraction-pipeline.zip"
+lambda_package_source_hash = ""   # Fill in after running make lambda-package
 </code></pre>
-<p>For higher environments, start from the new templates:
-- <code>infrastructure/environments/staging/terraform.tfvars.example</code>
-- <code>infrastructure/environments/prod/terraform.tfvars.example</code></p>
-<blockquote>
-<p><strong>Note:</strong> <code>terraform.tfvars</code> is committed to source control. Never put passwords, tokens, or secrets here. Secrets go in Secrets Manager (Step 6).</p>
-</blockquote>
-<h3 id="step-22-initialize-terraform">Step 2.2 — Initialize Terraform</h3>
-<pre><code class="language-bash">cd infrastructure/environments/dev
+
+For higher environments, start from the new templates:
+<ul><li><code>infrastructure/environments/staging/terraform.tfvars.example</code></li>
+<li><code>infrastructure/environments/prod/terraform.tfvars.example</code></li></ul>
+
+<blockquote><strong>Note:</strong> <code>terraform.tfvars</code> is committed to source control. Never put passwords, tokens, or secrets here. Secrets go in Secrets Manager (Step 6).</blockquote>
+
+<h3>Step 2.2 — Initialize Terraform</h3>
+
+<pre><code>cd infrastructure/environments/dev
 terraform init
-# Expected output: &quot;Terraform has been successfully initialized!&quot;
+# Expected output: "Terraform has been successfully initialized!"
 </code></pre>
-<h3 id="step-23-review-the-plan">Step 2.3 — Review the plan</h3>
-<pre><code class="language-bash">terraform plan -out=tfplan
+
+<h3>Step 2.3 — Review the plan</h3>
+
+<pre><code>terraform plan -out=tfplan
 # Review the output. Confirm all expected resources are listed.
 # Check that no existing resources will be destroyed unexpectedly.
 </code></pre>
-<p>Key resources Terraform will create:</p>
+
+Key resources Terraform will create:
+
 <table>
-<thead>
-<tr>
-<th>Resource type</th>
-<th>Count</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>aws_kms_key</code></td>
-<td>4</td>
-<td>storage, database, secrets, logs</td>
-</tr>
-<tr>
-<td><code>aws_s3_bucket</code></td>
-<td>6</td>
-<td>raw, curated, analytics, schema-snapshots, governance, mapping/artifacts</td>
-</tr>
-<tr>
-<td><code>aws_dynamodb_table</code></td>
-<td>4</td>
-<td>watermark, run-audit-log, entity-config, source-onboarding</td>
-</tr>
-<tr>
-<td><code>aws_iam_role</code></td>
-<td>5+</td>
-<td>extraction, transformation, entity-resolution, analytics-serve, governance</td>
-</tr>
-<tr>
-<td><code>aws_vpc</code> + subnets</td>
-<td>1 VPC</td>
-<td>private subnets, VPC endpoints</td>
-</tr>
-<tr>
-<td><code>aws_secretsmanager_secret</code></td>
-<td>3</td>
-<td>one per source system (values set later)</td>
-</tr>
-<tr>
-<td><code>aws_sqs_queue</code></td>
-<td>2</td>
-<td>extraction DLQ + retry queue</td>
-</tr>
-<tr>
-<td><code>aws_cloudwatch_*</code></td>
-<td>various</td>
-<td>log groups, alarms, metric filters</td>
-</tr>
-<tr>
-<td><code>aws_scheduler_schedule_group</code></td>
-<td>1</td>
-<td>EventBridge schedule group</td>
-</tr>
-<tr>
-<td><code>aws_sfn_state_machine</code></td>
-<td>1</td>
-<td>extraction orchestration workflow</td>
-</tr>
-<tr>
-<td><code>aws_lambda_function</code></td>
-<td>1</td>
-<td>extraction pipeline handler</td>
-</tr>
-</tbody>
+<tr><td>Resource type</td><td>Count</td><td>Notes</td></tr>
+<tr><td><code>aws_kms_key</code></td><td>4</td><td>storage, database, secrets, logs</td></tr>
+<tr><td><code>aws_s3_bucket</code></td><td>6</td><td>raw, curated, analytics, schema-snapshots, governance, mapping/artifacts</td></tr>
+<tr><td><code>aws_dynamodb_table</code></td><td>4</td><td>watermark, run-audit-log, entity-config, source-onboarding</td></tr>
+<tr><td><code>aws_iam_role</code></td><td>5+</td><td>extraction, transformation, entity-resolution, analytics-serve, governance</td></tr>
+<tr><td><code>aws_vpc</code> + subnets</td><td>1 VPC</td><td>private subnets, VPC endpoints</td></tr>
+<tr><td><code>aws_secretsmanager_secret</code></td><td>3</td><td>one per source system (values set later)</td></tr>
+<tr><td><code>aws_sqs_queue</code></td><td>2</td><td>extraction DLQ + retry queue</td></tr>
+<tr><td><code>aws_cloudwatch_<em></code></td><td>various</td><td>log groups, alarms, metric filters</td></tr>
+<tr><td><code>aws_scheduler_schedule_group</code></td><td>1</td><td>EventBridge schedule group</td></tr>
+<tr><td><code>aws_sfn_state_machine</code></td><td>1</td><td>extraction orchestration workflow</td></tr>
+<tr><td><code>aws_lambda_function</code></td><td>1</td><td>extraction pipeline handler</td></tr>
 </table>
-<h3 id="step-24-apply">Step 2.4 — Apply</h3>
-<pre><code class="language-bash">terraform apply tfplan
+
+<h3>Step 2.4 — Apply</h3>
+
+<pre><code>terraform apply tfplan
 # Type 'yes' when prompted.
 # First apply takes approximately 5-10 minutes.
 </code></pre>
-<h3 id="step-25-save-outputs">Step 2.5 — Save outputs</h3>
-<pre><code class="language-bash">terraform output -json &gt; /tmp/dev-outputs.json
+
+<h3>Step 2.5 — Save outputs</h3>
+
+<pre><code>terraform output -json &gt; /tmp/dev-outputs.json
 cat /tmp/dev-outputs.json
 </code></pre>
-<p>You will need these output values in later steps. Key outputs:</p>
+
+You will need these output values in later steps. Key outputs:
+
 <table>
-<thead>
-<tr>
-<th>Output name</th>
-<th>Used for</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>raw_bucket_name</code></td>
-<td>Lambda env var, seed script</td>
-</tr>
-<tr>
-<td><code>curated_bucket_name</code></td>
-<td>Transformation Lambda env var</td>
-</tr>
-<tr>
-<td><code>analytics_bucket_name</code></td>
-<td>Analytics publisher env var</td>
-</tr>
-<tr>
-<td><code>mapping_bucket_name</code></td>
-<td>Field mapping upload location</td>
-</tr>
-<tr>
-<td><code>governance_bucket_name</code></td>
-<td>Lineage and retention records</td>
-</tr>
-<tr>
-<td><code>entity_config_table_name</code></td>
-<td>Seed script target table</td>
-</tr>
-<tr>
-<td><code>watermark_table_name</code></td>
-<td>Watermark repository</td>
-</tr>
-<tr>
-<td><code>extraction_lambda_arn</code></td>
-<td>Manual trigger</td>
-</tr>
-<tr>
-<td><code>step_functions_state_machine_arn</code></td>
-<td>Schedule target</td>
-</tr>
-<tr>
-<td><code>salesforce_secret_arn</code></td>
-<td>Secret to populate</td>
-</tr>
-<tr>
-<td><code>netsuite_secret_arn</code></td>
-<td>Secret to populate</td>
-</tr>
-<tr>
-<td><code>mysql_rds_secret_arn</code></td>
-<td>Secret to populate</td>
-</tr>
-</tbody>
+<tr><td>Output name</td><td>Used for</td></tr>
+<tr><td><code>raw_bucket_name</code></td><td>Lambda env var, seed script</td></tr>
+<tr><td><code>curated_bucket_name</code></td><td>Transformation Lambda env var</td></tr>
+<tr><td><code>analytics_bucket_name</code></td><td>Analytics publisher env var</td></tr>
+<tr><td><code>mapping_bucket_name</code></td><td>Field mapping upload location</td></tr>
+<tr><td><code>governance_bucket_name</code></td><td>Lineage and retention records</td></tr>
+<tr><td><code>entity_config_table_name</code></td><td>Seed script target table</td></tr>
+<tr><td><code>watermark_table_name</code></td><td>Watermark repository</td></tr>
+<tr><td><code>extraction_lambda_arn</code></td><td>Manual trigger</td></tr>
+<tr><td><code>step_functions_state_machine_arn</code></td><td>Schedule target</td></tr>
+<tr><td><code>salesforce_secret_arn</code></td><td>Secret to populate</td></tr>
+<tr><td><code>netsuite_secret_arn</code></td><td>Secret to populate</td></tr>
+<tr><td><code>mysql_rds_secret_arn</code></td><td>Secret to populate</td></tr>
 </table>
-<hr />
-<h2 id="6-phase-3-application-deployment-lambda">6. Phase 3 — Application Deployment (Lambda)</h2>
-<blockquote>
-<p><strong>Prerequisite:</strong> Phase 2 Terraform apply must be complete so the S3 artifacts bucket exists for the Lambda zip upload.</p>
-</blockquote>
-<p>There are <strong>five Lambda functions</strong> in the full pipeline. They must all be deployed before Step Functions can wire them together in Phase 4.</p>
+
+<hr/>
+
+<h2>6. Phase 3 — Application Deployment (Lambda)</h2>
+
+<blockquote><strong>Prerequisite:</strong> Phase 2 Terraform apply must be complete so the S3 artifacts bucket exists for the Lambda zip upload.</blockquote>
+
+There are <strong>five Lambda functions</strong> in the full pipeline. They must all be deployed before Step Functions can wire them together in Phase 4.
+
 <table>
-<thead>
-<tr>
-<th>Lambda</th>
-<th>Handler</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>{env}-extraction-pipeline</code></td>
-<td><code>connector_runtime.extraction_pipeline_handler.lambda_handler</code></td>
-<td>Stages 1–10: extract raw data</td>
-</tr>
-<tr>
-<td><code>{env}-transformation-pipeline</code></td>
-<td><code>transformation.transformation_handler.lambda_handler</code></td>
-<td>Stage 11: raw → curated</td>
-</tr>
-<tr>
-<td><code>{env}-entity-resolution</code></td>
-<td><code>entity_resolution.resolution_handler.lambda_handler</code></td>
-<td>Stage 12–13: cross-source matching + golden records</td>
-</tr>
-<tr>
-<td><code>{env}-analytics-publisher</code></td>
-<td><code>transformation.analytics_handler.lambda_handler</code></td>
-<td>Stage 14: curated/golden → analytics layer</td>
-</tr>
-<tr>
-<td><code>{env}-serving-store-loader</code></td>
-<td><code>transformation.serving_handler.lambda_handler</code></td>
-<td>Stage 15: analytics → MySQL RDS</td>
-</tr>
-</tbody>
+<tr><td>Lambda</td><td>Handler</td><td>Purpose</td></tr>
+<tr><td><code>{env}-extraction-pipeline</code></td><td><code>connector_runtime.extraction_pipeline_handler.lambda_handler</code></td><td>Stages 1–10: extract raw data</td></tr>
+<tr><td><code>{env}-transformation-pipeline</code></td><td><code>transformation.transformation_handler.lambda_handler</code></td><td>Stage 11: raw → curated</td></tr>
+<tr><td><code>{env}-entity-resolution</code></td><td><code>entity_resolution.resolution_handler.lambda_handler</code></td><td>Stage 12–13: cross-source matching + golden records</td></tr>
+<tr><td><code>{env}-analytics-publisher</code></td><td><code>transformation.analytics_handler.lambda_handler</code></td><td>Stage 14: curated/golden → analytics layer</td></tr>
+<tr><td><code>{env}-serving-store-loader</code></td><td><code>transformation.serving_handler.lambda_handler</code></td><td>Stage 15: analytics → MySQL RDS</td></tr>
 </table>
-<h3 id="step-31-build-the-lambda-package">Step 3.1 — Build the Lambda package</h3>
-<pre><code class="language-bash">cd /path/to/enterprise-data-lake  # repo root
+
+<h3>Step 3.1 — Build the Lambda package</h3>
+
+<pre><code>cd /path/to/enterprise-data-lake  # repo root
 source .venv/bin/activate
 
 make lambda-package
 # Output: dist/extraction-pipeline.zip
 # Output: SHA-256 (base64): &lt;hash-string&gt;  ← copy this hash
 </code></pre>
-<p>Copy the SHA-256 hash printed at the end. Paste it into <code>terraform.tfvars</code>:</p>
-<pre><code class="language-hcl">lambda_package_source_hash = &quot;abc123==...&quot;   # ← paste the base64 hash here
+
+Copy the SHA-256 hash printed at the end. Paste it into <code>terraform.tfvars</code>:
+
+<pre><code>lambda_package_source_hash = "abc123==..."   # ← paste the base64 hash here
 </code></pre>
-<h3 id="step-32-upload-to-s3">Step 3.2 — Upload to S3</h3>
-<pre><code class="language-bash">export ARTIFACTS_BUCKET=dev-edl-terraform-state
+
+<h3>Step 3.2 — Upload to S3</h3>
+
+<pre><code>export ARTIFACTS_BUCKET=dev-edl-terraform-state
 export AWS_REGION=us-east-1
 
 make lambda-upload
 # Uploads dist/extraction-pipeline.zip to s3://dev-edl-terraform-state/lambda/extraction-pipeline.zip
 </code></pre>
-<h3 id="step-33-deploy-lambda-via-terraform">Step 3.3 — Deploy Lambda via Terraform</h3>
-<pre><code class="language-bash">cd infrastructure/environments/dev
+
+<h3>Step 3.3 — Deploy Lambda via Terraform</h3>
+
+<pre><code>cd infrastructure/environments/dev
 terraform apply \
-  -var=&quot;lambda_package_source_hash=$(openssl dgst -sha256 -binary ../../dist/extraction-pipeline.zip | openssl base64)&quot;
+  -var="lambda_package_source_hash=$(openssl dgst -sha256 -binary ../../dist/extraction-pipeline.zip | openssl base64)"
 </code></pre>
-<p>Or use the convenience target which does all three steps:</p>
-<pre><code class="language-bash">make lambda-deploy   # packages + uploads + applies Terraform
+
+Or use the convenience target which does all three steps:
+
+<pre><code>make lambda-deploy   # packages + uploads + applies Terraform
 </code></pre>
-<h3 id="step-34-collect-lambda-arns">Step 3.4 — Collect Lambda ARNs</h3>
-<p>After applying, collect all five Lambda ARNs — you need them for Phase 4:</p>
-<pre><code class="language-bash">cd infrastructure/environments/dev
+
+<h3>Step 3.4 — Collect Lambda ARNs</h3>
+
+After applying, collect all five Lambda ARNs — you need them for Phase 4:
+
+<pre><code>cd infrastructure/environments/dev
 
 # Extraction Lambda (created by lambda_pipeline module)
 terraform output extraction_lambda_arn
@@ -637,35 +563,48 @@ aws lambda get-function --function-name dev-analytics-publisher \
 aws lambda get-function --function-name dev-serving-store-loader \
   --query Configuration.FunctionArn --output text
 </code></pre>
-<h3 id="step-35-verify-all-lambdas-deployed">Step 3.5 — Verify all Lambdas deployed</h3>
-<pre><code class="language-bash">for fn in extraction-pipeline transformation-pipeline entity-resolution analytics-publisher serving-store-loader; do
+
+<h3>Step 3.5 — Verify all Lambdas deployed</h3>
+
+<pre><code>for fn in extraction-pipeline transformation-pipeline entity-resolution analytics-publisher serving-store-loader; do
   aws lambda get-function \
-    --function-name &quot;dev-${fn}&quot; \
+    --function-name "dev-${fn}" \
     --region us-east-1 \
-    --query &quot;Configuration.[FunctionName,State,LastModified]&quot; \
+    --query "Configuration.[FunctionName,State,LastModified]" \
     --output table
 done
 </code></pre>
-<p>All five should show <code>State: Active</code>.</p>
-<hr />
-<h2 id="7-phase-4-automatic-pipeline-configuration-step-functions">7. Phase 4 — Automatic Pipeline Configuration (Step Functions)</h2>
-<p>This phase wires all five Lambda functions into the Step Functions state machine that runs the full end-to-end pipeline automatically.</p>
-<h3 id="step-41-add-lambda-arns-to-terraformtfvars">Step 4.1 — Add Lambda ARNs to terraform.tfvars</h3>
-<p>Add the five ARNs collected in Step 3.4 to <code>infrastructure/environments/dev/terraform.tfvars</code>:</p>
-<pre><code class="language-hcl"># infrastructure/environments/dev/terraform.tfvars
+
+All five should show <code>State: Active</code>.
+
+<hr/>
+
+<h2>7. Phase 4 — Automatic Pipeline Configuration (Step Functions)</h2>
+
+This phase wires all five Lambda functions into the Step Functions state machine that runs the full end-to-end pipeline automatically.
+
+<h3>Step 4.1 — Add Lambda ARNs to terraform.tfvars</h3>
+
+Add the five ARNs collected in Step 3.4 to <code>infrastructure/environments/dev/terraform.tfvars</code>:
+
+<pre><code># infrastructure/environments/dev/terraform.tfvars
 
 # Pipeline Lambda ARNs — set after running Phase 3
-extraction_pipeline_lambda_arn     = &quot;arn:aws:lambda:us-east-1:123456789012:function:dev-extraction-pipeline&quot;
-transformation_pipeline_lambda_arn = &quot;arn:aws:lambda:us-east-1:123456789012:function:dev-transformation-pipeline&quot;
-entity_resolution_lambda_arn       = &quot;arn:aws:lambda:us-east-1:123456789012:function:dev-entity-resolution&quot;
-analytics_publisher_lambda_arn     = &quot;arn:aws:lambda:us-east-1:123456789012:function:dev-analytics-publisher&quot;
-serving_store_loader_lambda_arn    = &quot;arn:aws:lambda:us-east-1:123456789012:function:dev-serving-store-loader&quot;
+extraction_pipeline_lambda_arn     = "arn:aws:lambda:us-east-1:123456789012:function:dev-extraction-pipeline"
+transformation_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:dev-transformation-pipeline"
+entity_resolution_lambda_arn       = "arn:aws:lambda:us-east-1:123456789012:function:dev-entity-resolution"
+analytics_publisher_lambda_arn     = "arn:aws:lambda:us-east-1:123456789012:function:dev-analytics-publisher"
+serving_store_loader_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:dev-serving-store-loader"
 </code></pre>
-<h3 id="step-42-apply-to-create-the-state-machine">Step 4.2 — Apply to create the state machine</h3>
-<pre><code class="language-bash">cd infrastructure/environments/dev
+
+<h3>Step 4.2 — Apply to create the state machine</h3>
+
+<pre><code>cd infrastructure/environments/dev
 terraform apply
 </code></pre>
-<p>Terraform creates a Standard Workflow (dev uses Express for cost savings; staging/prod use Standard for execution history and &gt;5min timeout support) with this branching logic:</p>
+
+Terraform creates a Standard Workflow (dev uses Express for cost savings; staging/prod use Standard for execution history and >5min timeout support) with this branching logic:
+
 <pre><code>Extraction
   ├─ transformation_blocked=true  → STOP (breaking schema drift — alert fired)
   └─ transformation_blocked=false → Transformation
@@ -675,13 +614,16 @@ terraform apply
                                                                                → ServingStoreLoad
                                                                                    → COMPLETE
 </code></pre>
-<h3 id="step-43-verify-state-machine-created">Step 4.3 — Verify state machine created</h3>
-<pre><code class="language-bash">aws stepfunctions describe-state-machine \
-  --state-machine-arn &quot;$(cd infrastructure/environments/dev &amp;&amp; terraform output state_machine_arn)&quot; \
-  --query &quot;[name,status,type]&quot; \
+
+<h3>Step 4.3 — Verify state machine created</h3>
+
+<pre><code>aws stepfunctions describe-state-machine \
+  --state-machine-arn "$(cd infrastructure/environments/dev &amp;&amp; terraform output state_machine_arn)" \
+  --query "[name,status,type]" \
   --output table
 </code></pre>
-<p>Expected output:</p>
+
+Expected output:
 <pre><code>-----------------------------------------------------------
 |              DescribeStateMachine                       |
 +-----------------------------------------------+---------+
@@ -689,10 +631,14 @@ terraform apply
 |  STANDARD                                     |         |
 -----------------------------------------------------------
 </code></pre>
-<h3 id="step-44-create-extraction-schedules-per-entity">Step 4.4 — Create extraction schedules per entity</h3>
-<p>Each entity needs an EventBridge schedule pointing at the state machine. Schedules are <strong>data</strong> — managed by <code>ExtractionScheduleClient</code> at runtime, not by Terraform.</p>
-<p><code>seed_schedules.py</code> reads every active entity from DynamoDB that has <code>schedule_cron</code> set and <code>schedule_enabled=True</code>, then creates or updates the corresponding EventBridge Scheduler schedules in one pass. <strong>This must be run after every <code>terraform apply</code> and after any <code>seed_entity_config.py</code> run.</strong></p>
-<pre><code class="language-bash"># Preview what will be created without making AWS API calls:
+
+<h3>Step 4.4 — Create extraction schedules per entity</h3>
+
+Each entity needs an EventBridge schedule pointing at the state machine. Schedules are <strong>data</strong> — managed by <code>ExtractionScheduleClient</code> at runtime, not by Terraform.
+
+<code>seed_schedules.py</code> reads every active entity from DynamoDB that has <code>schedule_cron</code> set and <code>schedule_enabled=True</code>, then creates or updates the corresponding EventBridge Scheduler schedules in one pass. <strong>This must be run after every <code>terraform apply</code> and after any <code>seed_entity_config.py</code> run.</strong>
+
+<pre><code># Preview what will be created without making AWS API calls:
 python scripts/seed_schedules.py --environment dev --dry-run
 
 # Create / update all schedules:
@@ -701,32 +647,39 @@ python scripts/seed_schedules.py --environment dev
 # Or via Makefile:
 make seed-schedules
 </code></pre>
-<blockquote>
-<p><strong>Note:</strong> Terraform only creates the schedule <em>group</em> (<code>dev-extraction-schedules</code>). The individual cron triggers inside the group are created entirely by <code>seed_schedules.py</code>. If you skip this step, the group is empty and the pipeline never runs automatically.</p>
-</blockquote>
-<h3 id="step-45-test-the-full-pipeline-with-a-manual-trigger">Step 4.5 — Test the full pipeline with a manual trigger</h3>
-<p>Before waiting for the schedule, trigger one run manually to verify the end-to-end flow:</p>
-<pre><code class="language-bash">python scripts/trigger_extraction.py \
+
+<blockquote><strong>Note:</strong> Terraform only creates the schedule </em>group<em> (<code>dev-extraction-schedules</code>). The individual cron triggers inside the group are created entirely by <code>seed_schedules.py</code>. If you skip this step, the group is empty and the pipeline never runs automatically.</blockquote>
+
+<h3>Step 4.5 — Test the full pipeline with a manual trigger</h3>
+
+Before waiting for the schedule, trigger one run manually to verify the end-to-end flow:
+
+<pre><code>python scripts/trigger_extraction.py \
   --source-id salesforce \
   --entity-id salesforce-account \
   --environment dev \
   --param object_name=Account
 </code></pre>
-<p>Watch execution in the AWS Console or via CLI:</p>
-<pre><code class="language-bash"># Get the most recent execution ARN
+
+Watch execution in the AWS Console or via CLI:
+
+<pre><code># Get the most recent execution ARN
 MACHINE_ARN=$(cd infrastructure/environments/dev &amp;&amp; terraform output -raw state_machine_arn)
 
 aws stepfunctions list-executions \
-  --state-machine-arn &quot;${MACHINE_ARN}&quot; \
+  --state-machine-arn "${MACHINE_ARN}" \
   --max-results 1 \
-  --query &quot;executions[0].executionArn&quot; \
+  --query "executions[0].executionArn" \
   --output text | xargs -I{} \
   aws stepfunctions describe-execution --execution-arn {}
 </code></pre>
-<h3 id="step-46-understand-the-pipeline-outputs-at-each-stage">Step 4.6 — Understand the pipeline outputs at each stage</h3>
-<p>After a successful run, verify each stage's S3 output:</p>
-<pre><code class="language-bash">ENV=dev
-RUN_ID=&quot;run-20260616-...&quot;  # from execution output
+
+<h3>Step 4.6 — Understand the pipeline outputs at each stage</h3>
+
+After a successful run, verify each stage's S3 output:
+
+<pre><code>ENV=dev
+RUN_ID="run-20260616-..."  # from execution output
 
 # Stage A — Raw Parquet written
 aws s3 ls s3://${ENV}-edl-raw/salesforce/salesforce-account/ --recursive
@@ -741,303 +694,324 @@ aws s3 cp s3://${ENV}-edl-curated/quality-reports/salesforce/salesforce-account/
 aws s3 ls s3://${ENV}-edl-analytics/canonical/ --recursive
 aws s3 ls s3://${ENV}-edl-analytics/ --recursive
 </code></pre>
-<hr />
-<h2 id="8-phase-5-data-configuration-dynamodb-seeds-secrets">8. Phase 5 — Data Configuration (DynamoDB Seeds + Secrets)</h2>
-<h3 id="step-61-populate-source-credentials-in-secrets-manager">Step 6.1 — Populate source credentials in Secrets Manager</h3>
-<p>This step stores actual credentials. <strong>Do this from a secure workstation only.</strong> Never commit credential values to git.</p>
-<p><strong>Salesforce credentials:</strong></p>
-<pre><code class="language-bash">aws secretsmanager put-secret-value \
-  --secret-id &quot;dev/sources/salesforce/credentials&quot; \
+
+<hr/>
+
+<h2>8. Phase 5 — Data Configuration (DynamoDB Seeds + Secrets)</h2>
+
+<h3>Step 6.1 — Populate source credentials in Secrets Manager</h3>
+
+This step stores actual credentials. <strong>Do this from a secure workstation only.</strong> Never commit credential values to git.
+
+<strong>Salesforce credentials:</strong>
+
+<pre><code>aws secretsmanager put-secret-value \
+  --secret-id "dev/sources/salesforce/credentials" \
   --region us-east-1 \
   --secret-string '{
-    &quot;client_id&quot;:     &quot;YOUR_SALESFORCE_CONNECTED_APP_CLIENT_ID&quot;,
-    &quot;client_secret&quot;: &quot;YOUR_SALESFORCE_CONNECTED_APP_CLIENT_SECRET&quot;,
-    &quot;instance_url&quot;:  &quot;https://yourcompany.my.salesforce.com&quot;
+    "client_id":     "YOUR_SALESFORCE_CONNECTED_APP_CLIENT_ID",
+    "client_secret": "YOUR_SALESFORCE_CONNECTED_APP_CLIENT_SECRET",
+    "instance_url":  "https://yourcompany.my.salesforce.com"
   }'
 </code></pre>
-<p><strong>NetSuite credentials:</strong></p>
-<pre><code class="language-bash">aws secretsmanager put-secret-value \
-  --secret-id &quot;dev/sources/netsuite/credentials&quot; \
+
+<strong>NetSuite credentials:</strong>
+
+<pre><code>aws secretsmanager put-secret-value \
+  --secret-id "dev/sources/netsuite/credentials" \
   --region us-east-1 \
   --secret-string '{
-    &quot;account_id&quot;:    &quot;YOUR_NETSUITE_ACCOUNT_ID&quot;,
-    &quot;consumer_key&quot;:  &quot;YOUR_CONSUMER_KEY&quot;,
-    &quot;consumer_secret&quot;: &quot;YOUR_CONSUMER_SECRET&quot;,
-    &quot;token_id&quot;:      &quot;YOUR_TOKEN_ID&quot;,
-    &quot;token_secret&quot;:  &quot;YOUR_TOKEN_SECRET&quot;
+    "account_id":    "YOUR_NETSUITE_ACCOUNT_ID",
+    "consumer_key":  "YOUR_CONSUMER_KEY",
+    "consumer_secret": "YOUR_CONSUMER_SECRET",
+    "token_id":      "YOUR_TOKEN_ID",
+    "token_secret":  "YOUR_TOKEN_SECRET"
   }'
 </code></pre>
-<p><strong>MySQL RDS credentials:</strong></p>
-<pre><code class="language-bash">aws secretsmanager put-secret-value \
-  --secret-id &quot;dev/sources/mysql-rds/credentials&quot; \
+
+<strong>MySQL RDS credentials:</strong>
+
+<pre><code>aws secretsmanager put-secret-value \
+  --secret-id "dev/sources/mysql-rds/credentials" \
   --region us-east-1 \
   --secret-string '{
-    &quot;host&quot;:     &quot;your-rds-endpoint.us-east-1.rds.amazonaws.com&quot;,
-    &quot;port&quot;:     3306,
-    &quot;database&quot;: &quot;your_database_name&quot;,
-    &quot;username&quot;: &quot;edl_readonly&quot;,
-    &quot;password&quot;: &quot;YOUR_READONLY_PASSWORD&quot;
+    "host":     "your-rds-endpoint.us-east-1.rds.amazonaws.com",
+    "port":     3306,
+    "database": "your_database_name",
+    "username": "edl_readonly",
+    "password": "YOUR_READONLY_PASSWORD"
   }'
 </code></pre>
-<blockquote>
-<p><strong>Security note:</strong> The <code>extraction-service-role</code> IAM role created by Terraform has <code>GetSecretValue</code> permission on these exact secret ARNs only. No other role can read these credentials.</p>
-</blockquote>
-<p><strong>Sage Intacct credentials:</strong></p>
-<pre><code class="language-bash">aws secretsmanager put-secret-value \
-  --secret-id &quot;dev/sources/sage/intacct/credentials&quot; \
+
+<blockquote><strong>Security note:</strong> The <code>extraction-service-role</code> IAM role created by Terraform has <code>GetSecretValue</code> permission on these exact secret ARNs only. No other role can read these credentials.</blockquote>
+
+<strong>Sage Intacct credentials:</strong>
+
+<pre><code>aws secretsmanager put-secret-value \
+  --secret-id "dev/sources/sage/intacct/credentials" \
   --region us-east-1 \
   --secret-string '{
-    &quot;token_url&quot;:   &quot;https://api.intacct.com/ia/api/v1/auth/oauth2/token&quot;,
-    &quot;client_id&quot;:  &quot;YOUR_INTACCT_CLIENT_ID&quot;,
-    &quot;client_secret&quot;: &quot;YOUR_INTACCT_CLIENT_SECRET&quot;,
-    &quot;base_url&quot;:   &quot;https://api.intacct.com/ia/api/v1&quot;,
-    &quot;company_id&quot;: &quot;YOUR_INTACCT_COMPANY_ID&quot;
+    "token_url":   "https://api.intacct.com/ia/api/v1/auth/oauth2/token",
+    "client_id":  "YOUR_INTACCT_CLIENT_ID",
+    "client_secret": "YOUR_INTACCT_CLIENT_SECRET",
+    "base_url":   "https://api.intacct.com/ia/api/v1",
+    "company_id": "YOUR_INTACCT_COMPANY_ID"
   }'
 </code></pre>
-<p><strong>Sage X3 credentials:</strong></p>
-<pre><code class="language-bash">aws secretsmanager put-secret-value \
-  --secret-id &quot;dev/sources/sage/x3/credentials&quot; \
+
+<strong>Sage X3 credentials:</strong>
+
+<pre><code>aws secretsmanager put-secret-value \
+  --secret-id "dev/sources/sage/x3/credentials" \
   --region us-east-1 \
   --secret-string '{
-    &quot;token_url&quot;:   &quot;https://YOUR_X3_SERVER/auth/realms/sage/protocol/openid-connect/token&quot;,
-    &quot;client_id&quot;:  &quot;YOUR_X3_CLIENT_ID&quot;,
-    &quot;client_secret&quot;: &quot;YOUR_X3_CLIENT_SECRET&quot;,
-    &quot;base_url&quot;:   &quot;https://YOUR_X3_SERVER/api&quot;,
-    &quot;folder&quot;:     &quot;YOUR_X3_COMPANY_FOLDER&quot;
+    "token_url":   "https://YOUR_X3_SERVER/auth/realms/sage/protocol/openid-connect/token",
+    "client_id":  "YOUR_X3_CLIENT_ID",
+    "client_secret": "YOUR_X3_CLIENT_SECRET",
+    "base_url":   "https://YOUR_X3_SERVER/api",
+    "folder":     "YOUR_X3_COMPANY_FOLDER"
   }'
 </code></pre>
-<pre><code class="language-bash">python scripts/seed_entity_config.py \
+
+<h3>Step 6.2 — Seed entity configuration records into DynamoDB</h3>
+
+<pre><code>python scripts/seed_entity_config.py \
   --environment dev \
   --region us-east-1
 </code></pre>
-<p>This writes the default entity configuration records for <code>salesforce-account</code>, <code>salesforce-contact</code>, <code>netsuite-customer</code>, <code>mysql-rds-orders</code>, <code>sage-intacct-customer</code>, <code>sage-intacct-vendor</code>, <code>sage-intacct-arinvoice</code>, <code>sage-intacct-apbill</code>, <code>sage-x3-customer</code>, and <code>sage-x3-supplier</code>. All records are idempotent (safe to run multiple times).</p>
-<p>To add a new entity, edit <code>scripts/seed_entity_config.py</code> and add a record to the <code>_RECORDS</code> list, then re-run the script. No Terraform changes needed.</p>
-<p><strong>Entity configuration fields explained:</strong></p>
-<pre><code class="language-python">{
-    &quot;source_id&quot;:          &quot;salesforce&quot;,           # stable source identifier
-    &quot;entity_id&quot;:          &quot;salesforce-account&quot;,   # stable entity identifier
-    &quot;config_version&quot;:     &quot;1.0.0&quot;,                # semantic version
-    &quot;load_type&quot;:          &quot;incremental&quot;,           # &quot;full&quot; or &quot;incremental&quot;
-    &quot;watermark_field&quot;:    &quot;SystemModstamp&quot;,        # source timestamp field for delta sync
-    &quot;extraction_window_days&quot;: 1,                  # max days per extraction run
-    &quot;watermark_overlap_hours&quot;: 1,                 # overlap to catch late-arriving records
-    &quot;field_mode&quot;:         &quot;all&quot;,                  # &quot;all&quot;, &quot;standard&quot;, &quot;custom&quot;, &quot;includeOnly&quot;
-    &quot;include_fields&quot;:     [],                     # only used when field_mode = &quot;includeOnly&quot;
-    &quot;exclude_fields&quot;:     [&quot;IsDeleted&quot;],          # always excluded regardless of field_mode
-    &quot;output_format&quot;:      &quot;parquet&quot;,              # always parquet
-    &quot;active&quot;:             True                    # False = skip this entity
+
+This writes the default entity configuration records for <code>salesforce-account</code>, <code>salesforce-contact</code>, <code>netsuite-customer</code>, <code>mysql-rds-orders</code>, <code>sage-intacct-customer</code>, <code>sage-intacct-vendor</code>, <code>sage-intacct-arinvoice</code>, <code>sage-intacct-apbill</code>, <code>sage-x3-customer</code>, and <code>sage-x3-supplier</code>. All records are idempotent (safe to run multiple times).
+
+To add a new entity, edit <code>scripts/seed_entity_config.py</code> and add a record to the <code>_RECORDS</code> list, then re-run the script. No Terraform changes needed.
+
+<strong>Entity configuration fields explained:</strong>
+
+<pre><code>{
+    "source_id":               "salesforce",           # stable source identifier
+    "entity_id":               "salesforce-account",   # stable entity identifier
+    "config_version":          "1.1.0",                # semantic version — bump when changing load_type or merge fields
+    "load_type":               "incremental",           # "full" or "incremental"
+    "watermark_field":         "SystemModstamp",        # source timestamp field for delta sync (required for incremental)
+    "extraction_window_days":  1,                       # max days per extraction run
+    "watermark_overlap_hours": 1,                       # overlap to catch late-arriving records
+    "field_mode":              "all",                   # "all", "standard", "custom", "includeOnly"
+    "include_fields":          [],                      # only used when field_mode = "includeOnly"
+    "exclude_fields":          ["IsDeleted"],           # always excluded regardless of field_mode
+    "output_format":           "parquet",               # always parquet
+    # ── Incremental merge (SCD Type 1) ──────────────────────────────────────
+    # Set primary_key_field to enable SCD Type 1 merge for incremental entities.
+    # The curated layer will always hold the FULL current state, not just the delta.
+    # This ensures entity resolution and analytics see complete data on every run.
+    # Leave as None for full-load entities (no merge needed — full extract every run).
+    "primary_key_field":       "Id",                   # canonical PK field name (flat, no dots); None = append-only
+    # soft_delete_field controls what happens when a source record carries a deletion flag:
+    #   None (default / tombstone)  → deleted records are KEPT with their flag (is_deleted=True)
+    #                                 BI queries filter WHERE is_deleted = false
+    #   "is_deleted"                → deleted records are physically REMOVED from the curated snapshot
+    "soft_delete_field":       None,                   # canonical delete-flag field name; None = tombstone pattern
+    "active":                  True                    # False = skip this entity
 }
 </code></pre>
-<h3 id="step-63-create-eventbridge-extraction-schedules">Step 6.3 — Create EventBridge extraction schedules</h3>
-<p>Run <code>seed_schedules.py</code> to create all schedules in one pass (reads from DynamoDB — no per-entity CLI calls needed):</p>
-<pre><code class="language-bash">python scripts/seed_schedules.py --environment dev
-# or: make seed-schedules
+
+<strong>Current entity extraction modes (dev):</strong>
+
+<table>
+<tr><td>Entity</td><td>load_type</td><td>watermark_field</td><td>primary_key_field</td><td>soft_delete_field</td></tr>
+<tr><td><code>salesforce-account</code></td><td><code>incremental</code></td><td><code>SystemModstamp</code></td><td><code>Id</code></td><td><code>None</code> (tombstone)</td></tr>
+<tr><td><code>salesforce-contact</code></td><td><code>incremental</code></td><td><code>SystemModstamp</code></td><td><code>Id</code></td><td><code>None</code> (tombstone)</td></tr>
+<tr><td><code>mysql-rds-contracts</code></td><td><code>incremental</code></td><td><code>ModifiedOn</code></td><td><code>Id</code></td><td><code>None</code> (tombstone — <code>is_deleted=True</code> persists)</td></tr>
+<tr><td>Sage entities</td><td><code>incremental</code></td><td>varies</td><td><code>None</code></td><td><code>None</code></td></tr>
+</table>
+<pre><code>
+### Step 6.3 — Create EventBridge extraction schedules
+
+Run `seed_schedules.py` to create all schedules in one pass (reads from DynamoDB — no per-entity CLI calls needed):
+
+</code></pre>bash
+python scripts/seed_schedules.py --environment dev
+<h1>or: make seed-schedules</h1>
+<pre><code>
+To add a schedule for a new entity: set `schedule_cron` and `schedule_enabled=True` in `seed_entity_config.py`, re-run `seed_entity_config.py`, then re-run `seed_schedules.py`.
+
+---
+
+## 9. Phase 6 — Field Mapping Configuration
+
+Field mapping tells the transformation pipeline how to rename source fields to canonical business names. **If you don't provide a mapping, the pipeline uses identity mapping (field names passed through unchanged).**
+
+### Where field mappings are stored
+
+Field mappings are **JSON files stored in S3**:
+
 </code></pre>
-<p>To add a schedule for a new entity: set <code>schedule_cron</code> and <code>schedule_enabled=True</code> in <code>seed_entity_config.py</code>, re-run <code>seed_entity_config.py</code>, then re-run <code>seed_schedules.py</code>.</p>
-<hr />
-<h2 id="9-phase-6-field-mapping-configuration">9. Phase 6 — Field Mapping Configuration</h2>
-<p>Field mapping tells the transformation pipeline how to rename source fields to canonical business names. <strong>If you don't provide a mapping, the pipeline uses identity mapping (field names passed through unchanged).</strong></p>
-<h3 id="where-field-mappings-are-stored">Where field mappings are stored</h3>
-<p>Field mappings are <strong>JSON files stored in S3</strong>:</p>
-<pre><code>s3://{env}-edl-mapping-config/
+s3://{env}-edl-mapping-config/
 └── field-mappings/
     └── {source_id}/
         └── {entity_id}/
             ├── 1.0.0.json        ← versioned rule set
             ├── 1.1.0.json        ← updated rule set
-            └── latest.json       ← pointer: {&quot;mapping_version&quot;: &quot;1.1.0&quot;}
-</code></pre>
-<p>The platform automatically loads <code>latest.json</code> to find the current active version. Previous versions are retained for replay/rollback.</p>
-<h3 id="field-mapping-json-format">Field mapping JSON format</h3>
-<p>Create a file called <code>salesforce-account-mapping.json</code>:</p>
-<pre><code class="language-json">{
-  &quot;source_id&quot;: &quot;salesforce&quot;,
-  &quot;entity_id&quot;: &quot;salesforce-account&quot;,
-  &quot;mapping_version&quot;: &quot;1.0.0&quot;,
-  &quot;rules&quot;: [
+            └── latest.json       ← pointer: {"mapping_version": "1.1.0"}
+<pre><code>
+The platform automatically loads `latest.json` to find the current active version. Previous versions are retained for replay/rollback.
+
+### Field mapping JSON format
+
+Create a file called `salesforce-account-mapping.json`:
+
+</code></pre>json
+{
+  "source_id": "salesforce",
+  "entity_id": "salesforce-account",
+  "mapping_version": "1.0.0",
+  "rules": [
     {
-      &quot;source_fields&quot;: [&quot;Id&quot;],
-      &quot;canonical_field&quot;: &quot;account_id&quot;,
-      &quot;transformation&quot;: &quot;rename&quot;,
-      &quot;transformation_params&quot;: {},
-      &quot;missing_field_behavior&quot;: &quot;raise_error&quot;
+      "source_fields": ["Id"],
+      "canonical_field": "account_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
     },
     {
-      &quot;source_fields&quot;: [&quot;Name&quot;],
-      &quot;canonical_field&quot;: &quot;account_name&quot;,
-      &quot;transformation&quot;: &quot;rename&quot;,
-      &quot;transformation_params&quot;: {},
-      &quot;missing_field_behavior&quot;: &quot;raise_error&quot;
+      "source_fields": ["Name"],
+      "canonical_field": "account_name",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
     },
     {
-      &quot;source_fields&quot;: [&quot;BillingCity&quot;],
-      &quot;canonical_field&quot;: &quot;billing_city&quot;,
-      &quot;transformation&quot;: &quot;rename&quot;,
-      &quot;transformation_params&quot;: {},
-      &quot;missing_field_behavior&quot;: &quot;drop_field&quot;
+      "source_fields": ["BillingCity"],
+      "canonical_field": "billing_city",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
     },
     {
-      &quot;source_fields&quot;: [&quot;BillingState&quot;],
-      &quot;canonical_field&quot;: &quot;billing_state&quot;,
-      &quot;transformation&quot;: &quot;rename&quot;,
-      &quot;transformation_params&quot;: {},
-      &quot;missing_field_behavior&quot;: &quot;drop_field&quot;
+      "source_fields": ["BillingState"],
+      "canonical_field": "billing_state",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
     },
     {
-      &quot;source_fields&quot;: [&quot;AnnualRevenue&quot;],
-      &quot;canonical_field&quot;: &quot;annual_revenue_usd&quot;,
-      &quot;transformation&quot;: &quot;cast&quot;,
-      &quot;transformation_params&quot;: {&quot;type&quot;: &quot;decimal&quot;},
-      &quot;missing_field_behavior&quot;: &quot;use_default&quot;,
-      &quot;default_value&quot;: &quot;0&quot;
+      "source_fields": ["AnnualRevenue"],
+      "canonical_field": "annual_revenue_usd",
+      "transformation": "cast",
+      "transformation_params": {"type": "decimal"},
+      "missing_field_behavior": "use_default",
+      "default_value": "0"
     },
     {
-      &quot;source_fields&quot;: [&quot;CreatedDate&quot;],
-      &quot;canonical_field&quot;: &quot;created_date&quot;,
-      &quot;transformation&quot;: &quot;date_format&quot;,
-      &quot;transformation_params&quot;: {
-        &quot;input_format&quot;: &quot;%Y-%m-%dT%H:%M:%S.%f%z&quot;,
-        &quot;output_format&quot;: &quot;%Y-%m-%d&quot;
+      "source_fields": ["CreatedDate"],
+      "canonical_field": "created_date",
+      "transformation": "date_format",
+      "transformation_params": {
+        "input_format": "%Y-%m-%dT%H:%M:%S.%f%z",
+        "output_format": "%Y-%m-%d"
       },
-      &quot;missing_field_behavior&quot;: &quot;drop_field&quot;
+      "missing_field_behavior": "drop_field"
     },
     {
-      &quot;source_fields&quot;: [&quot;FirstName&quot;, &quot;LastName&quot;],
-      &quot;canonical_field&quot;: &quot;full_name&quot;,
-      &quot;transformation&quot;: &quot;concat&quot;,
-      &quot;transformation_params&quot;: {&quot;separator&quot;: &quot; &quot;},
-      &quot;missing_field_behavior&quot;: &quot;drop_field&quot;
+      "source_fields": ["FirstName", "LastName"],
+      "canonical_field": "full_name",
+      "transformation": "concat",
+      "transformation_params": {"separator": " "},
+      "missing_field_behavior": "drop_field"
     }
   ]
 }
-</code></pre>
-<h3 id="transformation-types-reference">Transformation types reference</h3>
-<table>
-<thead>
-<tr>
-<th><code>transformation</code></th>
-<th>What it does</th>
-<th>Required <code>transformation_params</code></th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>rename</code></td>
-<td>Copy value from one source field to canonical field</td>
-<td>none</td>
-</tr>
-<tr>
-<td><code>concat</code></td>
-<td>Join multiple source fields with a separator</td>
-<td><code>separator</code> (default: <code>" "</code>)</td>
-</tr>
-<tr>
-<td><code>date_format</code></td>
-<td>Parse and reformat a date/datetime string</td>
-<td><code>input_format</code>, <code>output_format</code> (strftime patterns)</td>
-</tr>
-<tr>
-<td><code>cast</code></td>
-<td>Convert value to a different type</td>
-<td><code>type</code>: <code>string</code>, <code>integer</code>, <code>decimal</code>, <code>boolean</code></td>
-</tr>
-<tr>
-<td><code>mask</code></td>
-<td>Mask field value (last N chars visible)</td>
-<td><code>visible_chars</code> (default: <code>4</code>)</td>
-</tr>
-</tbody>
-</table>
-<h3 id="missing_field_behavior-reference"><code>missing_field_behavior</code> reference</h3>
-<table>
-<thead>
-<tr>
-<th>Value</th>
-<th>Effect when source field is absent or null</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>drop_field</code></td>
-<td>Skip this field — canonical record produced without it</td>
-</tr>
-<tr>
-<td><code>raise_error</code></td>
-<td>Discard the entire record — increments <code>mapping_failures</code> counter</td>
-</tr>
-<tr>
-<td><code>use_default</code></td>
-<td>Use the value in <code>default_value</code> field</td>
-</tr>
-</tbody>
-</table>
-<h3 id="how-to-upload-a-field-mapping">How to upload a field mapping</h3>
-<p><strong>Option A — Python script (recommended):</strong></p>
-<pre><code class="language-bash">python - &lt;&lt;'EOF'
+<pre><code>
+### Transformation types reference
+
+| `transformation` | What it does | Required `transformation_params` |
+|---|---|---|
+| `rename` | Copy value from one source field to canonical field | none |
+| `concat` | Join multiple source fields with a separator | `separator` (default: `" "`) |
+| `date_format` | Parse and reformat a date/datetime string | `input_format`, `output_format` (strftime patterns) |
+| `cast` | Convert value to a different type | `type`: `string`, `integer`, `decimal`, `boolean` |
+| `mask` | Mask field value (last N chars visible) | `visible_chars` (default: `4`) |
+
+### `missing_field_behavior` reference
+
+| Value | Effect when source field is absent or null |
+|---|---|
+| `drop_field` | Skip this field — canonical record produced without it |
+| `raise_error` | Discard the entire record — increments `mapping_failures` counter |
+| `use_default` | Use the value in `default_value` field |
+
+### How to upload a field mapping
+
+**Option A — Python script (recommended):**
+
+</code></pre>bash
+python - <<'EOF'
 import boto3, json
 
-s3 = boto3.client(&quot;s3&quot;, region_name=&quot;us-east-1&quot;)
-BUCKET = &quot;dev-edl-mapping-config&quot;   # ← from terraform output mapping_bucket_name
+s3 = boto3.client("s3", region_name="us-east-1")
+BUCKET = "dev-edl-mapping-config"   # ← from terraform output mapping_bucket_name
 
-with open(&quot;salesforce-account-mapping.json&quot;) as f:
+with open("salesforce-account-mapping.json") as f:
     rule_set = json.load(f)
 
-# Upload versioned file
-key = f&quot;field-mappings/{rule_set['source_id']}/{rule_set['entity_id']}/{rule_set['mapping_version']}.json&quot;
-s3.put_object(Bucket=BUCKET, Key=key, Body=json.dumps(rule_set, indent=2).encode(), ContentType=&quot;application/json&quot;)
+<h1>Upload versioned file</h1>
+key = f"field-mappings/{rule_set['source_id']}/{rule_set['entity_id']}/{rule_set['mapping_version']}.json"
+s3.put_object(Bucket=BUCKET, Key=key, Body=json.dumps(rule_set, indent=2).encode(), ContentType="application/json")
 
-# Update latest pointer
-pointer_key = f&quot;field-mappings/{rule_set['source_id']}/{rule_set['entity_id']}/latest.json&quot;
+<h1>Update latest pointer</h1>
+pointer_key = f"field-mappings/{rule_set['source_id']}/{rule_set['entity_id']}/latest.json"
 s3.put_object(Bucket=BUCKET, Key=pointer_key,
-              Body=json.dumps({&quot;mapping_version&quot;: rule_set[&quot;mapping_version&quot;]}).encode(),
-              ContentType=&quot;application/json&quot;)
+              Body=json.dumps({"mapping_version": rule_set["mapping_version"]}).encode(),
+              ContentType="application/json")
 
-print(f&quot;Published: {key}&quot;)
+print(f"Published: {key}")
 EOF
-</code></pre>
-<p><strong>Option B — AWS CLI:</strong></p>
-<pre><code class="language-bash">BUCKET=dev-edl-mapping-config
+<pre><code>
+**Option B — AWS CLI:**
+
+</code></pre>bash
+BUCKET=dev-edl-mapping-config
 SOURCE_ID=salesforce
 ENTITY_ID=salesforce-account
 VERSION=1.0.0
 
-# Upload the rule set
+<h1>Upload the rule set</h1>
 aws s3 cp salesforce-account-mapping.json \
   s3://${BUCKET}/field-mappings/${SOURCE_ID}/${ENTITY_ID}/${VERSION}.json \
   --content-type application/json
 
-# Update the latest pointer
-echo '{&quot;mapping_version&quot;: &quot;'&quot;${VERSION}&quot;'&quot;}' | \
+<h1>Update the latest pointer</h1>
+echo '{"mapping_version": "'"${VERSION}"'"}' | \
   aws s3 cp - \
     s3://${BUCKET}/field-mappings/${SOURCE_ID}/${ENTITY_ID}/latest.json \
     --content-type application/json
-</code></pre>
-<p><strong>Option C — Python <code>FieldMappingRegistryClient</code> (programmatic):</strong></p>
-<pre><code class="language-python">from transformation.field_mapping.field_mapping_registry import (
+<pre><code>
+**Option C — Python `FieldMappingRegistryClient` (programmatic):**
+
+</code></pre>python
+from transformation.field_mapping.field_mapping_registry import (
     FieldMappingRegistryClient, FieldMappingRule, FieldMappingRuleSet,
     MappingTransformation, MissingFieldBehavior
 )
 
 client = FieldMappingRegistryClient(
-    s3_bucket=&quot;dev-edl-mapping-config&quot;,
-    region_name=&quot;us-east-1&quot;
+    s3_bucket="dev-edl-mapping-config",
+    region_name="us-east-1"
 )
 
 rule_set = FieldMappingRuleSet(
-    source_id=&quot;salesforce&quot;,
-    entity_id=&quot;salesforce-account&quot;,
-    mapping_version=&quot;1.0.0&quot;,
+    source_id="salesforce",
+    entity_id="salesforce-account",
+    mapping_version="1.0.0",
     rules=(
         FieldMappingRule(
-            source_fields=(&quot;Id&quot;,),
-            canonical_field=&quot;account_id&quot;,
+            source_fields=("Id",),
+            canonical_field="account_id",
             transformation=MappingTransformation.RENAME,
             transformation_params={},
             missing_field_behavior=MissingFieldBehavior.RAISE_ERROR,
         ),
         FieldMappingRule(
-            source_fields=(&quot;Name&quot;,),
-            canonical_field=&quot;account_name&quot;,
+            source_fields=("Name",),
+            canonical_field="account_name",
             transformation=MappingTransformation.RENAME,
             transformation_params={},
             missing_field_behavior=MissingFieldBehavior.RAISE_ERROR,
@@ -1046,510 +1020,291 @@ rule_set = FieldMappingRuleSet(
 )
 
 key = client.publish_rule_set(rule_set)
-print(f&quot;Published to: {key}&quot;)
+print(f"Published to: {key}")
+<pre><code>
+### Updating a field mapping
+
+To update, create a new JSON file with an incremented `mapping_version` (e.g. `"1.1.0"`) and upload it. The `latest.json` pointer is updated automatically. The next transformation run picks up the new version. Old versions remain in S3 for replay.
+
+---
+
+## 10. Phase 7 — Entity Resolution Config
+
+Entity resolution match rules and survivorship policies are stored as **versioned JSON config files in S3** — analogous to field mappings but for entity identity and canonical output schema.
+
+### Where entity resolution configs are stored
+
 </code></pre>
-<h3 id="updating-a-field-mapping">Updating a field mapping</h3>
-<p>To update, create a new JSON file with an incremented <code>mapping_version</code> (e.g. <code>"1.1.0"</code>) and upload it. The <code>latest.json</code> pointer is updated automatically. The next transformation run picks up the new version. Old versions remain in S3 for replay.</p>
-<hr />
-<h2 id="10-phase-7-entity-resolution-config">10. Phase 7 — Entity Resolution Config</h2>
-<p>Entity resolution match rules and survivorship policies are stored as <strong>versioned JSON config files in S3</strong> — analogous to field mappings but for entity identity and canonical output schema.</p>
-<h3 id="where-entity-resolution-configs-are-stored">Where entity resolution configs are stored</h3>
-<pre><code>s3://{env}-edl-curated/
+s3://{env}-edl-curated/
 └── entity-resolution/
     └── {entity_type}/
         ├── match_rules_v1.json     ← match rules (blocking + deterministic/probabilistic rules)
         ├── survivorship_v1.json    ← survivorship policy + output_fields schema
-        └── latest.json             ← {&quot;match_rules_version&quot;: &quot;v1&quot;, &quot;survivorship_version&quot;: &quot;v1&quot;}
-</code></pre>
-<p>The source files live in Git under <code>config/entity_resolution/</code>. The <code>ResolutionConfigRegistry</code> loads them from S3 at runtime. Every entity resolution Lambda invocation loads config fresh (with in-process caching for warm Lambda instances).</p>
-<h3 id="how-to-publish-entity-resolution-configs">How to publish entity resolution configs</h3>
-<pre><code class="language-bash"># Publish all entity resolution configs from config/entity_resolution/ to dev S3
+        └── latest.json             ← {"match_rules_version": "v1", "survivorship_version": "v1"}
+<pre><code>
+The source files live in Git under `config/entity_resolution/`. The `ResolutionConfigRegistry` loads them from S3 at runtime. Every entity resolution Lambda invocation loads config fresh (with in-process caching for warm Lambda instances).
+
+### How to publish entity resolution configs
+
+</code></pre>bash
+<h1>Publish all entity resolution configs from config/entity_resolution/ to dev S3</h1>
 python scripts/seed_entity_resolution_configs.py --environment dev --region us-east-1
 
-# Dry-run first (prints what would be published, no S3 writes)
+<h1>Dry-run first (prints what would be published, no S3 writes)</h1>
 python scripts/seed_entity_resolution_configs.py --environment dev --region us-east-1 --dry-run
 
-# Publish a single entity type
+<h1>Publish a single entity type</h1>
 python scripts/seed_entity_resolution_configs.py --environment dev --entity-type company
-</code></pre>
-<h3 id="currently-defined-entity-types">Currently defined entity types</h3>
-<table>
-<thead>
-<tr>
-<th>Entity type</th>
-<th>Git config path</th>
-<th>Sources merged</th>
-<th>Output prefix</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>company</code></td>
-<td><code>config/entity_resolution/company/</code></td>
-<td>Salesforce Account + NetSuite Customer</td>
-<td><code>canonical/company/</code></td>
-</tr>
-<tr>
-<td><code>person</code></td>
-<td><code>config/entity_resolution/person/</code></td>
-<td>Salesforce Contact</td>
-<td><code>canonical/person/</code></td>
-</tr>
-</tbody>
-</table>
-<h3 id="adding-a-new-entity-type">Adding a new entity type</h3>
-<p>No code change is required. Add new JSON files and publish:</p>
-<pre><code class="language-bash"># 1. Create config directory
+<pre><code>
+### Currently defined entity types
+
+| Entity type | Git config path | Sources merged | Output prefix |
+|---|---|---|---|
+| `company` | `config/entity_resolution/company/` | Salesforce Account + NetSuite Customer | `canonical/company/` |
+| `person` | `config/entity_resolution/person/` | Salesforce Contact | `canonical/person/` |
+
+### Adding a new entity type
+
+No code change is required. Add new JSON files and publish:
+
+</code></pre>bash
+<h1>1. Create config directory</h1>
 mkdir -p config/entity_resolution/order
 
-# 2. Create match_rules_v1.json and survivorship_v1.json in that directory
-# (following the schema in docs/PIPELINE_FLOW.md §6)
+<h1>2. Create match_rules_v1.json and survivorship_v1.json in that directory</h1>
+<h1>(following the schema in docs/PIPELINE_FLOW.md §6)</h1>
 
-# 3. Publish to S3
+<h1>3. Publish to S3</h1>
 python scripts/seed_entity_resolution_configs.py --environment dev --entity-type order
-</code></pre>
-<h3 id="updating-an-existing-entity-type">Updating an existing entity type</h3>
-<pre><code class="language-bash"># 1. Edit config/entity_resolution/company/match_rules_v2.json (bump rule_set_version to &quot;v2&quot;)
-# 2. Publish new version — also updates latest.json pointer
+<pre><code>
+### Updating an existing entity type
+
+</code></pre>bash
+<h1>1. Edit config/entity_resolution/company/match_rules_v2.json (bump rule_set_version to "v2")</h1>
+<h1>2. Publish new version — also updates latest.json pointer</h1>
 python scripts/seed_entity_resolution_configs.py --environment dev --entity-type company
 
-# Rollback: pin to v1
+<h1>Rollback: pin to v1</h1>
 python scripts/seed_entity_resolution_configs.py --environment dev --entity-type company --pin-version v1
-</code></pre>
-<h3 id="verify-entity-resolution-configs-published">Verify entity resolution configs published</h3>
-<pre><code class="language-bash"># Check all configs exist in S3
+<pre><code>
+### Verify entity resolution configs published
+
+</code></pre>bash
+<h1>Check all configs exist in S3</h1>
 for entity in company person; do
-  echo &quot;--- ${entity} ---&quot;
-  aws s3 ls &quot;s3://dev-edl-curated/entity-resolution/${entity}/&quot;
+  echo "--- ${entity} ---"
+  aws s3 ls "s3://dev-edl-curated/entity-resolution/${entity}/"
 done
 
-# Inspect the latest pointer
+<h1>Inspect the latest pointer</h1>
 aws s3 cp s3://dev-edl-curated/entity-resolution/company/latest.json -
-# Expected: {&quot;match_rules_version&quot;: &quot;v1&quot;, &quot;survivorship_version&quot;: &quot;v1&quot;}
-</code></pre>
-<hr />
-<h2 id="11-all-aws-settings-reference-what-to-set-and-where">11. All AWS Settings Reference — What to Set and Where</h2>
-<h3 id="a-terraformtfvars-infrastructure-settings">A. <code>terraform.tfvars</code> — Infrastructure settings</h3>
-<p>File: <code>infrastructure/environments/{env}/terraform.tfvars</code></p>
-<p>Template files for promotion:
-- <code>infrastructure/environments/staging/terraform.tfvars.example</code>
-- <code>infrastructure/environments/prod/terraform.tfvars.example</code></p>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>What it is</th>
-<th>Example</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>aws_region</code></td>
-<td>AWS region for all resources</td>
-<td><code>"us-east-1"</code></td>
-</tr>
-<tr>
-<td><code>cost_center</code></td>
-<td>Tag applied to all resources for cost allocation</td>
-<td><code>"data-platform"</code></td>
-</tr>
-<tr>
-<td><code>github_org</code></td>
-<td>GitHub org for CI/CD OIDC trust (GitHub Actions → AWS)</td>
-<td><code>"your-github-org"</code></td>
-</tr>
-<tr>
-<td><code>github_repo</code></td>
-<td>GitHub repo name for OIDC trust</td>
-<td><code>"enterprise-data-lake"</code></td>
-</tr>
-<tr>
-<td><code>alert_email</code></td>
-<td>Email for CloudWatch alarm SNS notifications</td>
-<td><code>"ops@yourcompany.com"</code></td>
-</tr>
-<tr>
-<td><code>lambda_package_s3_bucket</code></td>
-<td>S3 bucket where Lambda zip is uploaded</td>
-<td><code>"dev-edl-terraform-state"</code></td>
-</tr>
-<tr>
-<td><code>lambda_package_s3_key</code></td>
-<td>S3 key of the Lambda zip</td>
-<td><code>"lambda/extraction-pipeline.zip"</code></td>
-</tr>
-<tr>
-<td><code>lambda_package_source_hash</code></td>
-<td>Base64 SHA-256 of zip (triggers Lambda update)</td>
-<td>output of <code>make lambda-package</code></td>
-</tr>
-</tbody>
-</table>
-<h3 id="b-backendtf-terraform-remote-state-settings">B. <code>backend.tf</code> — Terraform remote state settings</h3>
-<p>File: <code>infrastructure/environments/{env}/backend.tf</code></p>
-<table>
-<thead>
-<tr>
-<th>Setting</th>
-<th>What it is</th>
-<th>Example</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>bucket</code></td>
-<td>S3 bucket for Terraform state</td>
-<td><code>"dev-edl-terraform-state"</code></td>
-</tr>
-<tr>
-<td><code>key</code></td>
-<td>S3 object key for the state file</td>
-<td><code>"environments/dev/terraform.tfstate"</code></td>
-</tr>
-<tr>
-<td><code>region</code></td>
-<td>State bucket region</td>
-<td><code>"us-east-1"</code></td>
-</tr>
-<tr>
-<td><code>kms_key_id</code></td>
-<td>KMS alias for state encryption</td>
-<td><code>"alias/dev-terraform-state"</code></td>
-</tr>
-<tr>
-<td><code>dynamodb_table</code></td>
-<td>DynamoDB table for state locking</td>
-<td><code>"dev-edl-terraform-state-lock"</code></td>
-</tr>
-</tbody>
-</table>
-<h3 id="c-aws-secrets-manager-source-credentials">C. AWS Secrets Manager — Source credentials</h3>
-<p>Secret path: <code>{environment}/sources/{source_id}/credentials</code></p>
-<table>
-<thead>
-<tr>
-<th>Source</th>
-<th>Secret path</th>
-<th>Fields in JSON</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Salesforce</td>
-<td><code>dev/sources/salesforce/credentials</code></td>
-<td><code>instance_url</code>, <code>client_id</code>, <code>client_secret</code></td>
-</tr>
-<tr>
-<td>NetSuite</td>
-<td><code>dev/sources/netsuite/credentials</code></td>
-<td><code>account_id</code>, <code>consumer_key</code>, <code>consumer_secret</code>, <code>token_id</code>, <code>token_secret</code></td>
-</tr>
-<tr>
-<td>MySQL RDS</td>
-<td><code>dev/sources/mysql-rds/credentials</code></td>
-<td><code>host</code>, <code>port</code>, <code>database</code>, <code>username</code>, <code>password</code></td>
-</tr>
-</tbody>
-</table>
-<p><strong>How to set:</strong> <code>aws secretsmanager put-secret-value</code> (see Step 6.1 above)<br />
-<strong>Who can read:</strong> Only the <code>extraction-service-role</code> IAM role (enforced by Secrets Manager resource policy)<br />
-<strong>Where configured:</strong> <code>infrastructure/modules/secrets/main.tf</code> — the secret ARNs and resource policies are created by Terraform</p>
-<h3 id="d-dynamodb-entity-extraction-configuration">D. DynamoDB — Entity extraction configuration</h3>
-<p>Table: <code>{environment}-entity-extraction-config</code></p>
-<table>
-<thead>
-<tr>
-<th>Setting</th>
-<th>How to set</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Entity config records</td>
-<td><code>python scripts/seed_entity_config.py</code></td>
-<td>Idempotent; safe to re-run</td>
-</tr>
-<tr>
-<td>New entity for existing source</td>
-<td>Edit <code>scripts/seed_entity_config.py</code>, add record, re-run</td>
-<td>No Terraform change</td>
-</tr>
-<tr>
-<td>New source system</td>
-<td>Add adapter code + seed record + register credential</td>
-<td>See <a href="PLATFORM_FLOW.md#10-adding-a-new-connector">docs/PLATFORM_FLOW.md — Adding a New Connector</a></td>
-</tr>
-</tbody>
-</table>
-<p>Key fields you will configure per entity: <code>load_type</code>, <code>watermark_field</code>, <code>field_mode</code>, <code>exclude_fields</code>, <code>extraction_window_days</code>.</p>
-<h3 id="e-s3-field-mapping-configuration">E. S3 — Field mapping configuration</h3>
-<p>Bucket: <code>{environment}-edl-mapping-config</code><br />
-Prefix: <code>field-mappings/{source_id}/{entity_id}/</code></p>
-<table>
-<thead>
-<tr>
-<th>File</th>
-<th>Purpose</th>
-<th>How to set</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>{version}.json</code></td>
-<td>Versioned field mapping rule set</td>
-<td>Upload via script or AWS CLI (see Section 7)</td>
-</tr>
-<tr>
-<td><code>latest.json</code></td>
-<td>Pointer to the current active version</td>
-<td>Updated automatically when you publish a rule set</td>
-</tr>
-</tbody>
-</table>
-<h3 id="f-eventbridge-scheduler-extraction-schedules">F. EventBridge Scheduler — Extraction schedules</h3>
-<p>Schedule group: <code>{environment}-extraction-schedules</code> (created by Terraform)</p>
-<table>
-<thead>
-<tr>
-<th>Setting</th>
-<th>How to set</th>
-<th>Example</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Schedule expression</td>
-<td>Set <code>schedule_cron</code> in <code>seed_entity_config.py</code>, then run <code>seed_schedules.py</code></td>
-<td><code>"cron(0 2 * * ? *)"</code></td>
-</tr>
-<tr>
-<td>Time zone</td>
-<td>Set <code>schedule_timezone</code> in entity config (default: <code>UTC</code>)</td>
-<td>—</td>
-</tr>
-<tr>
-<td>Target</td>
-<td>Step Functions state machine ARN (wired automatically by <code>seed_schedules.py</code>)</td>
-<td>—</td>
-</tr>
-<tr>
-<td>Input payload</td>
-<td><code>{"source_id": "...", "entity_id": "...", "connector_params": {...}}</code></td>
-<td>Built from entity config</td>
-</tr>
-</tbody>
-</table>
-<p><strong>To update a schedule:</strong> Edit <code>schedule_cron</code> in <code>seed_entity_config.py</code>, re-run <code>seed_entity_config.py</code>, then re-run <code>seed_schedules.py</code>.<br />
-<strong>To disable a schedule:</strong> Set <code>schedule_enabled=False</code> in <code>seed_entity_config.py</code>, re-run both scripts.<br />
-<strong>No Terraform change needed</strong> for schedule changes.</p>
-<h3 id="g-lambda-environment-variables">G. Lambda environment variables</h3>
-<p>These are set by Terraform in <code>infrastructure/modules/lambda_pipeline/main.tf</code>. After Terraform apply, Lambda has:</p>
-<table>
-<thead>
-<tr>
-<th>Environment variable</th>
-<th>Value (from Terraform outputs)</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>ENVIRONMENT</code></td>
-<td><code>dev</code> / <code>staging</code> / <code>prod</code></td>
-<td>Determines DynamoDB table names and S3 bucket names</td>
-</tr>
-<tr>
-<td><code>AWS_DEFAULT_REGION</code></td>
-<td><code>us-east-1</code></td>
-<td>AWS SDK default region</td>
-</tr>
-<tr>
-<td><code>ENTITY_CONFIG_TABLE</code></td>
-<td><code>dev-entity-extraction-config</code></td>
-<td>DynamoDB config table</td>
-</tr>
-<tr>
-<td><code>WATERMARK_TABLE</code></td>
-<td><code>dev-watermark-repository</code></td>
-<td>DynamoDB watermark table</td>
-</tr>
-<tr>
-<td><code>AUDIT_TABLE</code></td>
-<td><code>dev-run-audit-log</code></td>
-<td>DynamoDB audit table</td>
-</tr>
-<tr>
-<td><code>RAW_BUCKET</code></td>
-<td><code>dev-edl-raw</code></td>
-<td>S3 raw layer bucket</td>
-</tr>
-<tr>
-<td><code>SCHEMA_SNAPSHOTS_BUCKET</code></td>
-<td><code>dev-edl-schema-snapshots</code></td>
-<td>Schema snapshot bucket</td>
-</tr>
-<tr>
-<td><code>MAPPING_BUCKET</code></td>
-<td><code>dev-edl-mapping-config</code></td>
-<td>Field mapping bucket</td>
-</tr>
-<tr>
-<td><code>GOVERNANCE_BUCKET</code></td>
-<td><code>dev-edl-governance</code></td>
-<td>Lineage and retention bucket</td>
-</tr>
-<tr>
-<td><code>DLQ_URL</code></td>
-<td>SQS queue URL</td>
-<td>Dead-letter queue for failed runs</td>
-</tr>
-<tr>
-<td><code>LOG_LEVEL</code></td>
-<td><code>INFO</code> (prod) / <code>DEBUG</code> (dev)</td>
-<td>Structured log verbosity</td>
-</tr>
-</tbody>
-</table>
-<p>You do <strong>not</strong> need to set these manually — Terraform configures them. If you need to change a value, update the Terraform variable and re-apply.</p>
-<h3 id="h-cloudwatch-alarms-alert-thresholds">H. CloudWatch Alarms — Alert thresholds</h3>
-<p>Created by Terraform in <code>infrastructure/modules/observability/</code>. Key alarms:</p>
-<table>
-<thead>
-<tr>
-<th>Alarm name</th>
-<th>Trigger</th>
-<th>Action</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>{env}-edl-extraction-failure-rate</code></td>
-<td>&gt; 5% failure rate over 5 min</td>
-<td>SNS → alert_email</td>
-</tr>
-<tr>
-<td><code>{env}-edl-dlq-depth</code></td>
-<td>DLQ has &gt; 0 messages for &gt; 4 hours</td>
-<td>SNS → alert_email</td>
-</tr>
-<tr>
-<td><code>{env}-edl-watermark-lag</code></td>
-<td>Lag &gt; 26 hours (daily entity)</td>
-<td>SNS → alert_email</td>
-</tr>
-<tr>
-<td><code>{env}-edl-breaking-drift</code></td>
-<td>Breaking drift event detected</td>
-<td>SNS → alert_email</td>
-</tr>
-</tbody>
-</table>
-<p>To change alert thresholds, edit <code>infrastructure/modules/observability/variables.tf</code> and run <code>terraform apply</code>.</p>
-<h3 id="i-iam-least-privilege-what-each-role-can-access">I. IAM Least Privilege — What Each Role Can Access</h3>
-<p>The platform enforces a <strong>zero-trust, need-to-know</strong> IAM model. Every role is created by Terraform and scoped to only the exact resources and actions it requires — no <code>Resource: "*"</code> and no <code>Action: "*"</code> permissions anywhere.</p>
-<table>
-<thead>
-<tr>
-<th>IAM role</th>
-<th>AWS services it can access</th>
-<th>Explicit restrictions</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>{env}-extraction-service-role</code></td>
-<td>S3 (<code>PutObject</code> on <code>raw/</code> prefix only) · DynamoDB (<code>GetItem</code>/<code>PutItem</code> on config, watermark, audit tables) · Secrets Manager (<code>GetSecretValue</code> on <code>{env}/sources/*</code> only) · CloudWatch Logs</td>
-<td>Cannot write to curated or analytics buckets; cannot read Secrets Manager secrets from other environments</td>
-</tr>
-<tr>
-<td><code>{env}-transformation-service-role</code></td>
-<td>S3 (<code>GetObject</code> on raw prefix; <code>PutObject</code> on curated prefix) · S3 (<code>GetObject</code>/<code>PutObject</code> on mapping-config bucket) · Glue (<code>CreateTable</code>, <code>UpdateTable</code> on the platform database only) · CloudWatch Logs</td>
-<td>Cannot access raw layer for write; cannot read Secrets Manager</td>
-</tr>
-<tr>
-<td><code>{env}-entity-resolution-role</code></td>
-<td>S3 (<code>GetObject</code> on curated prefix; <code>GetObject</code> on entity-resolution config prefix; <code>PutObject</code> on analytics <code>canonical/</code> prefix) · CloudWatch Logs</td>
-<td>Cannot read raw or mapping-config buckets; cannot access Secrets Manager</td>
-</tr>
-<tr>
-<td><code>{env}-analytics-publisher-role</code></td>
-<td>S3 (<code>GetObject</code> on curated prefix; <code>PutObject</code> on analytics <code>curated/</code> prefix) · Glue · CloudWatch Logs</td>
-<td>Cannot write to canonical (entity-resolved) prefix</td>
-</tr>
-<tr>
-<td><code>{env}-serving-store-role</code></td>
-<td>S3 (<code>GetObject</code> on analytics prefix) · Secrets Manager (<code>GetSecretValue</code> on serving DB secret only) · CloudWatch Logs</td>
-<td>Cannot write to any S3 bucket</td>
-</tr>
-<tr>
-<td><code>ci-cd-deploy-role</code></td>
-<td>Terraform state S3 bucket · IAM (boundary-constrained role updates) · Lambda/ECS task deployments</td>
-<td>Cannot access data buckets, Secrets Manager values, or DynamoDB data tables</td>
-</tr>
-</tbody>
-</table>
-<blockquote>
-<p><strong>Verification:</strong> After <code>terraform apply</code>, confirm no role has wildcard permissions:
-```bash</p>
-<h1 id="check-no-policy-has-resource-with-action">Check no policy has Resource: "<em>" with Action: "</em>"</h1>
-<p>aws iam list-policies --scope Local --query "Policies[*].PolicyName" --output text | \
-  xargs -I{} aws iam get-policy-version \
-    --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/{}" \
-    --version-id v1 --query "PolicyVersion.Document" | \
-  grep -c '"Resource": "*"'</p>
-<h1 id="expected-0">Expected: 0</h1>
-<p>```</p>
-</blockquote>
-<hr />
-<h2 id="12-promoting-to-staging-and-production">12. Promoting to Staging and Production</h2>
-<p>The deployment process for staging and production is the same as dev — the environment directory changes, and a few additional steps apply because the full automatic pipeline (5-stage Step Functions state machine) requires all Lambda ARNs before Terraform can apply the orchestration module.</p>
-<h3 id="step-111-complete-aws-prerequisites-for-the-new-environment">Step 11.1 — Complete AWS Prerequisites for the new environment</h3>
-<p>Before Terraform can run for staging or prod, repeat <strong>Section 2</strong> for the new environment:</p>
-<ul>
-<li>[ ] Terraform state S3 bucket (<code>staging-edl-terraform-state</code> or <code>prod-edl-terraform-state</code>)</li>
-<li>[ ] DynamoDB lock table (<code>staging-edl-terraform-state-lock</code> or <code>prod-edl-terraform-state-lock</code>)</li>
-<li>[ ] Bootstrap KMS key (<code>alias/staging-terraform-state</code> or <code>alias/prod-terraform-state</code>)</li>
+<h1>Expected: {"match_rules_version": "v1", "survivorship_version": "v1"}</h1>
+<pre><code>
+---
+
+## 11. All AWS Settings Reference — What to Set and Where
+
+### A. `terraform.tfvars` — Infrastructure settings
+
+File: `infrastructure/environments/{env}/terraform.tfvars`
+
+Template files for promotion:
+<ul><li>`infrastructure/environments/staging/terraform.tfvars.example`</li>
+<li>`infrastructure/environments/prod/terraform.tfvars.example`</li></ul>
+
+| Variable | What it is | Example |
+|---|---|---|
+| `aws_region` | AWS region for all resources | `"us-east-1"` |
+| `cost_center` | Tag applied to all resources for cost allocation | `"data-platform"` |
+| `github_org` | GitHub org for CI/CD OIDC trust (GitHub Actions → AWS) | `"your-github-org"` |
+| `github_repo` | GitHub repo name for OIDC trust | `"enterprise-data-lake"` |
+| `alert_email` | Email for CloudWatch alarm SNS notifications | `"ops@yourcompany.com"` |
+| `lambda_package_s3_bucket` | S3 bucket where Lambda zip is uploaded | `"dev-edl-terraform-state"` |
+| `lambda_package_s3_key` | S3 key of the Lambda zip | `"lambda/extraction-pipeline.zip"` |
+| `lambda_package_source_hash` | Base64 SHA-256 of zip (triggers Lambda update) | output of `make lambda-package` |
+
+### B. `backend.tf` — Terraform remote state settings
+
+File: `infrastructure/environments/{env}/backend.tf`
+
+| Setting | What it is | Example |
+|---|---|---|
+| `bucket` | S3 bucket for Terraform state | `"dev-edl-terraform-state"` |
+| `key` | S3 object key for the state file | `"environments/dev/terraform.tfstate"` |
+| `region` | State bucket region | `"us-east-1"` |
+| `kms_key_id` | KMS alias for state encryption | `"alias/dev-terraform-state"` |
+| `dynamodb_table` | DynamoDB table for state locking | `"dev-edl-terraform-state-lock"` |
+
+### C. AWS Secrets Manager — Source credentials
+
+Secret path: `{environment}/sources/{source_id}/credentials`
+
+| Source | Secret path | Fields in JSON |
+|---|---|---|
+| Salesforce | `dev/sources/salesforce/credentials` | `instance_url`, `client_id`, `client_secret` |
+| NetSuite | `dev/sources/netsuite/credentials` | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
+| MySQL RDS | `dev/sources/mysql-rds/credentials` | `host`, `port`, `database`, `username`, `password` |
+
+**How to set:** `aws secretsmanager put-secret-value` (see Step 6.1 above)  
+**Who can read:** Only the `extraction-service-role` IAM role (enforced by Secrets Manager resource policy)  
+**Where configured:** `infrastructure/modules/secrets/main.tf` — the secret ARNs and resource policies are created by Terraform
+
+### D. DynamoDB — Entity extraction configuration
+
+Table: `{environment}-entity-extraction-config`
+
+| Setting | How to set | Notes |
+|---|---|---|
+| Entity config records | `python scripts/seed_entity_config.py` | Idempotent; safe to re-run |
+| New entity for existing source | Edit `scripts/seed_entity_config.py`, add record, re-run | No Terraform change |
+| New source system | Add adapter code + seed record + register credential | See [docs/PLATFORM_FLOW.md — Adding a New Connector](PLATFORM_FLOW.md#10-adding-a-new-connector) |
+
+Key fields you will configure per entity: `load_type`, `watermark_field`, `field_mode`, `exclude_fields`, `extraction_window_days`.
+
+### E. S3 — Field mapping configuration
+
+Bucket: `{environment}-edl-mapping-config`  
+Prefix: `field-mappings/{source_id}/{entity_id}/`
+
+| File | Purpose | How to set |
+|---|---|---|
+| `{version}.json` | Versioned field mapping rule set | Upload via script or AWS CLI (see Section 7) |
+| `latest.json` | Pointer to the current active version | Updated automatically when you publish a rule set |
+
+### F. EventBridge Scheduler — Extraction schedules
+
+Schedule group: `{environment}-extraction-schedules` (created by Terraform)
+
+| Setting | How to set | Example |
+|---|---|---|
+| Schedule expression | Set `schedule_cron` in `seed_entity_config.py`, then run `seed_schedules.py` | `"cron(0 2 * * ? *)"` |
+| Time zone | Set `schedule_timezone` in entity config (default: `UTC`) | — |
+| Target | Step Functions state machine ARN (wired automatically by `seed_schedules.py`) | — |
+| Input payload | `{"source_id": "...", "entity_id": "...", "connector_params": {...}}` | Built from entity config |
+
+**To update a schedule:** Edit `schedule_cron` in `seed_entity_config.py`, re-run `seed_entity_config.py`, then re-run `seed_schedules.py`.  
+**To disable a schedule:** Set `schedule_enabled=False` in `seed_entity_config.py`, re-run both scripts.  
+**No Terraform change needed** for schedule changes.
+
+### G. Lambda environment variables
+
+These are set by Terraform in `infrastructure/modules/lambda_pipeline/main.tf`. After Terraform apply, Lambda has:
+
+| Environment variable | Value (from Terraform outputs) | Purpose |
+|---|---|---|
+| `ENVIRONMENT` | `dev` / `staging` / `prod` | Determines DynamoDB table names and S3 bucket names |
+| `AWS_DEFAULT_REGION` | `us-east-1` | AWS SDK default region |
+| `ENTITY_CONFIG_TABLE` | `dev-entity-extraction-config` | DynamoDB config table |
+| `WATERMARK_TABLE` | `dev-watermark-repository` | DynamoDB watermark table |
+| `AUDIT_TABLE` | `dev-run-audit-log` | DynamoDB audit table |
+| `RAW_BUCKET` | `dev-edl-raw` | S3 raw layer bucket |
+| `SCHEMA_SNAPSHOTS_BUCKET` | `dev-edl-schema-snapshots` | Schema snapshot bucket |
+| `MAPPING_BUCKET` | `dev-edl-mapping-config` | Field mapping bucket |
+| `GOVERNANCE_BUCKET` | `dev-edl-governance` | Lineage and retention bucket |
+| `DLQ_URL` | SQS queue URL | Dead-letter queue for failed runs |
+| `LOG_LEVEL` | `INFO` (prod) / `DEBUG` (dev) | Structured log verbosity |
+
+You do **not** need to set these manually — Terraform configures them. If you need to change a value, update the Terraform variable and re-apply.
+
+### H. CloudWatch Alarms — Alert thresholds
+
+Created by Terraform in `infrastructure/modules/observability/`. Key alarms:
+
+| Alarm name | Trigger | Action |
+|---|---|---|
+| `{env}-edl-extraction-failure-rate` | &gt; 5% failure rate over 5 min | SNS → alert_email |
+| `{env}-edl-dlq-depth` | DLQ has &gt; 0 messages for &gt; 4 hours | SNS → alert_email |
+| `{env}-edl-watermark-lag` | Lag &gt; 26 hours (daily entity) | SNS → alert_email |
+| `{env}-edl-breaking-drift` | Breaking drift event detected | SNS → alert_email |
+
+To change alert thresholds, edit `infrastructure/modules/observability/variables.tf` and run `terraform apply`.
+
+### I. IAM Least Privilege — What Each Role Can Access
+
+The platform enforces a **zero-trust, need-to-know** IAM model. Every role is created by Terraform and scoped to only the exact resources and actions it requires — no `Resource: "*"` and no `Action: "*"` permissions anywhere.
+
+| IAM role | AWS services it can access | Explicit restrictions |
+|---|---|---|
+| `{env}-extraction-service-role` | S3 (`PutObject` on `raw/` prefix only) · DynamoDB (`GetItem`/`PutItem` on config, watermark, audit tables) · Secrets Manager (`GetSecretValue` on `{env}/sources/*` only) · CloudWatch Logs | Cannot write to curated or analytics buckets; cannot read Secrets Manager secrets from other environments |
+| `{env}-transformation-service-role` | S3 (`GetObject` on raw prefix; `PutObject` on curated prefix) · S3 (`GetObject`/`PutObject` on mapping-config bucket) · Glue (`CreateTable`, `UpdateTable` on the platform database only) · CloudWatch Logs | Cannot access raw layer for write; cannot read Secrets Manager |
+| `{env}-entity-resolution-role` | S3 (`GetObject` on curated prefix; `GetObject` on entity-resolution config prefix; `PutObject` on analytics `canonical/` prefix) · CloudWatch Logs | Cannot read raw or mapping-config buckets; cannot access Secrets Manager |
+| `{env}-analytics-publisher-role` | S3 (`GetObject` on curated prefix; `PutObject` on analytics `curated/` prefix) · Glue · CloudWatch Logs | Cannot write to canonical (entity-resolved) prefix |
+| `{env}-serving-store-role` | S3 (`GetObject` on analytics prefix) · Secrets Manager (`GetSecretValue` on serving DB secret only) · CloudWatch Logs | Cannot write to any S3 bucket |
+| `ci-cd-deploy-role` | Terraform state S3 bucket · IAM (boundary-constrained role updates) · Lambda/ECS task deployments | Cannot access data buckets, Secrets Manager values, or DynamoDB data tables |
+
+&gt; **Verification:** After `terraform apply`, confirm no role has wildcard permissions:
+&gt; </code></pre>bash
+<blockquote># Check no policy has Resource: "</em>" with Action: "<em>"</blockquote>
+<blockquote>aws iam list-policies --scope Local --query "Policies[</em>].PolicyName" --output text | \</blockquote>
+<blockquote>  xargs -I{} aws iam get-policy-version \</blockquote>
+<blockquote>    --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/{}" \</blockquote>
+<blockquote>    --version-id v1 --query "PolicyVersion.Document" | \</blockquote>
+<blockquote>  grep -c '"Resource": "\<em>"'</blockquote>
+<blockquote># Expected: 0</blockquote>
+<blockquote><pre><code>
+---
+
+## 12. Promoting to Staging and Production
+
+The deployment process for staging and production is the same as dev — the environment directory changes, and a few additional steps apply because the full automatic pipeline (5-stage Step Functions state machine) requires all Lambda ARNs before Terraform can apply the orchestration module.
+
+### Step 11.1 — Complete AWS Prerequisites for the new environment
+
+Before Terraform can run for staging or prod, repeat **Section 2** for the new environment:
+
+<ul><li>[ ] Terraform state S3 bucket (`staging-edl-terraform-state` or `prod-edl-terraform-state`)</li>
+<li>[ ] DynamoDB lock table (`staging-edl-terraform-state-lock` or `prod-edl-terraform-state-lock`)</li>
+<li>[ ] Bootstrap KMS key (`alias/staging-terraform-state` or `alias/prod-terraform-state`)</li>
 <li>[ ] GitHub OIDC provider — already registered (account-level, shared across all environments)</li>
-<li>[ ] NAT Gateway IPs allowlisted in Salesforce, NetSuite, and MySQL RDS SG — <strong>do after Terraform apply</strong></li>
-</ul>
-<h3 id="step-112-copy-and-update-tfvars-for-the-new-environment">Step 11.2 — Copy and update tfvars for the new environment</h3>
-<pre><code class="language-bash">cp infrastructure/environments/staging/terraform.tfvars.example \
+<li>[ ] NAT Gateway IPs allowlisted in Salesforce, NetSuite, and MySQL RDS SG — **do after Terraform apply**</li></ul>
+
+### Step 11.2 — Copy and update tfvars for the new environment
+
+</code></pre>bash</blockquote>
+cp infrastructure/environments/staging/terraform.tfvars.example \
   infrastructure/environments/staging/terraform.tfvars
 
-# Edit staging/terraform.tfvars and update:
-#   alert_email                   = &quot;staging-ops@yourcompany.com&quot;
-#   github_org                    = &quot;your-github-org&quot;
-#   extraction_pipeline_lambda_arn     = &quot;arn:aws:lambda:...:staging-extraction-pipeline&quot;
-#   transformation_pipeline_lambda_arn = &quot;arn:aws:lambda:...:staging-transformation-pipeline&quot;
-#   entity_resolution_lambda_arn       = &quot;arn:aws:lambda:...:staging-entity-resolution-pipeline&quot;
-#   analytics_publisher_lambda_arn     = &quot;arn:aws:lambda:...:staging-analytics-layer-publisher&quot;
-#   serving_store_loader_lambda_arn    = &quot;arn:aws:lambda:...:staging-serving-store-loader&quot;
+<h1>Edit staging/terraform.tfvars and update:</h1>
+<h1>  alert_email                   = "staging-ops@yourcompany.com"</h1>
+<h1>  github_org                    = "your-github-org"</h1>
+<h1>  extraction_pipeline_lambda_arn     = "arn:aws:lambda:...:staging-extraction-pipeline"</h1>
+<h1>  transformation_pipeline_lambda_arn = "arn:aws:lambda:...:staging-transformation-pipeline"</h1>
+<h1>  entity_resolution_lambda_arn       = "arn:aws:lambda:...:staging-entity-resolution-pipeline"</h1>
+<h1>  analytics_publisher_lambda_arn     = "arn:aws:lambda:...:staging-analytics-layer-publisher"</h1>
+<h1>  serving_store_loader_lambda_arn    = "arn:aws:lambda:...:staging-serving-store-loader"</h1>
 #
-# For prod, copy from infrastructure/environments/prod/terraform.tfvars.example
-# and use prod-* Lambda function ARNs.
-</code></pre>
-<h3 id="step-113-bootstrap-staging-backend">Step 11.3 — Bootstrap staging backend</h3>
-<p>Repeat <a href="#4-phase-1--bootstrap-one-time-only">Phase 1</a> with <code>ENV=staging</code>.</p>
-<h3 id="step-114-apply-staging-infrastructure-excluding-orchestration">Step 11.4 — Apply staging infrastructure (excluding orchestration)</h3>
-<pre><code class="language-bash">cd infrastructure/environments/staging
+<h1>For prod, copy from infrastructure/environments/prod/terraform.tfvars.example</h1>
+<h1>and use prod-</em> Lambda function ARNs.</h1>
+<pre><code>
+### Step 11.3 — Bootstrap staging backend
+
+Repeat [Phase 1](#4-phase-1--bootstrap-one-time-only) with `ENV=staging`.
+
+### Step 11.4 — Apply staging infrastructure (excluding orchestration)
+
+</code></pre>bash
+cd infrastructure/environments/staging
 terraform init
 terraform plan -out=tfplan
 terraform apply tfplan
-</code></pre>
-<p>This creates VPC, S3 buckets, IAM roles, DynamoDB tables, Secrets Manager paths, CloudWatch alarms, Glue catalog, and the five Lambda function stubs. The orchestration module apply in this pass fails only if Lambda ARNs are not yet set — that is expected and handled in Step 11.5.</p>
-<blockquote>
-<p><strong>Note:</strong> If you see <code>Error: No value for required variable — var.transformation_pipeline_lambda_arn</code>, this is expected at this stage. Proceed to Step 11.5.</p>
-</blockquote>
-<h3 id="step-115-deploy-lambdas-and-collect-arns">Step 11.5 — Deploy Lambdas and collect ARNs</h3>
-<p>Repeat <a href="#6-phase-3--application-deployment-lambda">Phase 3</a> targeting <code>infrastructure/environments/staging</code>.</p>
-<p>Collect the five ARNs:</p>
-<pre><code class="language-bash">cd infrastructure/environments/staging
+<pre><code>
+This creates VPC, S3 buckets, IAM roles, DynamoDB tables, Secrets Manager paths, CloudWatch alarms, Glue catalog, and the five Lambda function stubs. The orchestration module apply in this pass fails only if Lambda ARNs are not yet set — that is expected and handled in Step 11.5.
 
-# Extraction Lambda
+&gt; **Note:** If you see `Error: No value for required variable — var.transformation_pipeline_lambda_arn`, this is expected at this stage. Proceed to Step 11.5.
+
+### Step 11.5 — Deploy Lambdas and collect ARNs
+
+Repeat [Phase 3](#6-phase-3--application-deployment-lambda) targeting `infrastructure/environments/staging`.
+
+Collect the five ARNs:
+
+</code></pre>bash
+cd infrastructure/environments/staging
+
+<h1>Extraction Lambda</h1>
 terraform output extraction_lambda_arn
 
-# Remaining four
+<h1>Remaining four</h1>
 aws lambda get-function --function-name staging-transformation-pipeline \
   --query Configuration.FunctionArn --output text
 
@@ -1561,551 +1316,320 @@ aws lambda get-function --function-name staging-analytics-publisher \
 
 aws lambda get-function --function-name staging-serving-store-loader \
   --query Configuration.FunctionArn --output text
-</code></pre>
-<p>Add them to <code>infrastructure/environments/staging/terraform.tfvars</code>:</p>
-<pre><code class="language-hcl">extraction_pipeline_lambda_arn     = &quot;arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-extraction-pipeline&quot;
-transformation_pipeline_lambda_arn = &quot;arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-transformation-pipeline&quot;
-entity_resolution_lambda_arn       = &quot;arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-entity-resolution&quot;
-analytics_publisher_lambda_arn     = &quot;arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-analytics-publisher&quot;
-serving_store_loader_lambda_arn    = &quot;arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-serving-store-loader&quot;
-</code></pre>
-<h3 id="step-116-re-apply-to-create-step-functions-state-machine">Step 11.6 — Re-apply to create Step Functions state machine</h3>
-<pre><code class="language-bash">cd infrastructure/environments/staging
+<pre><code>
+Add them to `infrastructure/environments/staging/terraform.tfvars`:
+
+</code></pre>hcl
+extraction_pipeline_lambda_arn     = "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-extraction-pipeline"
+transformation_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-transformation-pipeline"
+entity_resolution_lambda_arn       = "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-entity-resolution"
+analytics_publisher_lambda_arn     = "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-analytics-publisher"
+serving_store_loader_lambda_arn    = "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-serving-store-loader"
+<pre><code>
+### Step 11.6 — Re-apply to create Step Functions state machine
+
+</code></pre>bash
+cd infrastructure/environments/staging
 terraform apply
-</code></pre>
-<p>This apply creates the orchestration module: Standard Workflow state machine, EventBridge schedule group, and CloudWatch alarms. Staging uses <code>state_machine_type = "STANDARD"</code> (same as prod) for execution history and timeout support.</p>
-<h3 id="step-117-allowlist-nat-gateway-ips-in-source-systems">Step 11.7 — Allowlist NAT Gateway IPs in source systems</h3>
-<pre><code class="language-bash"># Get NAT Gateway IPs assigned to the staging environment
+<pre><code>
+This apply creates the orchestration module: Standard Workflow state machine, EventBridge schedule group, and CloudWatch alarms. Staging uses `state_machine_type = "STANDARD"` (same as prod) for execution history and timeout support.
+
+### Step 11.7 — Allowlist NAT Gateway IPs in source systems
+
+</code></pre>bash
+<h1>Get NAT Gateway IPs assigned to the staging environment</h1>
 terraform output nat_gateway_public_ips
-# [&quot;a.b.c.d&quot;, &quot;e.f.g.h&quot;, &quot;i.j.k.l&quot;]
+<h1>["a.b.c.d", "e.f.g.h", "i.j.k.l"]</h1>
+<pre><code>
+Log in to each source system and add these IPs:
+
+<ul><li>**Salesforce:** Setup → Connected Apps → Edit → IP Relaxation: "Enforce IP Restrictions" and add each IP to the IP Ranges list</li>
+<li>**NetSuite:** Setup → Integrations → Manage Integrations → Edit → Restrict IP Addresses</li>
+<li>**MySQL RDS:** EC2 → Security Groups → find the RDS SG → add inbound rule: TCP 3306 from each NAT IP</li></ul>
+
+### Step 11.8 — Populate staging secrets
+
+Repeat [Step 5.1](#step-51--populate-source-credentials-in-secrets-manager) with staging-specific credentials. The secret paths are:
 </code></pre>
-<p>Log in to each source system and add these IPs:</p>
-<ul>
-<li><strong>Salesforce:</strong> Setup → Connected Apps → Edit → IP Relaxation: "Enforce IP Restrictions" and add each IP to the IP Ranges list</li>
-<li><strong>NetSuite:</strong> Setup → Integrations → Manage Integrations → Edit → Restrict IP Addresses</li>
-<li><strong>MySQL RDS:</strong> EC2 → Security Groups → find the RDS SG → add inbound rule: TCP 3306 from each NAT IP</li>
-</ul>
-<h3 id="step-118-populate-staging-secrets">Step 11.8 — Populate staging secrets</h3>
-<p>Repeat <a href="#step-51--populate-source-credentials-in-secrets-manager">Step 5.1</a> with staging-specific credentials. The secret paths are:</p>
-<pre><code>staging/sources/salesforce/credentials
+staging/sources/salesforce/credentials
 staging/sources/netsuite/credentials
 staging/sources/mysql-rds/credentials
-</code></pre>
-<h3 id="step-119-seed-staging-entity-configs-field-mappings-and-entity-resolution-configs">Step 11.9 — Seed staging entity configs, field mappings, and entity resolution configs</h3>
-<pre><code class="language-bash"># DynamoDB entity config
+<pre><code>
+### Step 11.9 — Seed staging entity configs, field mappings, and entity resolution configs
+
+</code></pre>bash
+<h1>DynamoDB entity config</h1>
 python scripts/seed_entity_config.py --environment staging --region us-east-1
 
-# Field mappings to staging S3 bucket
+<h1>Field mappings to staging S3 bucket</h1>
 python scripts/seed_field_mappings.py --environment staging --region us-east-1
 
-# Entity resolution configs (match rules + survivorship) to staging S3 bucket
+<h1>Entity resolution configs (match rules + survivorship) to staging S3 bucket</h1>
 python scripts/seed_entity_resolution_configs.py --environment staging --region us-east-1
-</code></pre>
-<h3 id="step-1110-create-extraction-schedules-for-staging">Step 11.10 — Create extraction schedules for staging</h3>
-<pre><code class="language-bash">python scripts/seed_schedules.py --environment staging
-# or: make seed-schedules ENVIRONMENT=staging
-</code></pre>
-<h3 id="step-1111-production-promotion-checklist">Step 11.11 — Production promotion checklist</h3>
-<p>Before applying to production, confirm all of the following:</p>
-<ul>
-<li>[ ] All staging extraction runs completed without failures for at least 5 days</li>
+<pre><code>
+### Step 11.10 — Create extraction schedules for staging
+
+</code></pre>bash
+python scripts/seed_schedules.py --environment staging
+<h1>or: make seed-schedules ENVIRONMENT=staging</h1>
+<pre><code>
+### Step 11.11 — Production promotion checklist
+
+Before applying to production, confirm all of the following:
+
+<ul><li>[ ] All staging extraction runs completed without failures for at least 5 days</li>
 <li>[ ] All 5 pipeline stages (Extraction → Transformation → EntityResolution → Analytics → ServingStore) succeeded at least once in staging</li>
 <li>[ ] Schema drift reports reviewed — no outstanding breaking drift events</li>
-<li>[ ] Quality gate (<code>is_publication_blocked</code>) never fired unexpectedly in staging</li>
-<li>[ ] <code>terraform plan</code> on prod shows only expected changes (no destructive resource replacements)</li>
-<li>[ ] Lambda ARNs for prod environment added to <code>prod/terraform.tfvars</code></li>
+<li>[ ] Quality gate (`is_publication_blocked`) never fired unexpectedly in staging</li>
+<li>[ ] `terraform plan` on prod shows only expected changes (no destructive resource replacements)</li>
+<li>[ ] Lambda ARNs for prod environment added to `prod/terraform.tfvars`</li>
 <li>[ ] NAT Gateway IPs for prod allowlisted in Salesforce, NetSuite, and MySQL RDS SG</li>
 <li>[ ] SNS subscription confirmed for production alert email</li>
 <li>[ ] Manual approval gate in CI/CD pipeline signed off by platform lead</li>
-<li>[ ] Runbook for production incident response reviewed and current</li>
-</ul>
-<hr />
-<h2 id="13-verification-checklist">13. Verification Checklist</h2>
-<p>After completing all phases, verify the full deployment is healthy.</p>
-<h3 id="infrastructure">Infrastructure</h3>
-<pre><code class="language-bash"># All DynamoDB tables exist
+<li>[ ] Runbook for production incident response reviewed and current</li></ul>
+
+---
+
+## 13. Verification Checklist
+
+After completing all phases, verify the full deployment is healthy.
+
+### Infrastructure
+
+</code></pre>bash
+<h1>All DynamoDB tables exist</h1>
 aws dynamodb list-tables --region us-east-1 | grep edl
 
-# All S3 buckets exist and have encryption enabled
-aws s3api list-buckets --query &quot;Buckets[?contains(Name,'edl')]&quot;
+<h1>All S3 buckets exist and have encryption enabled</h1>
+aws s3api list-buckets --query "Buckets[?contains(Name,'edl')]"
 
-# All five Lambda functions deployed and active
+<h1>All five Lambda functions deployed and active</h1>
 for fn in extraction-pipeline transformation-pipeline entity-resolution analytics-publisher serving-store-loader; do
   aws lambda get-function \
-    --function-name &quot;dev-${fn}&quot; \
+    --function-name "dev-${fn}" \
     --region us-east-1 \
-    --query &quot;Configuration.[FunctionName,State]&quot; \
+    --query "Configuration.[FunctionName,State]" \
     --output text
 done
 
-# Step Functions state machine is ACTIVE
+<h1>Step Functions state machine is ACTIVE</h1>
 aws stepfunctions list-state-machines \
-  --query &quot;stateMachines[?contains(name,'dev')].[name,type,creationDate]&quot; \
+  --query "stateMachines[?contains(name,'dev')].[name,type,creationDate]" \
   --output table \
   --region us-east-1
 
-# EventBridge schedule group exists
+<h1>EventBridge schedule group exists</h1>
 aws scheduler list-schedule-groups \
-  --query &quot;ScheduleGroups[?contains(Name,'dev')].[Name,State]&quot; \
+  --query "ScheduleGroups[?contains(Name,'dev')].[Name,State]" \
   --output table \
   --region us-east-1
 
-# Secrets exist (do not verify values here)
+<h1>Secrets exist (do not verify values here)</h1>
 aws secretsmanager list-secrets --region us-east-1 \
-  --query &quot;SecretList[?contains(Name,'dev/sources')].[Name]&quot;
-</code></pre>
-<h3 id="entity-configuration">Entity configuration</h3>
-<pre><code class="language-bash"># Confirm at least one entity config record exists
+  --query "SecretList[?contains(Name,'dev/sources')].[Name]"
+<pre><code>
+### Entity configuration
+
+</code></pre>bash
+<h1>Confirm at least one entity config record exists</h1>
 aws dynamodb scan \
   --table-name dev-entity-extraction-config \
   --select COUNT \
   --region us-east-1
-</code></pre>
-<h3 id="field-mapping">Field mapping</h3>
-<pre><code class="language-bash"># Confirm the latest pointer exists for all configured entities
+<pre><code>
+### Field mapping
+
+</code></pre>bash
+<h1>Confirm the latest pointer exists for all configured entities</h1>
 for entity in salesforce/salesforce-account salesforce/salesforce-contact netsuite/netsuite-customer mysql-rds/mysql-rds-orders; do
-  echo &quot;--- ${entity} ---&quot;
-  aws s3 ls &quot;s3://dev-edl-mapping-config/field-mappings/${entity}/&quot;
+  echo "--- ${entity} ---"
+  aws s3 ls "s3://dev-edl-mapping-config/field-mappings/${entity}/"
 done
-</code></pre>
-<h3 id="entity-resolution-config">Entity resolution config</h3>
-<pre><code class="language-bash"># Confirm configs exist for all entity types
+<pre><code>
+### Entity resolution config
+
+</code></pre>bash
+<h1>Confirm configs exist for all entity types</h1>
 for entity in company person; do
-  echo &quot;--- ${entity} ---&quot;
-  aws s3 ls &quot;s3://dev-edl-curated/entity-resolution/${entity}/&quot;
+  echo "--- ${entity} ---"
+  aws s3 ls "s3://dev-edl-curated/entity-resolution/${entity}/"
 done
 
-# Verify latest.json pointer is populated
+<h1>Verify latest.json pointer is populated</h1>
 aws s3 cp s3://dev-edl-curated/entity-resolution/company/latest.json -
 aws s3 cp s3://dev-edl-curated/entity-resolution/person/latest.json -
-</code></pre>
-<h3 id="full-pipeline-end-to-end-test">Full pipeline end-to-end test</h3>
-<p>Trigger one complete run through all five stages:</p>
-<pre><code class="language-bash"># Start via Step Functions directly (bypasses schedule, triggers immediately)
-MACHINE_ARN=$(cd infrastructure/environments/dev &amp;&amp; terraform output -raw state_machine_arn)
+<pre><code>
+### Full pipeline end-to-end test
+
+Trigger one complete run through all five stages:
+
+</code></pre>bash
+<h1>Start via Step Functions directly (bypasses schedule, triggers immediately)</h1>
+MACHINE_ARN=$(cd infrastructure/environments/dev && terraform output -raw state_machine_arn)
 REGION=us-east-1
 
 EXEC_ARN=$(aws stepfunctions start-execution \
-  --state-machine-arn &quot;${MACHINE_ARN}&quot; \
-  --input '{&quot;source_id&quot;:&quot;salesforce&quot;,&quot;entity_id&quot;:&quot;salesforce-account&quot;,&quot;environment&quot;:&quot;dev&quot;}' \
+  --state-machine-arn "${MACHINE_ARN}" \
+  --input '{"source_id":"salesforce","entity_id":"salesforce-account","environment":"dev"}' \
   --query executionArn \
   --output text \
-  --region &quot;${REGION}&quot;)
+  --region "${REGION}")
 
-echo &quot;Execution ARN: ${EXEC_ARN}&quot;
+echo "Execution ARN: ${EXEC_ARN}"
 
-# Poll status (check every ~30 seconds manually, or watch in AWS Console)
+<h1>Poll status (check every ~30 seconds manually, or watch in AWS Console)</h1>
 aws stepfunctions describe-execution \
-  --execution-arn &quot;${EXEC_ARN}&quot; \
-  --query &quot;[status,startDate,stopDate]&quot; \
-  --region &quot;${REGION}&quot;
-</code></pre>
-<p>Expected terminal status: <code>SUCCEEDED</code></p>
-<p><strong>Expected CloudWatch log events across all five stages (in order):</strong></p>
-<table>
-<thead>
-<tr>
-<th>Stage</th>
-<th>Lambda</th>
-<th>Expected log event</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Extraction</td>
-<td><code>dev-extraction-pipeline</code></td>
-<td><code>run_complete</code> with <code>status: success</code></td>
-</tr>
-<tr>
-<td>Transformation</td>
-<td><code>dev-transformation-pipeline</code></td>
-<td><code>transformation_complete</code> with <code>curated_record_count &gt; 0</code></td>
-</tr>
-<tr>
-<td>Entity Resolution</td>
-<td><code>dev-entity-resolution</code></td>
-<td><code>golden_record_published</code> with <code>cluster_count &gt; 0</code></td>
-</tr>
-<tr>
-<td>Analytics</td>
-<td><code>dev-analytics-publisher</code></td>
-<td><code>analytics_publish_complete</code></td>
-</tr>
-<tr>
-<td>Serving Store</td>
-<td><code>dev-serving-store-loader</code></td>
-<td><code>serving_load_complete</code></td>
-</tr>
-</tbody>
-</table>
-<p><strong>Verify S3 outputs at each stage:</strong></p>
-<pre><code class="language-bash"># Stage A — Raw Parquet
+  --execution-arn "${EXEC_ARN}" \
+  --query "[status,startDate,stopDate]" \
+  --region "${REGION}"
+<pre><code>
+Expected terminal status: `SUCCEEDED`
+
+**Expected CloudWatch log events across all five stages (in order):**
+
+| Stage | Lambda | Expected log event |
+|---|---|---|
+| Extraction | `dev-extraction-pipeline` | `run_complete` with `status: success` |
+| Transformation | `dev-transformation-pipeline` | `transformation_complete` with `curated_record_count &gt; 0` |
+| Entity Resolution | `dev-entity-resolution` | `golden_record_published` with `cluster_count &gt; 0` |
+| Analytics | `dev-analytics-publisher` | `analytics_publish_complete` |
+| Serving Store | `dev-serving-store-loader` | `serving_load_complete` |
+
+**Verify S3 outputs at each stage:**
+
+</code></pre>bash
+<h1>Stage A — Raw Parquet</h1>
 aws s3 ls s3://dev-edl-raw/salesforce/salesforce-account/ --recursive | head -5
 
-# Stage B — Curated Parquet + quality report
+<h1>Stage B — Curated Parquet + quality report</h1>
 aws s3 ls s3://dev-edl-curated/curated/customer/salesforce-account/ --recursive | head -5
 
-# Stage C/D — Golden records
+<h1>Stage C/D — Golden records</h1>
 aws s3 ls s3://dev-edl-analytics/canonical/ --recursive | head -5
 
-# Stage E — Analytics layer
+<h1>Stage E — Analytics layer</h1>
 aws s3 ls s3://dev-edl-analytics/ --recursive | head -5
-</code></pre>
-<h3 id="nat-gateway-ip-allowlisting-verification">NAT Gateway IP allowlisting verification</h3>
-<pre><code class="language-bash"># Verify NAT IPs are correctly exported
+<pre><code>
+### NAT Gateway IP allowlisting verification
+
+</code></pre>bash
+<h1>Verify NAT IPs are correctly exported</h1>
 terraform output nat_gateway_public_ips
 
-# Confirm extraction Lambda can reach Salesforce (expect HTTP 200 on auth endpoint)
-# (This is indirectly verified by a successful extraction run above)
-</code></pre>
-<h3 id="alarm-and-alerting">Alarm and alerting</h3>
-<pre><code class="language-bash"># Confirm no alarms are currently in ALARM state
+<h1>Confirm extraction Lambda can reach Salesforce (expect HTTP 200 on auth endpoint)</h1>
+<h1>(This is indirectly verified by a successful extraction run above)</h1>
+<pre><code>
+### Alarm and alerting
+
+</code></pre>bash
+<h1>Confirm no alarms are currently in ALARM state</h1>
 aws cloudwatch describe-alarms \
-  --alarm-name-prefix &quot;dev-edl&quot; \
+  --alarm-name-prefix "dev-edl" \
   --state-value ALARM \
-  --query &quot;MetricAlarms[*].[AlarmName,StateValue,StateReason]&quot; \
+  --query "MetricAlarms[<em>].[AlarmName,StateValue,StateReason]" \
   --output table \
   --region us-east-1
 
-# Confirm SNS subscription is confirmed (not PendingConfirmation)
+<h1>Confirm SNS subscription is confirmed (not PendingConfirmation)</h1>
 aws sns list-subscriptions-by-topic \
-  --topic-arn &quot;$(cd infrastructure/environments/dev &amp;&amp; terraform output platform_alerts_topic_arn)&quot; \
-  --query &quot;Subscriptions[*].[Protocol,Endpoint,SubscriptionArn]&quot; \
+  --topic-arn "$(cd infrastructure/environments/dev && terraform output platform_alerts_topic_arn)" \
+  --query "Subscriptions[</em>].[Protocol,Endpoint,SubscriptionArn]" \
   --output table
-</code></pre>
-<hr />
-<h2 id="14-troubleshooting">14. Troubleshooting</h2>
+``<code>
+
+<hr/>
+
+<h2>14. Troubleshooting</h2>
+
 <table>
-<thead>
-<tr>
-<th>Problem</th>
-<th>Likely cause</th>
-<th>Fix</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>terraform init</code> fails with "bucket does not exist"</td>
-<td>Bootstrap S3 bucket not created</td>
-<td>Complete <a href="#4-phase-1--bootstrap-one-time-only">Phase 1</a> and <a href="#21-terraform-remote-state-backend-per-environment">Section 2.1</a></td>
-</tr>
-<tr>
-<td><code>terraform apply</code> fails — "No value for required variable: transformation_pipeline_lambda_arn"</td>
-<td>Lambda ARNs not yet set in tfvars</td>
-<td>Deploy Lambdas first (Phase 3), collect ARNs, then re-apply (see <a href="#25-five-pipeline-lambda-arns-for-step-functions-state-machine">Section 2.5</a>)</td>
-</tr>
-<tr>
-<td><code>terraform apply</code> fails — IAM module trust policy error</td>
-<td>GitHub OIDC provider not registered in AWS</td>
-<td>Run <code>aws iam create-open-id-connect-provider</code> (see <a href="#22-github-actions-oidc-provider">Section 2.2</a>)</td>
-</tr>
-<tr>
-<td>Lambda fails with <code>AccessDeniedException</code> on DynamoDB</td>
-<td>IAM role lacks correct permissions</td>
-<td>Re-run <code>terraform apply</code> — IAM policy may not have applied</td>
-</tr>
-<tr>
-<td>Lambda fails with <code>ResourceNotFoundException</code> on Secrets Manager</td>
-<td>Secret not yet populated</td>
-<td>Run <code>aws secretsmanager put-secret-value</code> (Step 5.1)</td>
-</tr>
-<tr>
-<td>Extraction runs but <code>record_count = 0</code></td>
-<td>Watermark is ahead of data; or field_mode excludes relevant fields</td>
-<td>Check watermark value in DynamoDB; check <code>field_mode</code> and <code>exclude_fields</code> in entity config</td>
-</tr>
-<tr>
-<td>Extraction Lambda returns <code>401 Unauthorized</code> from source system</td>
-<td>NAT Gateway IPs not allowlisted in source system</td>
-<td>Get IPs from <code>terraform output nat_gateway_public_ips</code> and add to source system allowlist (see <a href="#26-source-system-network-access">Section 2.6</a>)</td>
-</tr>
-<tr>
-<td>Transformation fails with <code>MappingRuleSetNotFoundError</code></td>
-<td>Field mapping not uploaded for this entity</td>
-<td>Upload mapping JSON to S3 (Section 9); or expected if using identity mapping</td>
-</tr>
-<tr>
-<td>Step Functions execution stuck in extraction</td>
-<td>Lambda timeout too low; extraction taking &gt;15 min</td>
-<td>Increase Lambda timeout in terraform.tfvars; or reduce batch size in entity config</td>
-</tr>
-<tr>
-<td>Step Functions execution shows <code>TransformationBlocked=true</code></td>
-<td>Schema drift classified as BREAKING was detected</td>
-<td>Review drift report in S3; fix upstream schema or update field mapping; reset drift flag</td>
-</tr>
-<tr>
-<td>Step Functions execution shows <code>PublicationBlocked=true</code></td>
-<td>Data quality gate failed</td>
-<td>Review quality report in S3 curated bucket; check quality threshold configuration</td>
-</tr>
-<tr>
-<td><code>terraform plan</code> wants to destroy and recreate S3 buckets</td>
-<td><code>force_destroy</code> flag or bucket name changed</td>
-<td>Never rename S3 buckets; review plan carefully before applying</td>
-</tr>
-<tr>
-<td>EventBridge schedule not triggering</td>
-<td><code>active: false</code> in entity config; or schedule disabled</td>
-<td>Set <code>active: true</code> in entity config; check schedule status in EventBridge console</td>
-</tr>
-<tr>
-<td>CloudWatch alarms firing immediately after deploy</td>
-<td><code>alert_email</code> not confirmed in SNS</td>
-<td>Check email inbox for SNS subscription confirmation (see <a href="#27-sns-email-subscription-confirmation">Section 2.7</a>)</td>
-</tr>
-<tr>
-<td>NAT Gateway IPs changed after infrastructure recreation</td>
-<td>NAT Gateway was destroyed and recreated (new Elastic IPs assigned)</td>
-<td>Get new IPs from <code>terraform output nat_gateway_public_ips</code>; update all source system allowlists</td>
-</tr>
-</tbody>
+<tr><td>Problem</td><td>Likely cause</td><td>Fix</td></tr>
+<tr><td></code>terraform init<code> fails with "bucket does not exist"</td><td>Bootstrap S3 bucket not created</td><td>Complete <a href="#4-phase-1--bootstrap-one-time-only">Phase 1</a> and <a href="#21-terraform-remote-state-backend-per-environment">Section 2.1</a></td></tr>
+<tr><td></code>terraform apply<code> fails — "No value for required variable: transformation_pipeline_lambda_arn"</td><td>Lambda ARNs not yet set in tfvars</td><td>Deploy Lambdas first (Phase 3), collect ARNs, then re-apply (see <a href="#25-five-pipeline-lambda-arns-for-step-functions-state-machine">Section 2.5</a>)</td></tr>
+<tr><td></code>terraform apply<code> fails — IAM module trust policy error</td><td>GitHub OIDC provider not registered in AWS</td><td>Run </code>aws iam create-open-id-connect-provider<code> (see <a href="#22-github-actions-oidc-provider">Section 2.2</a>)</td></tr>
+<tr><td>Lambda fails with </code>AccessDeniedException<code> on DynamoDB</td><td>IAM role lacks correct permissions</td><td>Re-run </code>terraform apply<code> — IAM policy may not have applied</td></tr>
+<tr><td>Lambda fails with </code>ResourceNotFoundException<code> on Secrets Manager</td><td>Secret not yet populated</td><td>Run </code>aws secretsmanager put-secret-value<code> (Step 5.1)</td></tr>
+<tr><td>Extraction runs but </code>record_count = 0<code></td><td>Watermark is ahead of data; or field_mode excludes relevant fields</td><td>Check watermark value in DynamoDB; check </code>field_mode<code> and </code>exclude_fields<code> in entity config</td></tr>
+<tr><td>Extraction Lambda returns </code>401 Unauthorized<code> from source system</td><td>NAT Gateway IPs not allowlisted in source system</td><td>Get IPs from </code>terraform output nat_gateway_public_ips<code> and add to source system allowlist (see <a href="#26-source-system-network-access">Section 2.6</a>)</td></tr>
+<tr><td>Transformation fails with </code>MappingRuleSetNotFoundError<code></td><td>Field mapping not uploaded for this entity</td><td>Upload mapping JSON to S3 (Section 9); or expected if using identity mapping</td></tr>
+<tr><td>Step Functions execution stuck in extraction</td><td>Lambda timeout too low; extraction taking >15 min</td><td>Increase Lambda timeout in terraform.tfvars; or reduce batch size in entity config</td></tr>
+<tr><td>Step Functions execution shows </code>TransformationBlocked=true<code></td><td>Schema drift classified as BREAKING was detected</td><td>Review drift report in S3; fix upstream schema or update field mapping; reset drift flag</td></tr>
+<tr><td>Step Functions execution shows </code>PublicationBlocked=true<code></td><td>Data quality gate failed</td><td>Review quality report in S3 curated bucket; check quality threshold configuration</td></tr>
+<tr><td></code>terraform plan<code> wants to destroy and recreate S3 buckets</td><td></code>force_destroy<code> flag or bucket name changed</td><td>Never rename S3 buckets; review plan carefully before applying</td></tr>
+<tr><td>EventBridge schedule not triggering</td><td></code>active: false<code> in entity config; or schedule disabled</td><td>Set </code>active: true<code> in entity config; check schedule status in EventBridge console</td></tr>
+<tr><td>CloudWatch alarms firing immediately after deploy</td><td></code>alert_email<code> not confirmed in SNS</td><td>Check email inbox for SNS subscription confirmation (see <a href="#27-sns-email-subscription-confirmation">Section 2.7</a>)</td></tr>
+<tr><td>NAT Gateway IPs changed after infrastructure recreation</td><td>NAT Gateway was destroyed and recreated (new Elastic IPs assigned)</td><td>Get new IPs from </code>terraform output nat_gateway_public_ips<code>; update all source system allowlists</td></tr>
 </table>
-<hr />
-<h2 id="technology-stack-and-version-reference">Technology Stack and Version Reference</h2>
-<p>Complete authoritative version reference for all tools used in deployment.</p>
-<h3 id="infrastructure-and-provisioning">Infrastructure and Provisioning</h3>
+
+<hr/>
+
+<h2>Technology Stack and Version Reference</h2>
+
+Complete authoritative version reference for all tools used in deployment.
+
+<h3>Infrastructure and Provisioning</h3>
+
 <table>
-<thead>
-<tr>
-<th>Tool</th>
-<th>Required version</th>
-<th>Verify with</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>Terraform</strong></td>
-<td>≥ 1.8, &lt; 2.0</td>
-<td><code>terraform version</code></td>
-</tr>
-<tr>
-<td><strong>AWS Terraform Provider</strong></td>
-<td>~&gt; 5.0</td>
-<td>Declared in <code>infrastructure/modules/*/versions.tf</code></td>
-</tr>
-<tr>
-<td><strong>AWS CLI</strong></td>
-<td>v2 (any recent)</td>
-<td><code>aws --version</code></td>
-</tr>
-<tr>
-<td><strong>Python</strong></td>
-<td>3.14.x</td>
-<td><code>python --version</code> (managed via pyenv)</td>
-</tr>
-<tr>
-<td><strong>pyenv</strong></td>
-<td>2.7.2+</td>
-<td><code>pyenv --version</code></td>
-</tr>
-<tr>
-<td><strong>GNU Make</strong></td>
-<td>≥ 3.8</td>
-<td><code>make --version</code></td>
-</tr>
-</tbody>
+<tr><td>Tool</td><td>Required version</td><td>Verify with</td></tr>
+<tr><td><strong>Terraform</strong></td><td>≥ 1.8, < 2.0</td><td></code>terraform version<code></td></tr>
+<tr><td><strong>AWS Terraform Provider</strong></td><td>~> 5.0</td><td>Declared in </code>infrastructure/modules/*/versions.tf<code></td></tr>
+<tr><td><strong>AWS CLI</strong></td><td>v2 (any recent)</td><td></code>aws --version<code></td></tr>
+<tr><td><strong>Python</strong></td><td>3.14.x</td><td></code>python --version<code> (managed via pyenv)</td></tr>
+<tr><td><strong>pyenv</strong></td><td>2.7.2+</td><td></code>pyenv --version<code></td></tr>
+<tr><td><strong>GNU Make</strong></td><td>≥ 3.8</td><td></code>make --version<code></td></tr>
 </table>
-<h3 id="python-runtime-dependencies">Python Runtime Dependencies</h3>
+
+<h3>Python Runtime Dependencies</h3>
+
 <table>
-<thead>
-<tr>
-<th>Package</th>
-<th>Minimum version</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>pydantic</strong></td>
-<td>≥ 2.7</td>
-<td>Frozen data model validation</td>
-</tr>
-<tr>
-<td><strong>structlog</strong></td>
-<td>≥ 24.4</td>
-<td>Structured JSON logging + PII scrubbing</td>
-</tr>
-<tr>
-<td><strong>boto3</strong></td>
-<td>Latest</td>
-<td>AWS SDK</td>
-</tr>
-<tr>
-<td><strong>pyarrow</strong></td>
-<td>Latest</td>
-<td>Apache Parquet I/O</td>
-</tr>
-<tr>
-<td><strong>pymysql</strong></td>
-<td>Latest</td>
-<td>MySQL RDS connector</td>
-</tr>
-<tr>
-<td><strong>requests</strong></td>
-<td>Latest</td>
-<td>Salesforce + NetSuite HTTP client</td>
-</tr>
-</tbody>
+<tr><td>Package</td><td>Minimum version</td><td>Purpose</td></tr>
+<tr><td><strong>pydantic</strong></td><td>≥ 2.7</td><td>Frozen data model validation</td></tr>
+<tr><td><strong>structlog</strong></td><td>≥ 24.4</td><td>Structured JSON logging + PII scrubbing</td></tr>
+<tr><td><strong>boto3</strong></td><td>Latest</td><td>AWS SDK</td></tr>
+<tr><td><strong>pyarrow</strong></td><td>Latest</td><td>Apache Parquet I/O</td></tr>
+<tr><td><strong>pymysql</strong></td><td>Latest</td><td>MySQL RDS connector</td></tr>
+<tr><td><strong>requests</strong></td><td>Latest</td><td>Salesforce + NetSuite HTTP client</td></tr>
 </table>
-<h3 id="code-quality-gate-all-must-pass-before-deploy">Code Quality Gate (all must pass before deploy)</h3>
+
+<h3>Code Quality Gate (all must pass before deploy)</h3>
+
 <table>
-<thead>
-<tr>
-<th>Tool</th>
-<th>Min version</th>
-<th>Command</th>
-<th>Gate enforced by</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>Ruff</strong></td>
-<td>≥ 0.5</td>
-<td><code>ruff check .</code></td>
-<td>GitHub Actions <code>ci.yml</code></td>
-</tr>
-<tr>
-<td><strong>mypy</strong></td>
-<td>≥ 1.10</td>
-<td><code>mypy .</code></td>
-<td>GitHub Actions <code>ci.yml</code></td>
-</tr>
-<tr>
-<td><strong>pytest</strong></td>
-<td>Latest</td>
-<td><code>pytest --cov --cov-fail-under=80</code></td>
-<td>GitHub Actions <code>ci.yml</code></td>
-</tr>
-<tr>
-<td><strong>bandit</strong></td>
-<td>≥ 1.7</td>
-<td><code>bandit -r . -c pyproject.toml</code></td>
-<td>GitHub Actions <code>ci.yml</code></td>
-</tr>
-<tr>
-<td><strong>pip-audit</strong></td>
-<td>≥ 2.7</td>
-<td><code>pip-audit</code></td>
-<td>GitHub Actions <code>ci.yml</code></td>
-</tr>
-<tr>
-<td><strong>checkov</strong></td>
-<td>Latest</td>
-<td><code>checkov -d infrastructure/</code></td>
-<td>GitHub Actions <code>ci.yml</code></td>
-</tr>
-<tr>
-<td><strong>Terraform validate</strong></td>
-<td>N/A</td>
-<td><code>terraform validate</code></td>
-<td>GitHub Actions <code>ci.yml</code></td>
-</tr>
-</tbody>
+<tr><td>Tool</td><td>Min version</td><td>Command</td><td>Gate enforced by</td></tr>
+<tr><td><strong>Ruff</strong></td><td>≥ 0.5</td><td></code>ruff check .<code></td><td>GitHub Actions </code>ci.yml<code></td></tr>
+<tr><td><strong>mypy</strong></td><td>≥ 1.10</td><td></code>mypy .<code></td><td>GitHub Actions </code>ci.yml<code></td></tr>
+<tr><td><strong>pytest</strong></td><td>Latest</td><td></code>pytest --cov --cov-fail-under=80<code></td><td>GitHub Actions </code>ci.yml<code></td></tr>
+<tr><td><strong>bandit</strong></td><td>≥ 1.7</td><td></code>bandit -r . -c pyproject.toml<code></td><td>GitHub Actions </code>ci.yml<code></td></tr>
+<tr><td><strong>pip-audit</strong></td><td>≥ 2.7</td><td></code>pip-audit<code></td><td>GitHub Actions </code>ci.yml<code></td></tr>
+<tr><td><strong>checkov</strong></td><td>Latest</td><td></code>checkov -d infrastructure/<code></td><td>GitHub Actions </code>ci.yml<code></td></tr>
+<tr><td><strong>Terraform validate</strong></td><td>N/A</td><td></code>terraform validate<code></td><td>GitHub Actions </code>ci.yml<code></td></tr>
 </table>
-<h3 id="aws-services-deployed-per-environment">AWS Services Deployed (per environment)</h3>
+
+<h3>AWS Services Deployed (per environment)</h3>
+
 <table>
-<thead>
-<tr>
-<th>Service</th>
-<th>Resource name pattern</th>
-<th>Deployed by</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>S3</strong></td>
-<td><code>{env}-edl-raw-layer</code>, <code>{env}-edl-curated-layer</code>, <code>{env}-edl-analytics-layer</code>, <code>{env}-edl-schema-snapshots</code></td>
-<td><code>infrastructure/modules/storage/</code></td>
-</tr>
-<tr>
-<td><strong>KMS</strong></td>
-<td>alias <code>{env}-edl-platform-key</code></td>
-<td><code>infrastructure/modules/kms/</code></td>
-</tr>
-<tr>
-<td><strong>VPC</strong></td>
-<td><code>{env}-edl-vpc</code>; 3 private subnets; 5 VPC Endpoints</td>
-<td><code>infrastructure/modules/networking/</code></td>
-</tr>
-<tr>
-<td><strong>IAM</strong></td>
-<td>5 service roles + 1 OIDC CI/CD role</td>
-<td><code>infrastructure/modules/iam/</code></td>
-</tr>
-<tr>
-<td><strong>DynamoDB</strong></td>
-<td><code>{env}-entity-extraction-config</code>, <code>{env}-watermark-repository</code>, <code>{env}-run-audit-log</code>, <code>{env}-source-onboarding</code></td>
-<td><code>infrastructure/modules/metadata_persistence/</code></td>
-</tr>
-<tr>
-<td><strong>Secrets Manager</strong></td>
-<td><code>{env}/sources/salesforce/credentials</code>, <code>{env}/sources/netsuite/credentials</code>, <code>{env}/sources/mysql-rds/credentials</code></td>
-<td><code>infrastructure/modules/secrets/</code></td>
-</tr>
-<tr>
-<td><strong>Step Functions</strong></td>
-<td><code>{env}-extraction-orchestration-workflow</code></td>
-<td><code>infrastructure/modules/orchestration/</code></td>
-</tr>
-<tr>
-<td><strong>CloudWatch</strong></td>
-<td>5 log groups; namespace <code>EnterpriseDatalake</code>; 4 alarms; X-Ray group</td>
-<td><code>infrastructure/modules/observability/</code></td>
-</tr>
-<tr>
-<td><strong>SNS</strong></td>
-<td><code>{env}-edl-platform-alerts</code></td>
-<td><code>infrastructure/modules/observability/</code></td>
-</tr>
-<tr>
-<td><strong>SQS (DLQ)</strong></td>
-<td><code>{env}-extraction-dlq</code></td>
-<td><code>infrastructure/modules/metadata_persistence/</code></td>
-</tr>
-<tr>
-<td><strong>Glue Data Catalog</strong></td>
-<td><code>{env}_curated</code>, <code>{env}_analytics</code> databases</td>
-<td>Created at runtime by transformation pipeline</td>
-</tr>
-<tr>
-<td><strong>EventBridge Schedules</strong></td>
-<td><code>{source_id}--{entity_id}</code></td>
-<td>Managed at runtime via <code>extraction_schedule_client.py</code></td>
-</tr>
-<tr>
-<td><strong>RDS MySQL</strong></td>
-<td><code>{env}-edl-serving-store</code></td>
-<td><code>infrastructure/modules/serving_store/</code></td>
-</tr>
-</tbody>
+<tr><td>Service</td><td>Resource name pattern</td><td>Deployed by</td></tr>
+<tr><td><strong>S3</strong></td><td></code>{env}-edl-raw-layer<code>, </code>{env}-edl-curated-layer<code>, </code>{env}-edl-analytics-layer<code>, </code>{env}-edl-schema-snapshots<code></td><td></code>infrastructure/modules/storage/<code></td></tr>
+<tr><td><strong>KMS</strong></td><td>alias </code>{env}-edl-platform-key<code></td><td></code>infrastructure/modules/kms/<code></td></tr>
+<tr><td><strong>VPC</strong></td><td></code>{env}-edl-vpc<code>; 3 private subnets; 5 VPC Endpoints</td><td></code>infrastructure/modules/networking/<code></td></tr>
+<tr><td><strong>IAM</strong></td><td>5 service roles + 1 OIDC CI/CD role</td><td></code>infrastructure/modules/iam/<code></td></tr>
+<tr><td><strong>DynamoDB</strong></td><td></code>{env}-entity-extraction-config<code>, </code>{env}-watermark-repository<code>, </code>{env}-run-audit-log<code>, </code>{env}-source-onboarding<code></td><td></code>infrastructure/modules/metadata_persistence/<code></td></tr>
+<tr><td><strong>Secrets Manager</strong></td><td></code>{env}/sources/salesforce/credentials<code>, </code>{env}/sources/netsuite/credentials<code>, </code>{env}/sources/mysql-rds/credentials<code></td><td></code>infrastructure/modules/secrets/<code></td></tr>
+<tr><td><strong>Step Functions</strong></td><td></code>{env}-extraction-orchestration-workflow<code></td><td></code>infrastructure/modules/orchestration/<code></td></tr>
+<tr><td><strong>CloudWatch</strong></td><td>5 log groups; namespace </code>EnterpriseDatalake<code>; 4 alarms; X-Ray group</td><td></code>infrastructure/modules/observability/<code></td></tr>
+<tr><td><strong>SNS</strong></td><td></code>{env}-edl-platform-alerts<code></td><td></code>infrastructure/modules/observability/<code></td></tr>
+<tr><td><strong>SQS (DLQ)</strong></td><td></code>{env}-extraction-dlq<code></td><td></code>infrastructure/modules/metadata_persistence/<code></td></tr>
+<tr><td><strong>Glue Data Catalog</strong></td><td></code>{env}_curated<code>, </code>{env}_analytics<code> databases</td><td>Created at runtime by transformation pipeline</td></tr>
+<tr><td><strong>EventBridge Schedules</strong></td><td></code>{source_id}--{entity_id}<code></td><td>Managed at runtime via </code>extraction_schedule_client.py<code></td></tr>
+<tr><td><strong>RDS MySQL</strong></td><td></code>{env}-edl-serving-store<code></td><td></code>infrastructure/modules/serving_store/<code></td></tr>
 </table>
-<h3 id="data-format-specifications">Data Format Specifications</h3>
+
+<h3>Data Format Specifications</h3>
+
 <table>
-<thead>
-<tr>
-<th>Format</th>
-<th>Spec</th>
-<th>Storage layer</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>Apache Parquet</strong></td>
-<td>Raw: <code>large_utf8</code> columns (no type coercion); Curated/Analytics: Snappy-compressed</td>
-<td>All data lake layers</td>
-</tr>
-<tr>
-<td><strong>JSON</strong></td>
-<td>UTF-8; no BOM</td>
-<td>Config files, snapshots, reports, lineage</td>
-</tr>
-<tr>
-<td><strong>DynamoDB Item</strong></td>
-<td>Native DynamoDB JSON serialisation</td>
-<td>Config, watermark, audit, onboarding tables</td>
-</tr>
-</tbody>
-</table></article></main>
+<tr><td>Format</td><td>Spec</td><td>Storage layer</td></tr>
+<tr><td><strong>Apache Parquet</strong></td><td>Raw: </code>large_utf8` columns (no type coercion); Curated/Analytics: Snappy-compressed</td><td>All data lake layers</td></tr>
+<tr><td><strong>JSON</strong></td><td>UTF-8; no BOM</td><td>Config files, snapshots, reports, lineage</td></tr>
+<tr><td><strong>DynamoDB Item</strong></td><td>Native DynamoDB JSON serialisation</td><td>Config, watermark, audit, onboarding tables</td></tr>
+</table>
+
 </body>
 </html>

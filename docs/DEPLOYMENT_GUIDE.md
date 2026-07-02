@@ -803,19 +803,40 @@ To add a new entity, edit `scripts/seed_entity_config.py` and add a record to th
 
 ```python
 {
-    "source_id":          "salesforce",           # stable source identifier
-    "entity_id":          "salesforce-account",   # stable entity identifier
-    "config_version":     "1.0.0",                # semantic version
-    "load_type":          "incremental",           # "full" or "incremental"
-    "watermark_field":    "SystemModstamp",        # source timestamp field for delta sync
-    "extraction_window_days": 1,                  # max days per extraction run
-    "watermark_overlap_hours": 1,                 # overlap to catch late-arriving records
-    "field_mode":         "all",                  # "all", "standard", "custom", "includeOnly"
-    "include_fields":     [],                     # only used when field_mode = "includeOnly"
-    "exclude_fields":     ["IsDeleted"],          # always excluded regardless of field_mode
-    "output_format":      "parquet",              # always parquet
-    "active":             True                    # False = skip this entity
+    "source_id":               "salesforce",           # stable source identifier
+    "entity_id":               "salesforce-account",   # stable entity identifier
+    "config_version":          "1.1.0",                # semantic version — bump when changing load_type or merge fields
+    "load_type":               "incremental",           # "full" or "incremental"
+    "watermark_field":         "SystemModstamp",        # source timestamp field for delta sync (required for incremental)
+    "extraction_window_days":  1,                       # max days per extraction run
+    "watermark_overlap_hours": 1,                       # overlap to catch late-arriving records
+    "field_mode":              "all",                   # "all", "standard", "custom", "includeOnly"
+    "include_fields":          [],                      # only used when field_mode = "includeOnly"
+    "exclude_fields":          ["IsDeleted"],           # always excluded regardless of field_mode
+    "output_format":           "parquet",               # always parquet
+    # ── Incremental merge (SCD Type 1) ──────────────────────────────────────
+    # Set primary_key_field to enable SCD Type 1 merge for incremental entities.
+    # The curated layer will always hold the FULL current state, not just the delta.
+    # This ensures entity resolution and analytics see complete data on every run.
+    # Leave as None for full-load entities (no merge needed — full extract every run).
+    "primary_key_field":       "Id",                   # canonical PK field name (flat, no dots); None = append-only
+    # soft_delete_field controls what happens when a source record carries a deletion flag:
+    #   None (default / tombstone)  → deleted records are KEPT with their flag (is_deleted=True)
+    #                                 BI queries filter WHERE is_deleted = false
+    #   "is_deleted"                → deleted records are physically REMOVED from the curated snapshot
+    "soft_delete_field":       None,                   # canonical delete-flag field name; None = tombstone pattern
+    "active":                  True                    # False = skip this entity
 }
+```
+
+**Current entity extraction modes (dev):**
+
+| Entity | load_type | watermark_field | primary_key_field | soft_delete_field |
+|---|---|---|---|---|
+| `salesforce-account` | `incremental` | `SystemModstamp` | `Id` | `None` (tombstone) |
+| `salesforce-contact` | `incremental` | `SystemModstamp` | `Id` | `None` (tombstone) |
+| `mysql-rds-contracts` | `incremental` | `ModifiedOn` | `Id` | `None` (tombstone — `is_deleted=True` persists) |
+| Sage entities | `incremental` | varies | `None` | `None` |
 ```
 
 ### Step 6.3 — Create EventBridge extraction schedules

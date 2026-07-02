@@ -509,7 +509,10 @@ Step Functions (dev-data-pipeline)
     ├─ Step 2: dev-transformation-pipeline Lambda
     │       Reads raw Parquet → applies field mapping JSON
     │       Quality checks → PII masking
-    │       Writes to: s3://dev-edl-curated-layer/curated/{source_id}/{entity_id}/
+    │       SCD Type 1 merge: loads previous curated state, merges delta by
+    │       primary_key_field → writes FULL current-state Parquet to curated
+    │       (full-load entities: writes delta only, no merge)
+    │       Writes to: s3://dev-edl-curated-layer/curated/{domain}/{entity_id}/
     │       Registers Glue table
     │
     ├─ Step 3: dev-entity-resolution-pipeline Lambda
@@ -573,12 +576,6 @@ Step Functions (dev-data-pipeline)
 
 16. **Sage X3 OData discriminant** — the X3 query engine embeds `"_x3_odata": true` in `query_text` JSON. `SageConnector.execute_extraction()` dispatches on this key to the OData GET path. Do not set this key manually in entity configs.
 
-12. **Sage `connector_params` must include `sage_product` and `object_path`** — e.g. `{"sage_product": "intacct", "object_path": "accounts-receivable/customer"}`. Missing either key raises `ValueError` at runtime. Valid `sage_product` values are `"intacct"` and `"x3"`.
+17. **`primary_key_field` must be a flat canonical field name** — dotted paths like `"auditInfo.id"` are silently treated as missing because `record.get()` only does top-level dict lookup. Use the canonical field name after field mapping (e.g. `"Id"`, `"contact_id"`). Only set this field for incremental entities; `None` (default) leaves pipeline unchanged.
 
-13. **Sage X3 field names are UPPERCASE** — e.g. `BPCNUM_0`, `MODDAT_0`. The X3 query engine validates against `^[A-Z][A-Z0-9_]{0,63}$`. Lowercase field names in `include_fields` will be rejected with a `X3QueryBuildError`.
-
-14. **Sage Intacct incremental watermark field is `auditInfo.modifiedAt`** — this dot-notation key is returned flat in query responses. Set `watermark_field` to this exact string in the entity config.
-
-15. **Sage credentials use per-product secret paths** — `{env}/sources/sage/intacct/credentials` and `{env}/sources/sage/x3/credentials` are separate Secrets Manager secrets. Intacct requires keys: `token_url`, `client_id`, `client_secret`, `base_url`, `company_id`. X3 requires the same plus `folder` (the X3 company folder, e.g. `"SEED"`).
-
-16. **Sage X3 OData discriminant** — the X3 query engine embeds `"_x3_odata": true` in `query_text` JSON. The `SageConnector.execute_extraction()` dispatches on this key to the OData GET path. Never set this key manually in entity configs.
+18. **Tombstone soft-delete is the default** — `soft_delete_field=None` means deleted records are never physically removed from the curated or analytics layers. They persist with their source deletion flag (e.g. `is_deleted=True`). Always filter `WHERE is_deleted = false` (or equivalent) in analytics queries to see only active records. To physically remove records, set `soft_delete_field` to the canonical name of the deletion flag field.

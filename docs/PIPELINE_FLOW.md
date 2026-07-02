@@ -99,7 +99,7 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 | Layer | Purpose | Storage | Format | Mutability |
 |---|---|---|---|---|
 | **Raw** | Exact copy of source data, no transformation | `{env}-edl-raw-layer` S3 | Parquet (large_utf8 columns) | Immutable — Object Lock GOVERNANCE |
-| **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked | `{env}-edl-curated-layer` S3 | Parquet (Snappy) | Append-only per run_id partition |
+| **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked. For incremental entities with `primary_key_field` set, each partition holds the **full current state** (SCD Type 1 merge — not just the day's delta) | `{env}-edl-curated-layer` S3 | Parquet (Snappy) | Full-load entities: append-only per run_id. Incremental entities with merge: full snapshot per run_id (overwrites previous state within the partition) |
 | **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Contains curated domain datasets (`curated/` prefix) and canonical (entity-resolved) outputs (`canonical/` prefix) | `{env}-edl-analytics-layer` S3 | Parquet (Snappy) | Append-only |
 | **Serving Store** | Optional operational store for low-latency API and application reads | MySQL RDS (private VPC) | SQL rows | Upsert (REPLACE INTO) |
 
@@ -142,10 +142,12 @@ Step Functions: START EXECUTION
   │  2. Load field mapping rule set from S3                  │         │
   │  3. Apply field mappings (rename/cast/concat/mask)       │         │
   │  4. Apply PII masking (classification policy)            │         │
-  │  5. Evaluate quality policy                              │         │
-  │  6. Write canonical records to curated layer (Parquet)   │         │
-  │  7. Register dataset in Glue Catalog                     │         │
-  │  8. Emit lineage record                                  │         │
+  │  5. Evaluate quality policy (on delta records only)      │         │
+  │  6. SCD Type 1 merge with previous curated state         │         │
+  │     (only for incremental entities with primary_key_field)│         │
+  │  7. Write full current-state Parquet to curated layer    │         │
+  │  8. Register dataset in Glue Catalog                     │         │
+  │  9. Emit lineage record                                  │         │
   └──────────────────────┬──────────────────────────────────┘         │
                          │                                             │
            quality_blocked=true?                                      │
@@ -227,7 +229,8 @@ Extraction succeeded?
 
 Transformation succeeded?
   └─ is_publication_blocked=true  → STOP (quality alert fired)
-  └─ is_publication_blocked=false → Entity Resolution
+  └─ curated_s3_prefix=null       → STOP as success (0 records extracted — TransformationCompleteNoRecords)
+  └─ otherwise                    → Entity Resolution
 
 Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 ```
@@ -238,7 +241,7 @@ Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 
 **Component:** `ConfigurationRepositoryClient` (DynamoDB backend)  
 **Purpose:** Loads `EntityExtractionConfig` for the requested source/entity. Validates config before any AWS or source API call is made.  
-**Key fields read:** `load_type`, `watermark_field`, `extraction_window_days`, `field_mode`, `include_fields`, `exclude_fields`, `output_format`  
+**Key fields read:** `load_type`, `watermark_field`, `extraction_window_days`, `field_mode`, `include_fields`, `exclude_fields`, `output_format`, `primary_key_field`, `soft_delete_field`  
 **Failure behaviour:** Raises `ConfigurationNotFoundError` → pipeline aborts, DLQ entry created.
 
 ---
@@ -323,20 +326,29 @@ Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 ### Stage 12 — Transformation (Raw → Curated)
 
 **Component:** `TransformationPipeline`  
-**Purpose:** Reads raw Parquet, applies field mappings, evaluates quality, writes canonical records to curated layer.
+**Purpose:** Reads raw Parquet, applies field mappings, evaluates quality, and writes canonical records to the curated layer. For incremental entities with `primary_key_field` set, performs an SCD Type 1 merge to ensure the curated partition always holds the full current state.
 
 **Field mapping system** (see also §5):
 - Rule set loaded from S3: `s3://{bucket}/field-mappings/{source_id}/{entity_id}/{version}.json`
 - If no rule set exists, records pass through as-is (identity mode — logged as warning)
 - Rules applied per record: rename, concat, date_format, cast, boolean, mask
 
-**Quality evaluation:**
+**Quality evaluation (runs on delta records only):**
 - `null_check` — required fields must be non-null
 - `range_check` — numeric bounds validation
 - `pattern_check` — regex match
 - `allowed_values` — enum validation
 - `WARNING` severity: publication continues, violations logged
 - `BLOCKING` severity: publication halted, downstream paused
+
+**SCD Type 1 merge (incremental entities with `primary_key_field` set):**
+- After quality check, the transformation loads the previous curated partition for this entity.
+- Delta records (today's extraction) are merged into the previous state using `primary_key_field` as the upsert key.
+- The **full merged result** (not just the delta) is written to the new curated partition.
+- This ensures entity resolution always sees complete data regardless of extraction granularity.
+- **Tombstone soft-delete:** When `soft_delete_field` is `None` (default), deleted records are **never removed** — they persist in the curated layer with their deletion flag (e.g. `is_deleted=True`). BI queries filter `WHERE is_deleted = false` to see only active records.
+- If `soft_delete_field` is set to a canonical field name, records where that field is truthy are physically removed from the merged state.
+- Full-load entities (`primary_key_field=None`) are unaffected — pipeline behaves identically to before.
 
 **Outputs:**
 - Curated Parquet: `s3://{bucket}/curated/{domain}/{entity_id}/curated_date={date}/run_id={run_id}/data.parquet`
