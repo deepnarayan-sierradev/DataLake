@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -125,7 +126,7 @@ class FieldMappingApplicator:
 
         return canonical
 
-    def _apply_rule(  # noqa: C901
+    def _apply_rule(
         self,
         record: dict[str, Any],
         rule: FieldMappingRule,
@@ -148,34 +149,61 @@ class FieldMappingApplicator:
                 return rule.default_value
             return _DROPPED_FIELD  # DROP_FIELD
 
-        if rule.transformation == MappingTransformation.RENAME:
-            return record[rule.source_fields[0]]
+        handler = _TRANSFORMATION_DISPATCH.get(rule.transformation)
+        if handler is not None:
+            return handler(record, rule)
+        return record[rule.source_fields[0]]  # fallback: pass-through for unknown types
 
-        if rule.transformation == MappingTransformation.CONCAT:
-            sep = rule.transformation_params.get("separator", " ")
-            return sep.join(str(record[f]) for f in rule.source_fields if record.get(f) is not None)
 
-        if rule.transformation == MappingTransformation.DATE_FORMAT:
-            raw_val = record[rule.source_fields[0]]
-            in_fmt = rule.transformation_params.get("input_format", "%Y-%m-%dT%H:%M:%S.%fZ")
-            out_fmt = rule.transformation_params.get("output_format", "%Y-%m-%d")
-            if isinstance(raw_val, datetime):
-                return raw_val.strftime(out_fmt)
-            return datetime.strptime(str(raw_val), in_fmt).strftime(out_fmt)
+# ---------------------------------------------------------------------------
+# Transformation handlers (module-level pure functions; one per transformation type)
+# These are referenced by _TRANSFORMATION_DISPATCH below and can be tested directly.
+# ---------------------------------------------------------------------------
 
-        if rule.transformation == MappingTransformation.CAST:
-            return _cast_value(
-                record[rule.source_fields[0]], rule.transformation_params.get("type", "string")
-            )
 
-        if rule.transformation == MappingTransformation.MASK:
-            raw_val = str(record[rule.source_fields[0]])
-            visible = int(rule.transformation_params.get("visible_chars", "4"))
-            if len(raw_val) <= visible:
-                return "*" * len(raw_val)
-            return "*" * (len(raw_val) - visible) + raw_val[-visible:]
+def _transform_rename(record: dict[str, Any], rule: FieldMappingRule) -> Any:
+    return record[rule.source_fields[0]]
 
-        return record[rule.source_fields[0]]  # fallback: pass-through
+
+def _transform_concat(record: dict[str, Any], rule: FieldMappingRule) -> Any:
+    sep = rule.transformation_params.get("separator", " ")
+    return sep.join(str(record[f]) for f in rule.source_fields if record.get(f) is not None)
+
+
+def _transform_date_format(record: dict[str, Any], rule: FieldMappingRule) -> Any:
+    raw_val = record[rule.source_fields[0]]
+    in_fmt = rule.transformation_params.get("input_format", "%Y-%m-%dT%H:%M:%S.%fZ")
+    out_fmt = rule.transformation_params.get("output_format", "%Y-%m-%d")
+    if isinstance(raw_val, datetime):
+        return raw_val.strftime(out_fmt)
+    return datetime.strptime(str(raw_val), in_fmt).strftime(out_fmt)
+
+
+def _transform_cast(record: dict[str, Any], rule: FieldMappingRule) -> Any:
+    return _cast_value(
+        record[rule.source_fields[0]], rule.transformation_params.get("type", "string")
+    )
+
+
+def _transform_mask(record: dict[str, Any], rule: FieldMappingRule) -> Any:
+    raw_val = str(record[rule.source_fields[0]])
+    visible = int(rule.transformation_params.get("visible_chars", "4"))
+    if len(raw_val) <= visible:
+        return "*" * len(raw_val)
+    return "*" * (len(raw_val) - visible) + raw_val[-visible:]
+
+
+# Dispatch table: MappingTransformation → handler function.
+# Adding a new transformation type requires only a new function + one dict entry.
+_TRANSFORMATION_DISPATCH: Final[
+    dict[MappingTransformation, Callable[[dict[str, Any], FieldMappingRule], Any]]
+] = {
+    MappingTransformation.RENAME:      _transform_rename,
+    MappingTransformation.CONCAT:      _transform_concat,
+    MappingTransformation.DATE_FORMAT: _transform_date_format,
+    MappingTransformation.CAST:        _transform_cast,
+    MappingTransformation.MASK:        _transform_mask,
+}
 
 
 def _cast_value(value: Any, target_type: str) -> Any:

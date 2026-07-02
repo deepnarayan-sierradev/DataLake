@@ -168,10 +168,9 @@ class TransformationPipeline:
 
         s3: Any = boto3.client("s3", region_name=ctx.region_name)
 
-        raw_records = _load_raw_records(s3, ctx.raw_s3_bucket, ctx.raw_s3_prefix)
-        _logger.info("raw_records_loaded", count=len(raw_records), run_id=ctx.run_id)
-
-        # Load mapping rule set (graceful degradation: identity if absent)
+        # Load mapping rule set before streaming so the same rule_set instance
+        # is reused for every record without re-fetching from S3 (graceful
+        # degradation: identity pass-through when absent).
         rule_set: FieldMappingRuleSet | None = None
         try:
             rule_set = self._mapping_registry.load_rule_set(
@@ -184,10 +183,30 @@ class TransformationPipeline:
                 entity_id=ctx.entity_id,
             )
 
-        canonical_records, mapping_failures = _apply_mappings(
-            raw_records, rule_set, FieldMappingApplicator()
-        )
         mapping_version = rule_set.mapping_version if rule_set else "identity"
+
+        # Stream raw Parquet records through the mapping applicator without
+        # materialising the full raw dataset in memory.  Only canonical records
+        # (post-mapping) are accumulated — peak memory is O(canonical) rather
+        # than O(raw + canonical).  For identity mapping (no rule_set) both
+        # sets are equal in size, but no duplicate copy is held simultaneously.
+        applicator = FieldMappingApplicator()
+        canonical_records: list[dict[str, Any]] = []
+        mapping_failures = 0
+        raw_record_count = 0
+
+        for raw_record in _iter_raw_records(s3, ctx.raw_s3_bucket, ctx.raw_s3_prefix):
+            raw_record_count += 1
+            if rule_set is None:
+                canonical_records.append(raw_record)
+            else:
+                mapped = applicator.apply(raw_record, rule_set)
+                if mapped is None:
+                    mapping_failures += 1
+                else:
+                    canonical_records.append(mapped)
+
+        _logger.info("raw_records_streamed", count=raw_record_count, run_id=ctx.run_id)
 
         # Apply data classification masking before any write (OWASP A04, spec §6.4)
         if self._classification_policy is not None and canonical_records:
@@ -234,7 +253,7 @@ class TransformationPipeline:
             run_id=ctx.run_id,
             source_id=ctx.source_id,
             entity_id=ctx.entity_id,
-            raw_record_count=len(raw_records),
+            raw_record_count=raw_record_count,
             canonical_record_count=len(canonical_records),
             mapping_failures=mapping_failures,
             curated_s3_prefix=curated_prefix,
@@ -250,7 +269,7 @@ class TransformationPipeline:
             run_id=ctx.run_id,
             source_id=ctx.source_id,
             entity_id=ctx.entity_id,
-            raw_records=len(raw_records),
+            raw_records=raw_record_count,
             canonical_records=len(canonical_records),
             mapping_failures=mapping_failures,
             is_publication_blocked=is_blocked,

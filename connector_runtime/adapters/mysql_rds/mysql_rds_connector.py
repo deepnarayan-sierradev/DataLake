@@ -84,6 +84,11 @@ class MySqlRdsConnector(ConnectorInterface):
             environment=environment,
             region_name=region_name,
         )
+        # Connection opened by discover_queryable_fields and reused by
+        # execute_extraction within the same extraction run, eliminating the
+        # second TCP handshake and TLS negotiation to the RDS instance.
+        # Set to None on extraction completion or on any discovery failure.
+        self._reusable_conn: Any = None
 
     def get_capability_declaration(self) -> ConnectorCapabilities:
         return ConnectorCapabilities(
@@ -120,7 +125,7 @@ class MySqlRdsConnector(ConnectorInterface):
         conn = self._open_connection(params)
         try:
             introspection_client = MySqlSchemaIntrospectionClient(connection=conn)
-            return introspection_client.discover_fields(
+            result = introspection_client.discover_fields(
                 source_id=source_id,
                 entity_id=entity_id,
                 database=params.database,
@@ -129,8 +134,13 @@ class MySqlRdsConnector(ConnectorInterface):
                 include_fields=include_fields,
                 exclude_fields=exclude_fields,
             )
-        finally:
-            conn.close()
+            # Transfer ownership: keep connection alive for execute_extraction.
+            # The connection is closed in execute_extraction's finally block.
+            self._reusable_conn = conn
+            return result
+        except Exception:
+            conn.close()  # close only on failure; success path reuses the conn
+            raise
 
     def build_extraction_query(
         self,
@@ -177,8 +187,14 @@ class MySqlRdsConnector(ConnectorInterface):
             table_name=self._table_name,
         )
 
-        params = self._creds_client.get_connection_parameters()
-        conn = self._open_connection(params)
+        # Reuse the connection opened by discover_queryable_fields if available;
+        # open a fresh connection only when called without prior discovery
+        # (e.g. direct invocation in tests or replay scenarios).
+        conn = getattr(self, "_reusable_conn", None)
+        self._reusable_conn = None  # consume — do not reuse again
+        if conn is None:
+            params = self._creds_client.get_connection_parameters()
+            conn = self._open_connection(params)
         record_count = 0
         try:
             extractor = MySqlIncrementalExtractor(connection=conn)
@@ -186,7 +202,7 @@ class MySqlRdsConnector(ConnectorInterface):
                 record_count += 1
                 yield record
         finally:
-            conn.close()
+            conn.close()  # always closed here; no double-close possible
 
         _logger.info(
             "mysql_rds_extraction_completed",

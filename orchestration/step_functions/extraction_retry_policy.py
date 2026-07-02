@@ -24,9 +24,14 @@ OWASP A10 — Mishandling of Exceptional Conditions:
 
 from __future__ import annotations
 
+import os
 import random
 import threading
-from typing import Final
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any, Final
+
+import boto3
 
 from connector_runtime.interfaces.connector_interface import ExtractionErrorClassification
 from observability.structured_logger import get_platform_logger
@@ -40,6 +45,11 @@ _TRANSIENT_CLASSIFICATIONS: Final[frozenset[ExtractionErrorClassification]] = fr
         ExtractionErrorClassification.TRANSIENT_NETWORK,
     }
 )
+
+# Sentinel run_id for circuit breaker items stored in the run-audit-log table.
+# Uses double-underscores so it can never collide with real run_ids, which must
+# start with a letter and match STABLE_ID_PATTERN.
+_CB_SENTINEL: Final[str] = "__circuit_breaker__"
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +83,19 @@ class ExtractionRetryPolicy:
     threading.Lock, making this class safe for use from multiple threads.
     Circuit breaker keys are scoped to (source_id, entity_id) so that failures
     for one entity do not block extraction of other entities from the same source.
+
+    Distributed circuit breaker:
+    When PLATFORM_ENVIRONMENT and AWS_REGION environment variables are present
+    (i.e. running inside Lambda), the circuit breaker state is persisted to the
+    existing {env}-run-audit-log DynamoDB table using a sentinel run_id
+    ("__circuit_breaker__").  This ensures that all Lambda containers see the
+    same failure count — a container that opens the circuit will block other
+    containers from starting new extractions for the same source.
+
+    If DynamoDB is unavailable (network error, permissions issue, or local
+    environment), the policy falls back silently to in-process state.  This
+    means the circuit breaker reverts to per-container protection rather than
+    failing the entire pipeline.
     """
 
     def __init__(
@@ -107,6 +130,10 @@ class ExtractionRetryPolicy:
         # Protected by _lock for thread safety.
         self._consecutive_failures: dict[str, int] = {}
         self._lock = threading.Lock()
+        # DynamoDB-backed distributed state — lazy-initialized on first use.
+        # None until _get_ddb_table() is called; stays None in non-Lambda envs.
+        self._ddb_table: Any = None
+        self._ddb_init_done: bool = False
 
     # ── Retry eligibility ───────────────────────────────────────────────────
 
@@ -174,9 +201,16 @@ class ExtractionRetryPolicy:
     def record_failure(self, source_id: str, entity_id: str = "") -> None:
         """Increment the consecutive failure counter for source_id:entity_id."""
         key = self._circuit_key(source_id, entity_id)
-        with self._lock:
-            self._consecutive_failures[key] = self._consecutive_failures.get(key, 0) + 1
-            count = self._consecutive_failures[key]
+        count = self._ddb_increment(key)
+        if count is None:
+            # DynamoDB unavailable — fall back to in-process atomic increment.
+            with self._lock:
+                self._consecutive_failures[key] = self._consecutive_failures.get(key, 0) + 1
+                count = self._consecutive_failures[key]
+        else:
+            # Sync local cache with DynamoDB count.
+            with self._lock:
+                self._consecutive_failures[key] = count
         _logger.info(
             "circuit_breaker_failure_recorded",
             source_id=source_id,
@@ -189,18 +223,26 @@ class ExtractionRetryPolicy:
     def record_success(self, source_id: str, entity_id: str = "") -> None:
         """Reset the consecutive failure counter for source_id:entity_id on success."""
         key = self._circuit_key(source_id, entity_id)
+        self._ddb_reset(key)  # best-effort; never propagates errors
         with self._lock:
             self._consecutive_failures[key] = 0
 
     def is_circuit_open(self, source_id: str, entity_id: str = "") -> bool:
         """True when consecutive failures for source_id:entity_id meet or exceed the threshold."""
         key = self._circuit_key(source_id, entity_id)
+        count = self._ddb_get_count(key)
+        if count is not None:
+            with self._lock:
+                self._consecutive_failures[key] = count  # sync local cache
+            return count >= self._circuit_open_threshold
+        # DynamoDB unavailable — fall back to in-process state.
         with self._lock:
             return self._consecutive_failures.get(key, 0) >= self._circuit_open_threshold
 
     def reset_circuit(self, source_id: str, entity_id: str = "") -> None:
         """Manually reset the circuit breaker state for source_id:entity_id."""
         key = self._circuit_key(source_id, entity_id)
+        self._ddb_reset(key)  # best-effort
         with self._lock:
             self._consecutive_failures[key] = 0
         _logger.info("circuit_breaker_reset", source_id=source_id, entity_id=entity_id)
@@ -208,6 +250,9 @@ class ExtractionRetryPolicy:
     def consecutive_failures(self, source_id: str, entity_id: str = "") -> int:
         """Return the current consecutive failure count for source_id:entity_id."""
         key = self._circuit_key(source_id, entity_id)
+        count = self._ddb_get_count(key)
+        if count is not None:
+            return count
         with self._lock:
             return self._consecutive_failures.get(key, 0)
 
@@ -220,3 +265,104 @@ class ExtractionRetryPolicy:
     def circuit_open_threshold(self) -> int:
         """Consecutive failure count at which the circuit opens."""
         return self._circuit_open_threshold
+
+    # ── DynamoDB helpers ────────────────────────────────────────────────────
+
+    def _get_ddb_table(self) -> Any:
+        """
+        Lazily connect to the run-audit-log DynamoDB table.
+
+        Returns None when PLATFORM_ENVIRONMENT or AWS_REGION are absent (local /
+        test environments) or when initialization fails.  Never raises.
+        """
+        if self._ddb_init_done:
+            return self._ddb_table
+        self._ddb_init_done = True
+        try:
+            region = os.environ.get("AWS_REGION", "")
+            env = os.environ.get("PLATFORM_ENVIRONMENT", "")
+            if not region or not env:
+                return None  # local/test environment — in-process only
+            table_name = (
+                os.environ.get("AUDIT_LOG_TABLE") or f"{env}-run-audit-log"
+            )
+            self._ddb_table = boto3.resource(
+                "dynamodb", region_name=region
+            ).Table(table_name)
+            _logger.info(
+                "circuit_breaker_ddb_backend_enabled",
+                table=table_name,
+                region=region,
+            )
+        except Exception:
+            _logger.warning("circuit_breaker_ddb_init_failed")
+        return self._ddb_table
+
+    def _ddb_increment(self, key: str) -> int | None:
+        """
+        Atomically increment consecutive_failures in DynamoDB.
+        Returns the new count, or None when DynamoDB is unavailable.
+        """
+        table = self._get_ddb_table()
+        if table is None:
+            return None
+        try:
+            response = table.update_item(
+                Key={"run_id": _CB_SENTINEL, "stage": key},
+                UpdateExpression=(
+                    "SET consecutive_failures = "
+                    "if_not_exists(consecutive_failures, :zero) + :one, "
+                    "updated_at = :now"
+                ),
+                ExpressionAttributeValues={
+                    ":zero": Decimal("0"),
+                    ":one":  Decimal("1"),
+                    ":now":  datetime.now(UTC).isoformat(),
+                },
+                ReturnValues="UPDATED_NEW",
+            )
+            return int(response["Attributes"]["consecutive_failures"])
+        except Exception:
+            _logger.warning("circuit_breaker_ddb_increment_failed", circuit_key=key)
+            return None
+
+    def _ddb_reset(self, key: str) -> None:
+        """
+        Set consecutive_failures to zero in DynamoDB (best-effort).
+        Never raises — failures are logged as warnings.
+        """
+        table = self._get_ddb_table()
+        if table is None:
+            return
+        try:
+            table.update_item(
+                Key={"run_id": _CB_SENTINEL, "stage": key},
+                UpdateExpression="SET consecutive_failures = :zero, updated_at = :now",
+                ExpressionAttributeValues={
+                    ":zero": Decimal("0"),
+                    ":now":  datetime.now(UTC).isoformat(),
+                },
+            )
+        except Exception:
+            _logger.warning("circuit_breaker_ddb_reset_failed", circuit_key=key)
+
+    def _ddb_get_count(self, key: str) -> int | None:
+        """
+        Read consecutive_failures from DynamoDB.
+        Returns count (0 when item absent), or None when DynamoDB is unavailable.
+        """
+        table = self._get_ddb_table()
+        if table is None:
+            return None
+        try:
+            response = table.get_item(
+                Key={"run_id": _CB_SENTINEL, "stage": key},
+                ConsistentRead=True,
+            )
+            item = response.get("Item")
+            if item is None:
+                return 0  # no prior failures recorded
+            return int(item.get("consecutive_failures", 0))
+        except Exception:
+            _logger.warning("circuit_breaker_ddb_read_failed", circuit_key=key)
+            return None
