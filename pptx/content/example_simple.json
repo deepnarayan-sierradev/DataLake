@@ -1,0 +1,289 @@
+{
+  "output": "Example_Presentation.pptx",
+  "slides": [
+
+    {
+      "type": "title",
+      "title": "Example Presentation",
+      "tagline": "Built with the Generic PPTX Framework",
+      "description": "This file shows the JSON content format.\nSwap with your own content — theme, fonts, and strip are automatic.",
+      "badges": [
+        { "label": "Status ✅  Active",  "color": "green_ok" },
+        { "label": "Version 1.0",         "color": "deep_blue" }
+      ],
+      "footer": "Your Organisation  ·  July 2026"
+    },
+
+    {
+      "type": "bullets",
+      "title": "Single-Column Bullet List",
+      "subtitle": "Use 'items' at the top level for a simple one-column list",
+      "numbered": false,
+      "items": [
+        "First bullet point — plain text",
+        "Second bullet point — with some detail",
+        "Third bullet point",
+        "Fourth bullet point",
+        "Fifth bullet point"
+      ],
+      "footer": "Example Presentation  ·  July 2026"
+    },
+
+    {
+      "type": "bullets",
+      "title": "Two-Column Bullet List",
+      "subtitle": "Use 'left' and 'right' keys to get two columns with headings",
+      "left": {
+        "heading": "Left Column Heading",
+        "heading_color": "deep_blue",
+        "items": [
+          "Left item one",
+          "Left item two",
+          "Left item three",
+          "Left item four",
+          "Left item five"
+        ]
+      },
+      "right": {
+        "heading": "Right Column Heading",
+        "heading_color": "orange",
+        "numbered": true,
+        "items": [
+          "Numbered item one",
+          "Numbered item two",
+          "Numbered item three",
+          "Numbered item four",
+          "Numbered item five"
+        ]
+      },
+      "code_block": "Optional monospace code block at the bottom — great for paths, commands, or examples",
+      "footer": "Example Presentation  ·  July 2026"
+    },
+
+    {
+      "type": "cards",
+      "title": "Card Grid",
+      "subtitle": "N cards auto-sized to fill the content area — works for 2 to 6 cards",
+      "cards": [
+        {
+          "title": "Card One",
+          "color": "deep_blue",
+          "body": "Body text for card one.\nSupports multi-line content."
+        },
+        {
+          "title": "Card Two",
+          "color": "orange",
+          "body": "Body text for card two.\nUse any named colour or hex code."
+        },
+        {
+          "title": "Card Three",
+          "color": "green",
+          "body": "Body text for card three.\nFont size auto-adjusts with card count."
+        },
+        {
+          "title": "Inactive Card",
+          "color": "muted",
+          "active": false,
+          "show_icon": true,
+          "body": "Set active=false for a greyed-out future item.\nshow_icon=true adds the status icon."
+        }
+      ],
+      "footer_strip": "Footer strip text — shown in a deep-blue bar at the bottom",
+      "footer": "Example Presentation  ·  July 2026"
+    },
+
+    {
+      "type": "table",
+      "title": "Data Table",
+      "subtitle": "Columns with configurable header colours and widths (in inches)",
+      "columns": [
+        { "header": "Column A",  "color": "charcoal",  "width": 3.0 },
+        { "header": "Column B",  "color": "deep_blue", "width": 3.5 },
+        { "header": "Column C",  "color": "green_ok",  "width": 3.6 }
+      ],
+      "rows": [
+        ["Row 1, Cell A", "Row 1, Cell B", "Row 1, Cell C"],
+        ["Row 2, Cell A", "Row 2, Cell B", "Row 2, Cell C"],
+        ["Row 3, Cell A", "Row 3, Cell B", "Row 3, Cell C"],
+        ["Row 4, Cell A", "Row 4, Cell B", "Row 4, Cell C"]
+      ],
+      "callout": "Optional callout strip — use a plain string for a simple one-liner",
+      "footer": "Example Presentation  ·  July 2026"
+    },
+
+    {
+      "type": "table",
+      "title": "Table with Multi-Part Callout",
+      "subtitle": "Use a 'parts' list inside callout for multiple styled lines",
+      "columns": [
+        { "header": "Metric",  "color": "charcoal",  "width": 3.5 },
+        { "header": "Before",  "color": "red",       "width": 3.0 },
+        { "header": "After",   "color": "green_ok",  "width": 3.6 }
+      ],
+      "rows": [
+        ["Time to delivery",  "3 days",   "2 hours"],
+        ["Error rate",        "12%",      "0.3%"],
+        ["Manual steps",      "14 steps", "0 steps"]
+      ],
+      "callout": {
+        "background": "#F0F4F8",
+        "parts": [
+          { "text": "Key takeaway: 90% reduction in manual effort", "bold": true, "color": "deep_blue" },
+          { "text": "Error rate reduced by 97.5% since automation", "bold": false, "color": "text" },
+          { "text": "Full ROI achieved within the first month",     "bold": true, "color": "orange" }
+        ]
+      },
+      "pairs": [
+        { "before": "3 days",   "after": "2 hours"  },
+        { "before": "12% errors", "after": "0.3%"   },
+        { "before": "14 manual steps", "after": "0 steps" },
+        { "before": "No audit trail",  "after": "Full lineage" }
+      ],
+      "footer": "Example Presentation  ·  July 2026"
+    },
+
+    {
+      "type": "metrics",
+      "title": "Metrics Slide",
+      "subtitle": "Big-number boxes at the top, optional detail table below",
+      "metrics": [
+        { "value": "99.9%",   "label": "Uptime",           "color": "green_ok" },
+        { "value": "1.2s",    "label": "Avg response time", "color": "deep_blue" },
+        { "value": "4,200",   "label": "Daily requests",    "color": "sky" },
+        { "value": "0",       "label": "Critical bugs",     "color": "orange" }
+      ],
+      "table": {
+        "headers": ["System",   "Status", "Last checked"],
+        "widths":  [4.5,         2.8,      2.8],
+        "rows": [
+          ["API Gateway",   "✅", "2026-07-03 08:00"],
+          ["Database",      "✅", "2026-07-03 08:00"],
+          ["Message queue", "✅", "2026-07-03 07:55"],
+          ["Cache layer",   "✅", "2026-07-03 08:01"]
+        ]
+      },
+      "footer": "Example Presentation  ·  July 2026"
+    },
+
+    {
+      "type": "flow",
+      "title": "Flow / Entity Resolution",
+      "subtitle": "Source boxes → merge → single output box + optional bullets below",
+      "sources": [
+        { "title": "Source System A", "color": "deep_blue",  "fields": "field_1\nfield_2\nfield_3" },
+        { "title": "Source System B", "color": "sky",        "fields": "field_a\nfield_b\nfield_c" },
+        { "title": "Source System C", "color": "green",      "fields": "field_x\nfield_y\nfield_z" }
+      ],
+      "merge_label": "⬇  DEDUPLICATE & MERGE  ⬇",
+      "output": {
+        "label": "🏆  MASTER RECORD",
+        "color": "orange",
+        "description": "unified_id  ·  primary_field  ·  secondary_field  ·  source_preferred_value\nSurvivorship policy determines which source wins per field"
+      },
+      "bullets": [
+        "Configurable matching rules per entity type",
+        "Survivorship policy: preferred source per field",
+        "Full lineage — every master record traces to source records"
+      ],
+      "footer": "Example Presentation  ·  July 2026"
+    },
+
+    {
+      "type": "split",
+      "title": "Split Layout — Bullets + Code Panel",
+      "subtitle": "Left: bullet list  ·  Right: syntax-highlighted code or query",
+      "left": {
+        "heading": "Key Points",
+        "heading_color": "deep_blue",
+        "items": [
+          "Describe your left-side content here",
+          "Lines starting with -- or # render as comments in the right panel",
+          "The right panel background colour is configurable",
+          "Useful for showing code alongside its explanation",
+          "Set footer_strip to add a coloured strip above the footer"
+        ]
+      },
+      "right": {
+        "title": "Code Example",
+        "title_color": "deep_blue",
+        "background": "#F5F8FF",
+        "code": "-- Select all active records\nSELECT id, name, status\nFROM my_table\nWHERE status = 'active'\n  AND created_at >= '2026-01-01'\nORDER BY name;\n\n# Python example\nimport boto3\nclient = boto3.client('s3')\nresponse = client.list_buckets()"
+      },
+      "footer_strip": "Optional footer strip — great for live stats or key callout",
+      "footer": "Example Presentation  ·  July 2026"
+    },
+
+    {
+      "type": "features",
+      "title": "Features Layout",
+      "subtitle": "Two-column bar + bold title + description per item (ideal for product features)",
+      "left": {
+        "title": "Category A",
+        "title_color": "deep_blue",
+        "items": [
+          { "title": "Feature One",   "body": "Description of feature one — what it does and why it matters" },
+          { "title": "Feature Two",   "body": "Description of feature two — key benefit highlighted here" },
+          { "title": "Feature Three", "body": "Description of feature three — concise and scannable" },
+          { "title": "Feature Four",  "body": "Description of feature four — one or two sentences max" },
+          { "title": "Feature Five",  "body": "Description of feature five — last item in left column" }
+        ]
+      },
+      "right": {
+        "title": "Category B",
+        "title_color": "orange",
+        "items": [
+          { "title": "Feature Six",   "body": "Description of feature six — right column starts here" },
+          { "title": "Feature Seven", "body": "Description of feature seven — same layout as left" },
+          { "title": "Feature Eight", "body": "Description of feature eight" },
+          { "title": "Feature Nine",  "body": "Description of feature nine" },
+          { "title": "Feature Ten",   "body": "Description of feature ten — last item in right column" }
+        ]
+      },
+      "footer": "Example Presentation  ·  July 2026"
+    },
+
+    {
+      "type": "swimlanes",
+      "title": "Swimlane / Roadmap",
+      "subtitle": "N vertical lane columns — auto-sized to fill the content area",
+      "lanes": [
+        {
+          "title": "Lane One (Green)",
+          "color": "green_ok",
+          "items": ["Item A", "Item B", "Item C", "Item D", "Item E", "Item F"]
+        },
+        {
+          "title": "Lane Two (Amber)",
+          "color": "amber",
+          "items": ["Item G", "Item H", "Item I", "Item J", "Item K", "Item L"]
+        },
+        {
+          "title": "Lane Three (Blue)",
+          "color": "deep_blue",
+          "items": ["Item M", "Item N", "Item O", "Item P", "Item Q", "Item R"]
+        },
+        {
+          "title": "Lane Four (Orange)",
+          "color": "orange",
+          "items": ["Item S", "Item T", "Item U", "Item V", "Item W", "Item X"]
+        }
+      ],
+      "footer": "Example Presentation  ·  July 2026"
+    },
+
+    {
+      "type": "checklist",
+      "title": "Summary\nChecklist",
+      "items": [
+        { "text": "First achievement — described in one concise sentence", "color": "deep_blue" },
+        { "text": "Second achievement — what was delivered and its impact", "color": "orange"    },
+        { "text": "Third achievement — keep it action-oriented",           "color": "green_ok"  },
+        { "text": "Fourth achievement — quantify where possible",          "color": "sky"       },
+        { "text": "Fifth achievement — link to a business outcome",        "color": "deep_blue" },
+        { "text": "Sixth achievement — forward-looking if appropriate",    "color": "orange"    }
+      ],
+      "footer": "Your Organisation  ·  July 2026"
+    }
+
+  ]
+}
