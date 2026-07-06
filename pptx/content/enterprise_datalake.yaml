@@ -10,7 +10,7 @@ slides:
   - type: title
     title: "Enterprise Data Lake Platform"
     tagline: "Automated  ·  Metadata-Driven  ·  Cloud-Native  ·  Governed"
-    description: "A unified platform connecting Salesforce CRM, MySQL RDS, and Sage ERP\ninto a single trusted, analytics-ready data foundation — built on AWS."
+    description: "A unified platform connecting Salesforce CRM, MySQL RDS, Sage ERP, and NetSuite ERP\ninto a single trusted, analytics-ready data foundation — built on AWS."
     badges:
       - label: "Dev  ✅  Live"
         color: green_ok
@@ -41,13 +41,14 @@ slides:
       - ["Salesforce CRM",  "Accounts & contacts",          "Sales, CS",        "Manual exports; no audit trail"]
       - ["MySQL RDS",       "Contracts & orders",            "Operations",       "24–72 hr delay; brittle scripts"]
       - ["Sage Intacct/X3", "AR/AP invoices, vendors",       "Finance",          "Disconnected from CRM"]
+      - ["NetSuite ERP",    "Customers, transactions",       "Finance, Ops",     "Siloed from CRM & Sage data"]
       - ["All systems",     "Credentials stored in scripts", "Engineering",      "Security risk, no rotation"]
-      - ["All systems",     "Same customer = 3 records",     "Analytics",        "No single source of truth"]
+      - ["All systems",     "Same customer = 4 records",     "Analytics",        "No single source of truth"]
     callout: "Result: stale data  ·  no audit trail  ·  no single source of truth  ·  weeks to onboard any new data source"
     pairs:
       - before: "24–72 hr delay"
         after:  "1–4 hr automated"
-      - before: "3 disconnected views"
+      - before: "4 disconnected views"
         after:  "1 golden record"
       - before: "No audit trail"
         after:  "Full lineage"
@@ -62,7 +63,7 @@ slides:
     cards:
       - title: "Multi-Source\nConnectors"
         color: deep_blue
-        body: "Salesforce  ·  MySQL RDS\nSage Intacct  ·  Sage X3\nOAuth 2.0 / REST / JWT"
+        body: "Salesforce  ·  MySQL RDS\nSage Intacct  ·  Sage X3  ·  NetSuite\nOAuth 2.0 / REST / JWT / TBA"
       - title: "4-Stage\nPipeline"
         color: sky
         body: "Extract  →  Transform\n→  Resolve  →  Publish\nAWS Step Functions"
@@ -75,7 +76,7 @@ slides:
     stats_strip:
       background: deep_blue
       items:
-        - value: "4 sources"
+        - value: "5 sources"
           label: connected
           value_color: white
           label_color: "#CCDDFF"
@@ -103,7 +104,7 @@ slides:
     subtitle: "Event-driven  ·  Serverless  ·  Three governed data layers"
     rows:
       - label: "SOURCE SYSTEMS"
-        description: "Salesforce CRM  ·  MySQL RDS  ·  Sage Intacct  ·  Sage X3  ·  (NetSuite — roadmap)"
+        description: "Salesforce CRM  ·  MySQL RDS  ·  Sage Intacct  ·  Sage X3  ·  NetSuite ERP"
         color: lite_blue
         border_color: deep_blue
       - label: "ORCHESTRATION"
@@ -160,10 +161,10 @@ slides:
         show_icon: true
         body: "REST API, OAuth 2.0\nEntities: Customer, Supplier\nSame SageConnector adapter\nWatermark incremental"
       - label: "NetSuite ERP"
-        color: muted
-        active: false
+        color: amber
+        active: true
         show_icon: true
-        body: "OAuth 1.0a token-based\nFuture — config only\nNo code change needed\nCredentials pre-reserved"
+        body: "OAuth 1.0a TBA (HMAC-SHA256)\nSuiteQL incremental extraction\nEntity: Customer (any record type)\nWatermark: lastModifiedDate"
     footer_strip: "All connectors implement ExtractionConnector  ·  3 methods to register a new source"
 
   # ── Slide 6 — Extraction (two-column bullets + code block) ───────────────
@@ -239,6 +240,9 @@ slides:
       - title: "Sage X3 Customer"
         color: green
         fields: "customer_code\ncustomer_name\ncountry_code\naccount_manager"
+      - title: "NetSuite Customer"
+        color: amber
+        fields: "customer_id\ncompany_name\nemail_address\nfull_name"
     merge_label: "⬇  MATCH & MERGE  ⬇"
     output:
       label: "🏆  GOLDEN RECORD  —  company entity"
@@ -410,6 +414,7 @@ slides:
         - ["Salesforce Contact",    "Incremental",        "49",     "dev_edl_analytics.person",            "✅"]
         - ["Sage Intacct Customer", "Incremental",        "Live",   "dev_edl_analytics.company (merged)",  "✅"]
         - ["Sage Intacct Vendor",   "Incremental",        "Live",   "Curated layer",                       "✅"]
+        - ["NetSuite — Customer",   "Incremental (SCD1)", "Built",  "dev_edl_analytics.company (ready)",   "🔲"]
     note: "Athena workgroup: dev-edl-analytics  ·  Database: dev_edl_analytics  ·  Account: 087972550871 / us-east-1"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
@@ -485,7 +490,8 @@ slides:
         color: green_ok
         items:
           - "All 4 Lambda stages live & tested"
-          - "3 sources: Salesforce, MySQL, Sage"
+          - "4 sources live: Salesforce, MySQL, Sage"
+          - "NetSuite connector code-complete"
           - "35,971+ records in analytics layer"
           - "Athena SQL queries operational"
           - "SCD Type 1 merge deployed"
@@ -511,7 +517,7 @@ slides:
       - title: "Backlog"
         color: orange
         items:
-          - "NetSuite ERP connector"
+          - "NetSuite — activate credentials & go live"
           - "Sage X3 entity resolution"
           - "Sage Intacct AR Invoice / AP Bill"
           - "Lambda timeout circuit breaker"
@@ -525,7 +531,7 @@ slides:
     items:
       - text: "Automated, end-to-end pipeline — running in the dev environment today"
         color: deep_blue
-      - text: "Four connected sources — extensible to any REST or SQL source via config"
+      - text: "Five source connectors — four live, NetSuite code-complete and ready to activate"
         color: orange
       - text: "Entity resolution delivering one golden record per customer across all systems"
         color: green_ok
