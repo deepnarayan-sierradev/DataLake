@@ -4,9 +4,9 @@
 
 aws_region  = "us-east-1"
 cost_center = "engineering"
-github_org  = "your-github-org"    # Update to actual org before first deployment
+github_org  = "your-github-org" # Update to actual org before first deployment
 github_repo = "enterprise-data-lake"
-alert_email = ""                   # Set to ops team email when ready
+alert_email = "" # Set to ops team email when ready
 
 # Lambda deployment package — produced by 'make lambda-package && make lambda-upload'
 lambda_package_s3_bucket   = "dev-edl-terraform-state"
@@ -15,5 +15,5 @@ lambda_package_source_hash = "4YCKilL2O9Tmes5oHHr1T07fJdsX78IT4yDrbZV36hQ="
 
 # Pipeline stage Lambda ARNs (required by Step Functions orchestration module)
 # Populate after deploying each Lambda stage package.
-extraction_pipeline_lambda_arn     = "arn:aws:lambda:us-east-1:087972550871:function:dev-extraction-pipeline"
+extraction_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:087972550871:function:dev-extraction-pipeline"
 # serving_store_loader_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:dev-serving-store-loader"

@@ -1,7 +1,7 @@
 """
 Sync EventBridge Scheduler schedules from the DynamoDB entity config table.
 
-Reads every active entity from {environment}-entity-extraction-config that has
+Reads every active entity from {environment}-edl-entity-extraction-config that has
 schedule_cron set and schedule_enabled=True, then creates or updates the
 corresponding EventBridge schedule.  Entities with schedule_cron=None or
 schedule_enabled=False have their schedule deleted if one exists.
@@ -28,11 +28,11 @@ from decimal import Decimal
 import boto3
 from boto3.dynamodb.conditions import Attr
 
+from observability.structured_logger import get_platform_logger
 from orchestration.event_bridge.extraction_schedule_client import (
     ExtractionScheduleClient,
     ScheduleNotFoundError,
 )
-from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
@@ -124,7 +124,7 @@ def main() -> None:
         sys.exit(1)
 
     cfg = _ENV_CONFIG[env]
-    table_name = f"{env}-entity-extraction-config"
+    table_name = f"{env}-edl-entity-extraction-config"
 
     entities = _load_schedulable_entities(table_name, cfg["region"])
 

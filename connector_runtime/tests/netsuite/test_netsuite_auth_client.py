@@ -60,8 +60,9 @@ class TestCredentialLoading:
         # Call twice — second should use cached creds (no second Secrets Manager call).
         auth.get_auth_headers("GET", "https://1234567.suitetalk.api.netsuite.com/test")
         auth.get_auth_headers("POST", "https://1234567.suitetalk.api.netsuite.com/q")
-        # If caching works, _load_credentials sets _account_id once.
-        assert auth._account_id == "1234567"  # type: ignore[attr-defined]
+        # If caching works, the shared credential client's internal cache is
+        # populated once and account_id resolves without a second fetch.
+        assert auth.account_id == "1234567"
 
     @mock_aws
     def test_secret_not_found_raises_credential_error(self) -> None:
@@ -74,7 +75,7 @@ class TestCredentialLoading:
     def test_invalid_json_raises_credential_error(self) -> None:
         _create_secret("not-json-at-all{{{")
         auth = NetSuiteAuthClient(environment=_ENVIRONMENT, region_name=_REGION)
-        with pytest.raises(NetSuiteCredentialError, match="invalid JSON"):
+        with pytest.raises(NetSuiteCredentialError, match="not valid JSON"):
             auth.get_auth_headers("GET", "https://1234567.suitetalk.api.netsuite.com/test")
 
     @mock_aws

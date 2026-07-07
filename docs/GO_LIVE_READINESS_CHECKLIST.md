@@ -15,7 +15,7 @@
 - [ ] AWS account created & billing configured
 - [ ] VPC created (prod environment, tagged correctly)
 - [ ] S3 buckets provisioned: raw-layer, curated-layer, analytics-layer, schema-snapshots
-- [ ] DynamoDB tables created: config, watermark, audit-log, onboarding-registry
+- [ ] DynamoDB tables created (5): config (`entity_extraction_config`), watermark (`watermark_repository`), audit-log (`run_audit_log`), entity-type-registry (`entity_type_registry`), onboarding-registry (`source_onboarding_registry`)
 - [ ] IAM roles created for extraction, transformation, entity-resolution, serving
 - [ ] Secrets Manager namespaces created for Salesforce, NetSuite, MySQL, Sage Intacct, and Sage X3 credentials
 - [ ] CloudWatch log groups created; retention set to 30 days (hot storage)
@@ -100,7 +100,7 @@
   - [ ] X3 `folder` is the correct company folder name (e.g. `SEED` or `PROD`)
   - [ ] OData v4 endpoint reachable from Lambda VPC
 - [ ] All credentials rotated within 90 days (prior to go-live)
-- [ ] Secrets Manager rotation schedule configured (auto-rotate every 90 days)
+- [ ] Credential-expiry alerting configured (daily SNS alert via `credential_expiry_notifier`); automatic rotation not yet implemented — tracked as follow-up
 - [ ] KMS key policy grants extraction service role `kms:Decrypt` permission
 
 **Owner:** Data Engineering + Security  
@@ -253,6 +253,22 @@
 **Owner:** Security / Platform Engineering  
 **Timeline:** 0.5 day  
 **Sign-off:** [ ] CISO
+
+---
+
+### Multi-Tenant / Control Plane Readiness
+
+> The control plane (`infrastructure/modules/control_plane/`: Cognito User Pool + API Gateway + JWT authorizer + `connector_runtime/api/control_plane_handler.py`) is already wired into `dev`, `staging`, and `prod` Terraform. Per `architecture/MULTI_TENANT_ROLLOUT_PLAN.md` it is **code-complete but not verified against a live AWS deployment** — pilot-tenant onboarding and load testing at scale have not been attempted. None of the items below may be skipped before a `terraform apply` that includes this module reaches production.
+
+- [ ] Control plane deployed and smoke-tested against a real (non-mocked) API Gateway deployment — specifically confirm which JWT claims path (`requestContext.authorizer.claims` for REST/HTTP API payload format 1.0 + Cognito authorizer, vs. `requestContext.authorizer.jwt.claims` for HTTP API payload format 2.0 + JWT authorizer) API Gateway actually populates for the deployed configuration. This is currently unverified in code — the handler (`control_plane_handler.py`) defensively checks both paths and fails closed if neither is present, but that is not the same as confirming the correct path is populated in a live deployment.
+- [ ] `tests/test_tenant_isolation.py` passing — covers S3 prefix isolation, DynamoDB app-level tenant guards, the entity-type-registry table, and the control-plane API's 404-not-403 run-lookup behavior
+- [ ] At least one pilot tenant onboarded end-to-end through the control plane, running in parallel with the `default` tenant for a full week with no cross-tenant incidents
+- [ ] Load test at target multi-tenant scale completed
+- [ ] Secrets Manager tenant-isolation gap acknowledged: credentials are still per-source-connector, not per-tenant (`SEC-2`/`SEC-6` in `architecture/MULTI_TENANT_ROLLOUT_PLAN.md`) — tracked as a known follow-up, not a blocker for a single/small number of tenants sharing infra
+
+**Owner:** Platform Engineering + Security  
+**Timeline:** 1 day (plus 1 week pilot soak)  
+**Sign-off:** [ ] Platform Engineering Lead, [ ] Security Officer
 
 ---
 
@@ -420,8 +436,8 @@ Verify that all required technologies are correctly configured before go-live.
 - [ ] **Lambda** — All 5 pipeline stage functions deployed; correct memory (512 MB default) and timeout (15 min) settings; VPC config attached
 - [ ] **ECS Fargate** — Task definition registered; cluster created; capacity provider set; correct IAM task role
 - [ ] **S3 buckets** — All 5 buckets created (`raw`, `curated`, `analytics`, `schema-snapshots`, `governance`); Object Lock confirmed on raw; SSE-KMS on all; TLS-only bucket policy applied
-- [ ] **DynamoDB tables** — All 4 tables created; PITR enabled; KMS encryption confirmed; GSI names match code expectations
-- [ ] **Secrets Manager** — 5 secrets created (`salesforce`, `netsuite`, `mysql-rds`, `sage/intacct`, `sage/x3`); initial values set; rotation schedule configured
+- [ ] **DynamoDB tables** — All 5 tables created (`entity_extraction_config`, `watermark_repository`, `run_audit_log`, `entity_type_registry`, `source_onboarding_registry`); PITR enabled; KMS encryption confirmed; GSI names match code expectations
+- [ ] **Secrets Manager** — 5 secrets created (`salesforce`, `netsuite`, `mysql-rds`, `sage/intacct`, `sage/x3`); initial values set; daily credential-expiry-check Lambda (`credential_expiry_notifier`) scheduled — automatic rotation not yet wired (`rotation_lambda_arn` unset everywhere)
 - [ ] **Glue Data Catalog** — Database `{env}_curated` created; IAM permissions allow `glue:CreateTable` and `glue:UpdateTable` from transformation role
 - [ ] **Athena** — Workgroup `{env}-analytics` created; output bucket set; per-query cost limit configured
 - [ ] **SQS (DLQ)** — Queue `{env}-extraction-dlq` created; KMS encrypted; 14-day retention; DLQ URL accessible from extraction Lambda
@@ -435,7 +451,7 @@ Verify that all required technologies are correctly configured before go-live.
 - [ ] **Python 3.14.x** — Correct version in Lambda runtime / ECS image; `pyproject.toml` version pin matches
 - [ ] **Pydantic v2** — Dependency installed; no Pydantic v1 compatibility shims
 - [ ] **Terraform state** — Remote state bucket and DynamoDB lock table exist in `prod`; Terraform apply completed with no errors
-- [ ] **GitHub Actions** — All 7 CI gate stages pass on `main` branch; deploy workflow triggered and succeeded
+- [ ] **GitHub Actions** — All 8 CI gate stages pass on `main` branch (lint, typecheck, test, security-sast, dependency-scan, iac-security-scan, terraform-validate, secret-scan); deploy workflow triggered and succeeded
 - [ ] **pre-commit hooks** — Installed in repository; baseline updated
 
 ### Source System Connectivity

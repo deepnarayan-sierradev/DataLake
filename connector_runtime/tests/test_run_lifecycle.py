@@ -17,14 +17,18 @@ import re
 import boto3
 from moto import mock_aws
 
-from connector_runtime.run_lifecycle.run_lifecycle import RunCoordinator, generate_run_id
+from connector_runtime.run_lifecycle.run_lifecycle import (
+    RunCoordinator,
+    generate_run_id,
+    make_partial_run_id,
+)
 from contracts.observability_contract import PipelineStage, RunStatus
 from contracts.pipeline_stage_contract import PipelineStageContract
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_AUDIT_TABLE = f"{_ENV}-run-audit-log"
-_DLQ_NAME = f"{_ENV}-extraction-dlq"
+_AUDIT_TABLE = f"{_ENV}-edl-run-audit-log"
+_DLQ_NAME = f"{_ENV}-edl-extraction-failure-dlq"
 
 
 # ---------------------------------------------------------------------------
@@ -411,3 +415,113 @@ class TestRunCoordinatorProperties:
         )
         # Should not raise; DLQ failure is logged and swallowed
         coord.enqueue_dlq_entry("some error", "unknown", PipelineStage.EXTRACTION)
+
+
+# ---------------------------------------------------------------------------
+# make_partial_run_id (PERF-5)
+# ---------------------------------------------------------------------------
+
+
+class TestMakePartialRunId:
+    def test_appends_part_suffix(self) -> None:
+        assert make_partial_run_id("run-20260611-143022123456-a3f9c1d2", 1) == (
+            "run-20260611-143022123456-a3f9c1d2-part1"
+        )
+
+    def test_different_part_numbers_produce_different_ids(self) -> None:
+        base = generate_run_id()
+        assert make_partial_run_id(base, 1) != make_partial_run_id(base, 2)
+
+    def test_zero_part_number_rejected(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="part_number"):
+            make_partial_run_id("run-x", 0)
+
+    def test_negative_part_number_rejected(self) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="part_number"):
+            make_partial_run_id("run-x", -1)
+
+
+# ---------------------------------------------------------------------------
+# RunCoordinator.emit_checkpoint_stage (PERF-5)
+# ---------------------------------------------------------------------------
+
+
+@mock_aws
+class TestEmitCheckpointStage:
+    def _make_coord(self) -> RunCoordinator:
+        _create_audit_table(None)
+        return RunCoordinator(
+            environment=_ENV,
+            region_name=_REGION,
+            source_id="mysql-rds",
+            entity_id="mysql-rds-orders",
+        )
+
+    def test_returns_contract_with_partial_run_id(self) -> None:
+        coord = self._make_coord()
+        contract = coord.emit_checkpoint_stage(part_number=1, record_count=5_000)
+        assert contract.run_id == make_partial_run_id(coord.run_id, 1)
+        assert contract.run_id != coord.run_id
+
+    def test_status_is_partial(self) -> None:
+        coord = self._make_coord()
+        contract = coord.emit_checkpoint_stage(part_number=1, record_count=5_000)
+        assert contract.status == RunStatus.PARTIAL
+
+    def test_stage_is_run_completion(self) -> None:
+        coord = self._make_coord()
+        contract = coord.emit_checkpoint_stage(part_number=1, record_count=5_000)
+        assert contract.stage == PipelineStage.RUN_COMPLETION
+
+    def test_persists_under_distinct_dynamodb_key(self) -> None:
+        coord = self._make_coord()
+        coord.emit_checkpoint_stage(part_number=2, record_count=1_234)
+
+        ddb = boto3.resource("dynamodb", region_name=_REGION)
+        table = ddb.Table(_AUDIT_TABLE)
+
+        partial_item = table.get_item(
+            Key={"run_id": make_partial_run_id(coord.run_id, 2), "stage": "run_completion"},
+            ConsistentRead=True,
+        ).get("Item")
+        assert partial_item is not None
+        assert partial_item["record_count"] == 1_234
+        assert partial_item["status"] == "partial"
+
+        # The MAIN run_id's own audit trail is untouched by the checkpoint —
+        # no item exists under the plain run_id for this stage.
+        main_item = table.get_item(
+            Key={"run_id": coord.run_id, "stage": "run_completion"},
+            ConsistentRead=True,
+        ).get("Item")
+        assert main_item is None
+
+    def test_does_not_raise_when_audit_table_missing(self) -> None:
+        """Same best-effort semantics as emit_stage — never propagates."""
+        coord = RunCoordinator(
+            environment=_ENV,
+            region_name=_REGION,
+            source_id="mysql-rds",
+            entity_id="mysql-rds-orders",
+        )
+        # Intentionally do NOT create the audit table.
+        contract = coord.emit_checkpoint_stage(part_number=1, record_count=100)
+        assert contract.status == RunStatus.PARTIAL
+
+    def test_carries_error_message_and_extraction_window_end(self) -> None:
+        from datetime import UTC, datetime
+
+        coord = self._make_coord()
+        window_end = datetime(2026, 6, 11, 11, tzinfo=UTC)
+        contract = coord.emit_checkpoint_stage(
+            part_number=1,
+            record_count=2,
+            extraction_window_end=window_end,
+            error_message="max_records_per_lambda_run (2) reached",
+        )
+        assert contract.extraction_window_end == window_end
+        assert contract.error_message == "max_records_per_lambda_run (2) reached"

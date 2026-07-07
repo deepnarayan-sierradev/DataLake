@@ -19,6 +19,10 @@ Security (OWASP A07, A09):
   - HMAC-SHA256 signatures computed in-memory; not persisted anywhere.
   - token_secret and consumer_secret absent from all log events.
   - Secrets Manager call uses IAM role credentials (boto3 implicit chain).
+
+Credential retrieval (DUP-2) is delegated to the shared
+SecretsManagerCredentialClient rather than hand-rolling boto3/Secrets Manager
+boilerplate here — see connector_runtime/credential_client.py.
 """
 
 from __future__ import annotations
@@ -26,34 +30,40 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import json
 import time
 import urllib.parse
 import uuid
-from typing import Any, Final
+from typing import Final
 
-import boto3
-from botocore.exceptions import ClientError
-
-from observability.structured_logger import get_platform_logger
-
-_logger = get_platform_logger(__name__)
+from connector_runtime.credential_client import (
+    SecretsManagerCredentialClient,
+    SecretsManagerCredentialError,
+)
+from connector_runtime.interfaces.connector_interface import (
+    DeterministicConnectorError,
+    ExtractionErrorClassification,
+)
 
 _SECRET_PATH_TEMPLATE: Final[str] = "{environment}/sources/netsuite/credentials"  # noqa: S105
 _OAUTH_VERSION: Final[str] = "1.0"
 _SIGNATURE_METHOD: Final[str] = "HMAC-SHA256"
-# NetSuite TBA credentials do not expire automatically, but we still re-fetch
-# periodically so that automatic rotation (FINDING-02) takes effect within
-# one hour without requiring a Lambda restart (OWASP A07).
-_CREDENTIAL_CACHE_TTL_SECONDS: Final[int] = 3_600
+
+# Required secret keys — enforced by the shared SecretsManagerCredentialClient.
+_REQUIRED_CREDENTIAL_KEYS: Final[frozenset[str]] = frozenset(
+    {"account_id", "consumer_key", "consumer_secret", "token_id", "token_secret"}
+)
 
 
-class NetSuiteCredentialError(Exception):
+class NetSuiteCredentialError(SecretsManagerCredentialError, DeterministicConnectorError):
     """Raised when NetSuite credentials cannot be retrieved from Secrets Manager."""
 
+    classification = ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
 
-class NetSuiteAuthError(Exception):
+
+class NetSuiteAuthError(DeterministicConnectorError):
     """Raised when an OAuth 1.0a signature cannot be generated."""
+
+    classification = ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
 
 
 class NetSuiteAuthClient:
@@ -61,8 +71,9 @@ class NetSuiteAuthClient:
     Generates per-request OAuth 1.0a TBA Authorization headers for NetSuite.
 
     One instance can be shared across all requests within an extraction run.
-    Credentials are loaded lazily on the first get_auth_headers() call and
-    cached in-memory for the lifetime of the instance.
+    Credentials are loaded lazily on the first get_auth_headers() call (via
+    the shared SecretsManagerCredentialClient's own TTL cache) and re-used
+    for the lifetime of the instance within that cache window.
 
     Usage::
 
@@ -76,25 +87,22 @@ class NetSuiteAuthClient:
             raise ValueError("environment must not be empty.")
         self._environment = environment
         self._region = region_name
-        self._secrets_client = boto3.client("secretsmanager", region_name=region_name)
-
-        # Credentials — loaded lazily; never logged.
-        self._account_id: str | None = None
-        self._consumer_key: str | None = None
-        self._consumer_secret: str | None = None
-        self._token_id: str | None = None
-        self._token_secret: str | None = None
-        self._credentials_loaded_at: float = 0.0  # monotonic timestamp of last successful fetch
+        self._credentials_client = SecretsManagerCredentialClient(
+            secret_id=_SECRET_PATH_TEMPLATE.format(environment=environment),
+            region_name=region_name,
+            required_keys=_REQUIRED_CREDENTIAL_KEYS,
+            source_label="NetSuite",
+            error_cls=NetSuiteCredentialError,
+            log_event="netsuite_credentials_loaded",
+            log_fields={"environment": environment},
+        )
 
     @property
     def account_id(self) -> str:
         """
         NetSuite account ID.  Available after first get_auth_headers() call.
         """
-        if self._credentials_expired():
-            self._load_credentials()
-        assert self._account_id is not None  # noqa: S101
-        return self._account_id
+        return self._credentials_client.get_credentials()["account_id"]
 
     def get_auth_headers(self, method: str, url: str) -> dict[str, str]:
         """
@@ -115,15 +123,12 @@ class NetSuiteAuthClient:
             NetSuiteCredentialError: credentials absent from Secrets Manager.
             NetSuiteAuthError: signature computation fails unexpectedly.
         """
-        if self._credentials_expired():
-            self._load_credentials()
-
-        # Mypy narrowing — _load_credentials guarantees these are set.
-        consumer_key: str = self._consumer_key  # type: ignore[assignment]
-        consumer_secret: str = self._consumer_secret  # type: ignore[assignment]
-        token_id: str = self._token_id  # type: ignore[assignment]
-        token_secret: str = self._token_secret  # type: ignore[assignment]
-        account_id: str = self._account_id  # type: ignore[assignment]
+        credentials = self._credentials_client.get_credentials()
+        consumer_key = credentials["consumer_key"]
+        consumer_secret = credentials["consumer_secret"]
+        token_id = credentials["token_id"]
+        token_secret = credentials["token_secret"]
+        account_id = credentials["account_id"]
 
         timestamp = str(int(time.time()))
         nonce = uuid.uuid4().hex
@@ -155,13 +160,6 @@ class NetSuiteAuthClient:
         return {"Authorization": f"OAuth {', '.join(auth_parts)}"}
 
     # ── Private ────────────────────────────────────────────────────────────────
-
-    def _credentials_expired(self) -> bool:
-        """True when credentials are not yet loaded or have exceeded the TTL."""
-        return (
-            self._account_id is None
-            or (time.monotonic() - self._credentials_loaded_at) >= _CREDENTIAL_CACHE_TTL_SECONDS
-        )
 
     @staticmethod
     def _compute_signature(
@@ -220,52 +218,3 @@ class NetSuiteAuthClient:
             hashlib.sha256,
         ).digest()
         return base64.b64encode(digest).decode("ascii")
-
-    def _load_credentials(self) -> None:
-        """
-        Load NetSuite TBA credentials from AWS Secrets Manager.
-
-        Credentials are stored once in-memory and never refreshed — they are
-        long-lived OAuth tokens that do not expire automatically.
-
-        Raises:
-            NetSuiteCredentialError: secret absent, access denied, or malformed JSON.
-        """
-        secret_id = _SECRET_PATH_TEMPLATE.format(environment=self._environment)
-        try:
-            response = self._secrets_client.get_secret_value(SecretId=secret_id)
-        except ClientError as exc:
-            code = exc.response["Error"]["Code"]
-            raise NetSuiteCredentialError(
-                f"Failed to retrieve NetSuite credentials from Secrets Manager "
-                f"(secret={secret_id!r}, code={code!r})."
-            ) from None
-
-        raw = response.get("SecretString") or ""
-        try:
-            payload: dict[str, Any] = json.loads(raw)
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise NetSuiteCredentialError(
-                "NetSuite credentials secret contains invalid JSON."
-            ) from exc
-
-        required = {"account_id", "consumer_key", "consumer_secret", "token_id", "token_secret"}
-        missing = required - payload.keys()
-        if missing:
-            raise NetSuiteCredentialError(
-                f"NetSuite credentials secret is missing required keys: {sorted(missing)}."
-            )
-
-        self._account_id = payload["account_id"]
-        self._consumer_key = payload["consumer_key"]
-        self._consumer_secret = payload["consumer_secret"]
-        self._token_id = payload["token_id"]
-        self._token_secret = payload["token_secret"]
-        self._credentials_loaded_at = time.monotonic()
-
-        _logger.info(
-            "netsuite_credentials_loaded",
-            environment=self._environment,
-            account_id=self._account_id,
-            # credential values intentionally omitted
-        )

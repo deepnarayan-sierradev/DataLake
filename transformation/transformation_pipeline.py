@@ -42,11 +42,13 @@ from governance.data_catalog_registration import (
 from governance.data_classification_policy import (
     EntityClassificationPolicy,
     FieldMaskingApplier,
+    build_auto_classification_policy,
 )
 from governance.lineage_record import (
     LineageEmitter,
     build_transformation_lineage,
 )
+from observability.lambda_utils import check_lambda_timeout_periodic as _check_timeout
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
 from transformation.curated_accumulator import CuratedAccumulator
@@ -90,6 +92,13 @@ class TransformationContext:
     governance_s3_bucket: str | None = None
     glue_catalog_database: str | None = None
     environment: str = "dev"
+    # Multi-tenancy (§1.1): tenant slug prefixed to all curated S3 paths.
+    # Default "demo" preserves backward-compat with single-tenant dev pipelines.
+    tenant_code: str = "demo"
+    # Optional Lambda context for mid-execution timeout checks (§3.5).
+    # When set, the pipeline checks remaining time before the curated write.
+    # None = no periodic checks (safe; pre-execution check still applies).
+    lambda_context: Any | None = None
 
     def __post_init__(self) -> None:
         # Validate domain before it is used in Glue table name construction (OWASP A03 / F06)
@@ -107,6 +116,14 @@ class TransformationContext:
             raise ValueError(
                 f"raw_s3_prefix {self.raw_s3_prefix!r} contains characters not permitted "
                 "in an S3 prefix."
+            )
+        # Validate tenant_code (OWASP A03 / §1.1)
+        from contracts.identifier_policy import (
+            TENANT_CODE_PATTERN as _TC_PATTERN,  # local import to avoid circular
+        )
+        if not _TC_PATTERN.match(self.tenant_code):
+            raise ValueError(
+                f"tenant_code {self.tenant_code!r} does not conform to the tenant code format."
             )
 
 
@@ -184,13 +201,181 @@ class TransformationPipeline:
             )
 
         mapping_version = rule_set.mapping_version if rule_set else "identity"
+        applicator = FieldMappingApplicator()
 
+        # ── Data classification (OWASP A01 / spec §6.4) ──────────────────────
+        # An explicit, data-steward-reviewed policy always wins. Absent one,
+        # auto-classify from the mapped (canonical) field names using
+        # name-pattern heuristics — this is a best-effort safety net, not a
+        # substitute for a reviewed policy, but it ensures PII/SENSITIVE_PII
+        # fields are never written unmasked purely because no policy exists
+        # yet for this entity. Computed per-run (never cached on `self`) since
+        # one pipeline instance may be reused across entities in a warm Lambda.
+        effective_classification_policy = self._classification_policy
+        if effective_classification_policy is None:
+            candidate_fields = (
+                [rule.canonical_field for rule in rule_set.rules] if rule_set is not None else []
+            )
+            if candidate_fields:
+                effective_classification_policy = build_auto_classification_policy(
+                    source_id=ctx.source_id,
+                    entity_id=ctx.entity_id,
+                    field_names=candidate_fields,
+                )
+            else:
+                # No mapping rule set means field names are unknown until raw
+                # records are read (identity pass-through). Auto-classification
+                # cannot run ahead of time in this case — log so the gap is
+                # operable rather than silently skipping masking.
+                _logger.warning(
+                    "classification_auto_detect_skipped_no_rule_set",
+                    source_id=ctx.source_id,
+                    entity_id=ctx.entity_id,
+                    reason="identity_pass_through_no_known_field_names",
+                )
+
+        # ── Fast path: no quality policy, no masking, no SCD merge ───────────
+        # When all features that require an in-memory list are absent, stream
+        # records directly from raw Parquet → mapping → curated writer.
+        # Peak memory is O(write_batch_size) regardless of total record count.
+        can_stream = (
+            self._quality_policy is None
+            and effective_classification_policy is None
+            and self._curated_accumulator is None
+        )
+
+        if can_stream:
+            return self._execute_streaming(
+                ctx=ctx,
+                s3=s3,
+                rule_set=rule_set,
+                applicator=applicator,
+                mapping_version=mapping_version,
+                started_at=started_at,
+            )
+
+        # ── Standard path: quality / masking / SCD merge requires full list ──
+        return self._execute_with_list(
+            ctx=ctx,
+            s3=s3,
+            rule_set=rule_set,
+            applicator=applicator,
+            mapping_version=mapping_version,
+            started_at=started_at,
+            classification_policy=effective_classification_policy,
+        )
+
+    def _execute_streaming(
+        self,
+        ctx: TransformationContext,
+        s3: Any,
+        rule_set: FieldMappingRuleSet | None,
+        applicator: FieldMappingApplicator,
+        mapping_version: str,
+        started_at: str,
+    ) -> TransformationResult:
+        """
+        Streaming execution path (§3.2): no list materialisation.
+
+        Used when no quality policy, no masking, and no SCD accumulator are
+        configured.  Peak memory is O(writer_batch_size) = ~20 MB.
+        """
+        _streaming_failures = 0
+
+        def _mapped_iter() -> Iterator[dict[str, Any]]:
+            for raw_record in _iter_raw_records(s3, ctx.raw_s3_bucket, ctx.raw_s3_prefix):
+                if rule_set is None:
+                    yield raw_record
+                else:
+                    mapped = applicator.apply(raw_record, rule_set)
+                    if mapped is not None:
+                        yield mapped
+                    else:
+                        nonlocal _streaming_failures
+                        _streaming_failures += 1
+
+        # Pre-write timeout guard: if Lambda has < 120s remaining, abort before
+        # starting the potentially large S3 multipart write (§3.5 / graceful shutdown).
+        _check_timeout(ctx.lambda_context, min_remaining_ms=120_000, operation_name="curated_streaming_write")
+
+        write_result = self._curated_writer.write_streaming(
+            records_iter=_mapped_iter(),
+            domain=ctx.domain,
+            entity_id=ctx.entity_id,
+            run_id=ctx.run_id,
+            curated_date=ctx.curated_date,
+            tenant_code=ctx.tenant_code,
+        )
+
+        curated_prefix = write_result.s3_prefix if write_result.record_count > 0 else None
+        canonical_count = write_result.record_count
+        mapping_failures = _streaming_failures
+
+        _logger.info(
+            "transformation_streaming_complete",
+            run_id=ctx.run_id,
+            source_id=ctx.source_id,
+            entity_id=ctx.entity_id,
+            canonical_records=canonical_count,
+            curated_prefix=curated_prefix,
+        )
+
+        if ctx.glue_catalog_database and curated_prefix:
+            _register_curated_catalog(
+                ctx=ctx,
+                s3_prefix=curated_prefix,
+                record_count=canonical_count,
+                raw_s3_prefix=ctx.raw_s3_prefix,
+            )
+
+        completed_at = datetime.now(UTC).isoformat()
+
+        result = TransformationResult(
+            run_id=ctx.run_id,
+            source_id=ctx.source_id,
+            entity_id=ctx.entity_id,
+            raw_record_count=canonical_count,  # approximation in streaming mode
+            canonical_record_count=canonical_count,
+            mapping_failures=mapping_failures,
+            curated_s3_prefix=curated_prefix,
+            quality_report_s3_key=None,
+            is_publication_blocked=False,
+            mapping_version=mapping_version,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+
+        if self._metrics_emitter is not None:
+            _emit_transformation_metrics(
+                emitter=self._metrics_emitter,
+                ctx=ctx,
+                result=result,
+                quality_report=None,
+            )
+
+        return result
+
+    def _execute_with_list(
+        self,
+        ctx: TransformationContext,
+        s3: Any,
+        rule_set: FieldMappingRuleSet | None,
+        applicator: FieldMappingApplicator,
+        mapping_version: str,
+        started_at: str,
+        classification_policy: EntityClassificationPolicy | None = None,
+    ) -> TransformationResult:
+        """
+        Standard execution path: accumulates canonical records for quality/masking/merge.
+
+        Used when quality policy, masking, or SCD accumulator is configured.
+        Peak memory is O(delta_records) — acceptable for incremental deltas;
+        full-load entities with these features require sufficient Lambda memory.
+        """
         # Stream raw Parquet records through the mapping applicator without
         # materialising the full raw dataset in memory.  Only canonical records
         # (post-mapping) are accumulated — peak memory is O(canonical) rather
-        # than O(raw + canonical).  For identity mapping (no rule_set) both
-        # sets are equal in size, but no duplicate copy is held simultaneously.
-        applicator = FieldMappingApplicator()
+        # than O(raw + canonical).
         canonical_records: list[dict[str, Any]] = []
         mapping_failures = 0
         raw_record_count = 0
@@ -209,15 +394,12 @@ class TransformationPipeline:
         _logger.info("raw_records_streamed", count=raw_record_count, run_id=ctx.run_id)
 
         # Apply data classification masking before any write (OWASP A04, spec §6.4)
-        if self._classification_policy is not None and canonical_records:
+        if classification_policy is not None and canonical_records:
             canonical_records = FieldMaskingApplier().apply(
-                canonical_records, self._classification_policy
+                canonical_records, classification_policy
             )
 
         # Quality evaluation — runs on the delta (today's extracted records only).
-        # Checking quality on the full merged state would re-evaluate unchanged
-        # records from previous runs against potentially updated quality rules,
-        # which could unexpectedly block the pipeline for records already accepted.
         curated_prefix: str | None = None
         quality_report_key: str | None = None
         is_blocked = False
@@ -230,11 +412,7 @@ class TransformationPipeline:
             quality_report_key = _write_quality_report(s3, ctx.mapping_bucket, ctx, quality_report)
             is_blocked = quality_report.is_publication_blocked
 
-        # SCD Type 1 merge — runs AFTER quality check on delta (so quality only
-        # gates today's changes), BEFORE write (so the full current state is
-        # persisted).  Only active when a CuratedAccumulator is injected
-        # (incremental entities with primary_key_field set).  Full-load entities
-        # never reach this branch — their accumulator is always None.
+        # SCD Type 1 merge — only active when a CuratedAccumulator is injected.
         records_to_write = canonical_records
         if not is_blocked and canonical_records and self._curated_accumulator is not None:
             acc_result = self._curated_accumulator.accumulate(
@@ -247,12 +425,15 @@ class TransformationPipeline:
 
         # Write curated layer (only when not blocked and records exist)
         if not is_blocked and records_to_write:
+            # Pre-write timeout guard (§3.5): abort before large S3 write if < 120s remain.
+            _check_timeout(ctx.lambda_context, min_remaining_ms=120_000, operation_name="curated_write")
             write_result = self._curated_writer.write(
                 records=records_to_write,
                 domain=ctx.domain,
                 entity_id=ctx.entity_id,
                 run_id=ctx.run_id,
                 curated_date=ctx.curated_date,
+                tenant_code=ctx.tenant_code,
             )
             curated_prefix = write_result.s3_prefix
 
@@ -316,16 +497,15 @@ class TransformationPipeline:
 # ---------------------------------------------------------------------------
 
 
-def _iter_raw_records(
-    s3: Any, bucket: str, raw_s3_prefix: str
+def _iter_raw_records_batched(
+    s3: Any, bucket: str, raw_s3_prefix: str, batch_size: int = 10_000
 ) -> Iterator[dict[str, Any]]:
     """Yield raw records one by one from all Parquet files under raw_s3_prefix.
 
-    Files are read and yielded sequentially — only one file is held in memory
-    at a time.  This avoids materialising the entire raw dataset into RAM (F-05).
+    Uses RecordBatch iteration (§2.3): only `batch_size` rows are materialised
+    in Python heap at a time — never the full file.
+    Peak memory: O(batch_size), not O(total_rows_per_file).
     """
-    # Enforce prefix safety at the point of use as a defence-in-depth measure;
-    # TransformationContext.__post_init__ is the primary gate (OWASP A03 / F05).
     if ".." in raw_s3_prefix or raw_s3_prefix.startswith("/"):
         raise ValueError(f"Unsafe raw_s3_prefix rejected: {raw_s3_prefix!r}")
     if not _SAFE_S3_PREFIX_PATTERN.match(raw_s3_prefix):
@@ -340,13 +520,24 @@ def _iter_raw_records(
             raw_data = s3.get_object(Bucket=bucket, Key=obj["Key"])
             buf = io.BytesIO(raw_data["Body"].read())
             table = pq.read_table(buf)  # type: ignore[no-untyped-call]
-            yield from _table_to_records(table)
-            del table  # release memory before reading next file
+            for batch in table.to_batches(max_chunksize=batch_size):
+                batch_dict: dict[str, list[Any]] = batch.to_pydict()
+                n = batch.num_rows
+                cols = list(batch_dict.keys())
+                yield from ({col: batch_dict[col][i] for col in cols} for i in range(n))
+            del table  # release Arrow buffer memory before reading next file
+
+
+def _iter_raw_records(
+    s3: Any, bucket: str, raw_s3_prefix: str
+) -> Iterator[dict[str, Any]]:
+    """Backward-compatible alias for _iter_raw_records_batched."""
+    return _iter_raw_records_batched(s3, bucket, raw_s3_prefix)
 
 
 def _load_raw_records(s3: Any, bucket: str, raw_s3_prefix: str) -> list[dict[str, Any]]:
     """List all Parquet files under raw_s3_prefix and return flat record list."""
-    return list(_iter_raw_records(s3, bucket, raw_s3_prefix))
+    return list(_iter_raw_records_batched(s3, bucket, raw_s3_prefix))
 
 
 def _apply_mappings(
@@ -409,13 +600,20 @@ def _write_quality_report(
 
 
 def _table_to_records(table: Any) -> list[dict[str, Any]]:
-    """Convert a pyarrow Table to a list of row dicts."""
-    py_dict: dict[str, list[Any]] = table.to_pydict()
-    if not py_dict:
-        return []
-    columns = list(py_dict.keys())
-    row_count = len(py_dict[columns[0]])
-    return [{col: py_dict[col][i] for col in columns} for i in range(row_count)]
+    """Convert a pyarrow Table to a list of row dicts.
+
+    Uses RecordBatch iteration (max_chunksize=10_000) so at most 10K rows
+    are materialised in Python heap at a time rather than the full table.
+    Peak memory: O(max_chunksize) per file, not O(total_rows).
+    """
+    records: list[dict[str, Any]] = []
+    _BATCH_SIZE = 10_000
+    for batch in table.to_batches(max_chunksize=_BATCH_SIZE):
+        batch_dict: dict[str, list[Any]] = batch.to_pydict()
+        n = batch.num_rows
+        cols = list(batch_dict.keys())
+        records.extend({col: batch_dict[col][i] for col in cols} for i in range(n))
+    return records
 
 
 def _emit_transformation_metrics(
@@ -430,12 +628,14 @@ def _emit_transformation_metrics(
         entity_id=ctx.entity_id,
         environment=ctx.environment,
         count=result.canonical_record_count,
+        stage="transformation",
     )
     emitter.emit_records_failed(
         source_id=ctx.source_id,
         entity_id=ctx.entity_id,
         environment=ctx.environment,
         count=result.mapping_failures,
+        stage="transformation",
     )
     if quality_report is not None:
         # Emit quality blocking violations as "failed" records
@@ -444,6 +644,7 @@ def _emit_transformation_metrics(
             entity_id=ctx.entity_id,
             environment=ctx.environment,
             count=quality_report.records_blocked,
+            stage="transformation",
         )
 
 

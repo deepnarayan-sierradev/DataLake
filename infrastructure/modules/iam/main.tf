@@ -60,7 +60,7 @@ data "aws_iam_policy_document" "extraction_runtime_permissions" {
     effect = "Allow"
     actions = [
       "s3:PutObject",
-      "s3:GetObject",           # Needed for multipart upload completion
+      "s3:GetObject", # Needed for multipart upload completion
       "s3:AbortMultipartUpload",
       "s3:ListMultipartUploadParts",
     ]
@@ -68,16 +68,16 @@ data "aws_iam_policy_document" "extraction_runtime_permissions" {
   }
 
   statement {
-    sid     = "ListRawLayerBucket"
-    effect  = "Allow"
-    actions = ["s3:ListBucket"]
+    sid       = "ListRawLayerBucket"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
     resources = [var.raw_layer_bucket_arn]
   }
 
   # Read and write schema snapshots
   statement {
-    sid    = "ReadWriteSchemaSnapshots"
-    effect = "Allow"
+    sid     = "ReadWriteSchemaSnapshots"
+    effect  = "Allow"
     actions = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
     resources = [
       var.schema_snapshots_bucket_arn,
@@ -87,9 +87,9 @@ data "aws_iam_policy_document" "extraction_runtime_permissions" {
 
   # Entity extraction config — read-only
   statement {
-    sid     = "ReadEntityConfig"
-    effect  = "Allow"
-    actions = ["dynamodb:GetItem", "dynamodb:Query"]
+    sid       = "ReadEntityConfig"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:Query"]
     resources = [var.entity_config_table_arn]
   }
 
@@ -108,13 +108,34 @@ data "aws_iam_policy_document" "extraction_runtime_permissions" {
 
   # Run audit log — write only
   statement {
-    sid     = "WriteRunAuditLog"
-    effect  = "Allow"
-    actions = ["dynamodb:PutItem"]
+    sid       = "WriteRunAuditLog"
+    effect    = "Allow"
+    actions   = ["dynamodb:PutItem"]
     resources = [var.run_audit_log_table_arn]
   }
 
   # Secrets Manager — read extraction credentials only
+  #
+  # SEC-2: this remains a wildcard across all connectors and cannot be
+  # narrowed to a single tenant with a static Terraform policy alone, given
+  # today's architecture: every tenant currently shares the SAME per-source
+  # connector credentials (one Salesforce/NetSuite/MySQL/Sage secret per
+  # environment, not per-tenant) via a single shared extraction_runtime role.
+  #
+  # Closing this for real requires a product decision this module cannot
+  # make unilaterally — either:
+  #   (a) per-tenant credentials: extend the secret path to
+  #       {environment}/{tenant_code}/sources/{source_id}/credentials
+  #       (mirroring the S3 tenant-prefix convention already used by
+  #       transformation/curated_layer_writer.py) and scope this resource
+  #       pattern to match, or
+  #   (b) ABAC: a role assumed per-invocation with a TenantCode session tag,
+  #       with resource ARNs parameterized on ${aws:PrincipalTag/TenantCode}
+  #       — requires every handler to assume a scoped role before touching
+  #       S3/Secrets, not just a Terraform change.
+  # Building either speculatively, before tenant credential-sharing is
+  # decided, would be unused infrastructure with no real security benefit.
+  # Tracked in architecture/MULTI_TENANT_ROLLOUT_PLAN.md Phase 6/7.
   statement {
     sid     = "ReadSourceCredentials"
     effect  = "Allow"
@@ -155,9 +176,9 @@ data "aws_iam_policy_document" "extraction_runtime_permissions" {
 
   # CloudWatch Metrics
   statement {
-    sid     = "PutExtractionMetrics"
-    effect  = "Allow"
-    actions = ["cloudwatch:PutMetricData"]
+    sid       = "PutExtractionMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:PutMetricData"]
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -241,7 +262,7 @@ data "aws_iam_policy_document" "transformation_runtime_permissions" {
     effect  = "Allow"
     actions = ["dynamodb:GetItem"]
     resources = [
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.environment}-entity-extraction-config",
+      var.entity_config_table_arn,
     ]
   }
 
@@ -259,8 +280,8 @@ data "aws_iam_policy_document" "transformation_runtime_permissions" {
   # Read and write curated layer — field mappings + quality reports are read,
   # canonical Parquet output is written.
   statement {
-    sid    = "ReadWriteCuratedLayer"
-    effect = "Allow"
+    sid     = "ReadWriteCuratedLayer"
+    effect  = "Allow"
     actions = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
     resources = [
       var.curated_layer_bucket_arn,
@@ -271,9 +292,9 @@ data "aws_iam_policy_document" "transformation_runtime_permissions" {
   # KMS: decrypt raw data keys (written by extraction role) and generate new
   # data keys for curated layer writes.
   statement {
-    sid    = "KmsDecryptEncrypt"
-    effect = "Allow"
-    actions = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    sid       = "KmsDecryptEncrypt"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
     resources = var.kms_key_arns_for_transformation
   }
 
@@ -281,8 +302,8 @@ data "aws_iam_policy_document" "transformation_runtime_permissions" {
   # CreateLogGroup intentionally excluded: the log group is pre-created by the
   # transformation_lambda Terraform module with correct retention and encryption.
   statement {
-    sid    = "WriteLambdaExecutionLogs"
-    effect = "Allow"
+    sid     = "WriteLambdaExecutionLogs"
+    effect  = "Allow"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
       "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-transformation-pipeline",
@@ -293,9 +314,9 @@ data "aws_iam_policy_document" "transformation_runtime_permissions" {
   # CloudWatch Metrics — emit transformation pipeline metrics.
   # Namespace-scoped condition prevents emission to unrelated namespaces.
   statement {
-    sid     = "PutTransformationMetrics"
-    effect  = "Allow"
-    actions = ["cloudwatch:PutMetricData"]
+    sid       = "PutTransformationMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:PutMetricData"]
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -397,20 +418,29 @@ data "aws_iam_policy_document" "entity_resolution_runtime_permissions" {
     ]
   }
 
+  # Entity type registry — read-only (ARCH-2). Registration (PutItem) is an
+  # onboarding/admin operation, not a runtime one — not granted here.
+  statement {
+    sid       = "ReadEntityTypeRegistry"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem"]
+    resources = [var.entity_type_registry_table_arn]
+  }
+
   # KMS: decrypt curated data keys and generate new data keys for analytics writes.
   # Reuses the same storage KMS key used by transformation (curated + analytics
   # buckets share the storage key).
   statement {
-    sid     = "KmsDecryptEncrypt"
-    effect  = "Allow"
-    actions = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    sid       = "KmsDecryptEncrypt"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
     resources = var.kms_key_arns_for_transformation
   }
 
   # CloudWatch Logs — write Lambda execution logs.
   statement {
-    sid    = "WriteLambdaExecutionLogs"
-    effect = "Allow"
+    sid     = "WriteLambdaExecutionLogs"
+    effect  = "Allow"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
       "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-entity-resolution-pipeline",
@@ -420,9 +450,9 @@ data "aws_iam_policy_document" "entity_resolution_runtime_permissions" {
 
   # CloudWatch Metrics — emit entity resolution pipeline metrics.
   statement {
-    sid     = "PutEntityResolutionMetrics"
-    effect  = "Allow"
-    actions = ["cloudwatch:PutMetricData"]
+    sid       = "PutEntityResolutionMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:PutMetricData"]
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -492,18 +522,26 @@ data "aws_iam_policy_document" "analytics_publisher_runtime_permissions" {
     ]
   }
 
+  # Entity type registry — read-only (ARCH-2).
+  statement {
+    sid       = "ReadEntityTypeRegistry"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem"]
+    resources = [var.entity_type_registry_table_arn]
+  }
+
   # KMS: decrypt golden record data keys and generate new keys for BI writes.
   statement {
-    sid     = "KmsDecryptEncrypt"
-    effect  = "Allow"
-    actions = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    sid       = "KmsDecryptEncrypt"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
     resources = var.kms_key_arns_for_transformation
   }
 
   # CloudWatch Logs — write Lambda execution logs.
   statement {
-    sid    = "WriteLambdaExecutionLogs"
-    effect = "Allow"
+    sid     = "WriteLambdaExecutionLogs"
+    effect  = "Allow"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
       "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-analytics-layer-publisher",
@@ -513,9 +551,9 @@ data "aws_iam_policy_document" "analytics_publisher_runtime_permissions" {
 
   # CloudWatch Metrics — emit analytics publisher pipeline metrics.
   statement {
-    sid     = "PutAnalyticsPublisherMetrics"
-    effect  = "Allow"
-    actions = ["cloudwatch:PutMetricData"]
+    sid       = "PutAnalyticsPublisherMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:PutMetricData"]
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -606,8 +644,8 @@ data "aws_iam_policy_document" "transformation_job_permissions" {
   }
 
   statement {
-    sid    = "ReadWriteCuratedLayer"
-    effect = "Allow"
+    sid     = "ReadWriteCuratedLayer"
+    effect  = "Allow"
     actions = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
     resources = [
       var.curated_layer_bucket_arn,
@@ -626,23 +664,23 @@ data "aws_iam_policy_document" "transformation_job_permissions" {
   }
 
   statement {
-    sid     = "ReadWatermarkRepository"
-    effect  = "Allow"
-    actions = ["dynamodb:GetItem", "dynamodb:Query"]
+    sid       = "ReadWatermarkRepository"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:Query"]
     resources = [var.watermark_table_arn]
   }
 
   statement {
-    sid     = "WriteTransformationAuditLog"
-    effect  = "Allow"
-    actions = ["dynamodb:PutItem"]
+    sid       = "WriteTransformationAuditLog"
+    effect    = "Allow"
+    actions   = ["dynamodb:PutItem"]
     resources = [var.run_audit_log_table_arn]
   }
 
   statement {
-    sid    = "KmsDecrypt"
-    effect = "Allow"
-    actions = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    sid       = "KmsDecrypt"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
     resources = var.kms_key_arns_for_transformation
   }
 
@@ -660,9 +698,9 @@ data "aws_iam_policy_document" "transformation_job_permissions" {
   }
 
   statement {
-    sid     = "PutTransformationMetrics"
-    effect  = "Allow"
-    actions = ["cloudwatch:PutMetricData"]
+    sid       = "PutTransformationMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:PutMetricData"]
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -734,9 +772,9 @@ data "aws_iam_policy_document" "orchestration_sfn_permissions" {
   }
 
   statement {
-    sid     = "SendToDlq"
-    effect  = "Allow"
-    actions = ["sqs:SendMessage"]
+    sid       = "SendToDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
     resources = [var.dlq_arn]
   }
 
@@ -756,9 +794,9 @@ data "aws_iam_policy_document" "orchestration_sfn_permissions" {
   }
 
   statement {
-    sid     = "PutOrchestrationMetrics"
-    effect  = "Allow"
-    actions = ["cloudwatch:PutMetricData"]
+    sid       = "PutOrchestrationMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:PutMetricData"]
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -802,6 +840,16 @@ resource "aws_iam_role" "eventbridge_scheduler" {
 }
 
 data "aws_iam_policy_document" "eventbridge_scheduler_permissions" {
+  # Allow sending to the SQS FIFO pipeline trigger queue (new burst-buffer architecture)
+  statement {
+    sid     = "SendToPipelineTriggerQueue"
+    effect  = "Allow"
+    actions = ["sqs:SendMessage"]
+    resources = [
+      "arn:aws:sqs:${local.region}:${local.account_id}:${var.environment}-edl-pipeline-trigger.fifo",
+    ]
+  }
+  # Keep direct Step Functions access as fallback for manual / replay triggers
   statement {
     sid     = "StartExtractionWorkflows"
     effect  = "Allow"
@@ -858,4 +906,384 @@ resource "aws_iam_role_policy_attachment" "cicd_deployment_terraform" {
   for_each   = toset(var.cicd_deployment_policy_arns)
   role       = aws_iam_role.cicd_deployment.name
   policy_arn = each.value
+}
+
+# ---------------------------------------------------------------------------
+# Pipeline Trigger Lambda Role (§1.6)
+# Assumed by the pipeline_trigger Lambda to:
+#   - Read + delete from the SQS FIFO pipeline trigger queue
+#   - Start Step Functions executions (scoped to extraction pipeline only)
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "pipeline_trigger_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "pipeline_trigger" {
+  name               = "${var.environment}-pipeline-trigger-role"
+  assume_role_policy = data.aws_iam_policy_document.pipeline_trigger_assume_role.json
+  description        = "Role assumed by the pipeline trigger Lambda to drain SQS and start Step Functions executions."
+  tags               = local.common_tags
+}
+
+data "aws_iam_policy_document" "pipeline_trigger_permissions" {
+  statement {
+    sid    = "ConsumePipelineTriggerQueue"
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:ChangeMessageVisibility",
+    ]
+    resources = [
+      "arn:aws:sqs:${local.region}:${local.account_id}:${var.environment}-edl-pipeline-trigger.fifo",
+    ]
+  }
+
+  statement {
+    sid     = "StartExtractionPipelineExecution"
+    effect  = "Allow"
+    actions = ["states:StartExecution"]
+    resources = [
+      "arn:aws:states:${local.region}:${local.account_id}:stateMachine:${var.environment}-extraction-pipeline",
+    ]
+  }
+
+  statement {
+    sid       = "KmsDecrypt"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    resources = var.kms_key_arns_for_extraction
+  }
+
+  statement {
+    sid     = "WriteLambdaExecutionLogs"
+    effect  = "Allow"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-pipeline-trigger",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-pipeline-trigger:log-stream:*",
+    ]
+  }
+
+  statement {
+    sid       = "XRayTracing"
+    effect    = "Allow"
+    actions   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords", "xray:GetSamplingRules", "xray:GetSamplingTargets"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "pipeline_trigger" {
+  name   = "${var.environment}-pipeline-trigger-policy"
+  role   = aws_iam_role.pipeline_trigger.id
+  policy = data.aws_iam_policy_document.pipeline_trigger_permissions.json
+}
+
+# ---------------------------------------------------------------------------
+# DLQ Processor Lambda Role (§4.4)
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "dlq_processor_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "dlq_processor" {
+  name               = "${var.environment}-dlq-processor-role"
+  assume_role_policy = data.aws_iam_policy_document.dlq_processor_assume_role.json
+  description        = "Role assumed by the DLQ processor Lambda to read, audit, and optionally replay failed runs."
+  tags               = local.common_tags
+}
+
+data "aws_iam_policy_document" "dlq_processor_permissions" {
+  statement {
+    sid    = "ConsumeDLQ"
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:ChangeMessageVisibility",
+    ]
+    resources = [var.dlq_arn]
+  }
+
+  statement {
+    sid       = "WriteAuditLog"
+    effect    = "Allow"
+    actions   = ["dynamodb:PutItem"]
+    resources = [var.run_audit_log_table_arn]
+  }
+
+  statement {
+    sid       = "PublishAlertNotification"
+    effect    = "Allow"
+    actions   = ["sns:Publish"]
+    resources = ["arn:aws:sns:${local.region}:${local.account_id}:${var.environment}-edl-platform-alerts"]
+  }
+
+  statement {
+    sid     = "ReplayFailedRuns"
+    effect  = "Allow"
+    actions = ["states:StartExecution"]
+    resources = [
+      "arn:aws:states:${local.region}:${local.account_id}:stateMachine:${var.environment}-extraction-pipeline",
+    ]
+  }
+
+  statement {
+    sid       = "KmsDecrypt"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    resources = var.kms_key_arns_for_extraction
+  }
+
+  statement {
+    sid     = "WriteLambdaExecutionLogs"
+    effect  = "Allow"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-dlq-processor",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-dlq-processor:log-stream:*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "dlq_processor" {
+  name   = "${var.environment}-dlq-processor-policy"
+  role   = aws_iam_role.dlq_processor.id
+  policy = data.aws_iam_policy_document.dlq_processor_permissions.json
+}
+
+# ---------------------------------------------------------------------------
+# Credential Expiry Notifier Lambda role (SEC-6)
+# Checks source-credential secret age on a daily schedule and publishes an
+# SNS alert when a secret is approaching or past its rotation window.
+# DescribeSecret only — never GetSecretValue; this role cannot read secret
+# values, only Secrets Manager metadata (CreatedDate / LastRotatedDate).
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "credential_expiry_notifier_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "credential_expiry_notifier" {
+  name               = "${var.environment}-credential-expiry-notifier-role"
+  assume_role_policy = data.aws_iam_policy_document.credential_expiry_notifier_assume_role.json
+  description        = "Role assumed by the credential expiry notifier Lambda (SEC-6). Read-only secret metadata + SNS publish."
+  tags               = local.common_tags
+}
+
+data "aws_iam_policy_document" "credential_expiry_notifier_permissions" {
+  statement {
+    sid       = "DescribeSourceCredentialSecrets"
+    effect    = "Allow"
+    actions   = ["secretsmanager:DescribeSecret"]
+    resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:${var.environment}/sources/*"]
+  }
+
+  statement {
+    sid       = "PublishAlertNotification"
+    effect    = "Allow"
+    actions   = ["sns:Publish"]
+    resources = ["arn:aws:sns:${local.region}:${local.account_id}:${var.environment}-edl-platform-alerts"]
+  }
+
+  statement {
+    sid     = "WriteLambdaExecutionLogs"
+    effect  = "Allow"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-credential-expiry-notifier",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-credential-expiry-notifier:log-stream:*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "credential_expiry_notifier" {
+  name   = "${var.environment}-credential-expiry-notifier-policy"
+  role   = aws_iam_role.credential_expiry_notifier.id
+  policy = data.aws_iam_policy_document.credential_expiry_notifier_permissions.json
+}
+
+# EventBridge Scheduler role to invoke the notifier Lambda on its daily
+# schedule. Separate from `eventbridge_scheduler` above (which is scoped to
+# extraction workflow triggering) — this one may only invoke this one Lambda.
+data "aws_iam_policy_document" "credential_expiry_scheduler_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["scheduler.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "credential_expiry_scheduler" {
+  name               = "${var.environment}-credential-expiry-scheduler-role"
+  assume_role_policy = data.aws_iam_policy_document.credential_expiry_scheduler_assume_role.json
+  description        = "Role assumed by EventBridge Scheduler to invoke the credential expiry notifier Lambda (SEC-6)."
+  tags               = local.common_tags
+}
+
+data "aws_iam_policy_document" "credential_expiry_scheduler_permissions" {
+  statement {
+    sid       = "InvokeCredentialExpiryNotifier"
+    effect    = "Allow"
+    actions   = ["lambda:InvokeFunction"]
+    resources = ["arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-edl-credential-expiry-notifier"]
+  }
+}
+
+resource "aws_iam_role_policy" "credential_expiry_scheduler" {
+  name   = "${var.environment}-credential-expiry-scheduler-policy"
+  role   = aws_iam_role.credential_expiry_scheduler.id
+  policy = data.aws_iam_policy_document.credential_expiry_scheduler_permissions.json
+}
+
+# ---------------------------------------------------------------------------
+# Control-Plane API Lambda Role
+# Assumed by the control-plane API Lambda (connector_runtime/api) to:
+#   - provision tenants and register entity configs (read/write)
+#   - trigger pipeline runs by enqueueing to the SAME pipeline-trigger FIFO
+#     queue that pipeline_trigger_handler.py consumes (no parallel
+#     states:StartExecution path)
+#   - read run status/history from the run audit log
+# Read-heavy: PutItem is only granted on the entity-config and
+# entity-type-registry tables (tenant provisioning / entity registration);
+# the run-audit-log table is read-only from this role — audit records are
+# written exclusively by RunCoordinator in the pipeline runtime.
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "control_plane_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "control_plane" {
+  name               = "${var.environment}-edl-control-plane-role"
+  assume_role_policy = data.aws_iam_policy_document.control_plane_assume_role.json
+  description        = "Role assumed by the control-plane API Lambda for tenant provisioning, entity registration, pipeline triggering, and run status queries."
+  tags               = local.common_tags
+}
+
+data "aws_iam_policy_document" "control_plane_permissions" {
+  statement {
+    sid       = "ReadWriteEntityConfig"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Query", "dynamodb:Scan"]
+    resources = [var.entity_config_table_arn]
+  }
+
+  statement {
+    sid       = "ReadWriteEntityTypeRegistry"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem"]
+    resources = [var.entity_type_registry_table_arn]
+  }
+
+  statement {
+    sid       = "ReadRunAuditLog"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan"]
+    resources = [var.run_audit_log_table_arn]
+  }
+
+  # Enqueue to the same SQS FIFO queue pipeline_trigger_handler.py consumes —
+  # constructed by naming convention (matches the pattern already used by
+  # the eventbridge_scheduler and pipeline_trigger roles above) rather than
+  # threaded through as a variable, to avoid a module dependency cycle
+  # between iam and orchestration.
+  statement {
+    sid     = "SendToPipelineTriggerQueue"
+    effect  = "Allow"
+    actions = ["sqs:SendMessage"]
+    resources = [
+      "arn:aws:sqs:${local.region}:${local.account_id}:${var.environment}-edl-pipeline-trigger.fifo",
+    ]
+  }
+
+  statement {
+    sid       = "KmsDecrypt"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    resources = var.kms_key_arns_for_extraction
+  }
+
+  statement {
+    sid     = "WriteLambdaExecutionLogs"
+    effect  = "Allow"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-control-plane",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-control-plane:log-stream:*",
+    ]
+  }
+
+  statement {
+    sid       = "XRayTracing"
+    effect    = "Allow"
+    actions   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords", "xray:GetSamplingRules", "xray:GetSamplingTargets"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "control_plane" {
+  name   = "${var.environment}-edl-control-plane-policy"
+  role   = aws_iam_role.control_plane.id
+  policy = data.aws_iam_policy_document.control_plane_permissions.json
 }

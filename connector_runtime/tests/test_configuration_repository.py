@@ -26,7 +26,7 @@ from contracts.entity_configuration_contract import EntityExtractionConfig, Load
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_TABLE = f"{_ENV}-entity-extraction-config"
+_TABLE = f"{_ENV}-edl-entity-extraction-config"
 _BUCKET = f"{_ENV}-entity-extraction-config-s3"
 
 _VALID_RECORD: dict[str, Any] = {
@@ -114,6 +114,40 @@ class TestConfigurationRepositoryDynamoDB:
         with pytest.raises(ConfigurationValidationError, match="salesforce"):
             client.load_config("salesforce", "salesforce-account")
 
+    @mock_aws
+    def test_load_config_default_tenant_matches_default_record(self) -> None:
+        """A record with the default tenant_code is visible under the default tenant."""
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        table = _create_dynamodb_table(dynamodb)
+        table.put_item(Item=_VALID_RECORD)  # tenant_code defaults to "demo"
+
+        client = ConfigurationRepositoryClient(
+            environment=_ENV, region_name=_REGION, backend=ConfigurationBackend.DYNAMODB
+        )
+        config = client.load_config("salesforce", "salesforce-account", tenant_code="demo")
+        assert config.tenant_code == "demo"
+
+    @mock_aws
+    def test_load_config_wrong_tenant_raises_not_found(self) -> None:
+        """SEC-2 app-level guard: a record belonging to another tenant is invisible."""
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        table = _create_dynamodb_table(dynamodb)
+        record = {**_VALID_RECORD, "tenant_code": "acme-corp"}
+        table.put_item(Item=record)
+
+        client = ConfigurationRepositoryClient(
+            environment=_ENV, region_name=_REGION, backend=ConfigurationBackend.DYNAMODB
+        )
+        with pytest.raises(ConfigurationNotFoundError):
+            client.load_config("salesforce", "salesforce-account", tenant_code="globex-eu")
+
+    def test_load_config_invalid_tenant_code_raises(self) -> None:
+        client = ConfigurationRepositoryClient(
+            environment=_ENV, region_name=_REGION, backend=ConfigurationBackend.DYNAMODB
+        )
+        with pytest.raises(ValueError, match="tenant_code"):
+            client.load_config("salesforce", "salesforce-account", tenant_code="BAD_CODE")
+
 
 # ---------------------------------------------------------------------------
 # S3 backend tests
@@ -125,9 +159,11 @@ class TestConfigurationRepositoryS3:
     def test_load_config_success(self) -> None:
         s3 = boto3.client("s3", region_name=_REGION)
         s3.create_bucket(Bucket=_BUCKET)
+        # §1.1: S3 backend path is tenant-prefixed, "demo" included like any
+        # other tenant (matches curated_layer_writer.py's convention).
         s3.put_object(
             Bucket=_BUCKET,
-            Key="salesforce/salesforce-account/config.json",
+            Key="demo/salesforce/salesforce-account/config.json",
             Body=json.dumps(_VALID_RECORD).encode("utf-8"),
             ContentType="application/json",
         )
@@ -142,6 +178,52 @@ class TestConfigurationRepositoryS3:
 
         assert config.source_id == "salesforce"
         assert config.load_type == LoadType.INCREMENTAL
+
+    @mock_aws
+    def test_load_config_success_non_default_tenant(self) -> None:
+        s3 = boto3.client("s3", region_name=_REGION)
+        s3.create_bucket(Bucket=_BUCKET)
+        record = {**_VALID_RECORD, "tenant_code": "acme-corp"}
+        s3.put_object(
+            Bucket=_BUCKET,
+            Key="acme-corp/salesforce/salesforce-account/config.json",
+            Body=json.dumps(record).encode("utf-8"),
+            ContentType="application/json",
+        )
+
+        client = ConfigurationRepositoryClient(
+            environment=_ENV,
+            region_name=_REGION,
+            backend=ConfigurationBackend.S3,
+            s3_bucket=_BUCKET,
+        )
+        config = client.load_config("salesforce", "salesforce-account", tenant_code="acme-corp")
+
+        assert config.tenant_code == "acme-corp"
+
+    @mock_aws
+    def test_load_config_wrong_tenant_raises_not_found(self) -> None:
+        """A record seeded for one tenant must be invisible to another (SEC-2 app-level guard)."""
+        s3 = boto3.client("s3", region_name=_REGION)
+        s3.create_bucket(Bucket=_BUCKET)
+        record = {**_VALID_RECORD, "tenant_code": "acme-corp"}
+        s3.put_object(
+            Bucket=_BUCKET,
+            Key="acme-corp/salesforce/salesforce-account/config.json",
+            Body=json.dumps(record).encode("utf-8"),
+            ContentType="application/json",
+        )
+
+        client = ConfigurationRepositoryClient(
+            environment=_ENV,
+            region_name=_REGION,
+            backend=ConfigurationBackend.S3,
+            s3_bucket=_BUCKET,
+        )
+        # Requesting under a different tenant_code must not find acme-corp's
+        # record (it looks under a different S3 prefix entirely).
+        with pytest.raises(ConfigurationNotFoundError):
+            client.load_config("salesforce", "salesforce-account", tenant_code="globex-eu")
 
     @mock_aws
     def test_load_config_key_not_found_raises(self) -> None:
@@ -164,7 +246,7 @@ class TestConfigurationRepositoryS3:
         # Missing required fields
         s3.put_object(
             Bucket=_BUCKET,
-            Key="salesforce/salesforce-account/config.json",
+            Key="demo/salesforce/salesforce-account/config.json",
             Body=json.dumps({"source_id": "salesforce"}).encode("utf-8"),
             ContentType="application/json",
         )

@@ -87,7 +87,7 @@ class ExtractionRetryPolicy:
     Distributed circuit breaker:
     When PLATFORM_ENVIRONMENT and AWS_REGION environment variables are present
     (i.e. running inside Lambda), the circuit breaker state is persisted to the
-    existing {env}-run-audit-log DynamoDB table using a sentinel run_id
+    existing {env}-edl-run-audit-log DynamoDB table using a sentinel run_id
     ("__circuit_breaker__").  This ensures that all Lambda containers see the
     same failure count — a container that opens the circuit will block other
     containers from starting new extractions for the same source.
@@ -270,7 +270,7 @@ class ExtractionRetryPolicy:
 
     def _get_ddb_table(self) -> Any:
         """
-        Lazily connect to the run-audit-log DynamoDB table.
+        Lazily connect to the edl-run-audit-log DynamoDB table.
 
         Returns None when PLATFORM_ENVIRONMENT or AWS_REGION are absent (local /
         test environments) or when initialization fails.  Never raises.
@@ -284,7 +284,7 @@ class ExtractionRetryPolicy:
             if not region or not env:
                 return None  # local/test environment — in-process only
             table_name = (
-                os.environ.get("AUDIT_LOG_TABLE") or f"{env}-run-audit-log"
+                os.environ.get("AUDIT_LOG_TABLE") or f"{env}-edl-run-audit-log"
             )
             self._ddb_table = boto3.resource(
                 "dynamodb", region_name=region

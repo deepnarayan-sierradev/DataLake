@@ -183,3 +183,35 @@ jobs:
       - name: Terraform fmt check
         working-directory: infrastructure/
         run: terraform fmt -recursive -check
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Stage 8: Secret scan (SEC-4)
+  # Runs the same detect-secrets check as the local pre-commit hook, but in
+  # CI — so a leaked credential cannot reach main/staging/prod via a commit
+  # made with --no-verify, from a machine without pre-commit installed, or
+  # via an automation/bot PR that never runs local hooks.
+  # ──────────────────────────────────────────────────────────────────────────
+  secret-scan:
+    name: "Secret Scan (detect-secrets)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      # Pinned to the same revision as .pre-commit-config.yaml so CI and
+      # local pre-commit never disagree on what counts as a secret.
+      - name: Install detect-secrets
+        run: pip install "detect-secrets @ git+https://github.com/Yelp/detect-secrets@01886c8a910c64595c47f186ca1ffc0b77fa5458"
+
+      - name: Run detect-secrets scan against baseline
+        # `scan --baseline` re-scans and rewrites the baseline in place,
+        # preserving existing audited entries. If the rewritten baseline
+        # differs from the committed one, a new, unaudited potential secret
+        # was found — fail the build rather than let it merge silently.
+        run: |
+          detect-secrets scan --baseline .secrets.baseline
+          git diff --exit-code .secrets.baseline

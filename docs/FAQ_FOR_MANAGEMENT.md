@@ -76,7 +76,7 @@ We're already designed for Dynamics 365, HubSpot, and PostgreSQL addition — ju
 | Layer | Control |
 |---|---|
 | **Raw data** | Locked in private S3 with encryption; only extraction team can read |
-| **Credentials** | AWS Secrets Manager, auto-rotated, never logged |
+| **Credentials** | AWS Secrets Manager; daily automated expiry check alerts the platform team via SNS if rotation is overdue (automatic rotation is a planned follow-up, not yet implemented); never logged |
 | **Transformation** | PII identified & masked before curated data is created |
 | **Analytics** | No PII reaches analytics layer; masked version only |
 | **Network** | All AWS service calls via VPC endpoints (no internet exposure) |
@@ -196,7 +196,7 @@ Each role has **zero permissions outside its scope.** IAM enforces this automati
 **A:** Six gates (takes 4–5 days):
 
 1. **SOURCE_REGISTRATION** (Platform) — Verify credentials, SLA agreement
-2. **CREDENTIAL_REGISTRATION** (Security) — Store in Secrets Manager, set rotation
+2. **CREDENTIAL_REGISTRATION** (Security) — Store in Secrets Manager, enable expiry-check alerting
 3. **ENTITY_MAPPING** (Data team) — Define what gets extracted (DynamoDB config)
 4. **EXTRACTION_PROFILE** (Platform) — Dry-run in dev; capture schema
 5. **SECURITY_GOVERNANCE** (Security/Compliance) — Review access model, PII classification
@@ -355,7 +355,7 @@ We'll deliver pre-recorded videos + live Q&A for each level.
 | **Step Functions** | Manages pipeline stages with retry, branching, and failure routing |
 | **Lambda / ECS Fargate** | Runs the Python extraction and transformation code |
 | **S3** | Stores all data (raw 7-year, curated 3-year, analytics 1-year) |
-| **DynamoDB** | Config, watermark state, run audit log, onboarding records |
+| **DynamoDB** | Config, entity type registry, watermark state, run audit log, onboarding records (5 tables) |
 | **Secrets Manager** | Stores Salesforce / NetSuite / MySQL / Sage Intacct / Sage X3 credentials securely |
 | **Glue Data Catalog + Athena** | Makes curated data queryable via SQL from any BI tool |
 | **CloudWatch + X-Ray + SNS** | Logs, metrics, alarms, alerts, tracing |
@@ -399,7 +399,7 @@ We'll deliver pre-recorded videos + live Q&A for each level.
 
 ### Q: "What CI/CD and quality tools are used?"
 
-**A:** GitHub Actions runs a 7-stage gate on every code change:
+**A:** GitHub Actions runs an 8-stage gate on every code change:
 1. **Ruff** — code style and security linting
 2. **mypy** — static type checking (strict mode)
 3. **pytest** — automated tests (≥ 80% coverage required)
@@ -407,6 +407,7 @@ We'll deliver pre-recorded videos + live Q&A for each level.
 5. **pip-audit** — dependency CVE scan
 6. **checkov** — Terraform security scan
 7. **Terraform validate** — infrastructure syntax and logic validation
+8. **detect-secrets** — secret-scan for accidentally committed credentials
 
-Deploys only proceed after all 7 gates pass.
+Deploys only proceed after all 8 gates pass.
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final
@@ -134,6 +135,57 @@ def auto_classify_field(field_name: str) -> DataClassificationLevel:
         if pattern.search(field_name):
             return DataClassificationLevel.PII
     return DataClassificationLevel.INTERNAL
+
+
+def build_auto_classification_policy(
+    source_id: str,
+    entity_id: str,
+    field_names: Iterable[str],
+) -> EntityClassificationPolicy | None:
+    """
+    Derive a best-effort classification policy from field-name heuristics.
+
+    This is the automatic fallback applied when no data-steward-reviewed
+    EntityClassificationPolicy has been registered for an entity — it is not
+    a substitute for one. A steward should review auto-classified entities
+    and replace this with an explicit, versioned policy over time.
+
+    Returns None when no field matches a PII/SENSITIVE_PII pattern, so
+    callers may treat "no policy" as "nothing to mask" and take a faster
+    code path rather than paying masking overhead for entities with no
+    sensitive fields.
+    """
+    classifications: list[FieldClassification] = []
+    for field_name in field_names:
+        level = auto_classify_field(field_name)
+        if level == DataClassificationLevel.SENSITIVE_PII:
+            # HASH requires no secret and is irreversible — a safe default
+            # until a Secrets-Manager-backed tokenisation key is wired in.
+            classifications.append(
+                FieldClassification(
+                    field_name=field_name,
+                    classification=level,
+                    masking_strategy=MaskingStrategy.HASH,
+                )
+            )
+        elif level == DataClassificationLevel.PII:
+            classifications.append(
+                FieldClassification(
+                    field_name=field_name,
+                    classification=level,
+                    masking_strategy=MaskingStrategy.PARTIAL_MASK,
+                )
+            )
+
+    if not classifications:
+        return None
+
+    return EntityClassificationPolicy(
+        source_id=source_id,
+        entity_id=entity_id,
+        policy_version="auto-v1",
+        field_classifications=tuple(classifications),
+    )
 
 
 # ---------------------------------------------------------------------------

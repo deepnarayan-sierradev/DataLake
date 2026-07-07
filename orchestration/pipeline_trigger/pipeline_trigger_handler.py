@@ -1,0 +1,219 @@
+"""
+Pipeline Trigger Lambda — SQS FIFO to Step Functions burst buffer.
+
+Consumes messages from the {env}-edl-pipeline-trigger.fifo FIFO queue
+(populated by EventBridge Scheduler) and starts one Step Functions execution
+per message.
+
+Architecture:
+  EventBridge Scheduler (N simultaneous fires)
+      │
+      ▼ (writes to SQS FIFO queue — absorbs burst instantly)
+  SQS FIFO Queue: {env}-edl-pipeline-trigger.fifo
+      │
+      ▼ (ESM batch_size=1, reserved_concurrency=50 caps execution rate)
+  This Lambda (pipeline_trigger_handler)
+      │
+      ▼ (starts one Step Functions execution per message, idempotent)
+  Step Functions State Machine → extraction → transformation → ...
+
+Idempotency:
+  Each Step Functions execution is started with a deterministic `name`
+  parameter: `{source_id}--{entity_id}--{schedule_tick_iso}`.
+  Step Functions rejects duplicate execution names with ExecutionAlreadyExists,
+  which this handler treats as a successful no-op.  This guarantees exactly-once
+  semantics even if SQS re-delivers a message after a visibility timeout.
+
+Security (OWASP A03, A05):
+  - All message body fields validated with Pydantic before use in any AWS call.
+  - State machine ARN comes from Lambda environment variable — never from message.
+  - No credentials or PII flow through this handler.
+  - SQS message body must not contain credentials.
+
+Required Lambda environment variables:
+  AWS_REGION              — injected by Lambda runtime
+  PLATFORM_ENVIRONMENT    — deployment environment (dev/staging/prod)
+  STATE_MACHINE_ARN       — ARN of the Step Functions extraction pipeline state machine
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import UTC, datetime
+from typing import Any, Final
+
+import boto3
+from botocore.exceptions import ClientError
+from pydantic import BaseModel, Field, field_validator
+
+from contracts.identifier_policy import STABLE_ID_PATTERN, TENANT_CODE_PATTERN
+from observability.lambda_utils import require_env, check_lambda_timeout
+from observability.structured_logger import get_platform_logger
+
+_logger = get_platform_logger(__name__)
+
+# Compiled once — used for execution name sanitisation.
+_EXEC_NAME_SAFE: Final[re.Pattern[str]] = re.compile(r"[^a-zA-Z0-9\-_]")
+# Step Functions execution name max length is 80 characters.
+_EXEC_NAME_MAX_LEN: Final[int] = 80
+# Reuse boto3 client across warm invocations (module-level singleton).
+_sfn_client = boto3.client("stepfunctions", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+
+
+# ---------------------------------------------------------------------------
+# Pydantic model for SQS message body validation (OWASP A03)
+# ---------------------------------------------------------------------------
+
+
+class TriggerMessage(BaseModel):
+    """Validated shape of an SQS trigger message body."""
+
+    model_config = {"extra": "forbid"}
+
+    source_id: str = Field(..., min_length=2, max_length=64)
+    entity_id: str = Field(..., min_length=2, max_length=64)
+    environment: str = Field(..., pattern=r"^(dev|staging|prod)$")
+    connector_params: dict[str, str] = Field(default_factory=dict)
+    is_replay: bool = Field(default=False)
+    tenant_code: str = Field(default="demo", min_length=2, max_length=48)
+    schedule_tick_iso: str = Field(
+        default="",
+        description="ISO-8601 UTC timestamp of the schedule tick; used in execution name.",
+    )
+
+    @field_validator("source_id", "entity_id")
+    @classmethod
+    def _validate_stable_id(cls, v: str) -> str:
+        if not STABLE_ID_PATTERN.match(v):
+            raise ValueError(
+                f"{v!r} does not conform to the stable identifier format."
+            )
+        return v
+
+    @field_validator("tenant_code")
+    @classmethod
+    def _validate_tenant_code(cls, v: str) -> str:
+        if not TENANT_CODE_PATTERN.match(v):
+            raise ValueError(
+                f"tenant_code {v!r} does not conform to the tenant code format."
+            )
+        return v
+
+
+# ---------------------------------------------------------------------------
+# Lambda handler
+# ---------------------------------------------------------------------------
+
+
+def lambda_handler(event: dict[str, Any], context: Any) -> None:
+    """
+    AWS Lambda entry point — processes one SQS message per invocation.
+
+    SQS ESM is configured with batch_size=1, so `Records` always has exactly
+    one element.  Each record starts one Step Functions execution.
+
+    Raises on failure (SQS will retry the message after VisibilityTimeout).
+    """
+    check_lambda_timeout(context, min_remaining_ms=30_000)
+
+    state_machine_arn = require_env("STATE_MACHINE_ARN")
+
+    records: list[dict[str, Any]] = event.get("Records", [])
+    if not records:
+        _logger.warning("pipeline_trigger_no_records_in_event")
+        return
+
+    # Enforce the batch_size=1 contract — if the ESM is misconfigured to send
+    # multiple records, fail loudly rather than silently start multiple executions.
+    # This is a defensive guard against operational misconfiguration (OWASP A05).
+    if len(records) != 1:
+        raise ValueError(
+            f"pipeline_trigger: SQS ESM batch_size must be 1; "
+            f"received {len(records)} records. Check the Event Source Mapping configuration."
+        )
+
+    for record in records:
+        _process_record(record, state_machine_arn)
+
+
+def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
+    """Process a single SQS record — validate, build execution name, start SFN."""
+    message_id: str = record.get("messageId", "unknown")
+    body_str: str = record.get("body", "{}")
+
+    # --- Parse and validate message body (OWASP A03) ---
+    try:
+        body_dict = json.loads(body_str)
+    except json.JSONDecodeError as exc:
+        _logger.error(
+            "pipeline_trigger_invalid_json",
+            message_id=message_id,
+            error=str(exc),
+        )
+        raise ValueError(f"SQS message {message_id!r} has invalid JSON body") from exc
+
+    try:
+        msg = TriggerMessage.model_validate(body_dict)
+    except Exception as exc:
+        _logger.error(
+            "pipeline_trigger_validation_failed",
+            message_id=message_id,
+            error=str(exc),
+        )
+        raise ValueError(f"SQS message {message_id!r} failed validation: {exc}") from exc
+
+    # --- Build deterministic, idempotent execution name ---
+    tick = msg.schedule_tick_iso or datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+    raw_name = f"{msg.source_id}--{msg.entity_id}--{tick}"
+    # Sanitise: Step Functions execution names allow letters, digits, hyphens, underscores
+    exec_name = _EXEC_NAME_SAFE.sub("-", raw_name)[:_EXEC_NAME_MAX_LEN]
+
+    # --- Build Step Functions input payload ---
+    sfn_input = json.dumps(
+        {
+            "source_id": msg.source_id,
+            "entity_id": msg.entity_id,
+            "environment": msg.environment,
+            "connector_params": msg.connector_params,
+            "is_replay": msg.is_replay,
+            "tenant_code": msg.tenant_code,
+        },
+        separators=(",", ":"),
+    )
+
+    # --- Start Step Functions execution (idempotent via execution name) ---
+    try:
+        _sfn_client.start_execution(
+            stateMachineArn=state_machine_arn,
+            name=exec_name,
+            input=sfn_input,
+        )
+        _logger.info(
+            "pipeline_trigger_execution_started",
+            source_id=msg.source_id,
+            entity_id=msg.entity_id,
+            environment=msg.environment,
+            tenant_code=msg.tenant_code,
+            execution_name=exec_name,
+        )
+    except ClientError as exc:
+        error_code = exc.response["Error"]["Code"]
+        if error_code == "ExecutionAlreadyExists":
+            # Idempotent re-delivery — safe to treat as success.
+            _logger.info(
+                "pipeline_trigger_execution_already_exists",
+                source_id=msg.source_id,
+                entity_id=msg.entity_id,
+                execution_name=exec_name,
+            )
+            return
+        _logger.error(
+            "pipeline_trigger_sfn_start_failed",
+            source_id=msg.source_id,
+            entity_id=msg.entity_id,
+            execution_name=exec_name,
+            error_code=error_code,
+        )
+        raise

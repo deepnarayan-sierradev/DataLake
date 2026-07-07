@@ -21,7 +21,13 @@ from __future__ import annotations
 import re
 from typing import Final
 
-from connector_runtime.interfaces.connector_interface import FieldContract, QueryContract
+from connector_runtime.interfaces.connector_interface import (
+    DeterministicConnectorError,
+    ExtractionErrorClassification,
+    FieldContract,
+    QueryContract,
+)
+from connector_runtime.query_builders.incremental_query_builder import build_incremental_select
 from contracts.entity_configuration_contract import LoadType
 from observability.structured_logger import get_platform_logger
 
@@ -35,8 +41,10 @@ _OBJECT_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z][A-Za-z0-9_
 _FIELD_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,254}$")
 
 
-class SalesforceSoqlQueryBuilderError(Exception):
+class SalesforceSoqlQueryBuilderError(DeterministicConnectorError):
     """Raised when a safe SOQL query cannot be constructed from the given inputs."""
+
+    classification = ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
 
 
 class SalesforceSoqlQueryBuilder:
@@ -94,8 +102,7 @@ class SalesforceSoqlQueryBuilder:
             SalesforceSoqlQueryBuilderError: if watermark inputs are invalid for
                 incremental load, or if field names fail validation.
         """
-        field_list = self._build_field_list(field_contract)
-        params: dict[str, str] = {}
+        field_names = self._validate_field_names(field_contract)
 
         if load_type == LoadType.INCREMENTAL:
             if not watermark_field:
@@ -111,17 +118,21 @@ class SalesforceSoqlQueryBuilder:
                     f"watermark_field {watermark_field!r} contains characters not permitted "
                     "in a Salesforce field name."
                 )
-            where_clause = (
-                f" WHERE {watermark_field} >= :lower_bound AND {watermark_field} < :upper_bound"
-            )
-            params = {
-                "lower_bound": watermark_lower,
-                "upper_bound": watermark_upper,
-            }
-        else:
-            where_clause = ""
 
-        query_text = f"SELECT {field_list} FROM {self._object_name}{where_clause}"  # noqa: S608
+        # DUP-4: the actual SELECT/FROM/WHERE assembly is shared with NetSuite
+        # SuiteQL and MySQL — see build_incremental_select(). SOQL uses no
+        # identifier quoting and ":lower_bound"/":upper_bound" bind-variable
+        # placeholders, bound by the Bulk API job controller at submission.
+        query_text, params, effective_watermark_field = build_incremental_select(
+            field_names=field_names,
+            table=self._object_name,
+            load_type=load_type,
+            watermark_field=watermark_field,
+            watermark_lower=watermark_lower,
+            watermark_upper=watermark_upper,
+            lower_bound_placeholder=":lower_bound",
+            upper_bound_placeholder=":upper_bound",
+        )
 
         _logger.info(
             "salesforce_soql_query_built",
@@ -139,12 +150,12 @@ class SalesforceSoqlQueryBuilder:
             load_type=load_type,
             watermark_lower=watermark_lower,
             watermark_upper=watermark_upper,
-            watermark_field=watermark_field if load_type == LoadType.INCREMENTAL else None,
+            watermark_field=effective_watermark_field,
         )
 
-    def _build_field_list(self, field_contract: FieldContract) -> str:
+    def _validate_field_names(self, field_contract: FieldContract) -> list[str]:
         """
-        Build the comma-separated SOQL field list from FieldContract.
+        Validate and return the ordered SOQL field names from FieldContract.
 
         Every field name is validated against _FIELD_NAME_PATTERN before
         inclusion in the query string, preventing injection through
@@ -168,4 +179,4 @@ class SalesforceSoqlQueryBuilder:
                 f"No valid fields available for object {self._object_name!r}. "
                 "Check field_mode configuration and Describe API response."
             )
-        return ", ".join(validated)
+        return validated

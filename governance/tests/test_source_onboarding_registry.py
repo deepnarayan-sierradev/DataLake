@@ -105,9 +105,9 @@ class TestSourceOnboardingRegistry:
 
     def test_activation_permitted_after_all_gates_passed(self):
         self.registry.register_source("salesforce", "data-eng", "critical", "pii")
-        from governance.source_onboarding_registry import _GATE_ORDER_LIST
+        from governance.source_onboarding_registry import _GATE_ORDER
 
-        for gate in _GATE_ORDER_LIST:
+        for gate in _GATE_ORDER:
             self.registry.advance_gate(
                 "salesforce", gate, OnboardingGateStatus.PASSED, reviewer="alice"
             )

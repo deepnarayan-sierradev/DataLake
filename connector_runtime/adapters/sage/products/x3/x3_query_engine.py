@@ -32,6 +32,18 @@ Query security (OWASP A03):
       value as ISO-8601 before substitution, preventing filter injection.
     - Placeholder markers use the format "__X3_{KEY}__" — strings that cannot
       match any valid X3 field value.
+
+DUP-4 scope note: Salesforce SOQL, NetSuite SuiteQL, and MySQL SQL query
+builders share a "SELECT {fields} FROM {table} [WHERE ...]" text-assembly
+step, now extracted to
+connector_runtime.query_builders.incremental_query_builder.build_incremental_select().
+This engine is intentionally NOT built on that shared function: it produces
+an OData v4 query encoded as a JSON dict ($select/$filter/$orderby strings),
+not a SQL SELECT/FROM/WHERE string — there is no FROM clause, and its
+placeholder substitution (bind_parameters() below) does a plain string
+.replace() on the $filter value rather than binding named SQL parameters.
+Forcing this into the SQL-family template would obscure the real
+OData-vs-SQL difference rather than remove genuine duplication.
 """
 
 from __future__ import annotations
@@ -39,7 +51,7 @@ from __future__ import annotations
 import copy
 import json
 import re
-from typing import Any, Final, Literal
+from typing import Any, Final
 
 from connector_runtime.interfaces.connector_interface import FieldContract, QueryContract
 from contracts.entity_configuration_contract import LoadType

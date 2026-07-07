@@ -18,6 +18,8 @@ dependencies = [
     "requests>=2.32,<3.0",
     "pyarrow>=16.0,<19.0",
     "pymysql>=1.1,<2.0",
+    "aws-xray-sdk>=2.14,<3.0",
+    "duckdb>=0.10,<2.0",
 ]
 
 [project.optional-dependencies]
@@ -45,6 +47,7 @@ packages = [
     "transformation",
     "entity_resolution",
     "governance",
+    "analytics_publisher",
 ]
 
 # ---------------------------------------------------------------------------
@@ -73,6 +76,7 @@ ignore = ["ANN401"]  # Any is legitimately needed for boto3 clients, pyarrow tab
 
 [tool.ruff.lint.per-file-ignores]
 "*/tests/*" = ["S101", "ANN", "T20", "S608"]  # assert, annotations, print, and SQL-in-test-fixture allowed in tests
+"tests/*" = ["S101", "ANN", "T20", "S608"]  # top-level cross-cutting integration tests (same rationale as above)
 "scripts/*" = ["T20", "ANN", "S603", "S607"]  # CLI scripts: print, annotations, subprocess allowed
 
 [tool.ruff.lint.mccabe]
@@ -89,6 +93,7 @@ known-first-party = [
     "transformation",
     "entity_resolution",
     "governance",
+    "analytics_publisher",
 ]
 
 # ---------------------------------------------------------------------------
@@ -123,6 +128,7 @@ module = [
     "connector_runtime.tests.salesforce.*",
     "connector_runtime.tests.netsuite.*",
     "connector_runtime.tests.mysql_rds.*",
+    "connector_runtime.tests.sage.*",
     "contracts.tests.*",
     "observability.tests.*",
     "schema_management.tests.*",
@@ -131,6 +137,7 @@ module = [
     "transformation.tests.*",
     "entity_resolution.tests.*",
     "governance.tests.*",
+    "analytics_publisher.tests.*",
 ]
 disallow_untyped_defs = false
 check_untyped_defs = false
@@ -153,6 +160,7 @@ testpaths = [
     "connector_runtime/tests/salesforce",
     "connector_runtime/tests/netsuite",
     "connector_runtime/tests/mysql_rds",
+    "connector_runtime/tests/sage",
     "schema_management/tests",
     "watermark_management/tests",
     "observability/tests",
@@ -161,6 +169,8 @@ testpaths = [
     "transformation/tests",
     "entity_resolution/tests",
     "governance/tests",
+    "analytics_publisher/tests",
+    "tests",
 ]
 addopts = "--cov --cov-report=term-missing --cov-fail-under=80 -v"
 
@@ -176,6 +186,7 @@ source = [
     "transformation",
     "entity_resolution",
     "governance",
+    "analytics_publisher",
 ]
 
 [tool.coverage.report]

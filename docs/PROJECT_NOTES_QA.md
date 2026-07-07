@@ -11,7 +11,7 @@ table inventory, and the exact rules applied at each layer. See also
 
 > **AWS services to show live:** **EventBridge Scheduler** (Console → Amazon EventBridge →
 > Scheduler → Schedules, group `dev-extraction-schedules`) and **DynamoDB**
-> (`dev-entity-extraction-config` table — holds `schedule_cron`/`schedule_enabled` per entity).
+> (`dev-edl-entity-extraction-config` table — holds `schedule_cron`/`schedule_enabled` per entity).
 > CLI: `aws scheduler list-schedules --group-name dev-extraction-schedules --region us-east-1`.
 
 All pipelines run **once daily, staggered a few minutes apart between 02:00–03:05 UTC**
@@ -33,7 +33,7 @@ All pipelines run **once daily, staggered a few minutes apart between 02:00–03
 **Where it lives in code** — schedules are **data in DynamoDB, not hardcoded in Terraform**:
 - Source of truth: `scripts/seed_entity_config.py` — a Python dict per entity with
   `schedule_cron`, `schedule_enabled`, `schedule_timezone` fields. Running it writes these
-  into the `{environment}-entity-extraction-config` DynamoDB table.
+  into the `{environment}-edl-entity-extraction-config` DynamoDB table.
 - Sync to AWS: `scripts/seed_schedules.py` reads that DynamoDB table and calls
   `ExtractionScheduleClient.create_or_update_schedule(...)` to create/update the actual
   EventBridge Scheduler entry (named `{source_id}--{entity_id}`). Disabled entities have
@@ -103,12 +103,14 @@ aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name' |
 ```
 Secrets are created manually/out-of-band by whoever has AWS console/CLI access.
 
-**Known gaps found while tracing this**:
-- `mysql_rds_credentials_client.py` (imported by the MySQL connector, local runner script,
-  and tests) **does not exist** in the repo — running MySQL extraction locally will raise
-  `ModuleNotFoundError`. Tests don't catch this because they mock the client entirely.
-- `infrastructure/modules/secrets/` (referenced by all 3 environments' `main.tf`/`outputs.tf`)
-  **does not exist** either — `terraform init`/`plan` would fail on this reference.
+**Known gaps found while tracing this — both RESOLVED**:
+- ~~`mysql_rds_credentials_client.py` does not exist in the repo~~ — **RESOLVED**: it now
+  exists at `connector_runtime/adapters/mysql_rds/mysql_rds_credentials_client.py`, a real
+  credentials client used by the MySQL connector, local runner script, and tests.
+- ~~`infrastructure/modules/secrets/` does not exist~~ — **RESOLVED**: `infrastructure/modules/secrets/main.tf`
+  now exists and is a substantial, real Terraform module — it defines Secrets Manager secrets
+  for all 5 sources plus the `credential_expiry_notifier` Lambda (see §6 and §11 for more on
+  that Lambda).
 
 ---
 
@@ -188,6 +190,34 @@ back to `module.analytics_publisher_lambda`.
 `dev-analytics-publisher` — outdated/shortened. The actual deployed name (per Terraform,
 the source of truth) is **`dev-analytics-layer-publisher`**.
 
+**Four newer Lambdas exist outside the core 4-stage pipeline above** — not wired into the
+`dev-extraction-pipeline` state machine, so they're easy to miss if you only look there:
+
+| Console name | Handler | Purpose |
+|---|---|---|
+| `dev-edl-control-plane` | `connector_runtime.api.control_plane_handler.lambda_handler` | SaaS control-plane REST API (Cognito/JWT auth) for self-service tenant provisioning — code-complete, not yet deployment-verified. See new §6.1 below. |
+| `dev-edl-credential-expiry-notifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` | Daily secret-age check, sends an SNS alert on stale credentials (see §3 and §11's rotation correction). |
+| `dev-edl-pipeline-trigger` | `orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler` | Rate-limited SQS FIFO → Step Functions trigger. |
+| `dev-edl-dlq-processor` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` | DLQ → audit log + SNS alert + optional replay. |
+
+Names confirmed via Terraform locals: `infrastructure/modules/control_plane/main.tf`
+(`control_plane_lambda_name`), `infrastructure/modules/secrets/main.tf` (`credential_expiry_notifier`
+resource), `infrastructure/modules/orchestration/main.tf` (`pipeline_trigger_lambda_name`,
+`dlq_processor_lambda_name`).
+
+### 6.1 Control plane / multi-tenancy (new, code-complete but unverified in a live deployment)
+
+`tenant_code` is now threaded through the config, watermark, and schema-snapshot repositories
+(e.g. `connector_runtime/configuration_repository/configuration_repository.py`,
+`watermark_management/watermark_repository/watermark_repository.py`,
+`schema_management/snapshot_repository/snapshot_repository.py`), plus a new
+`entity-type-registry` DynamoDB table that — unlike the other config tables in §13.3 — *is*
+Terraform-managed (`infrastructure/modules/metadata_persistence/`). A Cognito-authenticated SaaS
+control-plane API (`dev-edl-control-plane` above) now exists for self-service tenant
+provisioning. Both are code-complete but **not yet verified against a live AWS deployment** —
+treat as "built, not yet demoed." Canonical references: `tests/test_tenant_isolation.py` and the
+cross-tenant-incident scenario in `docs/PRODUCTION_INCIDENT_RUNBOOK.md`.
+
 ---
 
 ## 7. Combining multiple sources — which layer does it, and why query only Analytics
@@ -263,8 +293,8 @@ from whichever source has it — ready to query via Athena with no joins or dedu
 ## 8. All source tables/entities being extracted
 
 > **AWS services to show live:** **DynamoDB** (Console → DynamoDB → Tables →
-> `dev-entity-extraction-config` → Explore table items — every row in the table below is one
-> item here). CLI: `aws dynamodb scan --table-name dev-entity-extraction-config --region us-east-1`.
+> `dev-edl-entity-extraction-config` → Explore table items — every row in the table below is one
+> item here). CLI: `aws dynamodb scan --table-name dev-edl-entity-extraction-config --region us-east-1`.
 
 | Source | Entity ID | Actual table/object queried | Load type | Active? | Scheduled? |
 |---|---|---|---|---|---|
@@ -451,7 +481,11 @@ each doc — just the points worth actually saying out loud.
   35,971+ contract records — all real, all queryable in Athena right now, not a mockup.
 - **Before → after table** (good to screen-share): time to data 24–72h → 1–4h; customer
   identity 3 disconnected views → 1 golden record; new source onboarding 2–4 weeks → 2–3 days
-  config-only; credential security scripts/.env → Secrets Manager with 90-day auto-rotation.
+  config-only; credential security scripts/.env → Secrets Manager (no automatic rotation wired
+  up yet — `rotation_lambda_arn` is unset for every source in
+  `infrastructure/modules/secrets/main.tf`; the current mitigation is a daily
+  `credential_expiry_notifier` Lambda that sends an SNS alert when a secret is stale, not
+  automatic rotation).
 - **Status honesty**: Dev ✅ complete, Staging 🔲 not started, Production 🔲 pending staging
   sign-off — say this plainly, don't oversell readiness.
 
@@ -487,8 +521,9 @@ each doc — just the points worth actually saying out loud.
 - Live tables: `dev_edl_analytics.company` (34 rows), `.person` (49 rows), `.contract`
   (35,971+ rows, filter `is_deleted = false` for the honest active count).
 - Connected sources today: Salesforce ✅, MySQL RDS ✅, Sage Intacct ✅, Sage X3 ✅ (customer
-  active; supplier active but its schedule is disabled). NetSuite is 🔲 pending — mention it as
-  "next," not "broken."
+  active; supplier active but its schedule is disabled). NetSuite's connector is code-complete
+  (🟡, not yet confirmed live) — mention it as "code complete, activation pending," not "broken"
+  or "not started."
 
 ### `docs/PIPELINE_FLOW.md` + `docs/GLOSSARY_AND_TERMINOLOGY.md`
 - Plain-language flow: **Extract → Raw (immutable) → Transform/mask → Curated → Match/merge →
@@ -520,9 +555,12 @@ each doc — just the points worth actually saying out loud.
   failure, quality violation, breaking schema drift, DLQ aging, Lambda OOM) has a named runbook
   with concrete AWS CLI diagnosis steps and an escalation owner — this isn't improvised.
 - If asked about Sage specifically: Intacct customer/vendor/AR-invoice/AP-bill are live;
-  Sage X3 customer is live; a handful of hardening gaps (credential cache invalidation,
-  Terraform secrets placeholder, supplier entity resolution) are tracked and prioritized for
-  "Phase 6" — this is a known, managed backlog, not a surprise.
+  Sage X3 customer is live. Of the hardening gaps once tracked for "Phase 6," the **Terraform
+  secrets placeholder is now DONE** — `infrastructure/modules/secrets/main.tf` defines
+  `aws_secretsmanager_secret.sage_intacct_credentials` and `sage_x3_credentials`, each with a
+  `DenyAllOtherPrincipals` resource policy restricting reads to the extraction runtime role.
+  Remaining open items (credential cache invalidation, supplier entity resolution) are still a
+  known, managed backlog, not a surprise.
 
 ---
 
@@ -611,7 +649,8 @@ already covers it in depth — use the tag to jump straight to the detailed answ
 ### 13.1 What this codebase is *(from LOCAL_SETUP_PLAN.md §1)*
 
 A **metadata-driven, connector-based AWS data lake / ETL platform**. It pulls data from
-source systems (Salesforce, MySQL RDS, Sage Intacct/X3, NetSuite-pending), lands it in S3
+source systems (Salesforce, MySQL RDS, Sage Intacct/X3, NetSuite — code-complete, activation
+pending), lands it in S3
 in three progressively cleaner layers, cross-matches records across sources into "golden
 records," and exposes the result for SQL querying via Athena/Glue. Adding a new data source
 or entity is meant to be **config-only** (a DynamoDB/JSON config entry), not a code change —

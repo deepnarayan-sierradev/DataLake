@@ -47,6 +47,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import time
 from datetime import UTC, datetime
 from typing import Any, Final
 
@@ -55,17 +56,24 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import structlog
 
+from contracts.identifier_policy import DEFAULT_TENANT_CODE, TENANT_CODE_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from entity_resolution.entity_type_registry import EntityTypeRegistryClient
 from governance.data_catalog_registration import (
     CatalogDatasetSpec,
     DataCatalogRegistrationClient,
     DataLayer,
 )
-from entity_resolution.entity_type_registry import ENTITY_ID_TO_TYPE as _ENTITY_ID_TO_TYPE
+from observability.lambda_utils import check_lambda_timeout, configure_xray, require_env
+from observability.metrics_emitter import CloudWatchMetricsEmitter
+from observability.s3_writer import S3ParquetWriter
 from observability.structured_logger import get_platform_logger
-from observability.lambda_utils import require_env, check_lambda_timeout
 
 _logger = get_platform_logger(__name__)
+
+# ARCH-2: module-level warm-invocation cache, mirroring the pattern already
+# used for ResolutionConfigRegistry in entity_resolution_pipeline_handler.py.
+_entity_type_registry: EntityTypeRegistryClient | None = None
 
 # ---------------------------------------------------------------------------
 # Fields removed from golden records before writing the BI analytics layer.
@@ -144,26 +152,85 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     environment: str = event["environment"]
     run_id: str = event["run_id"]
     canonical_prefix: str = event["canonical_prefix"]
+    tenant_code: str = str(event.get("tenant_code") or DEFAULT_TENANT_CODE)
+    # Optional — set by the extraction stage and threaded through Step
+    # Functions Parameters at each stage boundary (§5.7 / OBS-4). Absent on
+    # manually-triggered or older-format executions; e2e metric is skipped then.
+    run_started_at: str | None = event.get("run_started_at")
+
+    _stage_start_ms = time.monotonic() * 1000
+
+    # Instrument AWS SDK calls with X-Ray subsegments (§5.5).
+    configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id, run_id=run_id)
 
     # Bind run context to every log line emitted in this Lambda invocation.
+    # Cleared in the `finally` block below (OBS-1) — without this, a warm
+    # container's NEXT invocation could log under this run's stale run_id if
+    # it fails before rebinding (e.g. in _validate_event).
     structlog.contextvars.bind_contextvars(
         run_id=run_id,
         source_id=source_id,
         entity_id=entity_id,
+        tenant_code=tenant_code,
     )
 
+    try:
+        return _run_analytics_publication(
+            source_id=source_id,
+            entity_id=entity_id,
+            environment=environment,
+            run_id=run_id,
+            canonical_prefix=canonical_prefix,
+            tenant_code=tenant_code,
+            run_started_at=run_started_at,
+            stage_start_ms=_stage_start_ms,
+        )
+    except Exception as exc:
+        _logger.error(
+            "analytics_publication_stage_failed",
+            source_id=source_id,
+            entity_id=entity_id,
+            run_id=run_id,
+            environment=environment,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise
+    finally:
+        structlog.contextvars.clear_contextvars()
+
+
+def _run_analytics_publication(
+    source_id: str,
+    entity_id: str,
+    environment: str,
+    run_id: str,
+    canonical_prefix: str,
+    tenant_code: str,
+    run_started_at: str | None,
+    stage_start_ms: float,
+) -> dict[str, Any]:
+    """Business logic for the analytics publication stage, isolated from handler plumbing."""
     # ── Env vars ─────────────────────────────────────────────────────────────
     region_name = require_env("AWS_REGION")
     analytics_s3_bucket = require_env("ANALYTICS_S3_BUCKET")
     glue_catalog_database = require_env("GLUE_CATALOG_DATABASE")
     governance_s3_bucket: str | None = os.environ.get("GOVERNANCE_S3_BUCKET") or None
 
-    # ── Resolve entity type ───────────────────────────────────────────────────
-    entity_type = _ENTITY_ID_TO_TYPE.get(entity_id)
+    # ── Resolve entity type (ARCH-2: tenant-scoped, DynamoDB-backed) ──────────
+    global _entity_type_registry
+    if _entity_type_registry is None:
+        _entity_type_registry = EntityTypeRegistryClient(
+            environment=environment, region_name=region_name
+        )
+    entity_type = _entity_type_registry.get_entity_type(entity_id, tenant_code=tenant_code)
     if entity_type is None:
         raise ValueError(
-            f"No entity type mapping found for entity_id={entity_id!r}. "
-            "Add it to ENTITY_ID_TO_TYPE in entity_resolution/entity_type_registry.py."
+            f"No entity type mapping found for entity_id={entity_id!r} and "
+            f"tenant_code={tenant_code!r}. Register it via "
+            "EntityTypeRegistryClient.register_entity_type(), or add it to "
+            "ENTITY_ID_TO_TYPE in entity_resolution/entity_type_registry.py "
+            f"for the {tenant_code!r} tenant's default fallback."
         )
 
     analytics_date = datetime.now(UTC).date()
@@ -202,27 +269,34 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         for rec in golden_records
     ]
 
-    # ── Write analytics Parquet ───────────────────────────────────────────────
+    # ── Write analytics Parquet (§3.3 — multipart upload for large files) ─────
     analytics_prefix = (
         f"analytics/{entity_type}"
         f"/analytics_date={analytics_date_str}/"
     )
     analytics_key = f"{analytics_prefix}data.parquet"
 
-    parquet_bytes, arrow_schema = _to_parquet_with_schema(analytics_records)
-    s3.put_object(
-        Bucket=analytics_s3_bucket,
-        Key=analytics_key,
-        Body=parquet_bytes,
-        ContentType="application/octet-stream",
+    s3_writer = S3ParquetWriter(s3)
+    record_count = s3_writer.write(
+        records_iter=iter(analytics_records),
+        bucket=analytics_s3_bucket,
+        key=analytics_key,
+        compression="snappy",
     )
+
+    # PERF-3: reuse the schema S3ParquetWriter already inferred while writing
+    # the Parquet file, instead of a second full pa.Table.from_pylist(...)
+    # materialisation of analytics_records purely to recompute the same
+    # schema for Glue registration.
+    arrow_schema = s3_writer.last_written_schema
+    if arrow_schema is None:
+        arrow_schema = pa.schema([])
 
     _logger.info(
         "analytics_publisher_parquet_written",
         entity_type=entity_type,
         s3_key=analytics_key,
-        record_count=len(analytics_records),
-        size_bytes=len(parquet_bytes),
+        record_count=record_count,
     )
 
     # ── Register / update Glue catalog table ─────────────────────────────────
@@ -282,7 +356,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             )
         _logger.info("analytics_publisher_partition_registered", analytics_date=analytics_date_str)
 
-    except Exception as exc:  # noqa: BLE001 — best-effort catalog registration
+    except Exception as exc:
         # Catalog registration failure does not fail the pipeline — the Parquet
         # is already written and queryable via direct S3 path.  Log the error
         # for investigation and continue.
@@ -294,10 +368,21 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     published_at = datetime.now(UTC).isoformat()
 
+    _emit_metrics_and_e2e_sla(
+        region_name=region_name,
+        tenant_code=tenant_code,
+        source_id=source_id,
+        entity_id=entity_id,
+        environment=environment,
+        stage_start_ms=stage_start_ms,
+        record_count=record_count,
+        run_started_at=run_started_at,
+    )
+
     return {
         "analytics_s3_prefix": analytics_prefix,
         "entity_type":         entity_type,
-        "record_count":        len(analytics_records),
+        "record_count":        record_count,
         "glue_table":          f"{glue_catalog_database}.{glue_table_name}",
         "analytics_date":      analytics_date_str,
         "published_at":        published_at,
@@ -309,10 +394,72 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _emit_metrics_and_e2e_sla(
+    region_name: str,
+    tenant_code: str,
+    source_id: str,
+    entity_id: str,
+    environment: str,
+    stage_start_ms: float,
+    record_count: int,
+    run_started_at: str | None,
+) -> None:
+    """
+    Emit CloudWatch metrics (§5.2) plus the end-to-end pipeline SLA metric
+    (§5.7 / OBS-4) when `run_started_at` was threaded through Step Functions.
+
+    Metric emission must never fail the pipeline run — all failures are
+    logged as warnings, never raised (OWASP A09 — graceful degradation).
+    """
+    try:
+        _metrics_emitter = CloudWatchMetricsEmitter(region_name=region_name)
+        _metrics_emitter.set_tenant_context(tenant_code)
+        _stage_duration_ms = time.monotonic() * 1000 - stage_start_ms
+        _metrics_emitter.emit_stage_duration(
+            source_id=source_id,
+            entity_id=entity_id,
+            environment=environment,
+            stage="analytics_publication",
+            duration_ms=_stage_duration_ms,
+        )
+        _metrics_emitter.emit_records_extracted(
+            source_id=source_id,
+            entity_id=entity_id,
+            environment=environment,
+            count=record_count,
+            stage="analytics_publication",
+        )
+        if run_started_at is not None:
+            # Skipped gracefully when run_started_at was not threaded through
+            # Step Functions Parameters for this run (e.g. older executions).
+            try:
+                e2e_duration_ms = (
+                    datetime.now(UTC) - datetime.fromisoformat(run_started_at)
+                ).total_seconds() * 1000
+                _metrics_emitter.emit_stage_duration(
+                    source_id=source_id,
+                    entity_id=entity_id,
+                    environment=environment,
+                    stage="e2e_pipeline",
+                    duration_ms=e2e_duration_ms,
+                )
+            except ValueError:
+                _logger.warning(
+                    "analytics_publisher_invalid_run_started_at",
+                    run_started_at=run_started_at,
+                )
+        _metrics_emitter.flush()
+    except Exception as _exc:
+        _logger.warning("analytics_publisher_metrics_emission_failed", error=str(_exc))
+
+
 def _load_parquet_records(
     s3: Any, bucket: str, prefix: str
 ) -> list[dict[str, Any]]:
-    """Load all Parquet files from an S3 prefix into a list of dicts."""
+    """Load all Parquet files from an S3 prefix into a list of dicts.
+
+    Uses RecordBatch iteration (§2.3) — 10K rows materialised at a time.
+    """
     clean = prefix.strip().rstrip("/") + "/"
     if ".." in clean or clean.startswith("/"):
         raise ValueError(f"Unsafe S3 prefix rejected: {clean!r}")
@@ -327,30 +474,14 @@ def _load_parquet_records(
             raw = s3.get_object(Bucket=bucket, Key=obj["Key"])
             buf = io.BytesIO(raw["Body"].read())
             table = pq.read_table(buf)  # type: ignore[no-untyped-call]
-            records.extend(table.to_pylist())
+            for batch in table.to_batches(max_chunksize=10_000):
+                batch_dict = batch.to_pydict()
+                n = batch.num_rows
+                cols = list(batch_dict.keys())
+                records.extend({col: batch_dict[col][i] for col in cols} for i in range(n))
             del table
 
     return records
-
-
-def _to_parquet_with_schema(
-    records: list[dict[str, Any]],
-) -> tuple[bytes, pa.Schema]:
-    """Serialise records to Parquet bytes and return (bytes, schema)."""
-    # Flatten any remaining list/dict fields to JSON strings for Parquet compat.
-    import json as _json
-
-    flat = [
-        {
-            k: _json.dumps(v) if isinstance(v, (list, dict)) else v
-            for k, v in r.items()
-        }
-        for r in records
-    ]
-    table = pa.Table.from_pylist(flat)
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression="snappy")  # type: ignore[no-untyped-call]
-    return buf.getvalue(), table.schema
 
 
 def _arrow_schema_to_glue_columns(
@@ -402,3 +533,11 @@ def _validate_event(event: dict[str, Any]) -> None:
             raise ValueError(
                 f"{prefix_field}={val!r} contains disallowed characters."
             )
+
+    # tenant_code is optional (defaults to DEFAULT_TENANT_CODE) but must be
+    # well-formed when present (OWASP A03 / SEC-5).
+    tenant_code = event.get("tenant_code")
+    if tenant_code is not None and not TENANT_CODE_PATTERN.match(str(tenant_code)):
+        raise ValueError(
+            f"tenant_code={tenant_code!r} does not conform to the tenant code format."
+        )

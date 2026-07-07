@@ -1,3 +1,23 @@
+output "entity_extraction_config_table_name" {
+  description = "Name of the entity extraction config DynamoDB table."
+  value       = aws_dynamodb_table.entity_extraction_config.name
+}
+
+output "entity_extraction_config_table_arn" {
+  description = "ARN of the entity extraction config DynamoDB table."
+  value       = aws_dynamodb_table.entity_extraction_config.arn
+}
+
+output "entity_type_registry_table_name" {
+  description = "Name of the entity type registry DynamoDB table (ARCH-2)."
+  value       = aws_dynamodb_table.entity_type_registry.name
+}
+
+output "entity_type_registry_table_arn" {
+  description = "ARN of the entity type registry DynamoDB table (ARCH-2)."
+  value       = aws_dynamodb_table.entity_type_registry.arn
+}
+
 output "watermark_repository_table_name" {
   description = "Name of the watermark repository DynamoDB table."
   value       = aws_dynamodb_table.watermark_repository.name
@@ -26,6 +46,11 @@ output "extraction_failure_dlq_url" {
 output "extraction_failure_dlq_arn" {
   description = "ARN of the extraction failure dead-letter SQS queue."
   value       = aws_sqs_queue.extraction_failure_dlq.arn
+}
+
+output "extraction_failure_dlq_name" {
+  description = "Name of the extraction failure dead-letter SQS queue (used for CloudWatch DLQ depth alarm)."
+  value       = aws_sqs_queue.extraction_failure_dlq.name
 }
 
 output "source_onboarding_registry_table_name" {

@@ -7,11 +7,15 @@ from __future__ import annotations
 import pytest
 
 from contracts.identifier_policy import (
+    DEFAULT_TENANT_CODE,
     PROHIBITED_IDENTIFIERS,
     SEQUENTIAL_INTEGER_PATTERN,
     STABLE_ID_PATTERN,
+    TENANT_CODE_PATTERN,
+    tenant_scoped_key,
     validate_run_id,
     validate_stable_id,
+    validate_tenant_code,
 )
 
 
@@ -112,3 +116,77 @@ class TestValidateRunId:
     def test_alphanumeric_run_id_accepted(self) -> None:
         # A run_id that contains digits but also letters is fine
         assert validate_run_id("run-001-abc") == "run-001-abc"
+
+
+class TestTenantCodePattern:
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "demo",
+            "acme-corp",
+            "globex-eu",
+            "initech",
+            "tenant1",
+            "ab",       # minimum 2 chars
+            "a" + "x" * 47,  # maximum 48 chars
+        ],
+    )
+    def test_valid_tenant_codes_match(self, value: str) -> None:
+        assert TENANT_CODE_PATTERN.match(value) is not None
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "A",              # uppercase
+            "1bad",           # starts with digit
+            "-bad",           # starts with hyphen
+            "a",              # too short (1 char)
+            "",               # empty
+            "has space",      # space
+            "has_underscore", # underscore not allowed
+            "has.dot",        # dot not allowed
+            "UPPER",          # uppercase
+            "a" * 49,         # too long (49 chars)
+        ],
+    )
+    def test_invalid_tenant_codes_do_not_match(self, value: str) -> None:
+        assert TENANT_CODE_PATTERN.match(value) is None
+
+    def test_demo_tenant_code_is_valid(self) -> None:
+        """The default test tenant_code 'demo' must always be valid."""
+        assert TENANT_CODE_PATTERN.match("demo") is not None
+
+    def test_tenant_code_48_chars_valid(self) -> None:
+        """48-character tenant codes are at the boundary and must be accepted."""
+        value = "a" + "b" * 47  # 48 chars total
+        assert TENANT_CODE_PATTERN.match(value) is not None
+
+
+class TestValidateTenantCode:
+    def test_valid_tenant_code_returned_unchanged(self) -> None:
+        assert validate_tenant_code("acme-corp") == "acme-corp"
+
+    def test_invalid_tenant_code_raises(self) -> None:
+        with pytest.raises(ValueError, match="tenant_code"):
+            validate_tenant_code("BAD_CODE")
+
+    def test_custom_field_name_in_error_message(self) -> None:
+        with pytest.raises(ValueError, match="tenant"):
+            validate_tenant_code("BAD", field_name="tenant")
+
+
+class TestTenantScopedKey:
+    def test_default_tenant_is_prefixed_like_any_other(self) -> None:
+        """Matches curated_layer_writer.py's S3 convention: no special-casing."""
+        result = tenant_scoped_key(DEFAULT_TENANT_CODE, "salesforce-account")
+        assert result == "demo#salesforce-account"
+
+    def test_non_default_tenant_prefixes_key(self) -> None:
+        result = tenant_scoped_key("acme-corp", "salesforce-account")
+        assert result == "acme-corp#salesforce-account"
+
+    def test_different_tenants_never_collide(self) -> None:
+        key_a = tenant_scoped_key("acme-corp", "salesforce-account")
+        key_b = tenant_scoped_key("globex-eu", "salesforce-account")
+        key_c = tenant_scoped_key(DEFAULT_TENANT_CODE, "salesforce-account")
+        assert len({key_a, key_b, key_c}) == 3

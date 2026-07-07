@@ -7,6 +7,16 @@
 
 ---
 
+> **Staleness note:** This plan was written 2026-07-01, immediately after Phase 5 (Sage
+> Intacct only) shipped. Significant work has landed since then — most notably a full Sage
+> X3 implementation (`connector_runtime/adapters/sage/products/x3/`) and a broader
+> multi-tenant/control-plane batch — that this document does not reflect everywhere. Gaps
+> known to be stale as a result are annotated inline below. Before treating any "OPEN" item
+> here as still open, cross-check it against `docs/PLATFORM_STATUS.md`, the canonical and
+> more frequently updated resource inventory.
+
+---
+
 ## 1. Current State
 
 Phase 5 delivered the **connector layer** for Sage Intacct:
@@ -58,15 +68,16 @@ wasted retries that would also be rate-limited.
 event (`sage_rate_limit_exceeded`) so CloudWatch dashboards and alerting can surface it.
 The retry sleep itself is intentionally left to Step Functions (platform convention).
 
-#### GAP-S3 — No Terraform placeholder for Sage Secrets Manager secret (OPEN)
-**Risk (OWASP A07):** There is no Terraform resource creating `{env}/sources/sage/intacct/credentials`
-even as a placeholder. Operators must remember to create it manually before the first run.
+#### GAP-S3 — No Terraform placeholder for Sage Secrets Manager secret (FIXED ✅)
+**Risk (OWASP A07):** There was no Terraform resource creating `{env}/sources/sage/intacct/credentials`
+even as a placeholder. Operators had to remember to create it manually before the first run.
 A missing secret causes a runtime `SageCredentialError` that is only caught when the Lambda
 actually executes, with no pre-deployment validation.  
-**Remediation (Phase 6):** Add a `aws_secretsmanager_secret` resource (empty placeholder with
-`lifecycle { ignore_changes = [secret_string] }`) in the `iam` Terraform module and wire a
-`SecretReadOnly` policy statement for `{env}-extraction-runtime-role`. This makes the secret's
-existence a Terraform plan precondition rather than an undocumented manual step.
+**Fix (applied):** `infrastructure/modules/secrets/main.tf` now defines
+`aws_secretsmanager_secret.sage_intacct_credentials` and `aws_secretsmanager_secret.sage_x3_credentials`,
+each with an `aws_secretsmanager_secret_policy` restricting `GetSecretValue` to the extraction
+runtime role only. Terraform creates the secret as an empty shell — populating the actual
+credential *value* is still a manual step (see §4).
 
 #### GAP-S4 — Credential cache TTL does not invalidate on auth failure (OPEN)
 **File:** `sage_credential_manager.py`  
@@ -218,22 +229,25 @@ so `SageRawLayerWriter` uses the config value instead of a hardcoded prefix.
 
 ### 2.5 Scalability Gaps
 
-#### GAP-SC1 — Only `intacct` product supported (OPEN)
+#### GAP-SC1 — Only `intacct` product supported (PARTIALLY FIXED — Sage X3 ✅, others still OPEN)
 **File:** `common/sage_product_registry.py`  
-**Impact:** Sage X3, Sage 100, Sage 200, Sage 300, Sage Accounting are listed as comments
-in `SUPPORTED_SAGE_PRODUCTS` but are not implemented. The strategy pattern is designed for
-extension; adding a product requires implementing three protocol classes.  
-**Remediation (Phase 7+):** Implement per-product strategy triples:
+**Update:** Sage X3 is now fully implemented, not a stub: `connector_runtime/adapters/sage/products/x3/`
+provides `X3AuthClient`, `X3MetadataClient`, and `X3QueryEngine`, all registered in
+`SUPPORTED_SAGE_PRODUCTS` and wired into `SageConnector` (`_PRODUCT_REQUIRED_CREDENTIAL_KEYS["x3"]`,
+`_execute_x3_extraction()`), with live entity configs (`sage-x3-customer`, `sage-x3-supplier`) in
+`scripts/seed_entity_config.py`. Sage 100, Sage 200, Sage 300, and Sage Accounting remain listed only
+as commented-out placeholders in `SUPPORTED_SAGE_PRODUCTS` and are genuinely not implemented.  
+**Remediation (Phase 7+):** Implement per-product strategy triples for the remaining products:
 
 | Product | Auth | Query | Priority |
 |---------|------|-------|----------|
-| Sage X3 | SOAP/REST hybrid | X3 query service | Phase 7 |
+| Sage X3 | SOAP/REST hybrid | X3 query service | ✅ Done |
 | Sage 100 | SQL Server ODBC | Direct SQL | Phase 7 |
 | Sage 200 | REST (Sage 200 API) | OData v4 | Phase 8 |
 | Sage Accounting | REST (Sage Accounting API) | REST GET | Phase 8 |
 
-Each product only needs the three classes + a registry entry — `SageConnector` itself does
-not change.
+Each remaining product only needs the three classes + a registry entry — `SageConnector` itself
+does not change (as demonstrated by the X3 addition).
 
 #### GAP-SC2 — Single entity per Step Functions execution (OPEN)
 **Impact:** Each Sage object (customer, vendor, invoice, etc.) requires a separate Step
@@ -305,7 +319,10 @@ as flat string keys.
 ### Phase 6 — Remaining Gaps (Recommended Next Sprint)
 
 **Priority 1 — Blockers / High Risk:**
-1. **GAP-S3** — Terraform Secrets Manager placeholder for `{env}/sources/sage/intacct/credentials`
+1. ~~**GAP-S3** — Terraform Secrets Manager placeholder for `{env}/sources/sage/intacct/credentials`~~
+   RESOLVED: the Terraform resource exists (`infrastructure/modules/secrets/main.tf`). The only
+   remaining step is populating the secret's actual credential *value* via
+   `aws secretsmanager put-secret-value` (Terraform only creates an empty shell) — see §4.
 2. **GAP-S4** — Credential cache invalidation on `IntacctAuthError`
 3. **GAP-D1** — `value_map` transformation type for `is_active` boolean mapping
 4. **GAP-D2** — Validate dot-notation nested field handling against live Intacct API
@@ -324,7 +341,8 @@ as flat string keys.
 13. **GAP-M4** — Document dot-notation support in field mapping
 
 **Priority 4 — Scalability (Phase 7+):**
-14. **GAP-SC1** — Sage X3 product strategy implementation
+14. ~~**GAP-SC1** — Sage X3 product strategy implementation~~ DONE (Sage X3 is fully implemented;
+    remaining work under GAP-SC1 is limited to Sage 100 / 200 / 300 / Accounting)
 15. **GAP-D3** — Thread `target_raw_s3_prefix` through `_build_sage` builder
 
 ---
@@ -333,9 +351,12 @@ as flat string keys.
 
 ### Prerequisites (one-time setup per environment)
 ```bash
-# 1. Create Secrets Manager secret (manual step until GAP-S3 is fixed)
-AWS_PROFILE=dev aws secretsmanager create-secret \
-  --name dev/sources/sage/intacct/credentials \
+# 1. Populate the Secrets Manager secret value. Terraform now creates the secret
+#    resource itself (aws_secretsmanager_secret.sage_intacct_credentials in
+#    infrastructure/modules/secrets/main.tf — GAP-S3 is fixed), but only as an
+#    empty shell. Populating the actual credential value remains a manual step.
+AWS_PROFILE=dev aws secretsmanager put-secret-value \
+  --secret-id dev/sources/sage/intacct/credentials \
   --secret-string '{
     "base_url":      "https://api.intacct.com/ia/api/v1",
     "token_url":     "https://api.intacct.com/ia/api/v1/auth/token",
@@ -389,25 +410,35 @@ AWS_PROFILE=dev python scripts/seed_field_mappings.py \
 
 ---
 
-## 5. Adding a New Sage Product (e.g. Sage X3)
+## 5. Adding a New Sage Product (e.g. Sage 100)
 
-1. Create `connector_runtime/adapters/sage/products/x3/` with:
-   - `x3_auth.py` — implements `SageAuthProtocol` (X3 uses SOAP or REST depending on version)
-   - `x3_metadata_client.py` — implements `SageMetadataProtocol`
-   - `x3_query_engine.py` — implements `SageQueryProtocol`
+> **Note:** This section originally used Sage X3 as the hypothetical example. Sage X3 has
+> since been implemented end-to-end following exactly this recipe — see
+> `connector_runtime/adapters/sage/products/x3/` (`x3_auth.py`, `x3_metadata_client.py`,
+> `x3_query_engine.py`), the `"x3"` entries in `sage_product_registry.py` and
+> `sage_connector.py`'s `_PRODUCT_REQUIRED_CREDENTIAL_KEYS`, and the `sage-x3-customer` /
+> `sage-x3-supplier` entity configs in `seed_entity_config.py`. Treat it as a working
+> reference implementation of the steps below, not as an example of a gap. The steps
+> themselves remain the template for the next new product (e.g. Sage 100).
+
+1. Create `connector_runtime/adapters/sage/products/100/` with:
+   - `<product>_auth.py` — implements `SageAuthProtocol`
+   - `<product>_metadata_client.py` — implements `SageMetadataProtocol`
+   - `<product>_query_engine.py` — implements `SageQueryProtocol`
 
 2. In `sage_product_registry.py`:
-   - Add `"x3"` to `SUPPORTED_SAGE_PRODUCTS`
-   - Register the triple with `_register_product("x3", SageProductStrategies(...))`
+   - Add the product name to `SUPPORTED_SAGE_PRODUCTS`
+   - Register the triple with `_register_product(<name>, SageProductStrategies(...))`
 
 3. In `sage_connector.py`:
-   - Add `"x3": frozenset({...})` to `_PRODUCT_REQUIRED_CREDENTIAL_KEYS`
+   - Add `<name>: frozenset({...})` to `_PRODUCT_REQUIRED_CREDENTIAL_KEYS`
 
-4. Create entity configs in `seed_entity_config.py` with `"sage_product": "x3"`
+4. Create entity configs in `seed_entity_config.py` with `"sage_product": <name>`
 
-5. Create field mappings in `config/field_mappings/sage/sage-x3-{entity}/v1.json`
+5. Create field mappings in `config/field_mappings/sage/sage-<name>-{entity}/v1.json`
 
-No changes to `SageConnector`, `ConnectorInterface`, or the extraction pipeline handler.
+No changes to `SageConnector`, `ConnectorInterface`, or the extraction pipeline handler —
+confirmed in practice by the X3 addition, which touched none of these.
 
 ---
 

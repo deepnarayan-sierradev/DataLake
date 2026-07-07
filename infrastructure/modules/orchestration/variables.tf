@@ -80,3 +80,48 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "lambda_package_s3_bucket" {
+  description = "S3 bucket holding the Lambda deployment zip (used by the pipeline trigger Lambda)."
+  type        = string
+}
+
+variable "lambda_package_s3_key" {
+  description = "S3 key of the Lambda deployment zip package."
+  type        = string
+}
+
+variable "lambda_package_source_hash" {
+  description = "Base64 SHA-256 hash of the Lambda zip package."
+  type        = string
+}
+
+variable "pipeline_trigger_role_arn" {
+  description = "ARN of the IAM role assumed by the pipeline trigger Lambda."
+  type        = string
+}
+
+variable "pipeline_trigger_reserved_concurrency" {
+  description = "Reserved concurrent executions for the pipeline trigger Lambda."
+  type        = number
+  default     = 50
+  validation {
+    condition     = var.pipeline_trigger_reserved_concurrency >= 1 && var.pipeline_trigger_reserved_concurrency <= 1000
+    error_message = "pipeline_trigger_reserved_concurrency must be between 1 and 1000."
+  }
+}
+
+variable "dlq_processor_role_arn" {
+  description = "ARN of the IAM role assumed by the DLQ processor Lambda."
+  type        = string
+}
+
+variable "extraction_failure_dlq_arn" {
+  description = "ARN of the extraction failure SQS DLQ consumed by the DLQ processor Lambda."
+  type        = string
+}
+
+variable "run_audit_log_table_name" {
+  description = "Name of the DynamoDB run audit log table (used by DLQ processor)."
+  type        = string
+}

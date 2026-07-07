@@ -18,14 +18,13 @@ from __future__ import annotations
 
 import io
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
 from transformation.curated_accumulator import CuratedAccumulator, merge_records
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -256,7 +255,9 @@ class TestCuratedAccumulatorAccumulate:
 
         result = acc.accumulate(delta, domain="salesforce", entity_id="salesforce-contact", run_id="run-002")
 
-        assert result.previous_record_count == 3
+        # previous_record_count is -1 with DuckDB merge (not loaded into Python RAM)
+        # or the actual count when DuckDB falls back to Python merge.
+        assert result.previous_record_count in (-1, 3)
         assert result.delta_record_count == 2
         assert result.merged_record_count == 4  # 3 previous + 1 new - 0 deleted
         result_by_id = {r["Id"]: r for r in result.merged_records}
@@ -283,3 +284,33 @@ class TestCuratedAccumulatorAccumulate:
         assert result.merged_record_count == 1
         ids = {r["Id"] for r in result.merged_records}
         assert ids == {"1"}
+
+
+class TestCuratedAccumulatorDefensiveValidation:
+    def test_empty_pk_field_raises_value_error(self) -> None:
+        from unittest.mock import MagicMock
+        with pytest.raises(ValueError, match="primary_key_field"):
+            CuratedAccumulator(
+                s3=MagicMock(),
+                curated_s3_bucket="test",
+                primary_key_field="",
+            )
+
+    def test_whitespace_pk_field_raises_value_error(self) -> None:
+        from unittest.mock import MagicMock
+        with pytest.raises(ValueError, match="primary_key_field"):
+            CuratedAccumulator(
+                s3=MagicMock(),
+                curated_s3_bucket="test",
+                primary_key_field="   ",
+            )
+
+    def test_valid_pk_field_constructs_successfully(self) -> None:
+        from unittest.mock import MagicMock
+        acc = CuratedAccumulator(
+            s3=MagicMock(),
+            curated_s3_bucket="test",
+            primary_key_field="Id",
+            region_name="us-east-1",
+        )
+        assert acc._pk_field == "Id"

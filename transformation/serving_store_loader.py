@@ -29,9 +29,9 @@ import boto3
 import pymysql
 import pymysql.cursors
 
+from governance.lineage_record import LineageEmitter, build_serving_store_lineage
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
-from governance.lineage_record import LineageEmitter, build_serving_store_lineage
 
 _logger = get_platform_logger(__name__)
 
@@ -148,6 +148,7 @@ class ServingStoreLoader:
                 entity_id=table_name,
                 environment=self._environment,
                 count=loaded,
+                stage="serving_store_load",
             )
 
         # Emit lineage record if governance context was provided

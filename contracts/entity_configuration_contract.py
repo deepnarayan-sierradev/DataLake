@@ -28,6 +28,7 @@ from contracts.identifier_policy import (
 from contracts.identifier_policy import (
     STABLE_ID_PATTERN as _STABLE_ID_PATTERN,
 )
+from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
 
 # Field name pattern: letters, digits, underscore only — no dots.
 # pk_field and soft_delete_field must be flat canonical field names because
@@ -87,6 +88,17 @@ class EntityExtractionConfig(BaseModel):
     config_version: str = Field(
         ...,
         description="Semantic version of this configuration record (e.g. '1.0.0').",
+    )
+
+    # ── Multi-tenancy (§1.1) ──────────────────────────────────────────────────
+    tenant_code: str = Field(
+        default="demo",
+        description=(
+            "Tenant identifier slug (e.g. 'demo', 'acme-corp'). "
+            "Used as the root S3 path prefix for data isolation: "
+            "{tenant_code}/raw/{source_id}/{entity_id}/... "
+            "Validated against TENANT_CODE_PATTERN at load time."
+        ),
     )
 
     # ── Extraction behaviour ──────────────────────────────────────────────────
@@ -201,6 +213,32 @@ class EntityExtractionConfig(BaseModel):
         ),
     )
 
+    # ── Lambda execution tuning (§3.5, §3.7) ─────────────────────────────────
+    max_records_per_lambda_run: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Hard cap on records extracted per Lambda invocation. When the extraction "
+            "stage reaches this count with sufficient time remaining, it commits a "
+            "partial watermark and raises LambdaTimeoutWarning so Step Functions "
+            "can re-trigger from the checkpoint. "
+            "None means no cap — the full extraction runs in a single invocation. "
+            "Recommended for entities expected to exceed 500K records."
+        ),
+    )
+    lambda_memory_mb: int | None = Field(
+        default=None,
+        ge=1024,
+        le=10240,
+        description=(
+            "Lambda memory override in MB for this entity. When set, the Step Functions "
+            "Parameters block passes this value so the appropriate Lambda alias is invoked. "
+            "Use 2048 for entities requiring DuckDB in-process merge, 4096+ for very large "
+            "entities. None uses the Lambda function default (1024 MB for extraction, "
+            "2048 MB for transformation)."
+        ),
+    )
+
     # ── Validators ────────────────────────────────────────────────────────────
 
     @field_validator("source_id", "entity_id", mode="before")
@@ -208,10 +246,6 @@ class EntityExtractionConfig(BaseModel):
     def enforce_stable_identifier_format(cls, value: str) -> str:
         """
         Source and entity IDs must match the stable identifier format.
-        Same pattern enforced by StructuredLogEvent — single source of truth
-        for identifier constraints across the platform.
-        Valid: 'salesforce', 'salesforce-account', 'mysql-rds', 'netsuite-customer'
-        Invalid: 'Salesforce', 'salesforce_account', 'phase1', 'helper'
         """
         if not _STABLE_ID_PATTERN.match(value):
             raise ValueError(
@@ -224,6 +258,18 @@ class EntityExtractionConfig(BaseModel):
             raise ValueError(
                 f"Identifier '{value}' is a prohibited generic name. "
                 "Use a specific, domain-meaningful identifier instead."
+            )
+        return value
+
+    @field_validator("tenant_code", mode="before")
+    @classmethod
+    def validate_tenant_code(cls, value: str) -> str:
+        """Tenant code must match TENANT_CODE_PATTERN (§1.1)."""
+        if not _TENANT_CODE_PATTERN.match(value):
+            raise ValueError(
+                f"tenant_code '{value}' does not conform to the tenant code format. "
+                "Use lowercase letters, digits, and hyphens only (2-48 chars, "
+                "must start with a letter). Examples: 'demo', 'acme-corp'."
             )
         return value
 

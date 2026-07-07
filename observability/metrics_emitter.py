@@ -63,11 +63,28 @@ class CloudWatchMetricsEmitter:
         self,
         region_name: str,
         namespace: str = PLATFORM_METRIC_NAMESPACE,
+        tenant_code: str | None = None,
     ) -> None:
         self._namespace = namespace
         # Explicit region_name — never rely on ambient environment variables
         self._client = boto3.client("cloudwatch", region_name=region_name)
         self._pending: list[dict[str, object]] = []
+        # Tenant code added to every metric dimension when set (§1.1 SaaS).
+        # None = single-tenant mode (backward compatible; TenantCode dim omitted).
+        self._tenant_code: str | None = tenant_code
+
+    def set_tenant_context(self, tenant_code: str) -> None:
+        """
+        Set the tenant code for all subsequent metric emissions.
+
+        Call once per Lambda invocation after validating the event's tenant_code.
+        All metrics emitted after this call will include the TenantCode dimension,
+        enabling per-tenant CloudWatch dashboards and alarms.
+
+        Args:
+            tenant_code: Validated tenant slug (e.g. 'demo', 'acme-corp').
+        """
+        self._tenant_code = tenant_code
 
     # ── Public metric methods ─────────────────────────────────────────────────
 
@@ -77,13 +94,14 @@ class CloudWatchMetricsEmitter:
         entity_id: str,
         environment: str,
         duration_ms: float,
+        stage: str | None = None,
     ) -> None:
         """Emit the total extraction duration for one entity run."""
         self._put_metric(
             metric_name="ExtractionDurationMs",
             value=duration_ms,
             unit="Milliseconds",
-            dimensions=self._build_dimensions(source_id, entity_id, environment),
+            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
         )
 
     def emit_records_extracted(
@@ -92,13 +110,14 @@ class CloudWatchMetricsEmitter:
         entity_id: str,
         environment: str,
         count: int,
+        stage: str | None = None,
     ) -> None:
         """Emit the count of records successfully extracted and written to raw layer."""
         self._put_metric(
             metric_name="RecordsExtracted",
             value=float(count),
             unit="Count",
-            dimensions=self._build_dimensions(source_id, entity_id, environment),
+            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
         )
 
     def emit_records_failed(
@@ -107,13 +126,14 @@ class CloudWatchMetricsEmitter:
         entity_id: str,
         environment: str,
         count: int,
+        stage: str | None = None,
     ) -> None:
         """Emit the count of records that failed extraction or validation."""
         self._put_metric(
             metric_name="RecordsFailed",
             value=float(count),
             unit="Count",
-            dimensions=self._build_dimensions(source_id, entity_id, environment),
+            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
         )
 
     def emit_retry_count(
@@ -122,13 +142,14 @@ class CloudWatchMetricsEmitter:
         entity_id: str,
         environment: str,
         count: int,
+        stage: str | None = None,
     ) -> None:
         """Emit the total retry attempts for a run stage."""
         self._put_metric(
             metric_name="RetryCount",
             value=float(count),
             unit="Count",
-            dimensions=self._build_dimensions(source_id, entity_id, environment),
+            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
         )
 
     def emit_schema_drift_count(
@@ -137,13 +158,14 @@ class CloudWatchMetricsEmitter:
         entity_id: str,
         environment: str,
         count: int,
+        stage: str | None = None,
     ) -> None:
         """Emit the number of schema drift events detected in a run."""
         self._put_metric(
             metric_name="SchemaDriftCount",
             value=float(count),
             unit="Count",
-            dimensions=self._build_dimensions(source_id, entity_id, environment),
+            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
         )
 
     def emit_watermark_lag_seconds(
@@ -152,13 +174,60 @@ class CloudWatchMetricsEmitter:
         entity_id: str,
         environment: str,
         lag_seconds: float,
+        stage: str | None = None,
     ) -> None:
         """Emit the lag between the current watermark and now (data freshness indicator)."""
         self._put_metric(
             metric_name="WatermarkLagSeconds",
             value=lag_seconds,
             unit="Seconds",
-            dimensions=self._build_dimensions(source_id, entity_id, environment),
+            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
+        )
+
+    def emit_stage_duration(
+        self,
+        source_id: str,
+        entity_id: str,
+        environment: str,
+        stage: str,
+        duration_ms: float,
+    ) -> None:
+        """Emit the total duration for a named pipeline stage."""
+        self._put_metric(
+            metric_name="StageDurationMs",
+            value=duration_ms,
+            unit="Milliseconds",
+            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
+        )
+
+    def emit_golden_record_count(
+        self,
+        source_id: str,
+        entity_id: str,
+        environment: str,
+        count: int,
+    ) -> None:
+        """Emit the count of golden records produced by entity resolution."""
+        self._put_metric(
+            metric_name="GoldenRecordCount",
+            value=float(count),
+            unit="Count",
+            dimensions=self._build_dimensions(source_id, entity_id, environment, tenant_code=self._tenant_code),
+        )
+
+    def emit_cluster_count(
+        self,
+        source_id: str,
+        entity_id: str,
+        environment: str,
+        count: int,
+    ) -> None:
+        """Emit the count of entity clusters identified during entity resolution."""
+        self._put_metric(
+            metric_name="ClusterCount",
+            value=float(count),
+            unit="Count",
+            dimensions=self._build_dimensions(source_id, entity_id, environment, tenant_code=self._tenant_code),
         )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
@@ -213,9 +282,19 @@ class CloudWatchMetricsEmitter:
         source_id: str,
         entity_id: str,
         environment: str,
+        stage: str | None = None,
+        tenant_code: str | None = None,
     ) -> list[dict[str, str]]:
-        return [
+        # TenantCode is first so CloudWatch console shows it most prominently.
+        # Enables per-tenant dashboards and alarms in multi-tenant deployments.
+        dims: list[dict[str, str]] = []
+        if tenant_code:
+            dims.append({"Name": "TenantCode", "Value": tenant_code})
+        dims.extend([
             {"Name": "SourceId", "Value": source_id},
             {"Name": "EntityId", "Value": entity_id},
             {"Name": "Environment", "Value": environment},
-        ]
+        ])
+        if stage:
+            dims.append({"Name": "Stage", "Value": stage})
+        return dims

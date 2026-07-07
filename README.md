@@ -1,8 +1,13 @@
 # Enterprise Data Lake Platform
 
-Metadata-driven, connector-based extraction platform built on AWS.
+Metadata-driven, connector-based, multi-tenant-aware extraction platform built on AWS.
 
 **Status:** Dev environment live ✅ | Staging 🔲 | Production 🔲
+
+If you're using Claude Code or another AI coding agent on this repo, it reads root `CLAUDE.md`
+automatically — that file, plus `infrastructure/CLAUDE.md` and `connector_runtime/CLAUDE.md`, are
+the agent-facing counterpart to the Developer Guide below and capture the same conventions in a
+form meant to survive across sessions.
 
 ## Documentation
 
@@ -12,25 +17,47 @@ Metadata-driven, connector-based extraction platform built on AWS.
 | [docs/PLATFORM_STATUS.md](docs/PLATFORM_STATUS.md) | Everyone | Current deployment state, live data, all AWS resource names |
 | [docs/PIPELINE_FLOW.md](docs/PIPELINE_FLOW.md) | Engineers, architects, on-call | Full pipeline architecture, stage-by-stage reference |
 | [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Platform engineers | Environment deployment (staging/prod), field mapping, AWS settings |
-| [docs/PRODUCTION_INCIDENT_RUNBOOK.md](docs/PRODUCTION_INCIDENT_RUNBOOK.md) | On-call engineers | Incident response, runbooks per failure scenario |
+| [docs/PRODUCTION_INCIDENT_RUNBOOK.md](docs/PRODUCTION_INCIDENT_RUNBOOK.md) | On-call engineers | Incident response, runbooks per failure scenario, including cross-tenant incidents |
+| [docs/GO_LIVE_READINESS_CHECKLIST.md](docs/GO_LIVE_READINESS_CHECKLIST.md) | Platform engineers, leadership | Go-live gate checklist |
+| [docs/SAGE_ERP_IMPLEMENTATION_PLAN.md](docs/SAGE_ERP_IMPLEMENTATION_PLAN.md) | Engineers | Sage Intacct/X3 connector implementation plan |
+| [docs/COST_ANALYSIS_AND_ROI.md](docs/COST_ANALYSIS_AND_ROI.md) | Finance, leadership | AWS resource cost breakdown and ROI model |
+| [docs/FAQ_FOR_MANAGEMENT.md](docs/FAQ_FOR_MANAGEMENT.md) | Management | Common questions, plain-language answers |
 | [docs/LEADERSHIP_BRIEF.md](docs/LEADERSHIP_BRIEF.md) | CTO, CIO, VP, Finance | What was built, current status, ROI, roadmap |
 | [docs/EXECUTIVE_OVERVIEW.md](docs/EXECUTIVE_OVERVIEW.md) | Engineering & product leadership | Deep-dive functional walkthrough, compliance, security |
 | [docs/GLOSSARY_AND_TERMINOLOGY.md](docs/GLOSSARY_AND_TERMINOLOGY.md) | All | Term definitions |
+| [docs/PROJECT_NOTES_QA.md](docs/PROJECT_NOTES_QA.md) | Engineers | Working notes / Q&A log |
 | [Enterprise_Data_Lake_Platform_Full_Specification.md](Enterprise_Data_Lake_Platform_Full_Specification.md) | All | Full platform specification (source of truth) |
+
+### Architecture and multi-tenant rollout docs
+
+Read in this order — each supersedes the previous **for sequencing only, not design detail**:
+
+1. [architecture/IMPROVEMENT_PLAN.md](architecture/IMPROVEMENT_PLAN.md) — original prioritized gap list across 5 quality dimensions
+2. [architecture/GAP_ANALYSIS_FINDINGS.md](architecture/GAP_ANALYSIS_FINDINGS.md) — verified findings catalog with an implementation-status table
+3. [architecture/MULTI_TENANT_ROLLOUT_PLAN.md](architecture/MULTI_TENANT_ROLLOUT_PLAN.md) — phased rollout plan; current source of truth for what's done vs. deferred
 
 ## Connector Credentials (AWS Secrets Manager)
 
-All connector credentials are loaded from AWS Secrets Manager using this path pattern:
+Most connector credentials are loaded from AWS Secrets Manager using this path pattern:
 
 `{environment}/sources/{source_id}/credentials`
+
+**Sage is the one exception** — it has an extra `{product_name}` segment because it has two
+distinct products (Intacct and X3) with separate credentials: `{environment}/sources/sage/{product_name}/credentials`.
 
 | Source | Secret ID example (`environment=dev`) | Status | Required JSON keys |
 |---|---|---|---|
 | Salesforce | `dev/sources/salesforce/credentials` | ✅ Connected | `instance_url`, `client_id`, `client_secret` |
 | MySQL RDS | `dev/sources/mysql-rds/credentials` | ✅ Connected | `host`, `port`, `username`, `password`, `database` |
-| NetSuite | `dev/sources/netsuite/credentials` | 🔲 Pending | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
+| Sage Intacct | `dev/sources/sage/intacct/credentials` | ✅ Connected | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
+| Sage X3 | `dev/sources/sage/x3/credentials` | ✅ Connected | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
+| NetSuite | `dev/sources/netsuite/credentials` | 🟡 Code-complete, not yet live — connector, auth client, and query planner are fully implemented (`connector_runtime/adapters/netsuite/`); confirm the secret is populated and entity config is schedule-enabled before assuming live extraction | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
 
-See [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) for `aws secretsmanager put-secret-value` examples.
+All five secrets above are Terraform-managed (`infrastructure/modules/secrets/main.tf` creates
+the empty secret shells with a resource policy restricting reads to the extraction runtime role)
+— you still need to populate the actual values by hand. See
+[docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) for `aws secretsmanager put-secret-value`
+examples.
 
 ## Development Setup
 
@@ -61,7 +88,10 @@ pytest --cov --cov-fail-under=80
 
 # 5. Run linting and type checks
 ruff check .
-mypy .
+mypy connector_runtime schema_management watermark_management observability orchestration \
+     transformation governance entity_resolution analytics_publisher contracts
+# NOTE: bare `mypy .` currently fails for reasons unrelated to any given change — see the
+# caveat in "Running CI checks locally" below. Scope it as shown above instead.
 ```
 
 ### Running CI checks locally
@@ -69,9 +99,14 @@ mypy .
 ```bash
 # Lint
 ruff check . --output-format=github
+ruff format --check .
 
-# Type check
-mypy .
+# Type check — scope it; bare `mypy .` fails on a dist/lambda-build/typing_extensions.py
+# shadow conflict (present after `make lambda-package`) and a scripts/generate_presentation.py
+# vs. pptx/generate_presentation.py module-name collision. Neither is fixed yet, and
+# `make typecheck` has the same problem since it also just runs bare `mypy .`.
+mypy connector_runtime schema_management watermark_management observability orchestration \
+     transformation governance entity_resolution analytics_publisher contracts
 
 # Tests with coverage
 pytest --cov --cov-report=term-missing --cov-fail-under=80
@@ -81,4 +116,7 @@ bandit -r . -c pyproject.toml
 
 # Dependency CVE scan
 pip-audit
+
+# Naming standard — rejects helper/util/common/manager identifiers
+make banned-names
 ```

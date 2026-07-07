@@ -59,3 +59,40 @@ variable "tags" {
   default     = {}
   description = "Additional resource tags merged with module-managed tags."
 }
+
+variable "extraction_failure_dlq_name" {
+  type        = string
+  default     = ""
+  description = "Name of the extraction failure SQS DLQ. Used for the DLQ depth alarm. Leave empty to skip."
+}
+
+variable "extraction_lambda_name" {
+  type        = string
+  default     = ""
+  description = "Name of the extraction pipeline Lambda function. Used for error/duration/throttle alarms."
+}
+
+variable "transformation_lambda_name" {
+  type        = string
+  default     = ""
+  description = "Name of the transformation pipeline Lambda function."
+}
+
+variable "entity_resolution_lambda_name" {
+  type        = string
+  default     = ""
+  description = "Name of the entity resolution pipeline Lambda function."
+}
+
+variable "analytics_publisher_lambda_name" {
+  type        = string
+  default     = ""
+  description = "Name of the analytics publisher Lambda function."
+}
+
+variable "pagerduty_integration_url" {
+  type        = string
+  default     = ""
+  description = "PagerDuty or OpsGenie HTTPS endpoint for SNS subscription. Leave empty to skip."
+  sensitive   = true
+}

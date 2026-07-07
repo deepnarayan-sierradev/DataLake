@@ -41,21 +41,28 @@ Security (OWASP A03, A07, A09):
 
 from __future__ import annotations
 
-import boto3
 import dataclasses
 import os
 import re
 from datetime import UTC, datetime
 from typing import Any, Final
 
-from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+import boto3
+import structlog
+
 from connector_runtime.configuration_repository.configuration_repository import (
     ConfigurationNotFoundError,
     ConfigurationRepositoryClient,
+    ConfigurationValidationError,
+)
+from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from observability.lambda_utils import (
+    check_lambda_timeout,
+    configure_xray,
+    require_env,
 )
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
-from observability.lambda_utils import require_env, check_lambda_timeout
 from transformation.curated_accumulator import CuratedAccumulator
 from transformation.curated_layer_writer import CuratedLayerWriter
 from transformation.curated_utils import source_id_to_domain as _source_id_to_domain
@@ -109,6 +116,22 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     run_id: str = event["run_id"]
     raw_s3_prefix: str = event["raw_s3_prefix"]
     mapping_version: str = str(event.get("mapping_version") or "latest")
+    # Tenant code for S3 path isolation (§1.1). Default "demo" for backward compat.
+    tenant_code: str = str(event.get("tenant_code") or "demo")
+
+    # Instrument AWS SDK calls with X-Ray subsegments (§5.5).
+    configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id, run_id=run_id)
+
+    # Bind run context to every log line emitted in this Lambda invocation
+    # (§OBS-3 — standardizes on the same contextvars mechanism already used
+    # by entity_resolution and analytics_publisher handlers). Cleared in the
+    # existing `finally` block below alongside metrics flush.
+    structlog.contextvars.bind_contextvars(
+        run_id=run_id,
+        source_id=source_id,
+        entity_id=entity_id,
+        tenant_code=tenant_code,
+    )
 
     if not _MAPPING_VERSION_PATTERN.match(mapping_version):
         raise ValueError(
@@ -158,6 +181,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     )
 
     metrics_emitter = CloudWatchMetricsEmitter(region_name=region_name)
+    metrics_emitter.set_tenant_context(tenant_code)
 
     # ── Load entity config (for incremental merge settings) ───────────────────
     # Reads primary_key_field and soft_delete_field from the entity config record
@@ -166,18 +190,19 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     # incremental entities not yet migrated), config loading succeeds but returns
     # None for both fields — accumulator is not created and pipeline is unchanged.
     #
-    # Security: table name is constructed server-side from the validated
-    # environment string; never interpolated from user event input (OWASP A03).
+    # Security: environment is validated against _KNOWN_ENVIRONMENTS above and
+    # is the only input to table-name construction inside the repository
+    # client; never interpolated from unvalidated user event input (OWASP A03).
     curated_accumulator: CuratedAccumulator | None = None
     try:
-        config_table = f"{environment}-entity-extraction-config"
         config_repo = ConfigurationRepositoryClient(
-            table_name=config_table,
+            environment=environment,
             region_name=region_name,
         )
         entity_config = config_repo.load_config(
             source_id=source_id,
             entity_id=entity_id,
+            tenant_code=tenant_code,
         )
         if entity_config.primary_key_field is not None:
             curated_accumulator = CuratedAccumulator(
@@ -185,6 +210,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 curated_s3_bucket=curated_s3_bucket,
                 primary_key_field=entity_config.primary_key_field,
                 soft_delete_field=entity_config.soft_delete_field,
+                region_name=region_name,
             )
             _logger.info(
                 "curated_accumulator_wired",
@@ -201,15 +227,21 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             source_id=source_id,
             entity_id=entity_id,
         )
-    except Exception as exc:  # noqa: BLE001
-        # Config load failure must never block transformation — append-only
-        # fallback is safe (data is written, merge is simply skipped).
+    except ConfigurationValidationError as exc:
+        # Stored config record failed Pydantic validation — not a blocker for
+        # transformation. Append-only fallback is safe (data is written, merge
+        # is simply skipped), but this is unexpected enough to warrant a warning.
         _logger.warning(
-            "entity_config_load_failed_accumulator_disabled",
+            "entity_config_invalid_accumulator_disabled",
             source_id=source_id,
             entity_id=entity_id,
             error=str(exc),
         )
+    # Deliberately narrow: a bare `except Exception` here previously masked a
+    # constructor signature mismatch (TypeError) as a benign config-load
+    # failure, silently disabling the SCD merge for every entity. Programming
+    # errors (TypeError, AttributeError, etc.) must propagate and fail the
+    # invocation loudly rather than degrade into "accumulator disabled."
 
     pipeline = TransformationPipeline(
         mapping_registry_client=mapping_registry,
@@ -237,6 +269,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         governance_s3_bucket=governance_s3_bucket,
         glue_catalog_database=glue_catalog_database,
         environment=environment,
+        tenant_code=tenant_code,
+        lambda_context=context,  # for mid-execution timeout checks (§3.5)
     )
 
     # ── Execute pipeline ──────────────────────────────────────────────────────
@@ -246,6 +280,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # Flush buffered CloudWatch metrics regardless of success or failure.
         # flush() is designed to never raise — it swallows ClientError internally.
         metrics_emitter.flush()
+        # §OBS-1: clear bound context so a warm container's next invocation
+        # never logs under this run's stale run_id/entity_id/tenant_code.
+        structlog.contextvars.clear_contextvars()
 
     _logger.info(
         "transformation_pipeline_handler_completed",

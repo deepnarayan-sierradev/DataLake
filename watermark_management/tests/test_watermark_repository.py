@@ -32,7 +32,7 @@ from watermark_management.watermark_repository.watermark_repository import (
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_TABLE = f"{_ENV}-watermark-repository"
+_TABLE = f"{_ENV}-edl-watermark-repository"
 
 _NOW = datetime(2026, 6, 11, 14, 0, 0, tzinfo=UTC)
 
@@ -448,3 +448,45 @@ class TestWatermarkRepositoryErrorPaths:
         )
         with pytest.raises(ClientError):
             self.repo.advance_watermark(rec, _NOW, "run-test-001")
+
+
+class TestTenantScoping:
+    """§1.1 / ARCH-1: tenant_code is stored on every record and cross-checked on read."""
+
+    @mock_aws
+    def test_initialise_watermark_stamps_tenant_code(self) -> None:
+        _create_table()
+        repo = _repo()
+        record = repo.initialise_watermark(
+            "salesforce", "salesforce-account", _NOW, "run-001", tenant_code="acme-corp"
+        )
+        assert record.tenant_code == "acme-corp"
+
+    @mock_aws
+    def test_get_watermark_wrong_tenant_returns_none(self) -> None:
+        """A watermark seeded for one tenant is invisible to another (SEC-2 app-level guard)."""
+        _create_table()
+        repo = _repo()
+        repo.initialise_watermark(
+            "salesforce", "salesforce-account", _NOW, "run-001", tenant_code="acme-corp"
+        )
+        # Requesting under a different tenant must behave like "first run".
+        other_tenant = repo.get_watermark("salesforce", "salesforce-account", tenant_code="globex-eu")
+        assert other_tenant is None
+        # The owning tenant still sees it.
+        owning_tenant = repo.get_watermark("salesforce", "salesforce-account", tenant_code="acme-corp")
+        assert owning_tenant is not None
+
+    @mock_aws
+    def test_advance_watermark_preserves_tenant_code(self) -> None:
+        _create_table()
+        repo = _repo()
+        rec = repo.initialise_watermark(
+            "salesforce", "salesforce-account", _NOW, "run-001", tenant_code="acme-corp"
+        )
+        advanced = repo.advance_watermark(rec, _NOW + timedelta(hours=1), "run-002")
+        assert advanced.tenant_code == "acme-corp"
+
+    def test_get_watermark_invalid_tenant_code_raises(self) -> None:
+        with pytest.raises(ValueError, match="tenant_code"):
+            _repo().get_watermark("salesforce", "salesforce-account", tenant_code="BAD_CODE")

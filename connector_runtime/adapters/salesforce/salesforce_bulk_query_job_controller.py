@@ -41,7 +41,11 @@ from typing import Any, Final
 import requests
 
 from connector_runtime.adapters.salesforce.salesforce_auth_protocol import SalesforceAuthProtocol
-from connector_runtime.interfaces.connector_interface import ExtractionRecord
+from connector_runtime.interfaces.connector_interface import (
+    ExtractionErrorClassification,
+    ExtractionRecord,
+    TransientConnectorError,
+)
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -84,16 +88,28 @@ class BulkJobState(StrEnum):
     FAILED = "Failed"
 
 
-class BulkJobTimeoutError(Exception):
+class BulkJobTimeoutError(TransientConnectorError):
     """Raised when a Bulk API 2.0 job exceeds the allowed polling timeout."""
+
+    classification = ExtractionErrorClassification.TRANSIENT_TIMEOUT
 
 
 class BulkJobFailedError(Exception):
-    """Raised when Salesforce marks the job as Failed or Aborted."""
+    """
+    Raised when Salesforce marks the job as Failed or Aborted.
+
+    Deliberately NOT a TransientConnectorError/DeterministicConnectorError
+    subclass: a Salesforce-side job failure can stem from either a transient
+    platform issue or a deterministic data/query problem, and the failure
+    reason string is not parsed here. classify_extraction_error() routes this
+    to UNKNOWN for DLQ + manual review rather than guessing (DP-3).
+    """
 
 
-class BulkApiLimitError(Exception):
+class BulkApiLimitError(TransientConnectorError):
     """Raised when the Salesforce API limit check blocks job submission."""
+
+    classification = ExtractionErrorClassification.TRANSIENT_THROTTLE
 
 
 class SalesforceBulkQueryJobController:

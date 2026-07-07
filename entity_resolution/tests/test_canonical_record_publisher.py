@@ -13,7 +13,6 @@ from moto import mock_aws
 from entity_resolution.canonical_record_publisher.canonical_record_publisher import (
     GoldenRecordPublicationError,
     GoldenRecordPublisher,
-    _to_parquet,
 )
 from entity_resolution.matching_engine.match_rule_engine import (
     DeterministicMatchField,
@@ -204,16 +203,9 @@ class TestGoldenRecordPublisher:
 # ---------------------------------------------------------------------------
 
 
-class TestToParquet:
-    """Cover _to_parquet(empty list) branch (line 240)."""
-
-    def test_empty_records_returns_empty_bytes(self):
-        assert _to_parquet([]) == b""
-
-
 @mock_aws
 class TestPublisherWithLineageEmission:
-    """Cover the _emit_golden_record_lineage path (lines 316-336)."""
+    """Cover the emit_golden_record_lineage path (publishing_shared)."""
 
     def setup_method(self, method=None):
         s3 = boto3.client("s3", region_name=_REGION)

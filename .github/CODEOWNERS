@@ -14,6 +14,9 @@ infrastructure/modules/iam/         @your-github-org/edl-security
 # ── Secrets module — security team mandatory ─────────────────────────────────
 infrastructure/modules/secrets/     @your-github-org/edl-security
 
+# ── Control plane module — Cognito/JWT auth boundary, same bar as iam/secrets ─
+infrastructure/modules/control_plane/ @your-github-org/edl-security
+
 # ── CI/CD workflows — platform + security review ─────────────────────────────
 .github/                            @your-github-org/edl-infrastructure @your-github-org/edl-security
 
@@ -22,6 +25,9 @@ contracts/                          @your-github-org/edl-architecture
 
 # ── Connector interfaces — architecture sign-off required ────────────────────
 connector_runtime/interfaces/       @your-github-org/edl-architecture
+
+# ── Control plane API — Cognito/JWT authn/authz boundary, same bar as interfaces/ ─
+connector_runtime/api/              @your-github-org/edl-architecture @your-github-org/edl-security
 
 # ── Production environment — highest protection ──────────────────────────────
 infrastructure/environments/prod/   @your-github-org/edl-infrastructure @your-github-org/edl-security @your-github-org/edl-architecture

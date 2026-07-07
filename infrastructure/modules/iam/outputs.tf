@@ -42,3 +42,28 @@ output "cicd_deployment_role_arn" {
   description = "ARN of the CI/CD GitHub Actions deployment role."
   value       = aws_iam_role.cicd_deployment.arn
 }
+
+output "pipeline_trigger_role_arn" {
+  description = "ARN of the pipeline trigger Lambda IAM role."
+  value       = aws_iam_role.pipeline_trigger.arn
+}
+
+output "dlq_processor_role_arn" {
+  description = "ARN of the DLQ processor Lambda IAM role."
+  value       = aws_iam_role.dlq_processor.arn
+}
+
+output "credential_expiry_notifier_role_arn" {
+  description = "ARN of the credential expiry notifier Lambda IAM role (SEC-6)."
+  value       = aws_iam_role.credential_expiry_notifier.arn
+}
+
+output "credential_expiry_scheduler_role_arn" {
+  description = "ARN of the EventBridge Scheduler role that invokes the credential expiry notifier Lambda (SEC-6)."
+  value       = aws_iam_role.credential_expiry_scheduler.arn
+}
+
+output "control_plane_role_arn" {
+  description = "ARN of the control-plane API Lambda IAM role."
+  value       = aws_iam_role.control_plane.arn
+}

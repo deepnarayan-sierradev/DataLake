@@ -2,7 +2,7 @@
 
 > **Spec version:** 2.0 | **Last updated:** 2026-06-29
 
-> **Dev status:** ✅ All stages deployed and live. Data flowing end-to-end: Salesforce (Account, Contact) + MySQL RDS (Contracts) + Sage Intacct (Customer, Vendor, AR Invoice, AP Bill) + Sage X3 (Customer, Supplier). Entity resolution and analytics publisher both operational.
+> **Dev status:** ✅ All stages deployed and live. Data flowing end-to-end: Salesforce (Account, Contact) + MySQL RDS (Contracts) + Sage Intacct (Customer, Vendor, AR Invoice, AP Bill) + Sage X3 (Customer, Supplier). Entity resolution and analytics publisher both operational. NetSuite: 🟡 code-complete (connector, metadata adapter, incremental query planner, auth client, and raw layer writer all implemented, matching the Salesforce/Sage connector shape) but not yet confirmed activated — entity config seeding and schedule-enable status were not independently verified for this document.
 
 ---
 
@@ -45,13 +45,15 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  SOURCE SYSTEMS                                                              │
-│  Salesforce CRM ✅  │  NetSuite ERP 🔲  │  MySQL RDS ✅  │  Sage ERP (Intacct + X3) ✅  │
+│  Salesforce CRM ✅  │  NetSuite ERP 🟡  │  MySQL RDS ✅  │  Sage ERP (Intacct + X3) ✅  │
 └────────────────────────────────┬─────────────────────────────────────────────┘
+                     (🟡 = code-complete, not yet confirmed activated — see Dev status above)
                                  │ full/incremental extraction (watermark-based)
                                  ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  ORCHESTRATION LAYER                                                         │
-│  EventBridge Scheduler → Step Functions (chained 5-stage state machine)     │
+│  EventBridge Scheduler → SQS FIFO Queue → Pipeline Trigger Lambda           │
+│  → Step Functions (chained 5-stage state machine)                            │
 └────────────────────────────────┬─────────────────────────────────────────────┘
                                  │
               ┌──────────────────┼──────────────────────┐
@@ -103,6 +105,20 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 | **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Contains curated domain datasets (`curated/` prefix) and canonical (entity-resolved) outputs (`canonical/` prefix) | `{env}-edl-analytics-layer` S3 | Parquet (Snappy) | Append-only |
 | **Serving Store** | Optional operational store for low-latency API and application reads | MySQL RDS (private VPC) | SQL rows | Upsert (REPLACE INTO) |
 
+### Multi-tenancy
+
+Every stage is tenant-scoped via a `tenant_code` parameter — default `"demo"`, sourced from `contracts.identifier_policy.DEFAULT_TENANT_CODE` and validated on every call via `validate_tenant_code()` / `TENANT_CODE_PATTERN`. It threads through:
+
+- **Configuration Load (Stage 3):** `ConfigurationRepositoryClient.load_config()` takes `tenant_code`; the S3 config key is `{tenant_code}/{source_id}/{entity_id}/config.json`, and the loaded record's own `tenant_code` field is cross-checked against the caller's.
+- **Watermark Update (Stage 11):** `WatermarkRepository.get_watermark()` / `advance_watermark()` both take `tenant_code`; watermark records carry it and mismatches are rejected.
+- **Schema Snapshot (Stage 8):** `SchemaSnapshotRepository` keys are tenant-prefixed (`{tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json`).
+- **Entity Resolution:** `EntityTypeRegistryClient` uses a single-table design keyed on `tenant_code` as the partition key.
+- **Step Functions state machine:** `infrastructure/modules/orchestration/main.tf` passes `"tenant_code.$" = "$.tenant_code"` explicitly into the Transformation, Entity Resolution, and Analytics Publish task `Parameters`.
+
+**Known asymmetry:** the S3 **raw layer** partition scheme (Stage 7) is deliberately *not* tenant-prefixed today. This is a real, tracked gap — raw-layer tenant prefixing has not been implemented yet — not an oversight in this document.
+
+Canonical references: `tests/test_tenant_isolation.py`; `docs/PRODUCTION_INCIDENT_RUNBOOK.md` → "Suspected Cross-Tenant Data Incident" (Scenario 8).
+
 ---
 
 ## 3. End-to-End Pipeline Flow
@@ -110,6 +126,10 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 ```
 EventBridge Scheduler (cron per entity)
           │
+          ▼
+SQS FIFO Queue  ── absorbs burst; exactly-once per entity per tick
+  ({env}-edl-pipeline-trigger.fifo)
+          │  (drains via Pipeline Trigger Lambda, reserved_concurrency=50)
           ▼
 Step Functions: START EXECUTION
           │
@@ -127,10 +147,18 @@ Step Functions: START EXECUTION
   │  6. Persist schema snapshot to S3                        │         │
   │  7. Evaluate schema drift vs previous snapshot           │         │
   │  8. Validate raw record count                            │         │
-  │  9. Advance watermark (success only)                     │         │
+  │  9. Advance watermark (full success) — or partial         │         │
+  │     watermark + checkpoint audit rec. on timeout warning  │         │
   │  10. Emit TRANSFORMATION_TRIGGER stage event             │         │
   └──────────────────────┬──────────────────────────────────┘         │
                          │                                             │
+       LambdaTimeoutWarning raised? (PERF-5 mid-run checkpoint)        │
+                    │ yes → ExtractionCheckpointed (Succeed,           │
+                    │        non-fatal). Partial watermark already     │
+                    │        committed; remaining window NOT           │
+                    │        processed. Auto-resume NOT implemented —  │
+                    │        needs a manual re-trigger.                │
+                    │ no ↓                                             │
            transformation_blocked=true?                               │
                     │ yes → END (drift alert sent)                    │
                     │ no ↓                                             │
@@ -190,6 +218,22 @@ Step Functions: START EXECUTION
                          ▼                                            │
               PIPELINE COMPLETE ◄───────────────────────────────────┘
               (all stages succeeded)
+
+  ── Failure path (any Stage A–E Task, retries exhausted) ──────────────
+  {Stage}Failed (Fail state)
+          │
+          ▼
+  SQS DLQ ({env}-edl-extraction-failure-dlq)
+          │
+          ▼
+  dlq_processor Lambda (event source mapping, batch_size=1)
+          │  1. Validate DLQ message (Pydantic)
+          │  2. Write audit record (RunStatus.FAILED) to run audit log
+          │  3. Emit SNS alert (ALERT_SNS_TOPIC_ARN)
+          │  4. Optional auto-replay → re-invoke Step Functions
+          │     (AUTO_REPLAY env var, default false — operator-driven)
+          ▼
+  Operator reviews → manual replay via scripts/trigger_extraction.py --is-replay
 ```
 
 ---
@@ -198,15 +242,19 @@ Step Functions: START EXECUTION
 
 ### Stage 1 — Event Scheduling
 
-**Component:** Amazon EventBridge Scheduler  
+**Component:** Amazon EventBridge Scheduler → Amazon SQS FIFO Queue → Pipeline Trigger Lambda  
 **Trigger:** Cron expression per source/entity (configured per entity at runtime via `ExtractionScheduleClient`)  
-**Purpose:** Fires a Step Functions execution on schedule without any manual intervention.  
+**Purpose:** Fires extraction runs on schedule without manual intervention. The SQS FIFO queue absorbs simultaneous schedule fires (80–100 entities at launch) and feeds them to the Pipeline Trigger Lambda at a controlled rate, preventing Lambda concurrency spikes.  
 **Key behaviour:**
-- One schedule per entity (e.g. `salesforce--salesforce-account`, `netsuite--netsuite-customer`)
-- Schedules are data — managed at runtime, not in Terraform
-- Passes `source_id`, `entity_id`, `environment`, `connector_params` as execution input
+- One EventBridge schedule per entity (e.g. `salesforce--salesforce-account`)
+- Schedules target the SQS FIFO trigger queue, **not** Step Functions directly
+- Message group ID = `{source_id}-{entity_id}` — per-entity ordering; one active execution per entity at a time
+- Content-based deduplication: duplicate fires within 5-minute window are dropped automatically
+- Pipeline Trigger Lambda (`reserved_concurrent_executions=50`) starts Step Functions executions at a controlled rate from the queue
+- Schedules are data — managed at runtime via `ExtractionScheduleClient`, not in Terraform
+- Passes `source_id`, `entity_id`, `environment`, `connector_params` as Step Functions execution input
 
-**What can go wrong:** Schedule disabled, IAM execution role missing `sfn:StartExecution`, wrong state machine ARN.
+**What can go wrong:** Schedule disabled; IAM EventBridge role missing `sqs:SendMessage` on trigger queue; SQS visibility timeout < Lambda timeout (causes duplicate execution starts); trigger Lambda reserved concurrency exhausted (messages accumulate in queue, drain resumes automatically).
 
 ---
 
@@ -218,11 +266,19 @@ Step Functions: START EXECUTION
 - Reads `transformation_blocked` from extraction output — skips stages B–E if breaking drift detected
 - Reads `is_publication_blocked` from transformation output — skips entity resolution and downstream if quality blocks publication
 - Retries transient Lambda errors with exponential backoff (3 attempts, 10s initial, 2× backoff)
-- Terminal failures route to `PipelineFailed` state and enqueue to DLQ
+- Terminal failures route to a per-stage `Fail` state (`ExtractionFailed`, `TransformationFailed`, `EntityResolutionFailed`, `AnalyticsPublishFailed`) and enqueue to DLQ
+- The `ExecuteExtraction` state's `Catch` block matches `LambdaTimeoutWarning` (PERF-5 mid-run checkpoint) *before* the generic `States.ALL` catch-all — first match wins in ASL, so a checkpoint does **not** fall through to `ExtractionFailed`/the DLQ. It routes instead to a terminal `ExtractionCheckpointed` `Succeed` state: non-fatal, partial watermark already committed, remaining window not yet processed. Automatic resume from a checkpoint is **not yet implemented** (documented as a gap in `extraction_workflow.py`'s own module docstring, PERF-5) — it needs a manual re-trigger.
+- DLQ messages (`{env}-edl-extraction-failure-dlq`) are consumed by the `dlq_processor` Lambda, which writes a `RunStatus.FAILED` audit record, emits an SNS alert, and optionally auto-replays (`AUTO_REPLAY` env var, default `false`)
 
 **Branching logic:**
 
 ```
+Extraction raises LambdaTimeoutWarning (PERF-5 mid-run checkpoint)?
+  └─ yes → ExtractionCheckpointed (Succeed, non-fatal) — partial watermark
+           committed, remaining window NOT processed. Auto-resume NOT
+           implemented (documented gap) — needs a manual re-trigger.
+  └─ no  → continue below
+
 Extraction succeeded?
   └─ transformation_blocked=true  → STOP (drift alert fired)
   └─ transformation_blocked=false → Transformation
@@ -233,6 +289,10 @@ Transformation succeeded?
   └─ otherwise                    → Entity Resolution
 
 Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
+
+Any stage's Task fails after retries exhausted (States.ALL)?
+  └─ yes → {Stage}Failed (Fail state) → SQS DLQ → dlq_processor Lambda
+           → audit record + SNS alert → optional auto-replay (default off)
 ```
 
 ---
@@ -242,6 +302,7 @@ Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 **Component:** `ConfigurationRepositoryClient` (DynamoDB backend)  
 **Purpose:** Loads `EntityExtractionConfig` for the requested source/entity. Validates config before any AWS or source API call is made.  
 **Key fields read:** `load_type`, `watermark_field`, `extraction_window_days`, `field_mode`, `include_fields`, `exclude_fields`, `output_format`, `primary_key_field`, `soft_delete_field`  
+**Tenant scoping:** `load_config()` takes a `tenant_code` parameter (default `demo`); the loaded record's own `tenant_code` is cross-checked against the caller's — see [Multi-tenancy](#multi-tenancy).  
 **Failure behaviour:** Raises `ConfigurationNotFoundError` → pipeline aborts, DLQ entry created.
 
 ---
@@ -276,7 +337,7 @@ Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 
 **Component:** `SalesforceBulkQueryJobController` (Bulk API 2.0), `NetSuiteConnector` (SuiteQL REST), `MySqlRdsConnector` (pymysql), `SageConnector` (Strategy pattern — dispatches to Intacct JSON-POST or X3 OData v4 GET based on `connector_params.sage_product`)  
 **Purpose:** Executes the extraction query, streams records, writes raw Parquet to S3.  
-**S3 partition scheme:** `s3://{bucket}/{source}/{entity_id}/extraction_date={YYYY-MM-DD}/run_id={run_id}/data.parquet`  
+**S3 partition scheme:** `s3://{bucket}/{source}/{entity_id}/extraction_date={YYYY-MM-DD}/run_id={run_id}/data.parquet` — **not tenant-prefixed** today; this is a real, tracked gap (see [Multi-tenancy](#multi-tenancy)), not an oversight.  
 **Key properties:**
 - All column values stored as `large_utf8` strings — no type loss, max compatibility
 - Records written in chunks (50,000 per file for large volumes)
@@ -288,8 +349,8 @@ Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 
 **Component:** `SchemaSnapshotRepository`  
 **Purpose:** Persists the current field schema to S3 as an immutable snapshot after every successful run. Used by drift evaluator to compare against the next run's schema.  
-**S3 path:** `s3://{bucket}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json`  
-**Latest pointer:** `latest.json` updated after each write (avoids S3 listing latency).
+**S3 path:** `s3://{bucket}/{tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json` — tenant-prefixed (default `tenant_code="demo"`); see [Multi-tenancy](#multi-tenancy).  
+**Latest pointer:** `{tenant_code}/{source_id}/{entity_id}/latest.json` updated after each write (avoids S3 listing latency).
 
 ---
 
@@ -318,8 +379,8 @@ Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 ### Stage 11 — Watermark Update
 
 **Component:** `WatermarkRepository`  
-**Purpose:** Advances the watermark to `upper_watermark` of the completed extraction window. Uses optimistic concurrency (DynamoDB `ConditionExpression` on `version`) to prevent concurrent runs from corrupting state.  
-**Critical rule:** Watermark advances **only on full success**. Any failure at any earlier stage leaves the watermark unchanged, enabling safe replay.
+**Purpose:** Advances the watermark to `upper_watermark` of the completed extraction window. Uses optimistic concurrency (DynamoDB `ConditionExpression` on `version`) to prevent concurrent runs from corrupting state. `get_watermark()` / `advance_watermark()` both take a `tenant_code` parameter (default `demo`) — see [Multi-tenancy](#multi-tenancy).  
+**Critical rule:** Watermark advances on full success — but that is only half the invariant now. A mid-run **checkpoint** (`LambdaTimeoutWarning`, PERF-5 — see [Stage 2](#stage-2--step-functions-orchestration)) also commits a **partial** watermark advance plus a distinct `'{run_id}-partN'` audit record, even though the extraction did not fully complete. Any true *failure* (as opposed to a checkpoint) at any earlier stage leaves the watermark unchanged, enabling safe replay.
 
 ---
 
@@ -351,7 +412,7 @@ Entity Resolution → Analytics Publish → Serving Store Load → COMPLETE
 - Full-load entities (`primary_key_field=None`) are unaffected — pipeline behaves identically to before.
 
 **Outputs:**
-- Curated Parquet: `s3://{bucket}/curated/{domain}/{entity_id}/curated_date={date}/run_id={run_id}/data.parquet`
+- Curated Parquet: `s3://{bucket}/{tenant_code}/curated/{domain}/{entity_id}/curated_date={date}/run_id={run_id}/data.parquet` — tenant-prefixed via `CuratedLayerWriter.write()`'s `tenant_code` parameter (default `demo`); see [Multi-tenancy](#multi-tenancy)
 - Quality report: `s3://{bucket}/quality-reports/{source_id}/{entity_id}/{run_id}/quality-report.json`
 - Glue Catalog table registered
 
@@ -666,6 +727,9 @@ python scripts/seed_entity_resolution_configs.py --environment dev --entity-type
 | Breaking schema drift | `SCHEMA_MISMATCH` | No retry | Immediately |
 | Quality blocking violation | Quality blocker | No retry | Alert only, no DLQ |
 | Watermark concurrency conflict | Concurrency | No retry | Returns `PARTIAL_SUCCESS` |
+| Mid-run Lambda timeout (checkpoint) | `LambdaTimeoutWarning` (PERF-5, non-fatal) | N/A — routes to terminal `ExtractionCheckpointed` Succeed state, not a retry | No DLQ — partial watermark + `'{run_id}-partN'` audit record already committed; auto-resume not implemented, needs manual re-trigger |
+
+**DLQ processing:** Messages landing in `{env}-edl-extraction-failure-dlq` are consumed by the **`dlq_processor`** Lambda (`orchestration/dlq_processor/dlq_processor_handler.py`, SQS event source mapping with `batch_size=1`). It validates the message body (Pydantic), writes a `RunStatus.FAILED` audit record to the run audit log table, emits an SNS notification to the platform alerts topic (run_id, source_id, entity_id, failure_reason), and — only if `AUTO_REPLAY=true` (default `false`) — re-invokes the Step Functions state machine to replay the failed run. With auto-replay off (the default), an operator reviews the DLQ message and replays manually per the command below.
 
 **Replay a failed run:**
 
@@ -704,7 +768,7 @@ aws sts get-caller-identity
 
 # 2. Entity config exists in DynamoDB
 aws dynamodb get-item \
-  --table-name dev-entity-extraction-config \
+  --table-name dev-edl-entity-extraction-config \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
 # 3. Field mapping published to S3
@@ -720,7 +784,7 @@ aws secretsmanager describe-secret \
 
 # 5. Current watermark state
 aws dynamodb get-item \
-  --table-name dev-watermark-repository \
+  --table-name dev-edl-watermark-repository \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 ```
 
@@ -742,21 +806,21 @@ aws s3 ls s3://dev-edl-raw-layer/salesforce/salesforce-account/ --recursive
 
 # Watermark advanced
 aws dynamodb get-item \
-  --table-name dev-watermark-repository \
+  --table-name dev-edl-watermark-repository \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
-# Schema snapshot written
-aws s3 ls s3://dev-edl-schema-snapshots/salesforce/salesforce-account/ --recursive
+# Schema snapshot written — path is tenant-prefixed (default tenant: demo)
+aws s3 ls s3://dev-edl-schema-snapshots/demo/salesforce/salesforce-account/ --recursive
 
-# No breaking drift (check drift_report)
-aws s3 cp s3://dev-edl-schema-snapshots/salesforce/salesforce-account/latest.json -
+# No breaking drift (check drift_report) — path is tenant-prefixed (default tenant: demo)
+aws s3 cp s3://dev-edl-schema-snapshots/demo/salesforce/salesforce-account/latest.json -
 ```
 
 ### Post-transformation verification
 
 ```bash
-# Curated Parquet written
-aws s3 ls s3://dev-edl-curated-layer/curated/customer/salesforce-account/ --recursive
+# Curated Parquet written — path is tenant-prefixed (default tenant: demo)
+aws s3 ls s3://dev-edl-curated-layer/demo/curated/customer/salesforce-account/ --recursive
 
 # Quality report — check is_publication_blocked=false
 aws s3 cp s3://dev-edl-curated-layer/quality-reports/salesforce/salesforce-account/<run_id>/quality-report.json -
@@ -793,9 +857,9 @@ This section maps each pipeline stage to the exact tools, AWS services, Python l
 
 | Stage | AWS Service(s) |
 |---|---|
-| Stage 1 — Event Scheduling | Amazon EventBridge Scheduler |
+| Stage 1 — Event Scheduling | Amazon EventBridge Scheduler; Amazon SQS FIFO (pipeline trigger queue); AWS Lambda (pipeline trigger) |
 | Stage 2 — Step Functions Orchestration | AWS Step Functions (Standard / Express Workflow) |
-| Stage 3 — Configuration Load | Amazon DynamoDB (`{env}-entity-extraction-config`) |
+| Stage 3 — Configuration Load | Amazon DynamoDB (`{env}-edl-entity-extraction-config`) |
 | Stage 4 — Credential Retrieval | AWS Secrets Manager (`{env}/sources/{source}/credentials`) |
 | Stage 5 — Metadata Discovery | Source APIs (no AWS; called from Lambda/ECS over VPC) |
 | Stage 6 — Query Construction | In-process (no AWS service); ISO-8601 validated |
@@ -803,12 +867,13 @@ This section maps each pipeline stage to the exact tools, AWS services, Python l
 | Stage 8 — Schema Snapshot | Amazon S3 (`{env}-edl-schema-snapshots`) |
 | Stage 9 — Drift Evaluation | In-process (no AWS service); writes drift report to Amazon S3 |
 | Stage 10 — Raw Layer Write | Amazon S3 (Object Lock GOVERNANCE); CloudWatch metric emit |
-| Stage 11 — Watermark Update | Amazon DynamoDB (`{env}-watermark-repository`; conditional put) |
+| Stage 11 — Watermark Update | Amazon DynamoDB (`{env}-edl-watermark-repository`; conditional put) |
 | Stage 12 — Transformation | AWS Lambda or AWS Glue; Amazon S3 (curated layer); AWS Glue Data Catalog |
 | Stage 13 — Entity Resolution | AWS Lambda; Amazon S3 (curated source read + analytics write) |
 | Stage 14 — Golden Record Publish | AWS Lambda; Amazon S3 (analytics layer `canonical/` prefix) |
 | Stage 15 — Analytics Layer Publish | Amazon S3 (analytics layer); AWS Glue Data Catalog |
 | Stage 16 — Serving Store Load | Amazon RDS MySQL 8 (private VPC); AWS Secrets Manager |
+| DLQ Processing (failure path) | AWS Lambda (`dlq_processor`); Amazon SQS (`{env}-edl-extraction-failure-dlq`, event source mapping `batch_size=1`); Amazon DynamoDB (run audit log); Amazon SNS (platform alerts topic); AWS Step Functions (optional auto-replay) |
 | All stages | Amazon CloudWatch Logs; Amazon CloudWatch Metrics; AWS X-Ray; Amazon SQS (DLQ) |
 
 ### Python Libraries by Component
@@ -866,4 +931,4 @@ This section maps each pipeline stage to the exact tools, AWS services, Python l
 | DynamoDB tables | `infrastructure/modules/metadata_persistence/` | Table names, GSI names |
 | CloudWatch, SNS, X-Ray | `infrastructure/modules/observability/` | Log group names, alarm ARNs, SNS topic ARN |
 | Step Functions state machine | `infrastructure/modules/orchestration/` | State machine ARN |
-| EventBridge schedules | Managed at runtime via `extraction_schedule_client.py` | Schedule names follow `{source_id}--{entity_id}` |
+| EventBridge schedules | Managed at runtime via `extraction_schedule_client.py` | Schedule names follow `{source_id}--{entity_id}`; target is SQS FIFO trigger queue (not Step Functions directly) |

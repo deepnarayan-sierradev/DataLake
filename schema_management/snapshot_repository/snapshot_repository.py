@@ -7,10 +7,15 @@ extraction run and are read by the schema drift evaluator to detect changes
 between runs.
 
 S3 key format (snapshot):
-  {source_id}/{entity_id}/{schema_version}/{extraction_date}.json
+  {tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json
 
 S3 key format (latest-pointer index):
-  {source_id}/{entity_id}/latest.json
+  {tenant_code}/{source_id}/{entity_id}/latest.json
+
+Multi-tenancy (§1.1 / ARCH-1): tenant_code is always prefixed, including the
+DEFAULT_TENANT_CODE ("demo") — matches the convention already established in
+transformation/curated_layer_writer.py. Genuinely IAM-enforceable via an S3
+bucket-policy condition on the key prefix.
 
 The latest-pointer is the only mutable object — it is overwritten on every
 successful run to point at the most recent snapshot key.  All snapshot objects
@@ -32,17 +37,18 @@ from typing import Any, Final
 import boto3
 from botocore.exceptions import ClientError
 
+from contracts.identifier_policy import DEFAULT_TENANT_CODE, validate_tenant_code
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
 _SNAPSHOT_KEY_TEMPLATE: Final[str] = (
-    "{source_id}/{entity_id}/{schema_version}/{extraction_date}.json"
+    "{tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json"
 )
-_LATEST_POINTER_KEY_TEMPLATE: Final[str] = "{source_id}/{entity_id}/latest.json"
+_LATEST_POINTER_KEY_TEMPLATE: Final[str] = "{tenant_code}/{source_id}/{entity_id}/latest.json"
 _DRIFT_REPORT_KEY_TEMPLATE: Final[str] = (
-    "{source_id}/{entity_id}/{schema_version}/drift-report-{extraction_date}.json"
+    "{tenant_code}/{source_id}/{entity_id}/{schema_version}/drift-report-{extraction_date}.json"
 )
 
 
@@ -110,7 +116,9 @@ class SchemaSnapshotRepository:
 
     # ── Write ──────────────────────────────────────────────────────────────────
 
-    def write_snapshot(self, snapshot: SchemaSnapshot) -> str:
+    def write_snapshot(
+        self, snapshot: SchemaSnapshot, tenant_code: str = DEFAULT_TENANT_CODE
+    ) -> str:
         """
         Persist a snapshot to S3 and update the latest-pointer index.
 
@@ -132,7 +140,9 @@ class SchemaSnapshotRepository:
                 f"entity_id={snapshot.entity_id!r} does not conform to the stable "
                 "identifier format and cannot be used in an S3 key."
             )
+        tenant_code = validate_tenant_code(tenant_code)
         key = _SNAPSHOT_KEY_TEMPLATE.format(
+            tenant_code=tenant_code,
             source_id=snapshot.source_id,
             entity_id=snapshot.entity_id,
             schema_version=snapshot.schema_version,
@@ -146,7 +156,7 @@ class SchemaSnapshotRepository:
             ContentType="application/json",
         )
         try:
-            self._write_latest_pointer(snapshot.source_id, snapshot.entity_id, key)
+            self._write_latest_pointer(snapshot.source_id, snapshot.entity_id, key, tenant_code)
         except ClientError:
             _logger.warning(
                 "snapshot_pointer_write_failed",
@@ -165,17 +175,20 @@ class SchemaSnapshotRepository:
         schema_version: str,
         extraction_date: str,
         report_json: str,
+        tenant_code: str = DEFAULT_TENANT_CODE,
     ) -> str:
         """
         Persist a drift report to S3 alongside its corresponding snapshot.
 
-        S3 key: {source_id}/{entity_id}/{schema_version}/drift-report-{extraction_date}.json
+        S3 key:
+          {tenant_code}/{source_id}/{entity_id}/{schema_version}/drift-report-{extraction_date}.json
 
         Accepts the JSON-serialised drift report string (from DriftReport.to_json())
         to avoid a circular import between snapshot_repository and drift_evaluator.
         Reports contain only structural metadata — field values are never included.
         """
         key = _DRIFT_REPORT_KEY_TEMPLATE.format(
+            tenant_code=validate_tenant_code(tenant_code),
             source_id=source_id,
             entity_id=entity_id,
             schema_version=schema_version,
@@ -191,13 +204,17 @@ class SchemaSnapshotRepository:
 
     # ── Read ───────────────────────────────────────────────────────────────────
 
-    def load_latest_snapshot(self, source_id: str, entity_id: str) -> SchemaSnapshot | None:
+    def load_latest_snapshot(
+        self, source_id: str, entity_id: str, tenant_code: str = DEFAULT_TENANT_CODE
+    ) -> SchemaSnapshot | None:
         """
         Load the most recent snapshot for a source entity.
 
         Returns None when no snapshot has been written (first extraction run).
         """
-        pointer_key = _LATEST_POINTER_KEY_TEMPLATE.format(source_id=source_id, entity_id=entity_id)
+        pointer_key = _LATEST_POINTER_KEY_TEMPLATE.format(
+            tenant_code=validate_tenant_code(tenant_code), source_id=source_id, entity_id=entity_id
+        )
         try:
             response = self._s3.get_object(Bucket=self._bucket, Key=pointer_key)
             index: dict[str, str] = json.loads(response["Body"].read().decode("utf-8"))
@@ -217,8 +234,12 @@ class SchemaSnapshotRepository:
 
     # ── Private ────────────────────────────────────────────────────────────────
 
-    def _write_latest_pointer(self, source_id: str, entity_id: str, snapshot_key: str) -> None:
-        pointer_key = _LATEST_POINTER_KEY_TEMPLATE.format(source_id=source_id, entity_id=entity_id)
+    def _write_latest_pointer(
+        self, source_id: str, entity_id: str, snapshot_key: str, tenant_code: str
+    ) -> None:
+        pointer_key = _LATEST_POINTER_KEY_TEMPLATE.format(
+            tenant_code=tenant_code, source_id=source_id, entity_id=entity_id
+        )
         body = json.dumps({"snapshot_key": snapshot_key}, separators=(",", ":")).encode("utf-8")
         self._s3.put_object(
             Bucket=self._bucket,

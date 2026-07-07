@@ -39,10 +39,6 @@ _STABLE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}
 # A short note like "ok" is not a meaningful audit record; require a real rationale.
 _WAIVER_MIN_NOTES_LEN: Final[int] = 20
 
-# Gate ordering — a source cannot advance past gate N without passing gates 1..N
-_GATE_ORDER: Final[tuple[OnboardingGate, ...]] = ()  # populated after StrEnum defined
-
-
 class OnboardingGate(StrEnum):
     SOURCE_REGISTRATION = "source_registration"
     CREDENTIAL_REGISTRATION = "credential_registration"
@@ -52,14 +48,16 @@ class OnboardingGate(StrEnum):
     ACCEPTANCE_VALIDATION = "acceptance_validation"
 
 
-_GATE_ORDER_LIST: Final[list[OnboardingGate]] = [
+# Gate ordering — a source cannot advance past gate N without passing gates 1..N.
+# Canonical, immutable sequence; all gate-order logic references this constant.
+_GATE_ORDER: Final[tuple[OnboardingGate, ...]] = (
     OnboardingGate.SOURCE_REGISTRATION,
     OnboardingGate.CREDENTIAL_REGISTRATION,
     OnboardingGate.ENTITY_MAPPING,
     OnboardingGate.EXTRACTION_PROFILE,
     OnboardingGate.SECURITY_GOVERNANCE,
     OnboardingGate.ACCEPTANCE_VALIDATION,
-]
+)
 
 
 class OnboardingGateStatus(StrEnum):
@@ -148,7 +146,7 @@ class SourceOnboardingRegistryClient:
             "last_updated_at": registered_at,
         }
         # Initialise all gates to PENDING
-        for gate in _GATE_ORDER_LIST:
+        for gate in _GATE_ORDER:
             item[f"gate_{gate.value}"] = OnboardingGateStatus.PENDING.value
 
         table = self._dynamodb.Table(self._table_name)
@@ -217,8 +215,8 @@ class SourceOnboardingRegistryClient:
         gate_statuses = current_state.gate_statuses
 
         if status == OnboardingGateStatus.PASSED:
-            gate_idx = _GATE_ORDER_LIST.index(gate)
-            for prior_gate in _GATE_ORDER_LIST[:gate_idx]:
+            gate_idx = list(_GATE_ORDER).index(gate)
+            for prior_gate in _GATE_ORDER[:gate_idx]:
                 prior_status = gate_statuses.get(
                     prior_gate.value, OnboardingGateStatus.PENDING.value
                 )
@@ -270,7 +268,7 @@ class SourceOnboardingRegistryClient:
 
         gate_statuses = {
             gate.value: str(item.get(f"gate_{gate.value}", OnboardingGateStatus.PENDING.value))
-            for gate in _GATE_ORDER_LIST
+            for gate in _GATE_ORDER
         }
 
         is_activation_permitted = all(
@@ -279,7 +277,7 @@ class SourceOnboardingRegistryClient:
                 OnboardingGateStatus.PASSED.value,
                 OnboardingGateStatus.WAIVED.value,
             )
-            for g in _GATE_ORDER_LIST
+            for g in _GATE_ORDER
         )
 
         return SourceOnboardingState(

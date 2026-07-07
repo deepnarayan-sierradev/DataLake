@@ -49,6 +49,7 @@ from orchestration.step_functions.extraction_retry_policy import (
 from orchestration.step_functions.extraction_workflow import (
     ExtractionWorkflow,
     ExtractionWorkflowResult,
+    LambdaTimeoutWarning,
 )
 from schema_management.drift_evaluation.drift_evaluator import DriftReport
 from schema_management.snapshot_repository.snapshot_repository import SchemaSnapshot
@@ -148,8 +149,18 @@ def _make_workflow(
     extraction_records: list[ExtractionRecord] | None = None,
     watermark_record: object = None,
     retry_policy: ExtractionRetryPolicy | None = None,
+    entity_config: EntityExtractionConfig | None = None,
+    lambda_context: object = None,
+    consume_record_iter_fully: bool = False,
 ) -> tuple[ExtractionWorkflow, dict[str, MagicMock]]:
-    """Build an ExtractionWorkflow with fully-mocked dependencies."""
+    """Build an ExtractionWorkflow with fully-mocked dependencies.
+
+    consume_record_iter_fully: when True, write_partition_streaming's mock
+    actually iterates the record_iter it receives (list(record_iter)) instead
+    of just recording the call — required to exercise the PERF-5 checkpoint-
+    bounded iterator, which only does anything when something actually pulls
+    records from it.
+    """
     records = extraction_records or [
         ExtractionRecord(payload={"Id": "1", "Name": "Acme"}),
         ExtractionRecord(payload={"Id": "2", "Name": "Globex"}),
@@ -161,10 +172,11 @@ def _make_workflow(
     coordinator.started_at = datetime.now(UTC)
     coordinator.source_id = _SOURCE
     coordinator.entity_id = _ENTITY
+    coordinator.emit_checkpoint_stage.return_value = MagicMock(run_id=f"{_RUN_ID}-part1")
 
     # Mock ConfigurationRepositoryClient
     config_client = MagicMock()
-    config_client.load_config.return_value = _make_entity_config()
+    config_client.load_config.return_value = entity_config or _make_entity_config()
 
     # Mock WatermarkRepository
     watermark_repo = MagicMock()
@@ -193,10 +205,18 @@ def _make_workflow(
     # Mock RawLayerWriter
     raw_writer = MagicMock()
     raw_writer.write_partition.return_value = "s3://raw/salesforce/account/2026-06-12/"
-    raw_writer.write_partition_streaming.return_value = (
-        "s3://raw/salesforce/account/2026-06-12/",
-        len(records),
-    )
+    if consume_record_iter_fully:
+
+        def _write_partition_streaming(record_iter, **_kwargs):  # type: ignore[no-untyped-def]
+            consumed = list(record_iter)
+            return ("s3://raw/salesforce/account/2026-06-12/", len(consumed))
+
+        raw_writer.write_partition_streaming.side_effect = _write_partition_streaming
+    else:
+        raw_writer.write_partition_streaming.return_value = (
+            "s3://raw/salesforce/account/2026-06-12/",
+            len(records),
+        )
 
     mocks = {
         "coordinator": coordinator,
@@ -217,6 +237,7 @@ def _make_workflow(
         connector=connector,
         raw_layer_writer=raw_writer,
         retry_policy=retry_policy,
+        lambda_context=lambda_context,
     )
     return workflow, mocks
 
@@ -509,3 +530,250 @@ class TestCircuitBreakerIntegration:
                 workflow.execute()
 
         policy.record_failure.assert_called_once_with(_SOURCE, _ENTITY)
+
+
+# ---------------------------------------------------------------------------
+# PERF-5: checkpoint / partial-run tests
+# ---------------------------------------------------------------------------
+
+_CHECKPOINT_WINDOW = (datetime(2026, 6, 11, tzinfo=UTC), datetime(2026, 6, 12, tzinfo=UTC))
+
+
+def _checkpoint_records(n: int, start_hour: int = 10) -> list[ExtractionRecord]:
+    return [
+        ExtractionRecord(
+            payload={"Id": str(i)},
+            source_timestamp=f"2026-06-11T{start_hour + i:02d}:00:00+00:00",
+        )
+        for i in range(n)
+    ]
+
+
+class TestPerf5Checkpoint:
+    """
+    PERF-5: checkpoint/resume detection for max_records_per_lambda_run and
+    low remaining Lambda time.
+
+    Covers: cap-reached triggers a checkpoint; natural EOF exactly at the cap
+    does NOT spuriously checkpoint; FULL loads ignore the cap; low remaining
+    time triggers a checkpoint; the partial watermark is clamped to never
+    regress; the checkpoint audit record is distinct from the main run's
+    audit trail; and LambdaTimeoutWarning is never routed to the DLQ or
+    counted as a circuit-breaker failure.
+    """
+
+    def test_checkpoint_triggers_on_max_records_reached(self) -> None:
+        config = _make_entity_config(
+            load_type=LoadType.INCREMENTAL,
+            watermark_field="LastModifiedDate",
+            max_records_per_lambda_run=2,
+        )
+        workflow, mocks = _make_workflow(
+            entity_config=config,
+            extraction_records=_checkpoint_records(3),
+            consume_record_iter_fully=True,
+        )
+
+        with patch(
+            "orchestration.step_functions.extraction_workflow.WatermarkRepository"
+            ".compute_extraction_window",
+            return_value=_CHECKPOINT_WINDOW,
+        ):
+            with pytest.raises(LambdaTimeoutWarning) as excinfo:
+                workflow.execute()
+
+        assert excinfo.value.records_written == 2
+        assert "max_records_per_lambda_run" in excinfo.value.reason
+
+        # First run (no prior watermark) — initialised to the 2nd record's OWN
+        # timestamp, not the full window's upper_bound.
+        mocks["watermark_repo"].initialise_watermark.assert_called_once()
+        _, init_kwargs = mocks["watermark_repo"].initialise_watermark.call_args
+        assert init_kwargs["upper_watermark"] == datetime(2026, 6, 11, 11, tzinfo=UTC)
+
+    def test_no_checkpoint_when_source_exhausted_exactly_at_cap(self) -> None:
+        """Natural completion at exactly the cap must NOT be flagged as a checkpoint."""
+        config = _make_entity_config(
+            load_type=LoadType.INCREMENTAL,
+            watermark_field="LastModifiedDate",
+            max_records_per_lambda_run=2,
+        )
+        workflow, mocks = _make_workflow(
+            entity_config=config,
+            extraction_records=_checkpoint_records(2),
+            consume_record_iter_fully=True,
+        )
+
+        with patch(
+            "orchestration.step_functions.extraction_workflow.WatermarkRepository"
+            ".compute_extraction_window",
+            return_value=_CHECKPOINT_WINDOW,
+        ):
+            result = workflow.execute()
+
+        assert isinstance(result, ExtractionWorkflowResult)
+        assert result.record_count == 2
+        mocks["coordinator"].emit_checkpoint_stage.assert_not_called()
+        # Normal completion advances to the full window's upper_bound.
+        _, init_kwargs = mocks["watermark_repo"].initialise_watermark.call_args
+        assert init_kwargs["upper_watermark"] == _CHECKPOINT_WINDOW[1]
+
+    def test_checkpoint_ignored_for_full_load(self) -> None:
+        config = _make_entity_config(load_type=LoadType.FULL, max_records_per_lambda_run=2)
+        workflow, mocks = _make_workflow(
+            entity_config=config,
+            extraction_records=_checkpoint_records(5),
+            consume_record_iter_fully=True,
+        )
+
+        with patch(
+            "orchestration.step_functions.extraction_workflow.WatermarkRepository"
+            ".compute_extraction_window",
+            return_value=_CHECKPOINT_WINDOW,
+        ):
+            result = workflow.execute()
+
+        assert isinstance(result, ExtractionWorkflowResult)
+        assert result.record_count == 5  # cap ignored for FULL loads
+        mocks["coordinator"].emit_checkpoint_stage.assert_not_called()
+
+    def test_checkpoint_triggers_on_low_remaining_lambda_time(self) -> None:
+        from orchestration.step_functions.extraction_workflow import (
+            _CHECKPOINT_TIME_CHECK_INTERVAL_RECORDS,
+        )
+
+        config = _make_entity_config(
+            load_type=LoadType.INCREMENTAL,
+            watermark_field="LastModifiedDate",
+            max_records_per_lambda_run=1_000_000,  # never reached — time is the trigger
+        )
+        total = _CHECKPOINT_TIME_CHECK_INTERVAL_RECORDS + 500
+        records = [
+            ExtractionRecord(payload={"Id": str(i)}, source_timestamp="2026-06-11T10:00:00+00:00")
+            for i in range(total)
+        ]
+        lambda_context = MagicMock()
+        lambda_context.get_remaining_time_in_millis.return_value = 1_000  # below threshold
+
+        workflow, mocks = _make_workflow(
+            entity_config=config,
+            extraction_records=records,
+            consume_record_iter_fully=True,
+            lambda_context=lambda_context,
+        )
+
+        with patch(
+            "orchestration.step_functions.extraction_workflow.WatermarkRepository"
+            ".compute_extraction_window",
+            return_value=_CHECKPOINT_WINDOW,
+        ):
+            with pytest.raises(LambdaTimeoutWarning) as excinfo:
+                workflow.execute()
+
+        assert excinfo.value.records_written == _CHECKPOINT_TIME_CHECK_INTERVAL_RECORDS
+        assert "remaining time" in excinfo.value.reason
+        del mocks  # unused beyond the exception assertions above
+
+    def test_partial_watermark_clamped_to_not_regress(self) -> None:
+        """A checkpoint's own timestamp must never regress before the prior watermark."""
+        prior_watermark = MagicMock()
+        prior_watermark.upper_watermark = datetime(2026, 6, 11, 15, tzinfo=UTC)
+
+        config = _make_entity_config(
+            load_type=LoadType.INCREMENTAL,
+            watermark_field="LastModifiedDate",
+            max_records_per_lambda_run=2,
+        )
+        # Records' own timestamps (10:00, 11:00) fall BEFORE prior_watermark
+        # (15:00) — plausible when re-processing the overlap window.
+        workflow, mocks = _make_workflow(
+            entity_config=config,
+            extraction_records=_checkpoint_records(3),
+            consume_record_iter_fully=True,
+            watermark_record=prior_watermark,
+        )
+
+        with patch(
+            "orchestration.step_functions.extraction_workflow.WatermarkRepository"
+            ".compute_extraction_window",
+            return_value=_CHECKPOINT_WINDOW,
+        ):
+            with pytest.raises(LambdaTimeoutWarning):
+                workflow.execute()
+
+        mocks["watermark_repo"].advance_watermark.assert_called_once()
+        _, advance_kwargs = mocks["watermark_repo"].advance_watermark.call_args
+        assert advance_kwargs["new_upper_watermark"] == prior_watermark.upper_watermark
+
+    def test_checkpoint_emits_distinct_audit_record(self) -> None:
+        config = _make_entity_config(
+            load_type=LoadType.INCREMENTAL,
+            watermark_field="LastModifiedDate",
+            max_records_per_lambda_run=2,
+        )
+        workflow, mocks = _make_workflow(
+            entity_config=config,
+            extraction_records=_checkpoint_records(3),
+            consume_record_iter_fully=True,
+        )
+
+        with patch(
+            "orchestration.step_functions.extraction_workflow.WatermarkRepository"
+            ".compute_extraction_window",
+            return_value=_CHECKPOINT_WINDOW,
+        ):
+            with pytest.raises(LambdaTimeoutWarning):
+                workflow.execute()
+
+        mocks["coordinator"].emit_checkpoint_stage.assert_called_once()
+        _, checkpoint_kwargs = mocks["coordinator"].emit_checkpoint_stage.call_args
+        assert checkpoint_kwargs["part_number"] == 1
+        assert checkpoint_kwargs["record_count"] == 2
+
+    def test_lambda_timeout_warning_not_routed_to_dlq(self) -> None:
+        config = _make_entity_config(
+            load_type=LoadType.INCREMENTAL,
+            watermark_field="LastModifiedDate",
+            max_records_per_lambda_run=2,
+        )
+        workflow, mocks = _make_workflow(
+            entity_config=config,
+            extraction_records=_checkpoint_records(3),
+            consume_record_iter_fully=True,
+        )
+
+        with patch(
+            "orchestration.step_functions.extraction_workflow.WatermarkRepository"
+            ".compute_extraction_window",
+            return_value=_CHECKPOINT_WINDOW,
+        ):
+            with pytest.raises(LambdaTimeoutWarning):
+                workflow.execute()
+
+        mocks["coordinator"].enqueue_dlq_entry.assert_not_called()
+
+    def test_lambda_timeout_warning_does_not_count_as_circuit_failure(self) -> None:
+        policy = MagicMock(spec=ExtractionRetryPolicy)
+        policy.is_circuit_open.return_value = False
+        config = _make_entity_config(
+            load_type=LoadType.INCREMENTAL,
+            watermark_field="LastModifiedDate",
+            max_records_per_lambda_run=2,
+        )
+        workflow, mocks = _make_workflow(
+            entity_config=config,
+            extraction_records=_checkpoint_records(3),
+            consume_record_iter_fully=True,
+            retry_policy=policy,
+        )
+
+        with patch(
+            "orchestration.step_functions.extraction_workflow.WatermarkRepository"
+            ".compute_extraction_window",
+            return_value=_CHECKPOINT_WINDOW,
+        ):
+            with pytest.raises(LambdaTimeoutWarning):
+                workflow.execute()
+
+        policy.record_failure.assert_not_called()
+        del mocks  # unused beyond the exception/policy assertions above

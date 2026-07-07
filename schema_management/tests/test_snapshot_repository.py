@@ -80,7 +80,7 @@ class TestWriteSnapshot:
         _create_bucket()
         snap = _make_snapshot()
         key = _repo().write_snapshot(snap)
-        assert key == "salesforce/salesforce-account/abc123def456/2026-06-11.json"
+        assert key == "demo/salesforce/salesforce-account/abc123def456/2026-06-11.json"
 
     @mock_aws
     def test_written_object_exists_in_s3(self) -> None:
@@ -97,7 +97,9 @@ class TestWriteSnapshot:
         snap = _make_snapshot()
         key = _repo().write_snapshot(snap)
         s3 = boto3.client("s3", region_name=_REGION)
-        pointer = s3.get_object(Bucket=_BUCKET, Key="salesforce/salesforce-account/latest.json")
+        pointer = s3.get_object(
+            Bucket=_BUCKET, Key="demo/salesforce/salesforce-account/latest.json"
+        )
         import json
 
         index = json.loads(pointer["Body"].read().decode("utf-8"))
@@ -220,7 +222,8 @@ class TestWriteDriftReport:
             extraction_date="2026-06-11",
             report_json='{"overall_classification":"no_drift","field_changes":[]}',
         )
-        assert key == ("salesforce/salesforce-account/abc123def456/drift-report-2026-06-11.json")
+        expected_key = "demo/salesforce/salesforce-account/abc123def456/drift-report-2026-06-11.json"
+        assert key == expected_key
         s3 = boto3.client("s3", region_name=_REGION)
         response = s3.get_object(Bucket=_BUCKET, Key=key)
         assert response["ContentType"] == "application/json"
@@ -290,7 +293,7 @@ class TestSnapshotPointerWriteFailureHandling:
         snap = _make_snapshot()
         # Must not raise; key must still be returned
         key = repo.write_snapshot(snap)
-        assert key == "salesforce/salesforce-account/abc123def456/2026-06-11.json"
+        assert key == "demo/salesforce/salesforce-account/abc123def456/2026-06-11.json"
 
         # Snapshot object must exist in S3 (was written before pointer failure)
         import boto3 as _boto3
@@ -298,3 +301,39 @@ class TestSnapshotPointerWriteFailureHandling:
         s3 = _boto3.client("s3", region_name=_REGION)
         response = s3.get_object(Bucket=_BUCKET, Key=key)
         assert response["ContentType"] == "application/json"
+
+
+class TestTenantScoping:
+    """§1.1 / ARCH-1: tenant_code is always prefixed, isolating tenants' snapshots."""
+
+    @mock_aws
+    def test_write_snapshot_prefixes_non_default_tenant(self) -> None:
+        _create_bucket()
+        snap = _make_snapshot()
+        key = _repo().write_snapshot(snap, tenant_code="acme-corp")
+        assert key == "acme-corp/salesforce/salesforce-account/abc123def456/2026-06-11.json"
+
+    @mock_aws
+    def test_two_tenants_snapshots_do_not_collide(self) -> None:
+        _create_bucket()
+        repo = _repo()
+        snap = _make_snapshot()
+        key_a = repo.write_snapshot(snap, tenant_code="acme-corp")
+        key_b = repo.write_snapshot(snap, tenant_code="globex-eu")
+        assert key_a != key_b
+
+        loaded_a = repo.load_latest_snapshot(
+            "salesforce", "salesforce-account", tenant_code="acme-corp"
+        )
+        loaded_b = repo.load_latest_snapshot(
+            "salesforce", "salesforce-account", tenant_code="globex-eu"
+        )
+        assert loaded_a is not None and loaded_b is not None
+
+    @mock_aws
+    def test_load_latest_snapshot_default_tenant_isolated_from_others(self) -> None:
+        _create_bucket()
+        repo = _repo()
+        repo.write_snapshot(_make_snapshot(), tenant_code="acme-corp")
+        # No snapshot written for "demo" — must not see acme-corp's.
+        assert repo.load_latest_snapshot("salesforce", "salesforce-account") is None

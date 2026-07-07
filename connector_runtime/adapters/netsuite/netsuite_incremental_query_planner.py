@@ -25,7 +25,13 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
-from connector_runtime.interfaces.connector_interface import FieldContract, QueryContract
+from connector_runtime.interfaces.connector_interface import (
+    DeterministicConnectorError,
+    ExtractionErrorClassification,
+    FieldContract,
+    QueryContract,
+)
+from connector_runtime.query_builders.incremental_query_builder import build_incremental_select
 from contracts.entity_configuration_contract import LoadType
 from observability.structured_logger import get_platform_logger
 
@@ -48,8 +54,10 @@ _SUITEQL_PATH: Final[str] = "/services/rest/query/v1/suiteql"
 _PAGE_SIZE: Final[int] = 1_000
 
 
-class NetSuiteIncrementalQueryPlannerError(Exception):
+class NetSuiteIncrementalQueryPlannerError(DeterministicConnectorError):
     """Raised when query construction fails due to invalid inputs."""
+
+    classification = ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
 
 
 class NetSuiteIncrementalQueryPlanner:
@@ -137,26 +145,27 @@ class NetSuiteIncrementalQueryPlanner:
                 "FieldContract contains no queryable fields — cannot build SuiteQL query."
             )
 
-        select_clause = ", ".join(field_names)
-        # field names and record_type are both validated against _IDENTIFIER_PATTERN
-        # before this point — no user-controlled input can reach this f-string.
-        query_text = f"SELECT {select_clause} FROM {self._record_type}"  # noqa: S608
-        query_parameters: dict[str, Any] = {}
-        effective_watermark_field: str | None = None
-
         if load_type == LoadType.INCREMENTAL and watermark_field:
             if not _IDENTIFIER_PATTERN.match(watermark_field):
                 raise NetSuiteIncrementalQueryPlannerError(
                     f"watermark_field {watermark_field!r} does not match identifier pattern."
                 )
-            query_text = (
-                f"{query_text}"
-                f" WHERE {watermark_field} >= :lower_bound"
-                f" AND {watermark_field} < :upper_bound"
-            )
-            query_parameters["lower_bound"] = watermark_lower
-            query_parameters["upper_bound"] = watermark_upper
-            effective_watermark_field = watermark_field
+
+        # DUP-4: the actual SELECT/FROM/WHERE assembly is shared with
+        # Salesforce SOQL and MySQL — see build_incremental_select(). SuiteQL
+        # uses no identifier quoting and ":lower_bound"/":upper_bound"
+        # placeholders, textually substituted by bind_parameters() below
+        # (SuiteQL has no server-side parameter binding).
+        query_text, query_parameters, effective_watermark_field = build_incremental_select(
+            field_names=field_names,
+            table=self._record_type,
+            load_type=load_type,
+            watermark_field=watermark_field,
+            watermark_lower=watermark_lower,
+            watermark_upper=watermark_upper,
+            lower_bound_placeholder=":lower_bound",
+            upper_bound_placeholder=":upper_bound",
+        )
 
         _logger.info(
             "netsuite_query_built",

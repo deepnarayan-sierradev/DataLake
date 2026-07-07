@@ -337,3 +337,64 @@ class TestConnectorRegistry:
         assert registry.registered_source_ids == []
         with pytest.raises(KeyError):
             registry.resolve("reset-source")
+
+
+class TestConnectorHealthCheck:
+    """OBS-5: default health_check() implementation on ConnectorInterface."""
+
+    def _make_connector(self, capability_raises: bool = False) -> ConnectorInterface:
+        class _StubConnector(ConnectorInterface):
+            def get_capability_declaration(self) -> ConnectorCapabilities:
+                if capability_raises:
+                    raise RuntimeError("credentials unavailable")
+                return ConnectorCapabilities(source_id="stub-source")
+
+            def discover_queryable_fields(
+                self,
+                source_id: str,
+                entity_id: str,
+                field_mode: FieldMode,
+                include_fields: list[str],
+                exclude_fields: list[str],
+            ) -> FieldContract:
+                raise NotImplementedError
+
+            def build_extraction_query(
+                self,
+                field_contract: FieldContract,
+                load_type: LoadType,
+                watermark_field: str | None,
+                watermark_lower: str | None,
+                watermark_upper: str | None,
+                extraction_window_days: int,
+            ) -> QueryContract:
+                raise NotImplementedError
+
+            def execute_extraction(
+                self,
+                query_contract: QueryContract,
+                run_id: str,
+            ) -> Iterator[ExtractionRecord]:
+                return iter([])
+
+            def classify_extraction_error(
+                self,
+                exc: Exception,
+            ) -> ExtractionErrorClassification:
+                return ExtractionErrorClassification.UNKNOWN
+
+        return _StubConnector()
+
+    def test_health_check_true_when_capability_declaration_succeeds(self) -> None:
+        assert self._make_connector().health_check() is True
+
+    def test_health_check_false_when_capability_declaration_raises(self) -> None:
+        assert self._make_connector(capability_raises=True).health_check() is False
+
+    def test_health_check_never_raises(self) -> None:
+        connector = self._make_connector(capability_raises=True)
+        try:
+            result = connector.health_check()
+        except Exception as exc:
+            pytest.fail(f"health_check() must never raise, got {exc!r}")
+        assert result is False

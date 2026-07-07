@@ -21,18 +21,27 @@ Token endpoint:
   grant_type=client_credentials
   client_id={client_id}
   client_secret={client_secret}
+
+Credential retrieval (DUP-2) is delegated to the shared
+SecretsManagerCredentialClient rather than hand-rolling boto3/Secrets Manager
+boilerplate here — see connector_runtime/credential_client.py.
 """
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any, Final
 
-import boto3
 import requests
-from botocore.exceptions import ClientError
 
+from connector_runtime.credential_client import (
+    SecretsManagerCredentialClient,
+    SecretsManagerCredentialError,
+)
+from connector_runtime.interfaces.connector_interface import (
+    DeterministicConnectorError,
+    ExtractionErrorClassification,
+)
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -44,13 +53,22 @@ _SECRET_PATH_TEMPLATE: Final[str] = "{environment}/sources/salesforce/credential
 # mid-extraction expiry on long-running Bulk API jobs.
 _PROACTIVE_REFRESH_SECONDS: Final[int] = 300
 
+# Required secret keys — enforced by the shared SecretsManagerCredentialClient.
+_REQUIRED_CREDENTIAL_KEYS: Final[frozenset[str]] = frozenset(
+    {"instance_url", "client_id", "client_secret"}
+)
 
-class SalesforceCredentialError(Exception):
+
+class SalesforceCredentialError(SecretsManagerCredentialError, DeterministicConnectorError):
     """Raised when Salesforce credentials cannot be retrieved or are invalid."""
 
+    classification = ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
 
-class SalesforceAuthError(Exception):
+
+class SalesforceAuthError(DeterministicConnectorError):
     """Raised when the OAuth 2.0 token exchange fails."""
+
+    classification = ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
 
 
 class SalesforceAuthClient:
@@ -72,7 +90,13 @@ class SalesforceAuthClient:
             raise ValueError("environment must not be empty.")
         self._environment = environment
         self._region = region_name
-        self._secrets_client = boto3.client("secretsmanager", region_name=region_name)
+        self._credentials_client = SecretsManagerCredentialClient(
+            secret_id=_SECRET_PATH_TEMPLATE.format(environment=environment),
+            region_name=region_name,
+            required_keys=_REQUIRED_CREDENTIAL_KEYS,
+            source_label="Salesforce",
+            error_cls=SalesforceCredentialError,
+        )
 
         # Token state — populated lazily on first get_access_token() call.
         self._access_token: str | None = None
@@ -195,27 +219,4 @@ class SalesforceAuthClient:
         Raises:
             SalesforceCredentialError: secret not found or malformed.
         """
-        secret_id = _SECRET_PATH_TEMPLATE.format(environment=self._environment)
-        try:
-            response = self._secrets_client.get_secret_value(SecretId=secret_id)
-        except ClientError as exc:
-            code = exc.response["Error"]["Code"]
-            raise SalesforceCredentialError(
-                f"Failed to retrieve Salesforce credentials from Secrets Manager "
-                f"(error_code={code!r})."
-            ) from None
-
-        raw = response.get("SecretString") or ""
-        try:
-            payload: dict[str, str] = json.loads(raw)
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise SalesforceCredentialError(
-                "Salesforce credentials secret is not valid JSON."
-            ) from exc
-
-        missing = [k for k in ("instance_url", "client_id", "client_secret") if k not in payload]
-        if missing:
-            raise SalesforceCredentialError(
-                f"Salesforce credentials secret is missing required keys: {missing}."
-            )
-        return payload
+        return self._credentials_client.get_credentials()

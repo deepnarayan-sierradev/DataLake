@@ -83,3 +83,30 @@ class TestCuratedLayerWriter:
 
         today = datetime.now(UTC).date().isoformat()
         assert today in result.s3_prefix
+
+    def test_tenant_code_prefixes_curated_path(self):
+        """S3 prefix must start with tenant_code/ (§1.1)."""
+        result = self.writer.write(
+            self._sample_records(), "customer", "salesforce-account", _RUN_ID,
+            tenant_code="acme-corp",
+        )
+        assert result.s3_prefix.startswith("acme-corp/curated/")
+
+    def test_default_tenant_code_is_demo(self):
+        """Default tenant_code 'demo' must be used when not specified."""
+        result = self.writer.write(
+            self._sample_records(), "customer", "salesforce-account", _RUN_ID
+        )
+        assert result.s3_prefix.startswith("demo/curated/")
+
+    def test_streaming_write_with_tenant_code(self):
+        """write_streaming must also include tenant_code in the path."""
+        result = self.writer.write_streaming(
+            records_iter=iter(self._sample_records()),
+            domain="customer",
+            entity_id="salesforce-account",
+            run_id=_RUN_ID,
+            tenant_code="globex-eu",
+        )
+        assert result.s3_prefix.startswith("globex-eu/curated/")
+        assert result.record_count == 2

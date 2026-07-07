@@ -43,6 +43,12 @@ from connector_runtime.adapters.sage.common.sage_credential_manager import (
     SageCredentialError,
     SageCredentialManager,
 )
+from connector_runtime.adapters.sage.common.sage_errors import (
+    SageMetadataDeterministicError,
+    SageMetadataError,
+    SageMetadataTransientError,
+    SageQueryBuildError,
+)
 from connector_runtime.adapters.sage.common.sage_http_client import (
     SageAuthenticationError,
     SageHttpClient,
@@ -62,12 +68,6 @@ from connector_runtime.adapters.sage.products.intacct.intacct_auth import (
     IntacctAuthError,
     IntacctCredentialError,
 )
-from connector_runtime.adapters.sage.common.sage_errors import (
-    SageMetadataDeterministicError,
-    SageMetadataError,
-    SageMetadataTransientError,
-    SageQueryBuildError,
-)
 from connector_runtime.adapters.sage.products.intacct.intacct_query_engine import (
     PAGE_SIZE,
     IntacctQueryEngine,
@@ -77,10 +77,10 @@ from connector_runtime.adapters.sage.products.x3.x3_auth import (
     X3CredentialError,
 )
 from connector_runtime.adapters.sage.products.x3.x3_query_engine import (
+    X3_ODATA_DISCRIMINANT,
     X3_PAGE_SIZE,
     X3QueryBuildError,
     X3QueryEngine,
-    X3_ODATA_DISCRIMINANT,
 )
 from connector_runtime.interfaces.connector_interface import (
     ConnectorCapabilities,
@@ -653,3 +653,7 @@ def _build_sage(
 
 
 connector_registry.register_builder(_SOURCE_ID, _build_sage)
+
+from connector_runtime.adapters.sage.sage_params import SageConnectorParams
+
+connector_registry.register_params_model(_SOURCE_ID, SageConnectorParams)

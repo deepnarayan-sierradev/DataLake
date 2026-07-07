@@ -70,7 +70,7 @@ An **Enterprise Data Lake Platform** — a production-grade, security-first, met
 | Audit trail | None | Full lineage from source to serving |
 | New source onboarding | 2–4 weeks (code change + deployment) | 2–3 days (configuration only) |
 | Data quality visibility | No monitoring | Quality reports per entity per run |
-| Credential security | Scripts and .env files | AWS Secrets Manager with auto-rotation |
+| Credential security | Scripts and .env files | AWS Secrets Manager with daily expiry-check alerting (auto-rotation planned) |
 | Compliance readiness | Manual documentation | Automated lineage + retention enforcement |
 
 ---
@@ -292,7 +292,7 @@ The platform enforces a **zero-trust, need-to-know** access model. Each pipeline
 Each source has its own Secrets Manager secret:
 - Path: `{environment}/sources/{source_id}/credentials` (or `{environment}/sources/sage/{product}/credentials` for Sage)
 - Only the `extraction-service-role` for that source has `GetSecretValue` permission.
-- Rotation is scheduled (every 90 days for Salesforce/Sage OAuth tokens, every 365 days for MySQL read-only passwords).
+- A daily automated check compares each secret's age against a threshold and alerts the platform team via SNS if rotation is overdue; automatic rotation itself is a planned follow-up and is not yet implemented.
 - Credentials are retrieved at runtime, held in memory for the duration of one extraction run, and never logged.
 
 ---
@@ -410,7 +410,7 @@ The platform is built security-first, with controls embedded at every layer:
 ### Credential Management
 - Source credentials stored exclusively in **AWS Secrets Manager**
 - Separate secret per source system, per environment
-- Automatic rotation scheduled per source type
+- Daily automated expiry-check Lambda alerts the platform team via SNS when a secret's age exceeds a threshold; automatic rotation is a planned follow-up, not yet implemented
 - Credentials held in memory only for the duration of a single extraction run — never written to logs, files, or environment variables
 
 ### Encryption
@@ -473,7 +473,7 @@ The platform is built exclusively on proven, production-grade technologies. Ever
 | Schema snapshots | **Amazon S3** | Immutable JSON per run; SHA-256 fingerprinted |
 | Field mapping / entity resolution config | **Amazon S3** | Versioned JSON; latest-pointer pattern |
 | Watermark state | **Amazon DynamoDB** | Point-in-time recovery; optimistic concurrency |
-| Entity configuration | **Amazon DynamoDB** | `{env}-entity-extraction-config`; KMS encrypted |
+| Entity configuration | **Amazon DynamoDB** | `{env}-edl-entity-extraction-config`; KMS encrypted |
 | Run audit log | **Amazon DynamoDB** | TTL-enabled; GSI on source/entity/time |
 | Serving store | **Amazon RDS MySQL 8** | Private VPC; read-only for analytics consumers |
 
@@ -504,7 +504,7 @@ The platform is built exclusively on proven, production-grade technologies. Ever
 
 | Concern | Technology | Notes |
 |---|---|---|
-| Credential storage | **AWS Secrets Manager** | One secret per source per environment; scheduled rotation |
+| Credential storage | **AWS Secrets Manager** | One secret per source per environment; daily expiry-check alerting (auto-rotation planned, not yet implemented) |
 | Encryption at rest | **AWS KMS** (customer-managed CMK, SSE-KMS) | Applied to all S3 buckets, DynamoDB tables, and SQS queues |
 | Encryption in transit | **TLS 1.2+** | Mandatory; enforced via S3 bucket policy (`aws:SecureTransport`) |
 | Network isolation | **Amazon VPC** (private subnets) | No internet gateway; all AWS traffic via VPC Endpoints |
@@ -545,7 +545,7 @@ The platform is built exclusively on proven, production-grade technologies. Ever
 
 | Tool | Notes |
 |---|---|
-| **GitHub Actions** | 7-stage CI gate: lint → typecheck → test → SAST → CVE scan → IaC scan → Terraform validate |
+| **GitHub Actions** | 8-stage CI gate: lint → typecheck → test → SAST → CVE scan → IaC scan → Terraform validate → secret-scan |
 | SHA-pinned action references | All `uses:` entries pinned to commit SHA digest (no mutable `@v4` tags) |
 | **pre-commit hooks** | Ruff, detect-private-key, no-commit-to-branch, bandit, Terraform fmt/validate/checkov, detect-secrets |
 
@@ -668,7 +668,7 @@ Compare: previous approach of writing a new ETL script = 2–4 weeks.
 
 | Audit question | Evidence location |
 |---|---|
-| "Who extracted this data on this date?" | DynamoDB run audit log (table: `{env}-run-audit-log`) |
+| "Who extracted this data on this date?" | DynamoDB run audit log (table: `{env}-edl-run-audit-log`) |
 | "What fields were extracted?" | Schema snapshot (S3: `schemas/{source_id}/{entity_id}/{date}.json`) |
 | "Was PII masked before analytics access?" | Transformation lineage record; classification policy version logged |
 | "What changed in the source schema?" | Drift report (S3: alongside schema snapshot) |
@@ -708,6 +708,7 @@ Compare: previous approach of writing a new ETL script = 2–4 weeks.
 
 | Item | Description |
 |---|---|
+| SaaS control plane / multi-tenancy | Self-service tenant provisioning, entity registration, and pipeline triggering via a Cognito-authenticated REST API — code-complete and wired into all three environments, but not yet verified against a live AWS deployment. Pilot tenant onboarding and load testing are the next gating steps. |
 | Dynamics 365 connector | Configuration-only addition; adapter code ~3 days |
 | HubSpot connector | Marketing activity data for unified customer view |
 | Real-time CDC pipeline | Debezium + Kafka for sub-minute latency on MySQL changes |

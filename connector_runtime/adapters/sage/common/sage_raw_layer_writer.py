@@ -17,14 +17,21 @@ Design:
     "customer" concept but their records are structurally different).
   - Append-only writes — each run produces a unique partition path via run_id.
   - write_partition_streaming() keeps peak memory at O(chunk_size) for large datasets.
-  - Both methods follow the same pattern as NetSuiteRawLayerWriter and
-    SalesforceRawLayerWriter to maintain consistency across the platform.
 
 Security (OWASP A05, A08, A09):
   - S3 keys constructed from validated IDs only (STABLE_ID_PATTERN + product whitelist).
   - product_name validated against SUPPORTED_SAGE_PRODUCTS before path interpolation.
   - Record payloads written as-is; no values are logged.
   - IAM credentials via implicit boto3 credential chain (Lambda execution role).
+
+DUP-1: write_partition() and _write_parquet_part() are inherited unchanged
+from connector_runtime.raw_layer_writer.RawLayerWriter — that logic was
+byte-for-byte identical to Salesforce/NetSuite/MySQL RDS's raw layer writers
+modulo the source name. write_partition_streaming() is overridden here
+because Sage's zero-record handling (raises) and chunk file naming/metadata
+fields genuinely differ from the other three adapters (which warn and return
+(prefix, 0)) — see RawLayerWriter.write_partition_streaming's docstring for
+the shared variant this deliberately diverges from.
 """
 
 from __future__ import annotations
@@ -32,15 +39,15 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from io import BytesIO
 from typing import Any, Final
 
-import boto3
-import pyarrow as pa
-import pyarrow.parquet as pq
-
 from connector_runtime.interfaces.connector_interface import ExtractionRecord
-from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from connector_runtime.raw_layer_writer import (
+    DEFAULT_STREAMING_CHUNK_SIZE,
+    RawLayerWriter,
+    RawLayerWriterError,
+    build_parquet_bytes,
+)
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -49,11 +56,11 @@ _logger = get_platform_logger(__name__)
 _SAGE_ROOT: Final[str] = "sage"
 
 
-class SageRawLayerWriterError(Exception):
+class SageRawLayerWriterError(RawLayerWriterError):
     """Raised when raw layer writing fails in a way that aborts the extraction run."""
 
 
-class SageRawLayerWriter:
+class SageRawLayerWriter(RawLayerWriter):
     """
     Writes a batch of ExtractionRecord objects to the S3 raw layer as Parquet.
 
@@ -78,6 +85,9 @@ class SageRawLayerWriter:
         )
     """
 
+    error_cls = SageRawLayerWriterError
+    log_prefix = "sage"
+
     def __init__(
         self,
         s3_bucket: str,
@@ -85,94 +95,23 @@ class SageRawLayerWriter:
         sage_product: str,
         region_name: str,
     ) -> None:
-        if not s3_bucket:
-            raise ValueError("s3_bucket must not be empty.")
         if not sage_product:
             raise ValueError("sage_product must not be empty.")
-        self._bucket = s3_bucket
-        self._prefix = s3_prefix.strip("/")
         self._sage_product = sage_product
-        self._s3 = boto3.client("s3", region_name=region_name)
-
-    def write_partition(
-        self,
-        records: list[ExtractionRecord],
-        source_id: str,
-        entity_id: str,
-        run_id: str,
-        schema_fingerprint: str,
-        extraction_date: str,
-    ) -> str:
-        """
-        Write records as Parquet and a metadata JSON sidecar to the S3 raw layer.
-
-        Returns:
-            The S3 key of the written Parquet file.
-
-        Raises:
-            SageRawLayerWriterError: on S3 write failure or invalid inputs.
-        """
-        self._validate_stable_id("source_id", source_id)
-        self._validate_stable_id("entity_id", entity_id)
-
-        extraction_timestamp = datetime.now(UTC)
-        partition_prefix = self._partition_path(entity_id, extraction_date, run_id)
-        data_key = f"{partition_prefix}/data.parquet"
-        metadata_key = f"{partition_prefix}/metadata.json"
-
-        parquet_bytes = _records_to_parquet(records)
-        record_count = len(records)
-
-        metadata: dict[str, Any] = {
-            "run_id": run_id,
-            "source_id": source_id,
-            "sage_product": self._sage_product,
-            "entity_id": entity_id,
-            "extraction_timestamp": extraction_timestamp.isoformat(),
-            "schema_version": schema_fingerprint,
-            "record_count": record_count,
-            "extraction_date": extraction_date,
-            "data_key": data_key,
-        }
-
-        try:
-            self._s3.put_object(
-                Bucket=self._bucket,
-                Key=data_key,
-                Body=parquet_bytes,
-                ContentType="application/octet-stream",
-            )
-        except Exception as exc:
-            raise SageRawLayerWriterError(
-                f"Failed to write Parquet to s3://{self._bucket}/{data_key}: "
-                f"{type(exc).__name__}"
-            ) from exc
-
-        try:
-            self._s3.put_object(
-                Bucket=self._bucket,
-                Key=metadata_key,
-                Body=json.dumps(metadata, indent=2).encode(),
-                ContentType="application/json",
-            )
-        except Exception as exc:
-            _logger.warning(
-                "sage_raw_metadata_write_failed",
-                data_key=data_key,
-                metadata_key=metadata_key,
-                error=type(exc).__name__,
-            )
-
-        _logger.info(
-            "sage_raw_partition_written",
-            bucket=self._bucket,
-            data_key=data_key,
-            record_count=record_count,
-            sage_product=self._sage_product,
-            entity_id=entity_id,
-            run_id=run_id,
+        super().__init__(
+            s3_bucket=s3_bucket,
+            s3_prefix=s3_prefix,
+            path_segments=[_SAGE_ROOT, sage_product],
+            region_name=region_name,
         )
-        return data_key
+
+    def _extra_metadata_fields(self) -> dict[str, Any]:
+        return {"sage_product": self._sage_product}
+
+    def _extra_log_fields(self) -> dict[str, Any]:
+        return {"sage_product": self._sage_product}
+
+    # ── Overridden: Sage's streaming zero-record / naming semantics diverge ──
 
     def write_partition_streaming(
         self,
@@ -182,7 +121,7 @@ class SageRawLayerWriter:
         run_id: str,
         schema_fingerprint: str,
         extraction_date: str,
-        chunk_size: int = 50_000,
+        chunk_size: int = DEFAULT_STREAMING_CHUNK_SIZE,
     ) -> tuple[str, int]:
         """
         Write records from an iterator in memory-bounded chunks to S3.
@@ -191,8 +130,18 @@ class SageRawLayerWriter:
         Each chunk is written as a separate Parquet file under the same
         partition prefix, with a sequential suffix.
 
+        Unlike Salesforce/NetSuite/MySQL RDS's write_partition_streaming
+        (RawLayerWriter's shared implementation), Sage treats zero records
+        as a hard failure rather than a logged warning + (prefix, 0) — this
+        is a pre-existing, deliberate behavioural difference (DUP-1), not
+        something this consolidation should paper over.
+
         Returns:
             Tuple of (partition_prefix, total_record_count).
+
+        Raises:
+            SageRawLayerWriterError: on zero records, S3 write failure, or
+                invalid inputs.
         """
         self._validate_stable_id("source_id", source_id)
         self._validate_stable_id("entity_id", entity_id)
@@ -224,7 +173,7 @@ class SageRawLayerWriter:
             total_records += len(chunk)
 
         if total_records == 0:
-            raise SageRawLayerWriterError(
+            raise self.error_cls(
                 "Streaming write produced zero records — cannot write empty partition."
             )
 
@@ -267,47 +216,20 @@ class SageRawLayerWriter:
         )
         return partition_prefix, total_records
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
-    def _partition_path(self, entity_id: str, extraction_date: str, run_id: str) -> str:
-        parts = [self._prefix] if self._prefix else []
-        parts.extend([
-            _SAGE_ROOT,
-            self._sage_product,
-            entity_id,
-            f"extraction_date={extraction_date}",
-            f"run_id={run_id}",
-        ])
-        return "/".join(parts)
-
     def _write_chunk(
         self,
         chunk: list[ExtractionRecord],
         partition_prefix: str,
         chunk_index: int,
     ) -> None:
+        """
+        Serialise and upload one streaming chunk. Uses the shared
+        _write_parquet_part() upload path (RawLayerWriter) but keeps Sage's
+        own data_NNNN.parquet naming convention rather than the
+        part-NNNNN.parquet naming Salesforce/NetSuite/MySQL RDS use.
+        """
         data_key = f"{partition_prefix}/data_{chunk_index:04d}.parquet"
-        parquet_bytes = _records_to_parquet(chunk)
-        try:
-            self._s3.put_object(
-                Bucket=self._bucket,
-                Key=data_key,
-                Body=parquet_bytes,
-                ContentType="application/octet-stream",
-            )
-        except Exception as exc:
-            raise SageRawLayerWriterError(
-                f"Failed to write chunk {chunk_index} to "
-                f"s3://{self._bucket}/{data_key}: {type(exc).__name__}"
-            ) from exc
-
-    def _validate_stable_id(self, field_name: str, value: str) -> None:
-        if not _STABLE_ID_PATTERN.match(value):
-            raise SageRawLayerWriterError(
-                f"{field_name}={value!r} does not match the stable ID pattern "
-                f"{_STABLE_ID_PATTERN.pattern!r}. "
-                "Path traversal characters and uppercase are not permitted."
-            )
+        self._write_parquet_part(chunk, data_key)
 
 
 # ---------------------------------------------------------------------------
@@ -321,35 +243,14 @@ def _records_to_parquet(records: list[ExtractionRecord]) -> bytes:
 
     All field values are normalised to strings (or None) — the raw layer stores
     source values as-is without type coercion, matching the platform convention
-    established by the MySQL and NetSuite raw layer writers.
+    established across all raw layer writers.
+
+    Kept as a standalone, importable function (rather than folded fully into
+    RawLayerWriter) because it is unit-tested directly; delegates the actual
+    serialization to the shared connector_runtime.raw_layer_writer.build_parquet_bytes
+    (DUP-1) instead of reimplementing it.
 
     Raises:
         SageRawLayerWriterError: if records is empty.
     """
-    if not records:
-        raise SageRawLayerWriterError(
-            "Cannot write empty record batch — at least one record is required."
-        )
-
-    # Build a stable column ordering from all records (insertion-order dedup).
-    all_keys: list[str] = []
-    seen: set[str] = set()
-    for record in records:
-        for key in record.payload:
-            if key not in seen:
-                all_keys.append(key)
-                seen.add(key)
-
-    columns: dict[str, list[str | None]] = {key: [] for key in all_keys}
-    for record in records:
-        for key in all_keys:
-            value = record.payload.get(key)
-            columns[key].append(None if value is None else str(value))
-
-    arrays = [pa.array(columns[key], type=pa.large_utf8()) for key in all_keys]
-    schema = pa.schema([(key, pa.large_utf8()) for key in all_keys])
-    table = pa.table(dict(zip(all_keys, arrays, strict=True)), schema=schema)
-
-    buf = BytesIO()
-    pq.write_table(table, buf, compression="snappy")  # type: ignore[no-untyped-call]
-    return buf.getvalue()
+    return build_parquet_bytes(records, SageRawLayerWriterError)

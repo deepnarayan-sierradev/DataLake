@@ -23,13 +23,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from connector_runtime.interfaces.connector_interface import ConnectorInterface
 
 # Type alias for a connector builder callable.
-# Signature: (environment, region_name, connector_params, raw_s3_bucket) -> (connector, writer)
-# The writer return type is Any to avoid importing orchestration from connector_runtime
-# (which would create a circular dependency). Writers satisfy RawLayerWriterProtocol
-# structurally at the call site.
 ConnectorBuilder = Callable[
     [str, str, dict[str, str], str],
     "tuple[ConnectorInterface, Any]",
@@ -47,6 +45,7 @@ class ConnectorRegistry:
     def __init__(self) -> None:
         self._registry: dict[str, type[ConnectorInterface]] = {}
         self._builders: dict[str, ConnectorBuilder] = {}
+        self._params_models: dict[str, type[BaseModel]] = {}
 
     def register(
         self, source_id: str
@@ -166,6 +165,23 @@ class ConnectorRegistry:
         """
         self._registry.clear()
         self._builders.clear()
+        self._params_models.clear()
+
+    def register_params_model(
+        self, source_id: str, model_cls: type[BaseModel]
+    ) -> None:
+        """
+        Register a Pydantic model class for connector_params validation (§2.2).
+
+        Args:
+            source_id:  Stable source identifier.
+            model_cls:  Pydantic BaseModel subclass that validates connector_params.
+        """
+        self._params_models[source_id] = model_cls
+
+    def get_params_model(self, source_id: str) -> type[BaseModel] | None:
+        """Return the registered params model for source_id, or None if unregistered."""
+        return self._params_models.get(source_id)
 
 
 # Module-level singleton — imported by all adapters and the runtime

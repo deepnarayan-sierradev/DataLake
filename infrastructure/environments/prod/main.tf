@@ -13,22 +13,6 @@ locals {
 
 data "aws_caller_identity" "current" {}
 
-# Look up pre-existing operational DynamoDB tables.
-# These tables are created outside Terraform with the correct key schema
-# for the Python connector runtime (entity_id hash key only).
-# They must exist before terraform apply is run in a new environment.
-data "aws_dynamodb_table" "entity_config" {
-  name = "${local.environment}-entity-extraction-config"
-}
-
-data "aws_dynamodb_table" "watermark" {
-  name = "${local.environment}-watermark-repository"
-}
-
-data "aws_dynamodb_table" "audit_log" {
-  name = "${local.environment}-run-audit-log"
-}
-
 module "kms_storage" {
   source                  = "../../modules/kms"
   environment             = local.environment
@@ -120,7 +104,16 @@ module "secrets" {
   secrets_kms_key_arn          = module.kms_secrets.key_arn
   extraction_runtime_role_arns = [module.iam.extraction_runtime_role_arn]
   secret_recovery_window_days  = 30 # Maximum recovery window in prod
-  tags                         = local.common_tags
+
+  # SEC-6: credential expiry notifier Lambda + daily EventBridge schedule.
+  credential_expiry_notifier_role_arn  = module.iam.credential_expiry_notifier_role_arn
+  credential_expiry_scheduler_role_arn = module.iam.credential_expiry_scheduler_role_arn
+  alert_topic_arn                      = module.observability.platform_alerts_topic_arn
+  lambda_package_s3_bucket             = var.lambda_package_s3_bucket
+  lambda_package_s3_key                = var.lambda_package_s3_key
+  lambda_package_source_hash           = var.lambda_package_source_hash
+
+  tags = local.common_tags
 }
 
 module "iam" {
@@ -130,9 +123,10 @@ module "iam" {
   curated_layer_bucket_arn        = module.storage.curated_layer_bucket_arn
   analytics_layer_bucket_arn      = module.storage.analytics_layer_bucket_arn
   schema_snapshots_bucket_arn     = module.storage.schema_snapshots_bucket_arn
-  watermark_table_arn             = data.aws_dynamodb_table.watermark.arn
-  run_audit_log_table_arn         = data.aws_dynamodb_table.audit_log.arn
-  entity_config_table_arn         = data.aws_dynamodb_table.entity_config.arn
+  watermark_table_arn             = module.metadata_persistence.watermark_repository_table_arn
+  run_audit_log_table_arn         = module.metadata_persistence.run_audit_log_table_arn
+  entity_config_table_arn         = module.metadata_persistence.entity_extraction_config_table_arn
+  entity_type_registry_table_arn  = module.metadata_persistence.entity_type_registry_table_arn
   dlq_arn                         = module.metadata_persistence.extraction_failure_dlq_arn
   kms_key_arns_for_extraction     = [module.kms_storage.key_arn, module.kms_secrets.key_arn, module.kms_database.key_arn]
   kms_key_arns_for_transformation = [module.kms_storage.key_arn, module.kms_database.key_arn]
@@ -184,9 +178,9 @@ module "lambda_pipeline" {
   raw_s3_bucket_name             = module.storage.raw_layer_bucket_id
   schema_snapshot_s3_bucket_name = module.storage.schema_snapshots_bucket_id
 
-  entity_config_table_name = data.aws_dynamodb_table.entity_config.name
-  watermark_table_name     = data.aws_dynamodb_table.watermark.name
-  audit_log_table_name     = data.aws_dynamodb_table.audit_log.name
+  entity_config_table_name = module.metadata_persistence.entity_extraction_config_table_name
+  watermark_table_name     = module.metadata_persistence.watermark_repository_table_name
+  audit_log_table_name     = module.metadata_persistence.run_audit_log_table_name
 
   subnet_ids         = module.networking.private_subnet_ids
   security_group_ids = []
@@ -325,4 +319,35 @@ module "orchestration" {
   tags = local.common_tags
 
   depends_on = [module.iam, module.observability]
+}
+
+# ---------------------------------------------------------------------------
+# Control Plane — multi-tenant SaaS API (tenant provisioning, entity
+# registration, pipeline triggering, run status). Reuses the same pipeline
+# trigger SQS FIFO queue as orchestration's pipeline_trigger Lambda, and the
+# same Lambda deployment package as the rest of connector_runtime.
+# ---------------------------------------------------------------------------
+
+module "control_plane" {
+  source      = "../../modules/control_plane"
+  environment = local.environment
+
+  kms_key_arn         = module.kms_logs.key_arn
+  log_retention_days  = 365
+  enable_xray_tracing = true
+
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  control_plane_role_arn = module.iam.control_plane_role_arn
+
+  pipeline_trigger_queue_url      = module.orchestration.pipeline_trigger_queue_url
+  entity_config_table_name        = module.metadata_persistence.entity_extraction_config_table_name
+  entity_type_registry_table_name = module.metadata_persistence.entity_type_registry_table_name
+  run_audit_log_table_name        = module.metadata_persistence.run_audit_log_table_name
+
+  tags = local.common_tags
+
+  depends_on = [module.iam, module.orchestration, module.metadata_persistence]
 }

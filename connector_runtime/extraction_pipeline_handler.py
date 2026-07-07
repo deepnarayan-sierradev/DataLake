@@ -37,16 +37,18 @@ from typing import Any, Final
 # and register_builder() calls execute at Lambda cold-start time.
 import connector_runtime.adapters.mysql_rds.mysql_rds_connector
 import connector_runtime.adapters.netsuite.netsuite_connector
-import connector_runtime.adapters.sage.sage_connector  # noqa: F401
+import connector_runtime.adapters.sage.sage_connector
 import connector_runtime.adapters.salesforce.salesforce_connector  # noqa: F401
 from connector_runtime.configuration_repository.configuration_repository import (
     ConfigurationRepositoryClient,
 )
 from connector_runtime.registry import connector_registry
 from connector_runtime.run_lifecycle.run_lifecycle import RunCoordinator
+from contracts.identifier_policy import DEFAULT_TENANT_CODE, TENANT_CODE_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from observability.lambda_utils import check_lambda_timeout, configure_xray, require_env
+from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
-from observability.lambda_utils import require_env, check_lambda_timeout
 from orchestration.step_functions.extraction_retry_policy import ExtractionRetryPolicy
 from orchestration.step_functions.extraction_workflow import ExtractionWorkflow
 from schema_management.drift_evaluation.drift_evaluator import SchemaDriftEvaluator
@@ -104,6 +106,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     connector_params: dict[str, str] = event["connector_params"]
     is_replay: bool = bool(event.get("is_replay", False))
     replay_of_run_id: str | None = event.get("replay_of_run_id")
+    # Tenant code for data-plane isolation (§1.1 / ARCH-4). Optional for
+    # backward compatibility with Step Functions definitions that do not yet
+    # pass it; validated in _validate_event when present so an untrusted or
+    # malformed value can never reach a DynamoDB key or S3 path (OWASP A03).
+    tenant_code: str = str(event.get("tenant_code") or DEFAULT_TENANT_CODE)
+
+    # Instrument AWS SDK calls with X-Ray subsegments (§5.5).
+    configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id)
+
+    # ── Validate connector_params with per-connector Pydantic model (§2.2) ───
+    _validate_connector_params(source_id, connector_params)
 
     region_name = require_env("AWS_REGION")
     raw_s3_bucket = require_env("RAW_S3_BUCKET")
@@ -114,6 +127,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         source_id=source_id,
         entity_id=entity_id,
         environment=environment,
+        tenant_code=tenant_code,
         is_replay=is_replay,
         replay_of_run_id=replay_of_run_id,
         region_name=region_name,
@@ -126,6 +140,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         region_name=region_name,
         source_id=source_id,
         entity_id=entity_id,
+        tenant_code=tenant_code,
     )
 
     config_client = ConfigurationRepositoryClient(
@@ -158,6 +173,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         connector=connector,
         raw_layer_writer=raw_writer,
         retry_policy=_retry_policy,
+        # PERF-5: threaded through so the checkpoint path (opt-in via
+        # EntityExtractionConfig.max_records_per_lambda_run) can check
+        # remaining Lambda execution time via context.get_remaining_time_in_millis().
+        lambda_context=context,
     )
 
     # ── Execute pipeline ─────────────────────────────────────────────────────
@@ -176,6 +195,30 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         drift_classification=result.drift_classification,
         transformation_blocked=result.transformation_blocked,
     )
+
+    # ── Emit CloudWatch metrics for extraction stage ──────────────────────────
+    try:
+        _metrics = CloudWatchMetricsEmitter(region_name=region_name)
+        _metrics.set_tenant_context(tenant_code)
+        _metrics.emit_records_extracted(
+            source_id=source_id,
+            entity_id=entity_id,
+            environment=environment,
+            count=result.record_count,
+            stage="extraction",
+        )
+        if result.drift_classification and result.drift_classification != "NONE":
+            _metrics.emit_schema_drift_count(
+                source_id=source_id,
+                entity_id=entity_id,
+                environment=environment,
+                count=1,
+                stage="extraction",
+            )
+        _metrics.flush()
+    except Exception as _exc:
+        # Metric emission must never fail an extraction run.
+        _logger.warning("extraction_metrics_emission_failed", error=str(_exc))
 
     return dataclasses.asdict(result)
 
@@ -217,3 +260,38 @@ def _validate_event(event: dict[str, Any]) -> None:
         )
     if not isinstance(event.get("connector_params", {}), dict):
         raise ValueError("connector_params must be a JSON object (dict).")
+
+    # tenant_code is optional (defaults to DEFAULT_TENANT_CODE) but must be
+    # well-formed when present — an unvalidated value must never reach a
+    # DynamoDB key or S3 path (OWASP A03 / SEC-5).
+    tenant_code = event.get("tenant_code")
+    if tenant_code is not None and not TENANT_CODE_PATTERN.match(str(tenant_code)):
+        raise ValueError(
+            f"tenant_code={tenant_code!r} does not conform to the tenant code format."
+        )
+
+
+def _validate_connector_params(
+    source_id: str, connector_params: dict[str, str]
+) -> None:
+    """
+    Validate connector_params using the per-connector Pydantic model (§2.2).
+
+    Runs at handler entry before any AWS call.  Unknown connectors (no params
+    model registered) are allowed through — not all connectors require strict
+    param validation at this layer.
+
+    Raises:
+        ValueError: When connector_params fail the registered model's validation.
+    """
+    from pydantic import ValidationError
+
+    params_model_cls = connector_registry.get_params_model(source_id)
+    if params_model_cls is None:
+        return  # No model registered — passthrough (OWASP: fail-open not fail-closed here is intentional)
+    try:
+        params_model_cls.model_validate(connector_params)
+    except ValidationError as exc:
+        raise ValueError(
+            f"connector_params validation failed for source_id={source_id!r}: {exc}"
+        ) from exc

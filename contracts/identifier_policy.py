@@ -32,6 +32,16 @@ from typing import Final
 
 STABLE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}$")
 
+# Tenant code format: lowercase letters, digits, hyphens; 2–48 characters; starts with a letter.
+# Examples: "acme-corp", "globex-eu", "demo".
+TENANT_CODE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,47}$")
+
+# Sentinel tenant code for the pre-multi-tenancy single-tenant deployment.
+# `tenant_scoped_key()` special-cases this value so existing DynamoDB items
+# and S3 objects written before tenant scoping existed continue to resolve
+# without a data migration (§1.1 backward-compatibility guarantee).
+DEFAULT_TENANT_CODE: Final[str] = "demo"
+
 # Run-ids include a timestamp+UUID component and are up to 100 chars.
 # The generated format "run-YYYYMMDD-HHMMSSffffff-xxxxxxxx" is ~37 chars,
 # but 100 chars is allowed to accommodate future extensions.
@@ -87,6 +97,56 @@ def validate_stable_id(value: str, field_name: str = "identifier") -> str:
             f"Prohibited names: {sorted(PROHIBITED_IDENTIFIERS)}."
         )
     return value
+
+
+def validate_tenant_code(value: str, field_name: str = "tenant_code") -> str:
+    """
+    Validate a tenant code slug.
+
+    Raises ValueError with a precise message on failure so callers can
+    surface it directly to operators without leaking internals.
+    Returns the original value on success so it can be used inline inside
+    Pydantic field_validators.
+
+    Args:
+        value:      The tenant code string to validate.
+        field_name: Display name used in the error message.
+
+    Raises:
+        ValueError: When the value fails the tenant code format.
+    """
+    if not TENANT_CODE_PATTERN.match(value):
+        raise ValueError(
+            f"{field_name} {value!r} does not conform to the tenant code format. "
+            "Use lowercase letters, digits, and hyphens only (2-48 chars; must start "
+            "with a letter). Examples: 'acme-corp', 'globex-eu', 'demo'."
+        )
+    return value
+
+
+def tenant_scoped_key(tenant_code: str, key: str) -> str:
+    """
+    Build a tenant-scoped composite value for a DynamoDB key attribute.
+
+    Every repository that stores tenant-owned records by source_id/entity_id
+    (ConfigurationRepositoryClient, WatermarkRepository, SchemaSnapshotRepository)
+    must scope its key through this function so two different tenants can
+    never collide on the same source_id/entity_id value (§1.1 — SEC-2 / ARCH-1).
+
+    Matches the convention already established in `curated_layer_writer.py`'s
+    S3 path scheme (`{tenant_code}/curated/...`): `tenant_code` is always
+    prefixed, including for `DEFAULT_TENANT_CODE` ("demo") — there is no
+    special-cased "no prefix" behaviour, so every tenant (including the
+    pre-multi-tenancy default) is scoped identically and consistently.
+
+    Args:
+        tenant_code: Validated tenant code slug.
+        key:         The unscoped key value (e.g. entity_id).
+
+    Returns:
+        `f"{tenant_code}#{key}"`.
+    """
+    return f"{tenant_code}#{key}"
 
 
 def validate_run_id(value: str) -> str:

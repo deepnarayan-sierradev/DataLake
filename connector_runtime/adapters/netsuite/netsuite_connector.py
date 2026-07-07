@@ -29,14 +29,9 @@ from typing import Any, Final
 
 import requests
 
-from connector_runtime.adapters.netsuite.netsuite_auth_client import (
-    NetSuiteAuthClient,
-    NetSuiteAuthError,
-    NetSuiteCredentialError,
-)
+from connector_runtime.adapters.netsuite.netsuite_auth_client import NetSuiteAuthClient
 from connector_runtime.adapters.netsuite.netsuite_incremental_query_planner import (
     NetSuiteIncrementalQueryPlanner,
-    NetSuiteIncrementalQueryPlannerError,
 )
 from connector_runtime.adapters.netsuite.netsuite_metadata_adapter import (
     NetSuiteMetadataAdapter,
@@ -45,10 +40,12 @@ from connector_runtime.adapters.netsuite.netsuite_metadata_adapter import (
 from connector_runtime.interfaces.connector_interface import (
     ConnectorCapabilities,
     ConnectorInterface,
+    DeterministicConnectorError,
     ExtractionErrorClassification,
     ExtractionRecord,
     FieldContract,
     QueryContract,
+    TransientConnectorError,
 )
 from connector_runtime.registry import connector_registry
 from contracts.entity_configuration_contract import FieldMode, LoadType
@@ -63,12 +60,16 @@ _SUITEQL_URL_TEMPLATE: Final[str] = (
     "https://{account_id}.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql"
 )
 
-# NetSuite enforces a maximum page size of 1,000 rows per SuiteQL request.
-_PAGE_SIZE: Final[int] = 1_000
+# NetSuite SuiteQL maximum page size is 10,000 rows per request.
+# Default set to 10,000 (§3.6) — reduces API calls 10× vs the previous 1,000.
+# Individual entities can override via connector_params.page_size.
+_PAGE_SIZE: Final[int] = 10_000
 
 
-class NetSuiteSuiteQLRateLimitError(Exception):
+class NetSuiteSuiteQLRateLimitError(TransientConnectorError):
     """Raised when NetSuite returns HTTP 429 (SuiteQL rate limit exceeded)."""
+
+    classification = ExtractionErrorClassification.TRANSIENT_THROTTLE
 
 
 @connector_registry.register(_SOURCE_ID)
@@ -231,19 +232,19 @@ class NetSuiteConnector(ConnectorInterface):
     def classify_extraction_error(self, exc: Exception) -> ExtractionErrorClassification:
         """
         Classify a NetSuite extraction exception for the retry framework.
+
+        Credential, auth, query-planner, and rate-limit exceptions carry their
+        own classification via the shared TransientConnectorError /
+        DeterministicConnectorError markers (DP-3) — see netsuite_auth_client.py,
+        netsuite_incremental_query_planner.py, and NetSuiteSuiteQLRateLimitError
+        above. NetSuiteMetadataAdapterError is deliberately excluded from that
+        hierarchy: metadata discovery failure may be transient (API unavailable)
+        or deterministic (invalid record type), so it stays UNKNOWN for DLQ
+        + manual review rather than guessing.
         """
-        if isinstance(exc, NetSuiteCredentialError):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
-        if isinstance(exc, NetSuiteAuthError):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
-        if isinstance(exc, NetSuiteIncrementalQueryPlannerError):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
-        if isinstance(exc, NetSuiteSuiteQLRateLimitError):
-            return ExtractionErrorClassification.TRANSIENT_THROTTLE
+        if isinstance(exc, (DeterministicConnectorError, TransientConnectorError)):
+            return exc.classification
         if isinstance(exc, NetSuiteMetadataAdapterError):
-            # Metadata discovery failure may be transient (e.g. API unavailable)
-            # or deterministic (invalid record type).  Default to UNKNOWN to
-            # route to DLQ for manual review.
             return ExtractionErrorClassification.UNKNOWN
         if isinstance(exc, requests.Timeout):
             return ExtractionErrorClassification.TRANSIENT_TIMEOUT
@@ -342,3 +343,7 @@ def _build_netsuite(
 
 
 connector_registry.register_builder(_SOURCE_ID, _build_netsuite)
+
+from connector_runtime.adapters.netsuite.netsuite_params import NetSuiteConnectorParams
+
+connector_registry.register_params_model(_SOURCE_ID, NetSuiteConnectorParams)

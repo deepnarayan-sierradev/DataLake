@@ -310,3 +310,84 @@ class ConnectorInterface(abc.ABC):
           - Must never raise itself.
         """
         raise NotImplementedError
+
+    def health_check(self) -> bool:
+        """
+        Report whether this connector is currently able to extract (OBS-5).
+
+        Default implementation is a structural check — it verifies the
+        connector can produce its capability declaration without raising.
+        This is intentionally lightweight (no live network/credential call)
+        so it is safe to invoke on demand or on a schedule without incurring
+        source-system API rate-limit cost.
+
+        Connectors that can cheaply verify live credential validity (e.g. a
+        token-introspection call) should override this method to do so —
+        the default is a fallback for connectors that have not yet added a
+        live check, not a substitute for one.
+
+        Returns:
+            True when the connector is healthy; False on any failure
+            (never raises — a health check that itself throws is not useful
+            to a caller polling connector status).
+        """
+        try:
+            self.get_capability_declaration()
+            return True
+        except Exception:
+            return False
+
+
+# ---------------------------------------------------------------------------
+# Shared error taxonomy (DP-3)
+# ---------------------------------------------------------------------------
+#
+# Salesforce, NetSuite, and MySQL RDS each independently hand-rolled isinstance
+# dispatch chains in classify_extraction_error() because their exception types
+# carried no marker of whether they were transient or deterministic. Sage's
+# adapter already solved this (see sage_errors.SageMetadataError and its
+# Deterministic/Transient subclasses); these two marker bases generalize that
+# pattern so every adapter can opt in.
+#
+# Usage: a connector-specific exception that is UNAMBIGUOUSLY transient or
+# deterministic should subclass the matching marker and set `classification`
+# to the precise ExtractionErrorClassification value. classify_extraction_error()
+# implementations can then collapse what used to be several isinstance branches
+# into a single `isinstance(exc, (TransientConnectorError, DeterministicConnectorError))`
+# check followed by `exc.classification`.
+#
+# Exceptions whose cause is genuinely ambiguous from the type alone (e.g. a
+# generic query-execution failure that could be a deadlock — transient — or a
+# schema mismatch — deterministic) should NOT be forced under either marker.
+# Forcing an ambiguous exception into one bucket trades a correct UNKNOWN/DLQ
+# routing decision for an incorrect retry-or-fail-fast decision, which is
+# exactly the accuracy loss classify_extraction_error() must avoid.
+
+
+class TransientConnectorError(Exception):
+    """
+    Marker base for connector exceptions that are unambiguously retry-eligible.
+
+    Subclasses MUST override `classification` with the precise
+    ExtractionErrorClassification value (e.g. TRANSIENT_THROTTLE,
+    TRANSIENT_TIMEOUT) — the default here (TRANSIENT_NETWORK) is a
+    reasonable fallback only, not a recommendation to skip overriding it.
+    """
+
+    classification: ExtractionErrorClassification = ExtractionErrorClassification.TRANSIENT_NETWORK
+
+
+class DeterministicConnectorError(Exception):
+    """
+    Marker base for connector exceptions that are unambiguously fail-fast.
+
+    Subclasses MUST override `classification` with the precise
+    ExtractionErrorClassification value (e.g. DETERMINISTIC_INVALID_CREDENTIALS,
+    DETERMINISTIC_INVALID_CONFIGURATION, DETERMINISTIC_INVALID_OBJECT) — the
+    default here (DETERMINISTIC_INVALID_CONFIGURATION) is a reasonable
+    fallback only, not a recommendation to skip overriding it.
+    """
+
+    classification: ExtractionErrorClassification = (
+        ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
+    )

@@ -55,6 +55,7 @@ def trigger(
     connector_params: dict[str, str],
     is_replay: bool = False,
     replay_of_run_id: str | None = None,
+    tenant_code: str = "demo",
 ) -> None:
     import boto3
 
@@ -66,6 +67,7 @@ def trigger(
         "environment": environment,
         "connector_params": connector_params,
         "is_replay": is_replay,
+        "tenant_code": tenant_code,
     }
     if is_replay and replay_of_run_id:
         execution_input["replay_of_run_id"] = replay_of_run_id
@@ -108,6 +110,7 @@ def main() -> None:
     parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"])
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument("--state-machine-arn", default=None)
+    parser.add_argument("--tenant-code", default="demo", help="Tenant code slug (default: demo).")
     parser.add_argument(
         "--param",
         action="append",
@@ -145,6 +148,7 @@ def main() -> None:
         connector_params=connector_params,
         is_replay=args.is_replay,
         replay_of_run_id=args.replay_of_run_id,
+        tenant_code=args.tenant_code,
     )
 
 

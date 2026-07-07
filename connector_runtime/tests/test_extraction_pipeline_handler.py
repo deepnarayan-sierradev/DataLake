@@ -162,6 +162,35 @@ class TestHappyPath:
             replay_of_run_id="run-orig",
         )
 
+    def test_lambda_context_threaded_to_workflow(self) -> None:
+        """PERF-5: the Lambda context is passed to ExtractionWorkflow so the
+        checkpoint path can check remaining execution time."""
+        fake_context = MagicMock(name="lambda_context")
+        fake_context.get_remaining_time_in_millis.return_value = 999_999
+        with (
+            patch.dict("os.environ", _ENV_VARS),
+            patch("connector_runtime.extraction_pipeline_handler.RunCoordinator"),
+            patch("connector_runtime.extraction_pipeline_handler.ConfigurationRepositoryClient"),
+            patch("connector_runtime.extraction_pipeline_handler.WatermarkRepository"),
+            patch("connector_runtime.extraction_pipeline_handler.SchemaSnapshotRepository"),
+            patch("connector_runtime.extraction_pipeline_handler.SchemaDriftEvaluator"),
+            patch("connector_runtime.extraction_pipeline_handler.connector_registry") as mock_reg,
+            patch(
+                "connector_runtime.extraction_pipeline_handler.ExtractionWorkflow"
+            ) as mock_wf_cls,
+        ):
+            mock_reg.resolve_builder.return_value = MagicMock(
+                return_value=(MagicMock(), MagicMock())
+            )
+            mock_wf_instance = MagicMock()
+            mock_wf_instance.execute.return_value = _FAKE_RESULT
+            mock_wf_cls.return_value = mock_wf_instance
+
+            lambda_handler(_VALID_EVENT, fake_context)
+
+        _, wf_kwargs = mock_wf_cls.call_args
+        assert wf_kwargs["lambda_context"] is fake_context
+
     def test_registry_resolve_builder_called_with_source_id(self) -> None:
         with (
             patch.dict("os.environ", _ENV_VARS),

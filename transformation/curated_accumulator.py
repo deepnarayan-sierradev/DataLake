@@ -47,7 +47,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from observability.structured_logger import get_platform_logger
-from transformation.curated_utils import find_latest_curated_prefix, load_curated_records
+from transformation.curated_utils import (
+    find_latest_curated_prefix,
+    merge_with_duckdb,
+)
 
 _logger = get_platform_logger(__name__)
 
@@ -149,21 +152,30 @@ class CuratedAccumulator:
         curated_s3_bucket: str,
         primary_key_field: str,
         soft_delete_field: str | None = None,
+        region_name: str = "us-east-1",
     ) -> None:
         """
         Args:
-            s3:                Boto3 S3 client (must have GetObject + ListBucket
-                               on the curated bucket).
-            curated_s3_bucket: Curated layer S3 bucket name — from Lambda env var,
-                               never from user input (OWASP A03).
+            s3:                Boto3 S3 client.
+            curated_s3_bucket: Curated layer S3 bucket name — from Lambda env var.
             primary_key_field: Canonical field used as the upsert key.
-            soft_delete_field: Optional canonical field whose truthy value marks
-                               a record as soft-deleted.
+            soft_delete_field: Optional canonical field whose truthy value marks a
+                               record as soft-deleted.
+            region_name:       AWS region for DuckDB httpfs S3 configuration.
         """
+        # Fail-fast validation at construction time (OWASP A04 — Insecure Design).
+        # An empty pk_field would cause the entire merge to silently produce no output,
+        # since all records would have pk_value="" and be treated as missing-PK records.
+        if not primary_key_field or not primary_key_field.strip():
+            raise ValueError(
+                "primary_key_field must be a non-empty string. "
+                "This field is required by CuratedAccumulator for SCD Type 1 merge."
+            )
         self._s3 = s3
         self._bucket = curated_s3_bucket
         self._pk_field = primary_key_field
         self._soft_delete_field = soft_delete_field
+        self._region_name = region_name
 
     def accumulate(
         self,
@@ -200,39 +212,48 @@ class CuratedAccumulator:
                 entity_id=entity_id,
                 run_id=run_id,
             )
-            previous_records: list[dict[str, Any]] = []
-        else:
-            previous_records = load_curated_records(
-                self._s3, self._bucket, previous_prefix
+            # First run — return delta directly (no previous state to merge with).
+            return AccumulateResult(
+                merged_records=list(delta_records),
+                previous_record_count=0,
+                delta_record_count=len(delta_records),
+                merged_record_count=len(delta_records),
+                deleted_record_count=0,
             )
 
-        # ── Build previous-state lookup dict ──────────────────────────────────
-        # O(n) over previous records; O(1) per delta record during merge.
-        previous_state: dict[str, Any] = {}
-        for rec in previous_records:
-            pk_raw = rec.get(self._pk_field)
-            if pk_raw is not None and str(pk_raw) != "":
-                previous_state[str(pk_raw)] = rec
-
-        # ── Merge ─────────────────────────────────────────────────────────────
-        merged = merge_records(
-            previous_state=previous_state,
+        # ── DuckDB merge (§3.1) — previous state streamed from S3 directly ───
+        merged = merge_with_duckdb(
             delta_records=delta_records,
             pk_field=self._pk_field,
             soft_delete_field=self._soft_delete_field,
+            previous_prefix=previous_prefix,
+            s3_bucket=self._bucket,
+            region_name=self._region_name,
+            s3=self._s3,
         )
 
         # ── Compute deletion count for observability ──────────────────────────
+        # We cannot easily count previous records without loading them; use
+        # the delta-driven heuristic: merged < (previous + delta) implies deletes.
+        # This is an approximation — exact count is available in DuckDB logs.
         merged_pk_set = {
             str(r.get(self._pk_field, ""))
             for r in merged
             if r.get(self._pk_field) is not None
         }
-        deleted_count = sum(1 for pk in previous_state if pk not in merged_pk_set)
+        delta_pk_set = {
+            str(r.get(self._pk_field, ""))
+            for r in delta_records
+            if r.get(self._pk_field) is not None
+        }
+        deleted_count = sum(
+            1 for pk in delta_pk_set
+            if pk not in merged_pk_set
+        )
 
         result = AccumulateResult(
             merged_records=merged,
-            previous_record_count=len(previous_records),
+            previous_record_count=-1,  # Not loaded into Python RAM with DuckDB merge
             delta_record_count=len(delta_records),
             merged_record_count=len(merged),
             deleted_record_count=deleted_count,
@@ -243,7 +264,6 @@ class CuratedAccumulator:
             domain=domain,
             entity_id=entity_id,
             run_id=run_id,
-            previous_record_count=result.previous_record_count,
             delta_record_count=result.delta_record_count,
             merged_record_count=result.merged_record_count,
             deleted_record_count=result.deleted_record_count,

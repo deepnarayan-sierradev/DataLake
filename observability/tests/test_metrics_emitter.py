@@ -142,3 +142,145 @@ class TestFlushAndBuffering:
         emitter.flush()
         assert emitter._pending == []
 
+
+@mock_aws
+class TestTenantCodeDimension:
+    def test_tenant_code_included_when_set_via_constructor(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1", tenant_code="acme-corp")
+        emitter.emit_records_extracted(
+            source_id="salesforce", entity_id="salesforce-account", environment="dev", count=10
+        )
+        dims = {d["Name"]: d["Value"] for d in emitter._pending[0]["Dimensions"]}
+        assert dims["TenantCode"] == "acme-corp"
+        # TenantCode is the FIRST dimension (most visible in console)
+        assert emitter._pending[0]["Dimensions"][0]["Name"] == "TenantCode"
+
+    def test_tenant_code_included_when_set_via_set_tenant_context(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
+        emitter.set_tenant_context("globex-eu")
+        emitter.emit_records_extracted(
+            source_id="netsuite", entity_id="netsuite-customer", environment="dev", count=5
+        )
+        dims = {d["Name"]: d["Value"] for d in emitter._pending[0]["Dimensions"]}
+        assert dims["TenantCode"] == "globex-eu"
+
+    def test_tenant_code_absent_when_not_set(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
+        emitter.emit_records_extracted(
+            source_id="salesforce", entity_id="salesforce-account", environment="dev", count=5
+        )
+        dim_names = [d["Name"] for d in emitter._pending[0]["Dimensions"]]
+        assert "TenantCode" not in dim_names
+
+    def test_set_tenant_context_overrides_constructor_value(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1", tenant_code="old-tenant")
+        emitter.set_tenant_context("new-tenant")
+        emitter.emit_records_extracted(
+            source_id="sf", entity_id="sf-account", environment="dev", count=1
+        )
+        dims = {d["Name"]: d["Value"] for d in emitter._pending[0]["Dimensions"]}
+        assert dims["TenantCode"] == "new-tenant"
+
+    def test_stage_and_tenant_code_both_present(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1", tenant_code="demo")
+        emitter.emit_records_extracted(
+            source_id="sf", entity_id="sf-account", environment="dev", count=1,
+            stage="transformation"
+        )
+        dim_names = [d["Name"] for d in emitter._pending[0]["Dimensions"]]
+        assert "TenantCode" in dim_names
+        assert "Stage" in dim_names
+    def test_stage_dimension_included_when_provided(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
+        emitter.emit_records_extracted(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            environment="dev",
+            count=100,
+            stage="transformation",
+        )
+        assert len(emitter._pending) == 1
+        dims = {d["Name"]: d["Value"] for d in emitter._pending[0]["Dimensions"]}
+        assert dims["Stage"] == "transformation"
+
+    def test_stage_dimension_absent_when_not_provided(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
+        emitter.emit_records_extracted(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            environment="dev",
+            count=100,
+        )
+        assert len(emitter._pending) == 1
+        dim_names = [d["Name"] for d in emitter._pending[0]["Dimensions"]]
+        assert "Stage" not in dim_names
+
+    def test_emit_stage_duration(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
+        emitter.emit_stage_duration(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            environment="dev",
+            stage="entity_resolution",
+            duration_ms=2345.0,
+        )
+        assert len(emitter._pending) == 1
+        assert emitter._pending[0]["MetricName"] == "StageDurationMs"
+        dims = {d["Name"]: d["Value"] for d in emitter._pending[0]["Dimensions"]}
+        assert dims["Stage"] == "entity_resolution"
+
+    def test_emit_golden_record_count(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
+        emitter.emit_golden_record_count(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            environment="dev",
+            count=500,
+        )
+        assert emitter._pending[0]["MetricName"] == "GoldenRecordCount"
+
+    def test_emit_cluster_count(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
+        emitter.emit_cluster_count(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            environment="dev",
+            count=120,
+        )
+        assert emitter._pending[0]["MetricName"] == "ClusterCount"
+
+
+class TestCheckLambdaTimeoutPeriodic:
+    """Tests for check_lambda_timeout_periodic mid-execution check."""
+
+    def _make_context(self, remaining_ms: int):
+        from unittest.mock import MagicMock
+        ctx = MagicMock()
+        ctx.get_remaining_time_in_millis.return_value = remaining_ms
+        return ctx
+
+    def test_sufficient_time_does_not_raise(self) -> None:
+        from observability.lambda_utils import check_lambda_timeout_periodic
+        ctx = self._make_context(remaining_ms=300_000)  # 5 minutes
+        check_lambda_timeout_periodic(ctx, min_remaining_ms=120_000, operation_name="test_op")
+        # Should not raise
+
+    def test_insufficient_time_raises(self) -> None:
+        from observability.lambda_utils import check_lambda_timeout_periodic
+        ctx = self._make_context(remaining_ms=50_000)  # 50 seconds
+        with pytest.raises(RuntimeError, match="test_op"):
+            check_lambda_timeout_periodic(ctx, min_remaining_ms=120_000, operation_name="test_op")
+
+    def test_none_context_is_noop(self) -> None:
+        from observability.lambda_utils import check_lambda_timeout_periodic
+        # Should not raise even with tight threshold
+        check_lambda_timeout_periodic(None, min_remaining_ms=1_000_000, operation_name="test")
+
+    def test_error_message_includes_remaining_time(self) -> None:
+        from observability.lambda_utils import check_lambda_timeout_periodic
+        ctx = self._make_context(remaining_ms=30_000)
+        try:
+            check_lambda_timeout_periodic(ctx, min_remaining_ms=120_000, operation_name="write_op")
+        except RuntimeError as exc:
+            assert "30000" in str(exc)
+            assert "write_op" in str(exc)

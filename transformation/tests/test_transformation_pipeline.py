@@ -551,3 +551,233 @@ class TestModuleLevelHelpers:
         ctx = _make_ctx("raw/nolin/")
         # governance_s3_bucket is None — should return without raising
         _emit_transformation_lineage(ctx=ctx, curated_prefix="curated/test/")
+
+
+@pytest.fixture()
+def streaming_s3():
+    with mock_aws():
+        client = boto3.client("s3", region_name=_REGION)
+        for bucket in (_RAW_BUCKET, _CURATED_BUCKET, _MAPPING_BUCKET):
+            client.create_bucket(Bucket=bucket)
+        yield client
+
+
+class TestStreamingFastPath:
+    """Tests for the streaming execution path (no quality/masking/accumulator)."""
+
+    def test_streaming_path_used_when_no_features(self, streaming_s3) -> None:
+        """Pipeline should use streaming path when quality/masking/accumulator all absent."""
+        records = [{"Id": str(i), "Name": f"Record {i}"} for i in range(20)]
+        _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/stream/", records)
+
+        pipeline = _make_pipeline(FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION))
+        ctx = _make_ctx("raw/stream/")
+        result = pipeline.execute(ctx)
+
+        assert result.canonical_record_count == 20
+        # Streaming path should set curated_prefix
+        assert result.curated_s3_prefix is not None
+        # Curated prefix should include tenant_code (default "demo")
+        assert "demo" in result.curated_s3_prefix
+
+    def test_tenant_code_in_curated_path(self, streaming_s3) -> None:
+        """Curated layer S3 path should be prefixed with tenant_code (§1.1)."""
+        records = [{"Id": "1", "Name": "Alice"}]
+        _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/tenant/", records)
+
+        pipeline = _make_pipeline(FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION))
+        ctx = TransformationContext(
+            run_id=_RUN_ID,
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            domain="salesforce",
+            raw_s3_bucket=_RAW_BUCKET,
+            raw_s3_prefix="raw/tenant/",
+            mapping_bucket=_MAPPING_BUCKET,
+            curated_s3_bucket=_CURATED_BUCKET,
+            region_name=_REGION,
+            tenant_code="acme-corp",
+        )
+        result = pipeline.execute(ctx)
+
+        assert result.curated_s3_prefix is not None
+        assert result.curated_s3_prefix.startswith("acme-corp/curated/")
+
+    def test_streaming_path_counts_mapping_failures(self, streaming_s3) -> None:
+        """Streaming path must still count records that fail mapping."""
+        from transformation.field_mapping.field_mapping_registry import MissingFieldBehavior
+
+        records = [{"Id": "001"}]  # 'Name' is missing
+        _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/stream-fail/", records)
+
+        rule_set = FieldMappingRuleSet(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            mapping_version="1.0.0",
+            rules=(
+                FieldMappingRule(
+                    source_fields=("Name",),
+                    canonical_field="account_name",
+                    transformation=MappingTransformation.RENAME,
+                    transformation_params={},
+                    missing_field_behavior=MissingFieldBehavior.RAISE_ERROR,
+                ),
+            ),
+        )
+        registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
+        registry_client.publish_rule_set(rule_set)
+
+        pipeline = _make_pipeline(registry_client)
+        ctx = _make_ctx("raw/stream-fail/")
+        result = pipeline.execute(ctx)
+        assert result.mapping_failures == 1
+
+    def test_default_tenant_code_is_demo(self, streaming_s3) -> None:
+        """TransformationContext must default tenant_code to 'demo'."""
+        ctx = _make_ctx()
+        assert ctx.tenant_code == "demo"
+
+    def test_invalid_tenant_code_rejected(self, streaming_s3) -> None:
+        """TransformationContext should reject invalid tenant codes."""
+        with pytest.raises(ValueError, match="tenant_code"):
+            TransformationContext(
+                run_id=_RUN_ID,
+                source_id="salesforce",
+                entity_id="salesforce-account",
+                domain="salesforce",
+                raw_s3_bucket=_RAW_BUCKET,
+                raw_s3_prefix="raw/x/",
+                mapping_bucket=_MAPPING_BUCKET,
+                curated_s3_bucket=_CURATED_BUCKET,
+                region_name=_REGION,
+                tenant_code="INVALID_UPPER",
+            )
+
+
+class TestAutoClassification:
+    """
+    Tests for SEC-1: auto-classification must mask PII-shaped fields even
+    when no explicit, steward-reviewed EntityClassificationPolicy is wired.
+    """
+
+    def _read_curated_records(self, s3_client, prefix: str) -> list[dict]:
+        objects = s3_client.list_objects_v2(Bucket=_CURATED_BUCKET, Prefix=prefix)
+        records: list[dict] = []
+        for obj in objects.get("Contents", []):
+            body = s3_client.get_object(Bucket=_CURATED_BUCKET, Key=obj["Key"])["Body"].read()
+            table = pq.read_table(io.BytesIO(body))
+            records.extend(table.to_pylist())
+        return records
+
+    def test_pii_shaped_field_is_masked_with_no_explicit_policy(self, streaming_s3) -> None:
+        """A canonical field named 'email' must be masked automatically (SEC-1)."""
+        rule_set = FieldMappingRuleSet(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            mapping_version="1.0.0",
+            rules=(
+                FieldMappingRule(
+                    source_fields=("Email",),
+                    canonical_field="email",
+                    transformation=MappingTransformation.RENAME,
+                    transformation_params={},
+                ),
+            ),
+        )
+        registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
+        registry_client.publish_rule_set(rule_set)
+
+        records = [{"Email": "alice@example.com"}]
+        _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/auto-mask/", records)
+
+        pipeline = _make_pipeline(registry_client)
+        ctx = _make_ctx("raw/auto-mask/")
+        result = pipeline.execute(ctx)
+
+        assert result.canonical_record_count == 1
+        curated = self._read_curated_records(streaming_s3, result.curated_s3_prefix)
+        assert len(curated) == 1
+        assert curated[0]["email"] != "alice@example.com"
+        assert "alice@example.com" not in curated[0]["email"]
+
+    def test_non_pii_fields_still_use_streaming_fast_path(self, streaming_s3) -> None:
+        """Entities with no PII-shaped fields must keep the O(batch) streaming path."""
+        rule_set = FieldMappingRuleSet(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            mapping_version="1.0.0",
+            rules=(
+                FieldMappingRule(
+                    source_fields=("Id",),
+                    canonical_field="account_id",
+                    transformation=MappingTransformation.RENAME,
+                    transformation_params={},
+                ),
+            ),
+        )
+        registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
+        registry_client.publish_rule_set(rule_set)
+
+        records = [{"Id": "001"}]
+        _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/auto-nomask/", records)
+
+        pipeline = _make_pipeline(registry_client)
+        ctx = _make_ctx("raw/auto-nomask/")
+        result = pipeline.execute(ctx)
+
+        assert result.canonical_record_count == 1
+        curated = self._read_curated_records(streaming_s3, result.curated_s3_prefix)
+        assert curated[0]["account_id"] == "001"
+
+    def test_explicit_policy_still_overrides_auto_classification(self, streaming_s3) -> None:
+        """An explicit classification_policy takes priority over auto-detection."""
+        from governance.data_classification_policy import (
+            DataClassificationLevel,
+            EntityClassificationPolicy,
+            FieldClassification,
+            MaskingStrategy,
+        )
+
+        rule_set = FieldMappingRuleSet(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            mapping_version="1.0.0",
+            rules=(
+                FieldMappingRule(
+                    source_fields=("Email",),
+                    canonical_field="email",
+                    transformation=MappingTransformation.RENAME,
+                    transformation_params={},
+                ),
+            ),
+        )
+        registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
+        registry_client.publish_rule_set(rule_set)
+
+        records = [{"Email": "bob@example.com"}]
+        _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/explicit-mask/", records)
+
+        explicit_policy = EntityClassificationPolicy(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            policy_version="1.0.0",
+            field_classifications=(
+                FieldClassification(
+                    field_name="email",
+                    classification=DataClassificationLevel.PII,
+                    masking_strategy=MaskingStrategy.REDACT,
+                ),
+            ),
+        )
+        pipeline = TransformationPipeline(
+            mapping_registry_client=registry_client,
+            quality_evaluator=QualityPolicyEvaluator(),
+            curated_writer=CuratedLayerWriter(_CURATED_BUCKET, _REGION),
+            quality_policy=None,
+            classification_policy=explicit_policy,
+        )
+        ctx = _make_ctx("raw/explicit-mask/")
+        result = pipeline.execute(ctx)
+
+        curated = self._read_curated_records(streaming_s3, result.curated_s3_prefix)
+        assert curated[0]["email"] == "REDACTED"

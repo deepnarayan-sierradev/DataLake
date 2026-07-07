@@ -13,19 +13,19 @@ Rules:
   - Snappy compression for balance of speed and ratio.
   - Sensitive attribute masking is the responsibility of the transformation
     pipeline (applied before this writer is called).
+  - Uses S3ParquetWriter with automatic multipart upload for large files (§3.3).
 """
 
 from __future__ import annotations
 
-import io
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
 import boto3
-import pyarrow as pa
-import pyarrow.parquet as pq
 
+from observability.s3_writer import S3ParquetWriter
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -53,6 +53,7 @@ class CuratedLayerWriter:
         self._s3_bucket = s3_bucket
         self._region_name = region_name
         self._s3: Any = boto3.client("s3", region_name=region_name)
+        self._writer = S3ParquetWriter(self._s3)
 
     def write(
         self,
@@ -61,9 +62,13 @@ class CuratedLayerWriter:
         entity_id: str,
         run_id: str,
         curated_date: date | None = None,
+        tenant_code: str = "demo",
     ) -> CuratedWriteResult:
         """
         Write canonical records to the curated layer.
+
+        Uses S3ParquetWriter for automatic multipart upload on large files.
+        Path scheme: {tenant_code}/curated/{domain}/{entity_id}/curated_date=.../run_id=.../
 
         Args:
             records:      Canonical records after field mapping + quality check.
@@ -71,6 +76,7 @@ class CuratedLayerWriter:
             entity_id:    Stable entity identifier.
             run_id:       Extraction run_id for traceability and partition isolation.
             curated_date: Partition date; defaults to today UTC.
+            tenant_code:  Tenant slug for S3 path isolation (default: "demo").
 
         Returns:
             CuratedWriteResult with the S3 location and record count.
@@ -83,20 +89,18 @@ class CuratedLayerWriter:
 
         partition_date = curated_date or datetime.now(UTC).date()
         prefix = (
-            f"curated/{domain}/{entity_id}"
+            f"{tenant_code}/curated/{domain}/{entity_id}"
             f"/curated_date={partition_date.isoformat()}"
             f"/run_id={run_id}/"
         )
         key = f"{prefix}data.parquet"
 
-        parquet_bytes = _serialise_to_parquet(records)
-
         try:
-            self._s3.put_object(
-                Bucket=self._s3_bucket,
-                Key=key,
-                Body=parquet_bytes,
-                ContentType="application/octet-stream",
+            count = self._writer.write(
+                records_iter=iter(records),
+                bucket=self._s3_bucket,
+                key=key,
+                compression="snappy",
             )
         except Exception as exc:
             raise CuratedWriteError(f"S3 write failed for key={key!r}: {exc}") from exc
@@ -110,23 +114,74 @@ class CuratedLayerWriter:
             domain=domain,
             entity_id=entity_id,
             run_id=run_id,
-            record_count=len(records),
+            record_count=count,
         )
 
         return CuratedWriteResult(
             s3_prefix=prefix,
             s3_key=key,
-            record_count=len(records),
+            record_count=count,
             written_at=written_at,
         )
 
+    def write_streaming(
+        self,
+        records_iter: Iterator[dict[str, Any]],
+        domain: str,
+        entity_id: str,
+        run_id: str,
+        curated_date: date | None = None,
+        tenant_code: str = "demo",
+    ) -> CuratedWriteResult:
+        """
+        Write records from a lazy iterator using streaming + multipart upload.
 
-def _serialise_to_parquet(records: list[dict[str, Any]]) -> bytes:
-    """Convert a list of record dicts to Parquet bytes (Snappy compression)."""
-    table = pa.Table.from_pylist(records)
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression="snappy")  # type: ignore[no-untyped-call]
-    return buf.getvalue()
+        Path scheme: {tenant_code}/curated/{domain}/{entity_id}/curated_date=.../run_id=.../
+        Peak memory: O(50K rows × avg_record_bytes) regardless of total count.
+        """
+        partition_date = curated_date or datetime.now(UTC).date()
+        prefix = (
+            f"{tenant_code}/curated/{domain}/{entity_id}"
+            f"/curated_date={partition_date.isoformat()}"
+            f"/run_id={run_id}/"
+        )
+        key = f"{prefix}data.parquet"
+
+        try:
+            count = self._writer.write(
+                records_iter=records_iter,
+                bucket=self._s3_bucket,
+                key=key,
+                compression="snappy",
+            )
+        except Exception as exc:
+            raise CuratedWriteError(f"S3 streaming write failed for key={key!r}: {exc}") from exc
+
+        if count == 0:
+            return CuratedWriteResult(
+                s3_prefix="",
+                s3_key=key,
+                record_count=0,
+                written_at=datetime.now(UTC).isoformat(),
+            )
+
+        written_at = datetime.now(UTC).isoformat()
+        _logger.info(
+            "curated_layer_streaming_write_complete",
+            s3_bucket=self._s3_bucket,
+            s3_key=key,
+            domain=domain,
+            entity_id=entity_id,
+            run_id=run_id,
+            record_count=count,
+        )
+
+        return CuratedWriteResult(
+            s3_prefix=prefix,
+            s3_key=key,
+            record_count=count,
+            written_at=written_at,
+        )
 
 
 class CuratedWriteError(Exception):

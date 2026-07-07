@@ -39,9 +39,9 @@ locals {
     ResultPath = "$.serving"
     Retry = [
       {
-        ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "TransientServingError"]
-        IntervalSeconds = 20
-        MaxAttempts     = 2
+        ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "TransientServingError"]
+        IntervalSeconds = 30
+        MaxAttempts     = 5
         BackoffRate     = 2.0
         JitterStrategy  = "FULL"
       }
@@ -68,6 +68,15 @@ locals {
 
   # CloudWatch log group for Step Functions execution history
   sfn_log_group_name = "/edl/${var.environment}/step-functions/extraction-pipeline"
+
+  # SQS FIFO pipeline trigger queue name
+  pipeline_trigger_queue_name = "${var.environment}-edl-pipeline-trigger.fifo"
+
+  # Pipeline trigger Lambda name
+  pipeline_trigger_lambda_name = "${var.environment}-edl-pipeline-trigger"
+
+  # DLQ processor Lambda name
+  dlq_processor_lambda_name = "${var.environment}-edl-dlq-processor"
 }
 
 # ---------------------------------------------------------------------------
@@ -140,7 +149,7 @@ resource "aws_cloudwatch_log_resource_policy" "sfn_log_delivery" {
 # ---------------------------------------------------------------------------
 
 resource "aws_sfn_state_machine" "extraction_pipeline" {
-  name     = local.state_machine_name
+  name = local.state_machine_name
   # Standard Workflow: supports execution history > 5 min, human-approval waits,
   # and at-least-once execution guarantees needed for staging/prod reliability.
   # Dev may use EXPRESS for lower cost; controlled by var.state_machine_type.
@@ -165,14 +174,43 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
         ResultPath = "$.extraction"
         Retry = [
           {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "TransientExtractionError"]
-            IntervalSeconds = 10
-            MaxAttempts     = 3
+            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "TransientExtractionError"]
+            IntervalSeconds = 30
+            MaxAttempts     = 5
             BackoffRate     = 2.0
             JitterStrategy  = "FULL"
           }
         ]
         Catch = [
+          {
+            # PERF-5: LambdaTimeoutWarning (raised by ExtractionWorkflow when
+            # a max_records_per_lambda_run checkpoint fires) is NON-FATAL —
+            # the extraction Lambda already committed a partial watermark
+            # advance and a distinct '{run_id}-partN' audit record before
+            # raising. Matched BEFORE the States.ALL catch-all below (Step
+            # Functions evaluates Catch entries in order; first match wins),
+            # so it does NOT fall through to ExtractionFailed / the DLQ.
+            #
+            # This routes to a terminal Succeed state (ExtractionCheckpointed)
+            # rather than automatically re-invoking ExecuteExtraction. Doing
+            # the latter safely would require threading the checkpoint's
+            # partial watermark / resume position from this Lambda error back
+            # into ExecuteExtraction's OWN Parameters on the next attempt —
+            # ASL's Catch only captures error details into ResultPath for
+            # states AFTER the catch, it does not feed them back as input to
+            # a retried Task. That would need either: (a) a Choice/Wait loop
+            # that re-invokes ExecuteExtraction with Parameters sourced from
+            # $.error via JSONPath/intrinsic functions, or (b) redesigning the
+            # extraction Lambda's input contract to accept an explicit resume
+            # watermark. Both are real state-machine changes that need live
+            # testing against actual checkpoint payloads — intentionally left
+            # undone here rather than guessed at (see PERF-5 in
+            # orchestration/step_functions/extraction_workflow.py's module
+            # docstring for the full contract this Catch entry relies on).
+            ErrorEquals = ["LambdaTimeoutWarning"]
+            Next        = "ExtractionCheckpointed"
+            ResultPath  = "$.checkpoint"
+          },
           {
             ErrorEquals = ["States.ALL"]
             Next        = "ExtractionFailed"
@@ -180,6 +218,14 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
           }
         ]
         Next = "CheckTransformationBlocked"
+      }
+
+      # Terminal: extraction stopped early via a PERF-5 checkpoint. Data
+      # written so far is valid and the watermark was partially advanced —
+      # this is NOT a failure, but the remaining window is not yet processed.
+      # See the Catch entry above for exactly what full auto-resume would need.
+      ExtractionCheckpointed = {
+        Type = "Succeed"
       }
 
       # Guard: breaking schema drift blocks all downstream stages.
@@ -198,7 +244,7 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
       # Terminal: extraction succeeded but downstream is intentionally blocked.
       # Raw data is preserved; operator must resolve schema drift before replaying.
       ExtractionCompleteTransformationBlocked = {
-        Type  = "Succeed"
+        Type = "Succeed"
         # Step Functions Succeed state has no Comment field in ASL;
         # the CloudWatch log and structured log from the Lambda carry the detail.
       }
@@ -211,19 +257,20 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
         Type     = "Task"
         Resource = var.transformation_pipeline_lambda_arn
         Parameters = {
-          "source_id.$"      = "$.source_id"
-          "entity_id.$"      = "$.entity_id"
-          "environment.$"    = "$.environment"
-          "run_id.$"         = "$.extraction.run_id"
-          "raw_s3_prefix.$"  = "$.extraction.raw_s3_prefix"
-          "mapping_version"  = "latest"
+          "source_id.$"     = "$.source_id"
+          "entity_id.$"     = "$.entity_id"
+          "environment.$"   = "$.environment"
+          "run_id.$"        = "$.extraction.run_id"
+          "raw_s3_prefix.$" = "$.extraction.raw_s3_prefix"
+          "mapping_version" = "latest"
+          "tenant_code.$"   = "$.tenant_code"
         }
         ResultPath = "$.transformation"
         Retry = [
           {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "TransientTransformationError"]
-            IntervalSeconds = 15
-            MaxAttempts     = 2
+            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "TransientTransformationError"]
+            IntervalSeconds = 30
+            MaxAttempts     = 5
             BackoffRate     = 2.0
             JitterStrategy  = "FULL"
           }
@@ -278,13 +325,14 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
           "environment.$"       = "$.environment"
           "run_id.$"            = "$.extraction.run_id"
           "curated_s3_prefix.$" = "$.transformation.curated_s3_prefix"
+          "tenant_code.$"       = "$.tenant_code"
         }
         ResultPath = "$.entity_resolution"
         Retry = [
           {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "TransientResolutionError"]
-            IntervalSeconds = 20
-            MaxAttempts     = 2
+            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "TransientResolutionError"]
+            IntervalSeconds = 30
+            MaxAttempts     = 5
             BackoffRate     = 2.0
             JitterStrategy  = "FULL"
           }
@@ -306,19 +354,24 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
         Type     = "Task"
         Resource = var.analytics_publisher_lambda_arn
         Parameters = {
-          "source_id.$"              = "$.source_id"
-          "entity_id.$"              = "$.entity_id"
-          "environment.$"            = "$.environment"
-          "run_id.$"                 = "$.extraction.run_id"
-          "canonical_prefix.$"           = "$.entity_resolution.canonical_prefix"
-          "curated_s3_prefix.$"      = "$.transformation.curated_s3_prefix"
+          "source_id.$"         = "$.source_id"
+          "entity_id.$"         = "$.entity_id"
+          "environment.$"       = "$.environment"
+          "run_id.$"            = "$.extraction.run_id"
+          "canonical_prefix.$"  = "$.entity_resolution.canonical_prefix"
+          "curated_s3_prefix.$" = "$.transformation.curated_s3_prefix"
+          "tenant_code.$"       = "$.tenant_code"
+          # §5.7 / OBS-4: end-to-end pipeline SLA metric — extraction's
+          # started_at is still addressable here even though it is not part
+          # of any intermediate stage's own output.
+          "run_started_at.$"    = "$.extraction.started_at"
         }
         ResultPath = "$.analytics"
         Retry = [
           {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "TransientPublishError"]
-            IntervalSeconds = 15
-            MaxAttempts     = 2
+            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "TransientPublishError"]
+            IntervalSeconds = 30
+            MaxAttempts     = 5
             BackoffRate     = 2.0
             JitterStrategy  = "FULL"
           }
@@ -464,4 +517,206 @@ resource "aws_cloudwatch_metric_alarm" "sfn_executions_throttled" {
   tags = merge(local.common_tags, {
     Name = "${var.environment}-edl-pipeline-executions-throttled"
   })
+}
+
+# ---------------------------------------------------------------------------
+# SQS FIFO Queue — Pipeline Trigger Burst Buffer (§1.6)
+#
+# EventBridge Scheduler fires into this queue instead of directly into
+# Step Functions.  A dedicated pipeline_trigger Lambda drains the queue at
+# a controlled rate (reserved_concurrency=50), preventing concurrent Lambda
+# spikes when many entity schedules fire simultaneously.
+#
+# FIFO with ContentBasedDeduplication: duplicate fires within 5 minutes for
+# the same entity produce only one execution (idempotent schedule delivery).
+# Message group ID is set to {source_id}--{entity_id} by EventBridge.
+# ---------------------------------------------------------------------------
+
+resource "aws_sqs_queue" "pipeline_trigger" {
+  name                        = local.pipeline_trigger_queue_name
+  fifo_queue                  = true
+  content_based_deduplication = true
+
+  # VisibilityTimeout matches Lambda max timeout so a crashed trigger Lambda
+  # lets the message reappear for re-processing after 900 s.
+  visibility_timeout_seconds = 900
+
+  # 24 h retention — a missed schedule tick is retried within 24 h.
+  message_retention_seconds = 86400
+
+  # Encrypt with platform KMS key.
+  kms_master_key_id = var.kms_key_arn
+
+  # DLQ for trigger queue — messages that fail repeated trigger attempts land here.
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.pipeline_trigger_dlq.arn
+    maxReceiveCount     = 5
+  })
+
+  tags = merge(local.common_tags, {
+    Name = local.pipeline_trigger_queue_name
+  })
+}
+
+resource "aws_sqs_queue" "pipeline_trigger_dlq" {
+  name                      = "${var.environment}-edl-pipeline-trigger-dlq.fifo"
+  fifo_queue                = true
+  message_retention_seconds = 1209600 # 14 days
+  kms_master_key_id         = var.kms_key_arn
+
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-edl-pipeline-trigger-dlq.fifo"
+  })
+}
+
+# ---------------------------------------------------------------------------
+# Pipeline Trigger Lambda — SQS consumer that starts Step Functions executions
+# ---------------------------------------------------------------------------
+
+resource "aws_lambda_function" "pipeline_trigger" {
+  function_name = local.pipeline_trigger_lambda_name
+  description   = "Drains the pipeline trigger FIFO queue and starts Step Functions executions at a controlled rate."
+
+  s3_bucket        = var.lambda_package_s3_bucket
+  s3_key           = var.lambda_package_s3_key
+  source_code_hash = var.lambda_package_source_hash
+
+  handler     = "orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler"
+  runtime     = "python3.12"
+  timeout     = 60 # Short timeout — each invocation processes one message
+  memory_size = 256
+
+  # Cap at 50 concurrent executions — prevents burst absorption from
+  # translating into a Lambda concurrency spike downstream.
+  reserved_concurrent_executions = var.pipeline_trigger_reserved_concurrency
+
+  role = var.pipeline_trigger_role_arn
+
+  environment {
+    variables = {
+      PLATFORM_ENVIRONMENT = var.environment
+      STATE_MACHINE_ARN    = aws_sfn_state_machine.extraction_pipeline.arn
+      AWS_REGION           = data.aws_region.current.name
+    }
+  }
+
+  kms_key_arn = var.kms_key_arn
+
+  tracing_config {
+    mode = var.enable_xray_tracing ? "Active" : "PassThrough"
+  }
+
+  tags = merge(local.common_tags, {
+    Name = local.pipeline_trigger_lambda_name
+  })
+}
+
+# CloudWatch Log Group for trigger Lambda (pre-created with correct retention)
+resource "aws_cloudwatch_log_group" "pipeline_trigger" {
+  name              = "/aws/lambda/${local.pipeline_trigger_lambda_name}"
+  retention_in_days = var.log_retention_days
+  kms_key_id        = var.kms_key_arn
+
+  tags = merge(local.common_tags, {
+    Name = "/aws/lambda/${local.pipeline_trigger_lambda_name}"
+  })
+}
+
+# SQS Event Source Mapping — batch_size=1 ensures clear per-message audit trail
+resource "aws_lambda_event_source_mapping" "pipeline_trigger_sqs" {
+  event_source_arn = aws_sqs_queue.pipeline_trigger.arn
+  function_name    = aws_lambda_function.pipeline_trigger.arn
+  batch_size       = 1
+  enabled          = true
+
+  # Retry on transient failures; message reappears after VisibilityTimeout.
+  function_response_types = ["ReportBatchItemFailures"]
+}
+
+# ---------------------------------------------------------------------------
+# CloudWatch Alarms — Pipeline Trigger Queue
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_metric_alarm" "pipeline_trigger_dlq_depth" {
+  alarm_name          = "${var.environment}-edl-pipeline-trigger-dlq-messages"
+  alarm_description   = "Pipeline trigger DLQ contains messages. Trigger Lambda is failing to start Step Functions executions."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  namespace   = "AWS/SQS"
+  metric_name = "ApproximateNumberOfMessagesVisible"
+  statistic   = "Maximum"
+  period      = 60
+
+  dimensions = {
+    QueueName = aws_sqs_queue.pipeline_trigger_dlq.name
+  }
+
+  alarm_actions = var.alert_topic_arn != "" ? [var.alert_topic_arn] : []
+
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-edl-pipeline-trigger-dlq-messages"
+  })
+}
+
+# ---------------------------------------------------------------------------
+# DLQ Processor Lambda + ESM (§4.4)
+# Reads from the extraction failure DLQ, audits, notifies, optionally replays.
+# ---------------------------------------------------------------------------
+
+resource "aws_lambda_function" "dlq_processor" {
+  function_name = local.dlq_processor_lambda_name
+  description   = "Processes extraction failure DLQ messages: writes audit record, sends SNS alert, optionally replays."
+
+  s3_bucket        = var.lambda_package_s3_bucket
+  s3_key           = var.lambda_package_s3_key
+  source_code_hash = var.lambda_package_source_hash
+
+  handler     = "orchestration.dlq_processor.dlq_processor_handler.lambda_handler"
+  runtime     = "python3.12"
+  timeout     = 60
+  memory_size = 256
+
+  role = var.dlq_processor_role_arn
+
+  environment {
+    variables = {
+      PLATFORM_ENVIRONMENT = var.environment
+      RUN_AUDIT_LOG_TABLE  = var.run_audit_log_table_name
+      ALERT_SNS_TOPIC_ARN  = var.alert_topic_arn
+      STATE_MACHINE_ARN    = aws_sfn_state_machine.extraction_pipeline.arn
+      AUTO_REPLAY          = "false"
+    }
+  }
+
+  kms_key_arn = var.kms_key_arn
+
+  tracing_config {
+    mode = var.enable_xray_tracing ? "Active" : "PassThrough"
+  }
+
+  tags = merge(local.common_tags, {
+    Name = local.dlq_processor_lambda_name
+  })
+}
+
+resource "aws_cloudwatch_log_group" "dlq_processor" {
+  name              = "/aws/lambda/${local.dlq_processor_lambda_name}"
+  retention_in_days = var.log_retention_days
+  kms_key_id        = var.kms_key_arn
+
+  tags = merge(local.common_tags, {
+    Name = "/aws/lambda/${local.dlq_processor_lambda_name}"
+  })
+}
+
+resource "aws_lambda_event_source_mapping" "dlq_processor_sqs" {
+  event_source_arn = var.extraction_failure_dlq_arn
+  function_name    = aws_lambda_function.dlq_processor.arn
+  batch_size       = 1
+  enabled          = true
+
+  function_response_types = ["ReportBatchItemFailures"]
 }

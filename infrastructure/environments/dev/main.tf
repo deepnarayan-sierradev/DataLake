@@ -13,31 +13,16 @@ locals {
 
 data "aws_caller_identity" "current" {}
 
-# Look up the pre-existing entity extraction config table (created outside Terraform)
-data "aws_dynamodb_table" "entity_config" {
-  name = "${local.environment}-entity-extraction-config"
-}
-
-# Look up the pre-existing watermark and audit log tables.
-# These use the key schema the Python code expects (entity_id range key, not entity_id_env).
-data "aws_dynamodb_table" "watermark" {
-  name = "${local.environment}-watermark-repository"
-}
-
-data "aws_dynamodb_table" "audit_log" {
-  name = "${local.environment}-run-audit-log"
-}
-
 # ---------------------------------------------------------------------------
 # KMS Keys — one per capability area
 # ---------------------------------------------------------------------------
 
 module "kms_storage" {
-  source      = "../../modules/kms"
-  environment = local.environment
-  aws_region  = local.aws_region
-  capability  = "storage"
-  description = "KMS key for S3 data lake bucket encryption (dev)"
+  source                  = "../../modules/kms"
+  environment             = local.environment
+  aws_region              = local.aws_region
+  capability              = "storage"
+  description             = "KMS key for S3 data lake bucket encryption (dev)"
   key_user_role_arns      = [] # Populated after IAM module creates roles
   allow_cloudwatch_logs   = false
   deletion_window_in_days = 7 # Shorter window for dev
@@ -45,31 +30,31 @@ module "kms_storage" {
 }
 
 module "kms_database" {
-  source      = "../../modules/kms"
-  environment = local.environment
-  aws_region  = local.aws_region
-  capability  = "database"
-  description = "KMS key for DynamoDB and SQS encryption (dev)"
+  source                  = "../../modules/kms"
+  environment             = local.environment
+  aws_region              = local.aws_region
+  capability              = "database"
+  description             = "KMS key for DynamoDB and SQS encryption (dev)"
   deletion_window_in_days = 7
   tags                    = local.common_tags
 }
 
 module "kms_secrets" {
-  source      = "../../modules/kms"
-  environment = local.environment
-  aws_region  = local.aws_region
-  capability  = "secrets"
-  description = "KMS key for Secrets Manager encryption (dev)"
+  source                  = "../../modules/kms"
+  environment             = local.environment
+  aws_region              = local.aws_region
+  capability              = "secrets"
+  description             = "KMS key for Secrets Manager encryption (dev)"
   deletion_window_in_days = 7
   tags                    = local.common_tags
 }
 
 module "kms_logs" {
-  source      = "../../modules/kms"
-  environment = local.environment
-  aws_region  = local.aws_region
-  capability  = "logs"
-  description = "KMS key for CloudWatch Logs and SNS encryption (dev)"
+  source                  = "../../modules/kms"
+  environment             = local.environment
+  aws_region              = local.aws_region
+  capability              = "logs"
+  description             = "KMS key for CloudWatch Logs and SNS encryption (dev)"
   allow_cloudwatch_logs   = true
   allow_sns               = true
   deletion_window_in_days = 7
@@ -90,17 +75,17 @@ module "networking" {
   private_subnet_cidrs = ["10.0.0.0/20", "10.0.16.0/20"]
   public_subnet_cidrs  = ["10.0.128.0/20", "10.0.144.0/20"]
 
-  single_nat_gateway       = true # Cost-optimised for dev
-  flow_log_retention_days  = 30
-  flow_logs_kms_key_arn    = module.kms_logs.key_arn
+  single_nat_gateway      = true # Cost-optimised for dev
+  flow_log_retention_days = 30
+  flow_logs_kms_key_arn   = module.kms_logs.key_arn
 
   # Interface endpoints — all enabled for parity with staging/prod
-  enable_secrets_manager_endpoint        = true
-  enable_cloudwatch_logs_endpoint        = true
-  enable_cloudwatch_monitoring_endpoint  = true
-  enable_step_functions_endpoint         = true
-  enable_glue_endpoint                   = false # Glue endpoint optional in dev
-  enable_kms_endpoint                    = true
+  enable_secrets_manager_endpoint       = true
+  enable_cloudwatch_logs_endpoint       = true
+  enable_cloudwatch_monitoring_endpoint = true
+  enable_step_functions_endpoint        = true
+  enable_glue_endpoint                  = false # Glue endpoint optional in dev
+  enable_kms_endpoint                   = true
 
   tags = local.common_tags
 }
@@ -110,8 +95,8 @@ module "networking" {
 # ---------------------------------------------------------------------------
 
 module "storage" {
-  source      = "../../modules/storage"
-  environment = local.environment
+  source       = "../../modules/storage"
+  environment  = local.environment
   project_name = local.project_name
 
   storage_kms_key_arn = module.kms_storage.key_arn
@@ -153,6 +138,14 @@ module "secrets" {
   extraction_runtime_role_arns = [module.iam.extraction_runtime_role_arn]
   secret_recovery_window_days  = 7 # Shorter for dev
 
+  # SEC-6: credential expiry notifier Lambda + daily EventBridge schedule.
+  credential_expiry_notifier_role_arn  = module.iam.credential_expiry_notifier_role_arn
+  credential_expiry_scheduler_role_arn = module.iam.credential_expiry_scheduler_role_arn
+  alert_topic_arn                      = module.observability.platform_alerts_topic_arn
+  lambda_package_s3_bucket             = var.lambda_package_s3_bucket
+  lambda_package_s3_key                = var.lambda_package_s3_key
+  lambda_package_source_hash           = var.lambda_package_source_hash
+
   tags = local.common_tags
 }
 
@@ -168,9 +161,10 @@ module "iam" {
   curated_layer_bucket_arn    = module.storage.curated_layer_bucket_arn
   analytics_layer_bucket_arn  = module.storage.analytics_layer_bucket_arn
   schema_snapshots_bucket_arn = module.storage.schema_snapshots_bucket_arn
-  watermark_table_arn         = data.aws_dynamodb_table.watermark.arn
-  run_audit_log_table_arn     = data.aws_dynamodb_table.audit_log.arn
-  entity_config_table_arn     = data.aws_dynamodb_table.entity_config.arn
+  watermark_table_arn         = module.metadata_persistence.watermark_repository_table_arn
+  run_audit_log_table_arn     = module.metadata_persistence.run_audit_log_table_arn
+  entity_config_table_arn     = module.metadata_persistence.entity_extraction_config_table_arn
+  entity_type_registry_table_arn = module.metadata_persistence.entity_type_registry_table_arn
   dlq_arn                     = module.metadata_persistence.extraction_failure_dlq_arn
 
   kms_key_arns_for_extraction = [
@@ -203,6 +197,15 @@ module "observability" {
   alert_email               = var.alert_email
   watermark_lag_slo_seconds = 172800 # 48h SLO in dev (more relaxed)
 
+  # DLQ depth alarm
+  extraction_failure_dlq_name = module.metadata_persistence.extraction_failure_dlq_name
+
+  # Lambda alarms — names resolved from Lambda module outputs
+  extraction_lambda_name          = "${local.environment}-extraction-pipeline"
+  transformation_lambda_name      = "${local.environment}-transformation-pipeline"
+  entity_resolution_lambda_name   = "${local.environment}-entity-resolution-pipeline"
+  analytics_publisher_lambda_name = "${local.environment}-analytics-layer-publisher"
+
   tags = local.common_tags
 }
 
@@ -227,9 +230,9 @@ module "lambda_pipeline" {
   raw_s3_bucket_name             = module.storage.raw_layer_bucket_id
   schema_snapshot_s3_bucket_name = module.storage.schema_snapshots_bucket_id
 
-  entity_config_table_name = data.aws_dynamodb_table.entity_config.name
-  watermark_table_name     = data.aws_dynamodb_table.watermark.name
-  audit_log_table_name     = data.aws_dynamodb_table.audit_log.name
+  entity_config_table_name = module.metadata_persistence.entity_extraction_config_table_name
+  watermark_table_name     = module.metadata_persistence.watermark_repository_table_name
+  audit_log_table_name     = module.metadata_persistence.run_audit_log_table_name
 
   subnet_ids         = module.networking.private_subnet_ids
   security_group_ids = []
@@ -237,7 +240,10 @@ module "lambda_pipeline" {
   cloudwatch_log_group_arn = module.observability.log_group_arns["connector-runtime"]
   log_retention_days       = 30
   memory_size_mb           = 1024
-  timeout_seconds          = 900  # Max Lambda timeout; most entities complete in < 120s
+  timeout_seconds          = 900 # Max Lambda timeout; most entities complete in < 120s
+  # Reserved concurrency cap: prevents this function from consuming the full account pool.
+  # Value 400 per improvement plan §1.6 (burst-buffer reserved concurrency table).
+  reserved_concurrent_executions = 400
 
   tags = local.common_tags
 
@@ -264,15 +270,17 @@ module "transformation_lambda" {
 
   raw_s3_bucket_name           = module.storage.raw_layer_bucket_id
   curated_s3_bucket_name       = module.storage.curated_layer_bucket_id
-  field_mapping_s3_bucket_name = module.storage.curated_layer_bucket_id  # field mappings live under curated/field-mappings/
+  field_mapping_s3_bucket_name = module.storage.curated_layer_bucket_id # field mappings live under curated/field-mappings/
 
   subnet_ids         = module.networking.private_subnet_ids
   security_group_ids = []
 
   cloudwatch_log_group_arn = module.observability.log_group_arns["transformation"]
   log_retention_days       = 30
-  memory_size_mb           = 1024
+  memory_size_mb           = 2048 # Increased for DuckDB in-process merge (§3.1)
   timeout_seconds          = 900
+  # Reserved concurrency: 300 per improvement plan §1.6.
+  reserved_concurrent_executions = 300
 
   tags = local.common_tags
 
@@ -310,6 +318,8 @@ module "entity_resolution_lambda" {
   log_retention_days       = 30
   memory_size_mb           = 1024
   timeout_seconds          = 900
+  # Reserved concurrency: 200 per improvement plan §1.6.
+  reserved_concurrent_executions = 200
 
   tags = local.common_tags
 
@@ -337,6 +347,8 @@ module "analytics_publisher_lambda" {
   log_retention_days       = 30
   memory_size_mb           = 512
   timeout_seconds          = 300
+  # Reserved concurrency: 100 per improvement plan §1.6.
+  reserved_concurrent_executions = 100
 
   tags = local.common_tags
 
@@ -360,9 +372,53 @@ module "orchestration" {
   analytics_publisher_lambda_arn     = module.analytics_publisher_lambda.lambda_function_arn
   serving_store_loader_lambda_arn    = var.serving_store_loader_lambda_arn
 
+  # SQS burst buffer — pipeline trigger Lambda package (same zip as extraction pipeline)
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  pipeline_trigger_role_arn             = module.iam.pipeline_trigger_role_arn
+  pipeline_trigger_reserved_concurrency = 50
+
+  # DLQ processor Lambda
+  dlq_processor_role_arn     = module.iam.dlq_processor_role_arn
+  extraction_failure_dlq_arn = module.metadata_persistence.extraction_failure_dlq_arn
+  run_audit_log_table_name   = module.metadata_persistence.run_audit_log_table_name
+
   tags = local.common_tags
 
   depends_on = [module.iam, module.observability]
+}
+
+# ---------------------------------------------------------------------------
+# Control Plane — multi-tenant SaaS API (tenant provisioning, entity
+# registration, pipeline triggering, run status). Reuses the same pipeline
+# trigger SQS FIFO queue as orchestration's pipeline_trigger Lambda, and the
+# same Lambda deployment package as the rest of connector_runtime.
+# ---------------------------------------------------------------------------
+
+module "control_plane" {
+  source      = "../../modules/control_plane"
+  environment = local.environment
+
+  kms_key_arn         = module.kms_logs.key_arn
+  log_retention_days  = 30
+  enable_xray_tracing = true
+
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  control_plane_role_arn = module.iam.control_plane_role_arn
+
+  pipeline_trigger_queue_url      = module.orchestration.pipeline_trigger_queue_url
+  entity_config_table_name        = module.metadata_persistence.entity_extraction_config_table_name
+  entity_type_registry_table_name = module.metadata_persistence.entity_type_registry_table_name
+  run_audit_log_table_name        = module.metadata_persistence.run_audit_log_table_name
+
+  tags = local.common_tags
+
+  depends_on = [module.iam, module.orchestration, module.metadata_persistence]
 }
 
 # ---------------------------------------------------------------------------

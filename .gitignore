@@ -77,6 +77,10 @@ override.tf.json
 .DS_Store
 Thumbs.db
 
+# ─── Claude Code — personal/local only; settings.json, commands/, hooks/ ARE committed ────
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
 # ─── Logs ────────────────────────────────────────────────────────────────────
 *.log
 logs/

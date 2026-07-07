@@ -220,7 +220,9 @@ Centralized secret storage with encryption and rotation.
 - `prod/sources/sage/intacct/credentials` (Intacct OAuth 2.0 client credentials)
 - `prod/sources/sage/x3/credentials` (X3 OAuth 2.0 client credentials + folder name)
 
-Credentials auto-rotated every 90 days; never logged or exposed in code.
+A daily Lambda (`credential_expiry_notifier`) checks each secret's age and alerts via SNS when
+rotation is overdue; automatic rotation itself is planned but not yet implemented. Credentials
+are never logged or exposed in code.
 
 ---
 
@@ -429,8 +431,8 @@ Quick-reference definitions for every tool and service used in the platform.
 | **S3** | Amazon Simple Storage Service | Stores all data layers: raw, curated, analytics, snapshots, configs |
 | **Object Lock** | S3 Object Lock (GOVERNANCE mode) | Makes raw data immutable; enforces 7-year retention |
 | **Intelligent-Tiering** | S3 Intelligent-Tiering | Auto-moves analytics data to cheaper storage after 90 days of inactivity |
-| **DynamoDB** | Amazon DynamoDB | NoSQL database for config, watermark state, audit log, onboarding records |
-| **Secrets Manager** | AWS Secrets Manager | Secure credential store; auto-rotation; never in code or logs |
+| **DynamoDB** | Amazon DynamoDB | NoSQL database for config, watermark state, audit log, entity-type registry, onboarding records (5 tables) |
+| **Secrets Manager** | AWS Secrets Manager | Secure credential store; daily expiry-check alerting via a dedicated Lambda (auto-rotation planned, not yet implemented); never in code or logs |
 | **Glue Catalog** | AWS Glue Data Catalog | Metadata registry for curated and analytics tables |
 | **Athena** | Amazon Athena | Serverless SQL query engine over S3 Parquet files |
 | **RDS** | Amazon Relational Database Service (MySQL 8) | Serving store for operational apps and low-latency reads |

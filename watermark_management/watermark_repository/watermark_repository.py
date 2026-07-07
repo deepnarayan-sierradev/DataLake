@@ -10,7 +10,7 @@ conditional expressions on the version attribute).  The watermark is advanced
 ONLY after a fully successful extraction run — partial or failed runs leave
 the watermark unchanged.
 
-DynamoDB table: {environment}-watermark-repository
+DynamoDB table: {environment}-edl-watermark-repository
   PK: source_id (string)
   SK: entity_id (string)
 
@@ -36,11 +36,12 @@ from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field, field_validator
 
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType
+from contracts.identifier_policy import DEFAULT_TENANT_CODE, validate_tenant_code
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-_WATERMARK_TABLE_TEMPLATE: Final[str] = "{environment}-watermark-repository"
+_WATERMARK_TABLE_TEMPLATE: Final[str] = "{environment}-edl-watermark-repository"
 
 # Lower-bound sentinel used when no prior successful run exists (INCREMENTAL first run).
 _EPOCH: Final[datetime] = datetime(1970, 1, 1, tzinfo=UTC)
@@ -69,6 +70,7 @@ class WatermarkRecord(BaseModel):
     run_id: str
     updated_at: datetime
     version: int = Field(ge=0)
+    tenant_code: str = DEFAULT_TENANT_CODE
 
     @field_validator("last_successful_watermark", "upper_watermark", "updated_at", mode="before")
     @classmethod
@@ -124,13 +126,21 @@ class WatermarkRepository:
 
     # ── Read ───────────────────────────────────────────────────────────────────
 
-    def get_watermark(self, source_id: str, entity_id: str) -> WatermarkRecord | None:
+    def get_watermark(
+        self, source_id: str, entity_id: str, tenant_code: str = DEFAULT_TENANT_CODE
+    ) -> WatermarkRecord | None:
         """
         Load the current watermark for a source entity.
 
-        Returns None on first run (no prior record exists).
+        Returns None on first run (no prior record exists), AND when a record
+        exists but belongs to a different tenant (§1.1 / ARCH-1 — SEC-2
+        app-level guard) — treated the same as "no prior run" rather than
+        raising, since that is always a safe, non-breaking default for a
+        watermark read.
+
         Uses a strongly-consistent read to prevent stale-read races.
         """
+        tenant_code = validate_tenant_code(tenant_code)
         try:
             response = self._table.get_item(
                 Key={"source_id": source_id, "entity_id": entity_id},
@@ -148,7 +158,16 @@ class WatermarkRepository:
         item = response.get("Item")
         if not item:
             return None
-        return WatermarkRecord(**item)  # type: ignore[arg-type]
+        record = WatermarkRecord(**item)  # type: ignore[arg-type]
+        if record.tenant_code != tenant_code:
+            _logger.warning(
+                "watermark_tenant_mismatch",
+                source_id=source_id,
+                entity_id=entity_id,
+                requested_tenant_code=tenant_code,
+            )
+            return None
+        return record
 
     # ── Write ──────────────────────────────────────────────────────────────────
 
@@ -158,6 +177,7 @@ class WatermarkRepository:
         entity_id: str,
         upper_watermark: datetime,
         run_id: str,
+        tenant_code: str = DEFAULT_TENANT_CODE,
     ) -> WatermarkRecord:
         """
         Create the initial watermark record for a source entity (first run only).
@@ -166,6 +186,7 @@ class WatermarkRepository:
         initialisation wins the race.  When the condition fails the existing
         record is loaded and returned instead.
         """
+        tenant_code = validate_tenant_code(tenant_code)
         now = datetime.now(tz=UTC)
         record = WatermarkRecord(
             source_id=source_id,
@@ -176,6 +197,7 @@ class WatermarkRepository:
             run_id=run_id,
             updated_at=now,
             version=0,
+            tenant_code=tenant_code,
         )
         try:
             self._table.put_item(
@@ -185,7 +207,7 @@ class WatermarkRepository:
         except ClientError as exc:
             if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
                 # A concurrent initialisation succeeded first — return that record.
-                existing = self.get_watermark(source_id, entity_id)
+                existing = self.get_watermark(source_id, entity_id, tenant_code=tenant_code)
                 if existing is not None:
                     return existing
             raise
@@ -229,6 +251,7 @@ class WatermarkRepository:
             run_id=run_id,
             updated_at=now,
             version=new_version,
+            tenant_code=current.tenant_code,
         )
         try:
             self._table.put_item(
@@ -317,4 +340,5 @@ def _serialise_watermark(record: WatermarkRecord) -> dict[str, Any]:
         "run_id": record.run_id,
         "updated_at": record.updated_at.isoformat(),
         "version": record.version,
+        "tenant_code": record.tenant_code,
     }

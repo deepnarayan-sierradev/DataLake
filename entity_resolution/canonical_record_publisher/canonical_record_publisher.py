@@ -21,21 +21,21 @@ Security (OWASP A09):
 
 from __future__ import annotations
 
-import io
-import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
 import boto3
-import pyarrow as pa
-import pyarrow.parquet as pq
 
 from entity_resolution.matching_engine.match_rule_engine import (
-    MatchDecision,
     MatchRuleEngine,
     MatchRuleSet,
     stable_cluster_id,
+)
+from entity_resolution.publishing_shared import (
+    emit_golden_record_lineage,
+    flatten_list_fields,
+    serialise_decisions,
 )
 from entity_resolution.resolution_config.resolution_config_registry import (
     ResolutionConfigRegistry,
@@ -45,7 +45,7 @@ from entity_resolution.survivorship_policy import (
     SurvivorshipPolicy,
     SurvivorshipResult,
 )
-from governance.lineage_record import LineageEmitter, build_entity_resolution_lineage  # noqa: E501
+from observability.s3_writer import S3ParquetWriter
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -95,6 +95,7 @@ class GoldenRecordPublisher:
         self._curated_s3_bucket = curated_s3_bucket
         self._curated_s3_prefixes = curated_s3_prefixes
         self._s3: Any = boto3.client("s3", region_name=region_name)
+        self._parquet_writer = S3ParquetWriter(self._s3)
 
     @classmethod
     def from_registry(
@@ -108,7 +109,7 @@ class GoldenRecordPublisher:
         curated_s3_prefixes: tuple[str, ...] | None = None,
         match_rules_version: str = "latest",
         survivorship_version: str = "latest",
-    ) -> "GoldenRecordPublisher":
+    ) -> GoldenRecordPublisher:
         """
         Factory that constructs a publisher by loading config from a
         ResolutionConfigRegistry.
@@ -210,11 +211,14 @@ class GoldenRecordPublisher:
             f"/run_id={match_run_id}/"
         )
         analytics_key = f"{prefix}golden.parquet"
-        self._s3.put_object(
-            Bucket=self._analytics_s3_bucket,
-            Key=analytics_key,
-            Body=_to_parquet(golden_records),
-            ContentType="application/octet-stream",
+        # Use the shared, multipart-capable S3ParquetWriter (PERF-4): streams
+        # batches instead of building full Parquet bytes in memory, and lifts
+        # the 5 GB single-PUT ceiling for large golden-record sets.
+        self._parquet_writer.write(
+            records_iter=flatten_list_fields(golden_records),
+            bucket=self._analytics_s3_bucket,
+            key=analytics_key,
+            compression="snappy",
         )
 
         # Step 4: Write match decision audit trail (no PII values)
@@ -224,7 +228,7 @@ class GoldenRecordPublisher:
         self._s3.put_object(
             Bucket=self._analytics_s3_bucket,
             Key=decisions_key,
-            Body=_serialise_decisions(all_decisions).encode("utf-8"),
+            Body=serialise_decisions(all_decisions).encode("utf-8"),
             ContentType="application/json",
         )
 
@@ -240,7 +244,7 @@ class GoldenRecordPublisher:
 
         # Emit lineage record (spec §9.1 — lineage at publication boundaries)
         if self._governance_s3_bucket and self._curated_s3_bucket:
-            _emit_golden_record_lineage(
+            emit_golden_record_lineage(
                 s3_governance_bucket=self._governance_s3_bucket,
                 curated_s3_bucket=self._curated_s3_bucket,
                 curated_s3_prefixes=self._curated_s3_prefixes or (),
@@ -267,73 +271,5 @@ class GoldenRecordPublisher:
         )
 
 
-def _to_parquet(records: list[dict[str, Any]]) -> bytes:
-    """Serialise a list of dicts to Parquet bytes."""
-    if not records:
-        return b""
-    # Flatten list fields to JSON strings for Parquet compatibility
-    flat = [{k: json.dumps(v) if isinstance(v, list) else v for k, v in r.items()} for r in records]
-    table = pa.Table.from_pylist(flat)
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression="snappy")  # type: ignore[no-untyped-call]
-    return buf.getvalue()
-
-
-def _serialise_decisions(decisions: list[MatchDecision]) -> str:
-    return json.dumps(
-        [
-            {
-                "record_a_id": d.record_a_id,
-                "record_b_id": d.record_b_id,
-                "rule_id": d.rule_id,
-                "strategy": d.strategy.value,
-                "is_match": d.is_match,
-                "confidence_score": d.confidence_score,
-                "matched_fields": list(d.matched_fields),
-                "rule_set_version": d.rule_set_version,
-            }
-            for d in decisions
-        ],
-        indent=2,
-    )
-
-
 class GoldenRecordPublicationError(Exception):
     """Raised when golden record publication encounters an unrecoverable error."""
-
-
-def _emit_golden_record_lineage(
-    s3_governance_bucket: str,
-    curated_s3_bucket: str,
-    curated_s3_prefixes: tuple[str, ...],
-    analytics_s3_bucket: str,
-    analytics_s3_prefix: str,
-    match_run_id: str,
-    entity_type: str,
-    golden_record_count: int,
-    rule_set_version: str,
-    survivorship_version: str,
-    region_name: str,
-) -> None:
-    """Persist an ENTITY_RESOLUTION lineage record (spec §9.1). Best-effort."""
-    try:
-        record = build_entity_resolution_lineage(
-            run_id=match_run_id,
-            source_id=entity_type,
-            entity_type=entity_type,
-            curated_s3_bucket=curated_s3_bucket,
-            curated_s3_prefixes=curated_s3_prefixes,
-            analytics_s3_bucket=analytics_s3_bucket,
-            analytics_s3_prefix=analytics_s3_prefix,
-            record_count=golden_record_count,
-            rule_set_version=rule_set_version,
-            survivorship_version=survivorship_version,
-        )
-        LineageEmitter(
-            governance_s3_bucket=s3_governance_bucket,
-            region_name=region_name,
-        ).emit(record)
-    except Exception as exc:
-        import logging
-
-        logging.getLogger(__name__).warning("golden_record_lineage_emission_failed error=%s", exc)

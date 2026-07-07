@@ -108,6 +108,7 @@ class ExtractionScheduleClient:
         cron_expression: str,
         connector_params: dict[str, str],
         timezone: str = "UTC",
+        tenant_code: str = "demo",
     ) -> str:
         """
         Create or update the extraction schedule for a source entity.
@@ -149,6 +150,8 @@ class ExtractionScheduleClient:
                 "environment": self._environment,
                 "connector_params": connector_params,
                 "is_replay": False,
+                "tenant_code": tenant_code,
+                # schedule_tick_iso is populated at message-send time by the trigger Lambda
             },
             separators=(",", ":"),
         )

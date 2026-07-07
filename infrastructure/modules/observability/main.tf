@@ -140,7 +140,7 @@ resource "aws_cloudwatch_metric_alarm" "extraction_activity_absent" {
   statistic           = "Sum"
   threshold           = 0
   # BREACHING on missing data: absence of metric is itself the alert condition.
-  treat_missing_data  = "breaching"
+  treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.platform_alerts.arn]
   ok_actions    = [aws_sns_topic.platform_alerts.arn]
@@ -218,10 +218,10 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         width  = 12
         height = 6
         properties = {
-          title  = "Records Extracted"
-          region = data.aws_region.current.name
-          period = 300
-          stat   = "Sum"
+          title   = "Records Extracted"
+          region  = data.aws_region.current.name
+          period  = 300
+          stat    = "Sum"
           metrics = [["EnterpriseDatalake", "RecordsExtracted"]]
         }
       },
@@ -232,10 +232,10 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         width  = 12
         height = 6
         properties = {
-          title  = "Records Failed"
-          region = data.aws_region.current.name
-          period = 300
-          stat   = "Sum"
+          title   = "Records Failed"
+          region  = data.aws_region.current.name
+          period  = 300
+          stat    = "Sum"
           metrics = [["EnterpriseDatalake", "RecordsFailed"]]
         }
       },
@@ -246,10 +246,10 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         width  = 12
         height = 6
         properties = {
-          title  = "Schema Drift Events"
-          region = data.aws_region.current.name
-          period = 300
-          stat   = "Sum"
+          title   = "Schema Drift Events"
+          region  = data.aws_region.current.name
+          period  = 300
+          stat    = "Sum"
           metrics = [["EnterpriseDatalake", "SchemaDriftCount"]]
         }
       },
@@ -260,10 +260,10 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         width  = 12
         height = 6
         properties = {
-          title  = "Watermark Lag (seconds)"
-          region = data.aws_region.current.name
-          period = 300
-          stat   = "Maximum"
+          title   = "Watermark Lag (seconds)"
+          region  = data.aws_region.current.name
+          period  = 300
+          stat    = "Maximum"
           metrics = [["EnterpriseDatalake", "WatermarkLagSeconds"]]
         }
       },
@@ -274,10 +274,10 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         width  = 12
         height = 6
         properties = {
-          title  = "Retry Count"
-          region = data.aws_region.current.name
-          period = 300
-          stat   = "Sum"
+          title   = "Retry Count"
+          region  = data.aws_region.current.name
+          period  = 300
+          stat    = "Sum"
           metrics = [["EnterpriseDatalake", "RetryCount"]]
         }
       },
@@ -288,7 +288,7 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
         width  = 12
         height = 6
         properties = {
-          title  = "Active SLO Alarms"
+          title = "Active SLO Alarms"
           alarms = [
             aws_cloudwatch_metric_alarm.extraction_failures.arn,
             aws_cloudwatch_metric_alarm.schema_drift_breaking.arn,
@@ -395,3 +395,349 @@ resource "aws_cloudwatch_dashboard" "serving_slo" {
   })
 }
 
+# ---------------------------------------------------------------------------
+# DLQ Depth Alarm (§5.3)
+# Fires as soon as any message lands in the extraction failure DLQ.
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_metric_alarm" "extraction_failure_dlq_depth" {
+  alarm_name          = "${var.environment}-edl-dlq-messages-present"
+  alarm_description   = "Extraction failure DLQ contains unprocessed messages. Investigate failed runs immediately."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  namespace   = "AWS/SQS"
+  metric_name = "ApproximateNumberOfMessagesVisible"
+  statistic   = "Maximum"
+  period      = 60
+
+  dimensions = {
+    QueueName = var.extraction_failure_dlq_name
+  }
+
+  alarm_actions = [aws_sns_topic.platform_alerts.arn]
+
+  tags = local.common_tags
+}
+
+# ---------------------------------------------------------------------------
+# Lambda Error / Duration / Throttle Alarms (§5.4)
+# Three alarms per Lambda function: errors, duration at 85% timeout, throttles.
+# ---------------------------------------------------------------------------
+
+locals {
+  # Lambda functions to monitor. Key = display name, value = function name.
+  monitored_lambdas = {
+    for k, v in {
+      extraction          = var.extraction_lambda_name
+      transformation      = var.transformation_lambda_name
+      entity_resolution   = var.entity_resolution_lambda_name
+      analytics_publisher = var.analytics_publisher_lambda_name
+    } : k => v if v != ""
+  }
+
+  # 85% of 900s Lambda max timeout in milliseconds
+  lambda_timeout_alert_ms = 900 * 1000 * 0.85
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+  for_each = local.monitored_lambdas
+
+  alarm_name          = "${var.environment}-edl-${each.key}-errors"
+  alarm_description   = "Lambda ${each.value} reported execution errors. Check CloudWatch Logs."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  namespace   = "AWS/Lambda"
+  metric_name = "Errors"
+  statistic   = "Sum"
+  period      = 300
+
+  dimensions = {
+    FunctionName = each.value
+  }
+
+  alarm_actions = [aws_sns_topic.platform_alerts.arn]
+  tags          = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_duration" {
+  for_each = local.monitored_lambdas
+
+  alarm_name          = "${var.environment}-edl-${each.key}-duration-high"
+  alarm_description   = "Lambda ${each.value} approaching timeout (>85% of 900s). Risk of incomplete pipeline run."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = local.lambda_timeout_alert_ms
+  treat_missing_data  = "notBreaching"
+
+  namespace   = "AWS/Lambda"
+  metric_name = "Duration"
+  statistic   = "Maximum"
+  period      = 300
+
+  dimensions = {
+    FunctionName = each.value
+  }
+
+  alarm_actions = [aws_sns_topic.platform_alerts.arn]
+  tags          = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
+  for_each = local.monitored_lambdas
+
+  alarm_name          = "${var.environment}-edl-${each.key}-throttles"
+  alarm_description   = "Lambda ${each.value} is being throttled. Increase reserved concurrency or check limits."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  namespace   = "AWS/Lambda"
+  metric_name = "Throttles"
+  statistic   = "Sum"
+  period      = 300
+
+  dimensions = {
+    FunctionName = each.value
+  }
+
+  alarm_actions = [aws_sns_topic.platform_alerts.arn]
+  tags          = local.common_tags
+}
+
+# ---------------------------------------------------------------------------
+# CloudWatch Metric Filter — Circuit Breaker DDB Fallback (§4.2)
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_metric_filter" "cb_ddb_fallback" {
+  name           = "${var.environment}-cb-ddb-fallback"
+  pattern        = "{ $.event = \"circuit_breaker_ddb_init_failed\" }"
+  log_group_name = "/edl/${var.environment}/connector-runtime"
+
+  metric_transformation {
+    name      = "CircuitBreakerDDBFallback"
+    namespace = "EnterpriseDatalake"
+    value     = "1"
+  }
+
+  depends_on = [aws_cloudwatch_log_group.platform_services]
+}
+
+resource "aws_cloudwatch_metric_alarm" "cb_ddb_fallback" {
+  alarm_name          = "${var.environment}-edl-circuit-breaker-ddb-fallback"
+  alarm_description   = "Circuit breaker fell back to in-process state. Distributed protection disabled — check VPC routing."
+  namespace           = "EnterpriseDatalake"
+  metric_name         = "CircuitBreakerDDBFallback"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.platform_alerts.arn]
+  tags                = local.common_tags
+}
+
+# ---------------------------------------------------------------------------
+# Security Event Metric Filters + Alarms (§4.5)
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_metric_filter" "input_validation_failures" {
+  name           = "${var.environment}-input-validation-failures"
+  pattern        = "{ $.level = \"error\" && $.event = \"input_validation_failed\" }"
+  log_group_name = "/edl/${var.environment}/connector-runtime"
+
+  metric_transformation {
+    name      = "InputValidationFailures"
+    namespace = "EnterpriseDatalake"
+    value     = "1"
+  }
+
+  depends_on = [aws_cloudwatch_log_group.platform_services]
+}
+
+resource "aws_cloudwatch_metric_alarm" "input_validation_failures" {
+  alarm_name          = "${var.environment}-edl-input-validation-failures"
+  alarm_description   = "Repeated input validation failures. Possible injection probing or misconfigured client."
+  namespace           = "EnterpriseDatalake"
+  metric_name         = "InputValidationFailures"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 5
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.platform_alerts.arn]
+  tags                = local.common_tags
+}
+
+resource "aws_cloudwatch_log_metric_filter" "credential_retrieval_failures" {
+  name           = "${var.environment}-credential-retrieval-failures"
+  pattern        = "{ $.event = \"credential_retrieval_failed\" }"
+  log_group_name = "/edl/${var.environment}/connector-runtime"
+
+  metric_transformation {
+    name      = "CredentialRetrievalFailures"
+    namespace = "EnterpriseDatalake"
+    value     = "1"
+  }
+
+  depends_on = [aws_cloudwatch_log_group.platform_services]
+}
+
+resource "aws_cloudwatch_metric_alarm" "credential_retrieval_failures" {
+  alarm_name          = "${var.environment}-edl-credential-retrieval-failures"
+  alarm_description   = "Credential retrieval from Secrets Manager failed. Check rotation or access policies."
+  namespace           = "EnterpriseDatalake"
+  metric_name         = "CredentialRetrievalFailures"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.platform_alerts.arn]
+  tags                = local.common_tags
+}
+
+resource "aws_cloudwatch_log_metric_filter" "circuit_breaker_opened" {
+  name           = "${var.environment}-circuit-breaker-opened"
+  pattern        = "{ $.event = \"circuit_breaker_opened\" }"
+  log_group_name = "/edl/${var.environment}/connector-runtime"
+
+  metric_transformation {
+    name      = "CircuitBreakerOpened"
+    namespace = "EnterpriseDatalake"
+    value     = "1"
+  }
+
+  depends_on = [aws_cloudwatch_log_group.platform_services]
+}
+
+resource "aws_cloudwatch_metric_alarm" "circuit_breaker_opened" {
+  alarm_name          = "${var.environment}-edl-circuit-breaker-opened"
+  alarm_description   = "Extraction circuit breaker opened. Source is unavailable or returning persistent errors."
+  namespace           = "EnterpriseDatalake"
+  metric_name         = "CircuitBreakerOpened"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.platform_alerts.arn]
+  tags                = local.common_tags
+}
+
+# ---------------------------------------------------------------------------
+# CloudWatch Logs Insights Saved Queries (§5.6)
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_query_definition" "failed_runs_last_24h" {
+  name = "${var.environment}/edl/failed-runs-last-24h"
+  log_group_names = [
+    "/edl/${var.environment}/connector-runtime",
+    "/edl/${var.environment}/transformation",
+    "/edl/${var.environment}/entity-resolution",
+    "/edl/${var.environment}/analytics-publisher",
+  ]
+  query_string = <<-EOT
+    fields run_id, source_id, entity_id, @timestamp
+    | filter level = "error"
+    | sort @timestamp desc
+    | limit 50
+  EOT
+}
+
+resource "aws_cloudwatch_query_definition" "mapping_failures_by_entity" {
+  name            = "${var.environment}/edl/mapping-failures-by-entity"
+  log_group_names = ["/edl/${var.environment}/transformation"]
+  query_string    = <<-EOT
+    fields entity_id, @timestamp
+    | filter event = "mapping_failure"
+    | stats count() as failure_count by entity_id
+    | sort failure_count desc
+    | limit 20
+  EOT
+}
+
+resource "aws_cloudwatch_query_definition" "schema_drift_events" {
+  name            = "${var.environment}/edl/schema-drift-events"
+  log_group_names = ["/edl/${var.environment}/connector-runtime"]
+  query_string    = <<-EOT
+    fields source_id, entity_id, drift_classification, @timestamp
+    | filter event = "schema_drift_detected"
+    | sort @timestamp desc
+    | limit 50
+  EOT
+}
+
+resource "aws_cloudwatch_query_definition" "watermark_lag_by_source" {
+  name            = "${var.environment}/edl/watermark-lag-by-source"
+  log_group_names = ["/edl/${var.environment}/connector-runtime"]
+  query_string    = <<-EOT
+    fields source_id, entity_id, watermark_lag_seconds, @timestamp
+    | filter event = "watermark_updated"
+    | stats max(watermark_lag_seconds) as max_lag_seconds by source_id, entity_id
+    | sort max_lag_seconds desc
+  EOT
+}
+
+resource "aws_cloudwatch_query_definition" "circuit_breaker_history" {
+  name            = "${var.environment}/edl/circuit-breaker-events"
+  log_group_names = ["/edl/${var.environment}/connector-runtime"]
+  query_string    = <<-EOT
+    fields source_id, entity_id, event, @timestamp
+    | filter event in ["circuit_breaker_opened", "circuit_breaker_reset", "circuit_breaker_ddb_init_failed"]
+    | sort @timestamp desc
+    | limit 50
+  EOT
+}
+
+resource "aws_cloudwatch_query_definition" "dlq_enqueue_history" {
+  name = "${var.environment}/edl/dlq-enqueue-history"
+  log_group_names = [
+    "/edl/${var.environment}/connector-runtime",
+    "/edl/${var.environment}/orchestration",
+  ]
+  query_string = <<-EOT
+    fields run_id, source_id, entity_id, failure_reason, @timestamp
+    | filter event = "dlq_message_enqueued"
+    | sort @timestamp desc
+    | limit 100
+  EOT
+}
+
+resource "aws_cloudwatch_query_definition" "cold_start_duration" {
+  name = "${var.environment}/edl/cold-start-duration"
+  log_group_names = [
+    "/aws/lambda/${var.environment}-extraction-pipeline",
+    "/aws/lambda/${var.environment}-transformation-pipeline",
+    "/aws/lambda/${var.environment}-entity-resolution-pipeline",
+    "/aws/lambda/${var.environment}-analytics-layer-publisher",
+  ]
+  query_string = <<-EOT
+    filter @type = "REPORT"
+    | fields @initDuration, @duration, @memorySize, @maxMemoryUsed, @requestId
+    | sort @timestamp desc
+    | limit 50
+  EOT
+}
+
+# ---------------------------------------------------------------------------
+# PagerDuty / OpsGenie Integration (§5.8) — conditional on URL being set
+# ---------------------------------------------------------------------------
+
+resource "aws_sns_topic_subscription" "pagerduty" {
+  count                  = var.pagerduty_integration_url != "" ? 1 : 0
+  topic_arn              = aws_sns_topic.platform_alerts.arn
+  protocol               = "https"
+  endpoint               = var.pagerduty_integration_url
+  endpoint_auto_confirms = true
+}

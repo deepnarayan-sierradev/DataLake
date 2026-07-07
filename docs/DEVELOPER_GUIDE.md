@@ -1,8 +1,14 @@
 # Developer Guide — Enterprise Data Lake Platform
 
-**Audience:** Engineers new to the codebase, or anyone setting up a fresh workstation  
-**Last updated:** 2026-07-01  
+**Audience:** Engineers new to the codebase, or anyone setting up a fresh workstation
+**Last updated:** 2026-07-07
 **Status:** Dev environment is live and fully operational
+
+> If you're using Claude Code (or another AI coding agent) on this repo, read root `CLAUDE.md`
+> first — it captures the same setup/verification conventions as this guide plus non-obvious
+> traps (the broken bare `mypy .` invocation, the multi-tenancy isolation model, banned
+> identifiers) in a form meant to be loaded every session. This guide is the human-onboarding
+> version; keep both in sync when either changes.
 
 ---
 
@@ -26,20 +32,35 @@
 
 ## 1. What This Platform Does
 
-The Enterprise Data Lake Platform automatically extracts data from three source systems, transforms and governs it through three S3 layers, resolves customer identity across systems, and delivers trusted analytics-ready records queryable via Athena.
+The Enterprise Data Lake Platform automatically extracts data from source systems, transforms and governs it through three S3 layers, resolves customer identity across systems, and delivers trusted analytics-ready records queryable via Athena.
 
 ```
 Salesforce CRM ──┐
 MySQL RDS ────── ┤
 Sage ERP ────────┼──► Raw Layer (S3) ──► Curated Layer (S3) ──► Analytics Layer (S3)
 NetSuite ERP ────┘         │                     │                      │
- (pending)            Immutable           Field-mapped           Golden records
-                      Parquet             Quality-checked        Athena-queryable
+ (code-complete,      Immutable           Field-mapped           Golden records
+  not yet live)       Parquet             Quality-checked        Athena-queryable
 ```
 
-**Orchestration:** EventBridge → Step Functions → Lambda (extraction → transformation → entity resolution → analytics publish)
+**Orchestration:** EventBridge → SQS FIFO → `pipeline-trigger` Lambda → Step Functions → Lambda
+(extraction → transformation → entity resolution → analytics publish). Failures route to a DLQ
+processed by the `dlq-processor` Lambda (audit record + SNS alert + optional auto-replay).
 
-**Configuration-driven:** adding a new source or entity requires zero code changes — only a DynamoDB config record.
+**Configuration-driven:** adding a new source or entity requires zero code changes — only a
+DynamoDB config record (see §11).
+
+**Multi-tenancy:** the platform is multi-tenant-aware, not strictly single-tenant. Every entity
+config, watermark, schema snapshot, and entity-type lookup carries a `tenant_code` (default:
+`demo`, from `contracts/identifier_policy.DEFAULT_TENANT_CODE`). Isolation is **not yet uniform**:
+S3 curated/schema-snapshot keys and the `entity-type-registry` DynamoDB table are genuinely
+isolated (bucket prefix / partition key); `entity-extraction-config` and `watermark-repository`
+are only isolated by an application-level guard today, and the raw layer isn't tenant-prefixed at
+all yet. See `docs/PRODUCTION_INCIDENT_RUNBOOK.md`'s "How tenant isolation actually works today"
+section and run `tests/test_tenant_isolation.py` before touching any repository class. A new
+Cognito-authenticated SaaS control-plane API (`connector_runtime/api/`) exists for self-service
+tenant provisioning and pipeline triggering — it's code-complete but not yet verified against a
+live AWS deployment (see §2 and `connector_runtime/CLAUDE.md`).
 
 ---
 
@@ -47,19 +68,22 @@ NetSuite ERP ────┘         │                     │                
 
 | Module | Purpose |
 |---|---|
-| `connector_runtime/` | Extracts data from source APIs; writes Parquet to raw layer |
-| `transformation/` | Applies field mapping, quality checks, PII masking; writes to curated layer |
-| `entity_resolution/` | Cross-source entity matching; writes golden records to analytics layer |
-| `analytics_publisher/` | Publishes partitioned analytics Parquet; registers Glue partitions |
-| `schema_management/` | Schema snapshot capture and drift detection |
-| `watermark_management/` | Incremental extraction watermark read/write |
-| `orchestration/` | Step Functions and EventBridge wiring |
+| `connector_runtime/` | Extracts data from source APIs; writes Parquet to raw layer. Shared base classes for new connectors: `credential_client.py::SecretsManagerCredentialClient`, `raw_layer_writer.py::RawLayerWriter`, `query_builders/incremental_query_builder.py::build_incremental_select()` — see `connector_runtime/CLAUDE.md` before hand-rolling a new connector. |
+| `connector_runtime/api/` | **New.** SaaS control-plane REST API (Cognito/JWT-authenticated) — tenant provisioning, entity registration, pipeline trigger, run status. Code-complete, not yet deployment-verified. |
+| `connector_runtime/credential_rotation/` | **New.** Daily Lambda checking source-credential secret age; alerts via SNS if rotation is overdue. |
+| `transformation/` | Applies field mapping, quality checks, PII masking; writes to curated layer (tenant-prefixed S3 keys) |
+| `entity_resolution/` | Cross-source entity matching; writes golden records to analytics layer. `entity_type_registry.py` now has a DynamoDB-backed `EntityTypeRegistryClient` (tenant-scoped) alongside the original hardcoded fallback dicts. `publishing_shared.py` holds logic shared between the golden/canonical record publishers. |
+| `analytics_publisher/` | Publishes partitioned analytics Parquet; registers Glue partitions; emits an end-to-end pipeline SLA metric |
+| `schema_management/` | Schema snapshot capture and drift detection (tenant-prefixed S3 keys) |
+| `watermark_management/` | Incremental extraction watermark read/write (tenant-checked on read) |
+| `orchestration/` | Step Functions and EventBridge wiring. `pipeline_trigger/` (SQS FIFO → Step Functions, rate-limited) and `dlq_processor/` (DLQ → audit + alert + optional replay) are new dedicated Lambdas here, not just Terraform glue. |
 | `governance/` | Lineage records, data classification, retention enforcement |
 | `observability/` | Structured logging and CloudWatch metrics emission |
-| `contracts/` | Shared Pydantic models and interfaces used across all modules |
-| `infrastructure/` | Terraform modules and environment configs (`dev/`, `staging/`, `prod/`) |
+| `contracts/` | Shared Pydantic models and interfaces used across all modules — `identifier_policy.py` is the single source of truth for ID/tenant validation regexes; never re-derive them elsewhere |
+| `infrastructure/` | Terraform modules and environment configs (`dev/`, `staging/`, `prod/`) — see `infrastructure/CLAUDE.md` |
 | `scripts/` | Operational scripts: seeding configs, triggering runs, dry-run connectors |
 | `config/` | Field mapping JSON and entity resolution config files |
+| `tests/` | **New.** Cross-cutting integration tests only (currently: `test_tenant_isolation.py`) — module-specific tests belong under `<module>/tests/`, not here |
 
 ---
 
@@ -171,13 +195,19 @@ dev-edl-terraform-state
 aws dynamodb list-tables --region us-east-1 | grep dev-
 ```
 
-Expected:
+Expected (see Known Gotcha #3 — whether these are actually Terraform-managed in this account is
+currently unverified; don't assume either way):
 
 ```
-dev-entity-extraction-config
-dev-run-audit-log
-dev-watermark-repository
+dev-edl-entity-extraction-config
+dev-edl-run-audit-log
+dev-edl-watermark-repository
+dev-edl-entity-type-registry
 ```
+
+> If you see the same names *without* the `-edl-` infix (e.g. `dev-entity-extraction-config`),
+> that's the older naming form referenced in some docs — prefer the `-edl-` form shown above,
+> which matches the actual Terraform `name` attribute.
 
 ### Secrets Manager
 
@@ -189,6 +219,7 @@ Expected:
 
 ```
 dev/sources/salesforce/credentials
+dev/sources/netsuite/credentials
 dev/sources/mysql-rds/credentials
 dev/sources/sage/intacct/credentials
 dev/sources/sage/x3/credentials
@@ -203,10 +234,14 @@ aws lambda list-functions --region us-east-1 --query 'Functions[?starts_with(Fun
 Expected:
 
 ```
-dev-analytics-publisher
+dev-analytics-layer-publisher
 dev-entity-resolution-pipeline
 dev-extraction-pipeline
 dev-transformation-pipeline
+dev-edl-control-plane
+dev-edl-credential-expiry-notifier
+dev-edl-pipeline-trigger
+dev-edl-dlq-processor
 ```
 
 ### Step Functions
@@ -215,10 +250,10 @@ dev-transformation-pipeline
 aws stepfunctions list-state-machines --region us-east-1 --query 'stateMachines[?starts_with(name, `dev-`)].name'
 ```
 
-Expected:
+Expected — there is only one state machine (a previous version of this doc listed a second,
+`dev-data-pipeline`, that doesn't exist in `infrastructure/modules/orchestration/main.tf`):
 
 ```
-dev-data-pipeline
 dev-extraction-pipeline
 ```
 
@@ -247,20 +282,40 @@ pytest transformation/tests/ -v --no-cov
 # Entity resolution tests
 pytest entity_resolution/tests/ -v --no-cov
 
+# Analytics publisher tests
+pytest analytics_publisher/tests/ -v --no-cov
+
 # Schema, watermark, observability, contracts, governance, orchestration
 pytest schema_management/tests watermark_management/tests observability/tests \
        contracts/tests governance/tests orchestration/tests -v --no-cov
+
+# Cross-cutting integration tests (tenant isolation)
+pytest tests/ -v --no-cov
 ```
 
 ### Full CI check suite (same as GitHub Actions)
 
 ```bash
 ruff check .                           # lint
-mypy .                                 # type check
+ruff format --check .                  # formatting (separate CI job from lint)
+mypy .                                 # type check — SEE CAVEAT BELOW, currently broken
 pytest --cov --cov-fail-under=80       # tests + coverage
 bandit -r . -c pyproject.toml          # SAST security scan
 pip-audit                              # dependency CVE scan
+make banned-names                      # rejects helper/util/common/manager identifiers
 ```
+
+> **`mypy .` currently fails for reasons unrelated to your change.** It stops immediately on
+> `dist/lambda-build/typing_extensions.py` shadowing the real `typing_extensions` package (present
+> after running `make lambda-package`), and — once that's worked around — on a module-name
+> collision between `scripts/generate_presentation.py` and `pptx/generate_presentation.py`.
+> `make typecheck` has the exact same problem (it also just runs bare `mypy .`), so switching to
+> the Makefile target doesn't help. **Scope mypy to the packages you actually touched** instead,
+> e.g. `mypy connector_runtime schema_management watermark_management observability orchestration
+> transformation governance entity_resolution analytics_publisher contracts` (this excludes
+> `dist/`, `scripts/`, and `pptx/` by construction). This is tracked as a real bug, not just a
+> docs caveat — fixing the root cause (excluding `dist/` from mypy's search path, and renaming one
+> of the two colliding `generate_presentation.py` files) is still open.
 
 ---
 
@@ -414,18 +469,30 @@ terraform plan
 terraform apply -target=module.<name>
 ```
 
-**Apply order matters:**
+**Apply order matters — this is the full order today, not just the original 3 Lambda modules:**
 
 ```bash
 # 1. IAM first — provides role ARNs to everything else
 terraform apply -target=module.iam
 
-# 2. Lambdas (can apply together, need IAM done first)
-terraform apply -target=module.lambda_pipeline -target=module.transformation_lambda
+# 2. Metadata persistence — DynamoDB tables (entity-type-registry etc.), needed by control_plane
+terraform apply -target=module.metadata_persistence
 
-# 3. Orchestration last — needs all Lambda ARNs
+# 3. Lambdas (can apply together, need IAM done first)
+terraform apply -target=module.lambda_pipeline -target=module.transformation_lambda \
+  -target=module.entity_resolution_lambda -target=module.analytics_publisher_lambda
+
+# 4. Orchestration — needs all Lambda ARNs; also provisions pipeline-trigger and dlq-processor
 terraform apply -target=module.orchestration
+
+# 5. Control plane last — depends on iam, orchestration, AND metadata_persistence
+terraform apply -target=module.control_plane
 ```
+
+Or skip `-target` entirely and apply everything in one pass once `terraform validate` is clean —
+Terraform resolves the dependency graph itself; the staged order above is only needed when you
+want to control blast radius. See `infrastructure/CLAUDE.md` for the full 14-module list and
+`make iac-validate` / `make iac-scan` for the CI-equivalent local checks.
 
 > **Critical:** Run `terraform init` after adding any new module, even if the module directory already exists. Forgetting causes "Module not installed" error.
 
@@ -459,7 +526,7 @@ AWS_PROFILE=dev aws lambda update-function-code \
   --region us-east-1
 
 AWS_PROFILE=dev aws lambda update-function-code \
-  --function-name dev-analytics-publisher \
+  --function-name dev-analytics-layer-publisher \
   --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
   --region us-east-1
 ```
@@ -471,7 +538,14 @@ AWS_PROFILE=dev aws lambda update-function-code \
 | `dev-extraction-pipeline` | `connector_runtime.extraction_pipeline_handler.lambda_handler` |
 | `dev-transformation-pipeline` | `transformation.transformation_pipeline_handler.lambda_handler` |
 | `dev-entity-resolution-pipeline` | `entity_resolution.entity_resolution_pipeline_handler.lambda_handler` |
-| `dev-analytics-publisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` |
+| `dev-analytics-layer-publisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` |
+| `dev-edl-control-plane` | `connector_runtime.api.control_plane_handler.lambda_handler` |
+| `dev-edl-credential-expiry-notifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` |
+| `dev-edl-pipeline-trigger` | `orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler` |
+| `dev-edl-dlq-processor` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` |
+
+All eight share the same deployment zip (see §10 above) — a code change to any handler requires
+rebuilding and re-uploading once, then an `update-function-code` call per affected function.
 
 ---
 
@@ -499,31 +573,44 @@ Configs are defined in `config/` — edit them there and re-seed, never directly
 EventBridge Scheduler (cron)
     │
     ▼
-Step Functions (dev-data-pipeline)
+SQS FIFO queue ──► dev-edl-pipeline-trigger Lambda (rate-limited) ──► Step Functions (dev-extraction-pipeline)
+    │  (the control-plane API's pipeline-trigger route enqueues here too — same path, not a
+    │   parallel one)
     │
     ├─ Step 1: dev-extraction-pipeline Lambda
-    │       Reads DynamoDB config → fetches from source API
-    │       Writes Parquet to: s3://dev-edl-raw-layer/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/
-    │       Updates watermark in DynamoDB
+    │       Reads DynamoDB config (tenant_code-scoped) → fetches from source API
+    │       Writes Parquet to: s3://dev-edl-raw-layer/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/
+    │         (raw layer is NOT tenant-prefixed yet — see §1 Multi-tenancy note)
+    │       Updates watermark in DynamoDB (tenant-checked)
+    │       If approaching the Lambda timeout mid-run: commits a partial watermark, emits a
+    │       checkpoint audit record, and the state machine exits cleanly via the
+    │       `ExtractionCheckpointed` terminal state instead of failing. Automatic resume from a
+    │       checkpoint is NOT yet implemented — needs a manual re-trigger.
+    │       On unrecoverable failure: message lands on the extraction-failure DLQ →
+    │       dev-edl-dlq-processor Lambda (audit record + SNS alert + optional auto-replay)
     │
     ├─ Step 2: dev-transformation-pipeline Lambda
     │       Reads raw Parquet → applies field mapping JSON
-    │       Quality checks → PII masking
+    │       Quality checks → PII masking (now actually wired up — see governance module)
     │       SCD Type 1 merge: loads previous curated state, merges delta by
     │       primary_key_field → writes FULL current-state Parquet to curated
     │       (full-load entities: writes delta only, no merge)
-    │       Writes to: s3://dev-edl-curated-layer/curated/{domain}/{entity_id}/
+    │       Writes to: s3://dev-edl-curated-layer/{tenant_code}/curated/{domain}/{entity_id}/
     │       Registers Glue table
     │
     ├─ Step 3: dev-entity-resolution-pipeline Lambda
-    │       Loads latest curated data from ALL sources per entity type
+    │       Loads latest curated data from ALL sources per entity type — streamed via DuckDB
+    │       rather than fully materialized into memory
+    │       Resolves entity type via EntityTypeRegistryClient (DynamoDB, tenant-scoped), falling
+    │       back to hardcoded seed dicts if no registry record exists
     │       Runs matching (Jaro-Winkler + Jaccard)
     │       Writes golden records to: s3://dev-edl-analytics-layer/canonical/{entity_type}/
     │
-    └─ Step 4: dev-analytics-publisher Lambda
+    └─ Step 4: dev-analytics-layer-publisher Lambda
             Writes partitioned analytics Parquet
             Path: s3://dev-edl-analytics-layer/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet
             Registers Glue partition → queryable in Athena
+            Emits an end-to-end pipeline SLA metric (run start → analytics publish latency)
 ```
 
 **Entity type mapping:**
@@ -546,9 +633,9 @@ Step Functions (dev-data-pipeline)
 
 1. **`terraform init` required after adding new modules** — even if the module directory exists. Forgetting causes "Module not installed" error.
 
-2. **Terraform module apply order** — `module.iam` → (`module.lambda_pipeline` + `module.transformation_lambda`) → `module.orchestration`. Orchestration fails at plan time if any Lambda ARN is empty.
+2. **Terraform module apply order** — `module.iam` → `module.metadata_persistence` → (`module.lambda_pipeline` + `module.transformation_lambda` + `module.entity_resolution_lambda` + `module.analytics_publisher_lambda`) → `module.orchestration` → `module.control_plane` (needs `iam`, `orchestration`, *and* `metadata_persistence`). Orchestration and control_plane fail at plan time if any dependency's ARN is empty. See §9.
 
-3. **DynamoDB tables are NOT Terraform-managed** — pre-created manually with correct key schemas. Terraform uses `data "aws_dynamodb_table"` lookups. Never recreate them via Terraform.
+3. **DynamoDB tables — unresolved doc/infra contradiction, verify before applying.** This doc previously said these tables are "NOT Terraform-managed... Terraform uses `data \"aws_dynamodb_table\"` lookups." That's contradicted by the actual code: `infrastructure/modules/metadata_persistence/main.tf` defines real `aws_dynamodb_table` *resource* blocks (with `prevent_destroy`) for `watermark_repository`, `run_audit_log`, `entity_extraction_config`, and `entity_type_registry` — and this predates the current round of changes (confirmed via `git log` on that file), so it's a pre-existing mismatch, not something newly broken. **Before running `terraform apply` in any environment**, run `terraform state list | grep dynamodb` to check whether these are already tracked in state. If they exist in AWS but aren't in state, `apply` will fail with "already exists"; if you're setting up a fresh environment, they may need to be created via Terraform directly rather than by hand as this doc used to instruct.
 
 4. **Raw layer bucket rejects IAM user writes** — `dev-edl-raw-layer` policy allows writes only from `dev-extraction-runtime-role` (Lambda). Local scripts must use `--dry-run`. Full runs go through Step Functions.
 

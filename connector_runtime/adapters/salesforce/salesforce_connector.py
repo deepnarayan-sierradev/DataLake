@@ -26,15 +26,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any, Final
 
-from connector_runtime.adapters.salesforce.salesforce_auth_client import (
-    SalesforceAuthClient,
-    SalesforceAuthError,
-    SalesforceCredentialError,
-)
+from connector_runtime.adapters.salesforce.salesforce_auth_client import SalesforceAuthClient
 from connector_runtime.adapters.salesforce.salesforce_bulk_query_job_controller import (
-    BulkApiLimitError,
     BulkJobFailedError,
-    BulkJobTimeoutError,
     SalesforceBulkQueryJobController,
 )
 from connector_runtime.adapters.salesforce.salesforce_metadata_discovery_client import (
@@ -43,14 +37,15 @@ from connector_runtime.adapters.salesforce.salesforce_metadata_discovery_client 
 from connector_runtime.interfaces.connector_interface import (
     ConnectorCapabilities,
     ConnectorInterface,
+    DeterministicConnectorError,
     ExtractionErrorClassification,
     ExtractionRecord,
     FieldContract,
     QueryContract,
+    TransientConnectorError,
 )
 from connector_runtime.query_builders.salesforce_soql_query_builder import (
     SalesforceSoqlQueryBuilder,
-    SalesforceSoqlQueryBuilderError,
 )
 from connector_runtime.registry import connector_registry
 from contracts.entity_configuration_contract import FieldMode, LoadType
@@ -225,24 +220,18 @@ class SalesforceConnector(ConnectorInterface):
         Deterministic failures are not retried — they indicate configuration
         or credential problems that a retry cannot fix.
         Transient failures are eligible for exponential backoff retry.
+
+        Most Salesforce exception types now carry their own classification via
+        the shared TransientConnectorError/DeterministicConnectorError markers
+        (DP-3) — see salesforce_auth_client.py, salesforce_soql_query_builder.py,
+        and salesforce_bulk_query_job_controller.py. BulkJobFailedError is
+        deliberately excluded from that hierarchy because a Salesforce-side job
+        failure can be transient or deterministic and the reason string isn't
+        parsed here; it still routes to UNKNOWN for DLQ + manual review.
         """
-        if isinstance(exc, SalesforceCredentialError):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
-        if isinstance(exc, SalesforceSoqlQueryBuilderError):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
-        if isinstance(exc, SalesforceAuthError):
-            # Auth errors are deterministic — retrying with the same (broken)
-            # credentials won't help.
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
-        if isinstance(exc, BulkApiLimitError):
-            # API limit exhaustion is transient — quota resets daily.
-            return ExtractionErrorClassification.TRANSIENT_THROTTLE
-        if isinstance(exc, BulkJobTimeoutError):
-            # Timeout may be transient (large job, network slowness).
-            return ExtractionErrorClassification.TRANSIENT_TIMEOUT
+        if isinstance(exc, (DeterministicConnectorError, TransientConnectorError)):
+            return exc.classification
         if isinstance(exc, BulkJobFailedError):
-            # Salesforce-side job failure — could be transient or deterministic;
-            # classify as unknown to route to DLQ for manual review.
             return ExtractionErrorClassification.UNKNOWN
         if isinstance(exc, OSError):
             return ExtractionErrorClassification.TRANSIENT_NETWORK
@@ -294,3 +283,7 @@ def _build_salesforce(
 
 
 connector_registry.register_builder(_SOURCE_ID, _build_salesforce)
+
+from connector_runtime.adapters.salesforce.salesforce_params import SalesforceConnectorParams
+
+connector_registry.register_params_model(_SOURCE_ID, SalesforceConnectorParams)

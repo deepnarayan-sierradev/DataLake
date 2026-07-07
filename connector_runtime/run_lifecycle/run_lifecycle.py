@@ -17,8 +17,8 @@ The run_id satisfies all platform invariants:
   - Matches the stable identifier format regex used by StructuredLogEvent
 
 AWS resources used:
-  - DynamoDB table: {environment}-run-audit-log  (PK: run_id, SK: stage)
-  - SQS queue:      {environment}-extraction-dlq
+  - DynamoDB table: {environment}-edl-run-audit-log  (PK: run_id, SK: stage)
+  - SQS queue:      {environment}-edl-extraction-failure-dlq
 
 Security:
   - Sensitive content is auto-scrubbed by PipelineStageContract validators.
@@ -45,8 +45,8 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-_AUDIT_TABLE_TEMPLATE: Final[str] = "{environment}-run-audit-log"
-_DLQ_NAME_TEMPLATE: Final[str] = "{environment}-extraction-dlq"
+_AUDIT_TABLE_TEMPLATE: Final[str] = "{environment}-edl-run-audit-log"
+_DLQ_NAME_TEMPLATE: Final[str] = "{environment}-edl-extraction-failure-dlq"
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +70,30 @@ def generate_run_id() -> str:
     timestamp_part = now.strftime("%Y%m%d-%H%M%S%f")
     uuid_part = uuid.uuid4().hex[:8]
     return f"run-{timestamp_part}-{uuid_part}"
+
+
+def make_partial_run_id(run_id: str, part_number: int) -> str:
+    """
+    Derive a distinguishable identifier for a PARTIAL (checkpointed) run
+    (PERF-5).
+
+    Format:  {run_id}-part{part_number}
+    Example: run-20260611-143022123456-a3f9c1d2-part1
+
+    Used exclusively as the audit-log PK for a checkpoint's own stage record
+    (see RunCoordinator.emit_checkpoint_stage) — it is NOT a substitute for
+    the underlying run_id, which continues to identify the raw S3 partition
+    and every other stage's audit record. Keeping the checkpoint's audit
+    entry under a distinct PK makes it possible to tell, from the audit log
+    alone, that a given run stopped early via a checkpoint rather than
+    completing or failing outright.
+
+    Raises:
+        ValueError: part_number is not a positive integer.
+    """
+    if part_number < 1:
+        raise ValueError(f"part_number must be >= 1, got {part_number}.")
+    return f"{run_id}-part{part_number}"
 
 
 # ---------------------------------------------------------------------------
@@ -114,12 +138,16 @@ class RunCoordinator:
         region_name: str,
         source_id: str,
         entity_id: str,
+        tenant_code: str = "demo",
     ) -> None:
         if not environment:
             raise ValueError("environment must not be empty.")
+        from contracts.identifier_policy import validate_tenant_code
+
         self._environment = environment
         self._source_id = source_id
         self._entity_id = entity_id
+        self._tenant_code = validate_tenant_code(tenant_code)
         self._run_id: str = generate_run_id()
         self._started_at: datetime = datetime.now(tz=UTC)
 
@@ -153,6 +181,11 @@ class RunCoordinator:
     def entity_id(self) -> str:
         """The stable entity identifier for this run."""
         return self._entity_id
+
+    @property
+    def tenant_code(self) -> str:
+        """The tenant identifier slug for this run (§1.1)."""
+        return self._tenant_code
 
     # ── Stage emission ─────────────────────────────────────────────────────────
 
@@ -188,6 +221,7 @@ class RunCoordinator:
             stage=stage,
             status=status,
             environment=self._environment,
+            tenant_code=self._tenant_code,
             duration_ms=duration_ms,
             extraction_window_start=extraction_window_start,
             extraction_window_end=extraction_window_end,
@@ -199,6 +233,49 @@ class RunCoordinator:
             failed_record_count=failed_record_count,
             error_message=error_message,
             error_code=error_code,
+        )
+        self._persist_audit_record(contract)
+        return contract
+
+    # ── Checkpoint / partial-run audit (PERF-5) ─────────────────────────────────
+
+    def emit_checkpoint_stage(
+        self,
+        part_number: int,
+        record_count: int,
+        extraction_window_end: datetime | None = None,
+        error_message: str | None = None,
+    ) -> PipelineStageContract:
+        """
+        Emit a PARTIAL run-completion audit record for an EXTRACTION run that
+        stopped early via a checkpoint (max_records_per_lambda_run reached, or
+        Lambda remaining time ran low) rather than completing or failing
+        outright (PERF-5).
+
+        Persisted under a DISTINGUISHABLE run_id — '{run_id}-partN' — so the
+        audit log can tell a checkpointed run apart from the main run's own
+        stage records (which are still emitted under the unsuffixed run_id,
+        unchanged). status is always RunStatus.PARTIAL.
+
+        This does not itself advance the watermark or raise any exception —
+        the caller (ExtractionWorkflow) is responsible for committing the
+        partial watermark advance via the existing advance_watermark /
+        initialise_watermark methods, and for raising LambdaTimeoutWarning.
+
+        Returns the emitted contract (persisted best-effort, same as emit_stage).
+        """
+        partial_run_id = make_partial_run_id(self._run_id, part_number)
+        contract = PipelineStageContract(
+            run_id=partial_run_id,
+            source_id=self._source_id,
+            entity_id=self._entity_id,
+            stage=PipelineStage.RUN_COMPLETION,
+            status=RunStatus.PARTIAL,
+            environment=self._environment,
+            tenant_code=self._tenant_code,
+            extraction_window_end=extraction_window_end,
+            record_count=record_count,
+            error_message=error_message,
         )
         self._persist_audit_record(contract)
         return contract
@@ -238,6 +315,7 @@ class RunCoordinator:
             "source_id": self._source_id,
             "entity_id": self._entity_id,
             "environment": self._environment,
+            "tenant_code": self._tenant_code,
             "failed_stage": str(failed_stage),
             "error_code": error_code,
             # Scrub before enqueue — the payload bypasses PipelineStageContract
@@ -304,6 +382,7 @@ def _serialise_contract(contract: PipelineStageContract) -> dict[str, Any]:
         "entity_id": contract.entity_id,
         "status": str(contract.status),
         "environment": contract.environment,
+        "tenant_code": contract.tenant_code,
         "completed_at": _dt(contract.completed_at),
         "duration_ms": contract.duration_ms,
         "extraction_window_start": _dt(contract.extraction_window_start),

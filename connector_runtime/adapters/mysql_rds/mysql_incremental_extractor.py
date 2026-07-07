@@ -30,6 +30,10 @@ from connector_runtime.interfaces.connector_interface import (
     FieldContract,
     QueryContract,
 )
+from connector_runtime.query_builders.incremental_query_builder import (
+    BACKTICK_QUOTE,
+    build_incremental_select,
+)
 from contracts.entity_configuration_contract import LoadType
 from observability.structured_logger import get_platform_logger
 
@@ -48,7 +52,20 @@ _FETCH_BATCH_SIZE: Final[int] = 1_000
 
 
 class MySqlIncrementalExtractorError(Exception):
-    """Raised when query construction or execution fails."""
+    """
+    Raised when query construction or execution fails.
+
+    DP-3 note: deliberately NOT a TransientConnectorError/
+    DeterministicConnectorError subclass. This single exception type covers
+    both build_query() validation failures (always deterministic — bad
+    identifier, missing watermark_field) AND extract() cursor execution
+    failures (genuinely ambiguous — a deadlock or lock-wait timeout is
+    transient, a schema mismatch is deterministic, and the underlying
+    pymysql exception is only inspected as `type(exc).__name__` in the
+    message, not re-classified here). Forcing either marker onto this type
+    would misclassify one of those two cases, so mysql_rds_connector.py's
+    classify_extraction_error() keeps its explicit UNKNOWN routing for it.
+    """
 
 
 class MySqlIncrementalExtractor:
@@ -167,19 +184,12 @@ class MySqlIncrementalExtractor:
                 raise MySqlIncrementalExtractorError(
                     f"Field name {descriptor.name!r} does not match identifier pattern."
                 )
-            field_names.append(f"`{descriptor.name}`")
+            field_names.append(descriptor.name)
 
         if not field_names:
             raise MySqlIncrementalExtractorError(
                 "FieldContract contains no queryable fields — cannot build SQL query."
             )
-
-        select_clause = ", ".join(field_names)
-        # field names and table_name are both validated against _IDENTIFIER_PATTERN
-        # before this point — no user-controlled input can reach this f-string.
-        query_text = f"SELECT {select_clause} FROM `{table_name}`"  # noqa: S608
-        query_parameters: dict[str, Any] = {}
-        effective_watermark_field: str | None = None
 
         if load_type == LoadType.INCREMENTAL and watermark_field:
             if not _IDENTIFIER_PATTERN.match(watermark_field):
@@ -194,15 +204,24 @@ class MySqlIncrementalExtractor:
                 raise MySqlIncrementalExtractorError(
                     f"watermark_upper {watermark_upper!r} is not a valid ISO-8601 value."
                 )
-            query_text = (
-                f"{query_text}"
-                f" WHERE `{watermark_field}` >= %(lower_bound)s"
-                f" AND `{watermark_field}` < %(upper_bound)s"
-                f" ORDER BY `{watermark_field}` ASC"
-            )
-            query_parameters["lower_bound"] = watermark_lower
-            query_parameters["upper_bound"] = watermark_upper
-            effective_watermark_field = watermark_field
+
+        # DUP-4: the actual SELECT/FROM/WHERE/ORDER BY assembly is shared with
+        # Salesforce SOQL and NetSuite SuiteQL — see build_incremental_select().
+        # MySQL is the only one of the three that backtick-quotes identifiers
+        # and appends an ORDER BY clause (needed since MySQL, unlike SOQL/
+        # SuiteQL, has no source-side guarantee of watermark-field ordering).
+        query_text, query_parameters, effective_watermark_field = build_incremental_select(
+            field_names=field_names,
+            table=table_name,
+            load_type=load_type,
+            watermark_field=watermark_field,
+            watermark_lower=watermark_lower,
+            watermark_upper=watermark_upper,
+            lower_bound_placeholder="%(lower_bound)s",
+            upper_bound_placeholder="%(upper_bound)s",
+            quote=BACKTICK_QUOTE,
+            include_order_by=True,
+        )
 
         return QueryContract(
             source_id=field_contract.source_id,

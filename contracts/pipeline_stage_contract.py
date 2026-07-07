@@ -60,6 +60,14 @@ class PipelineStageContract(BaseModel):
     stage: PipelineStage = Field(..., description="Pipeline stage name.")
     status: RunStatus = Field(..., description="Stage status.")
     environment: str = Field(..., description="Deployment environment (dev, staging, prod).")
+    tenant_code: str = Field(
+        default="demo",
+        description=(
+            "Tenant identifier slug (§1.1 / ARCH-1). Stored on every audit record "
+            "so tenant-scoped queries and IAM conditions can filter by tenant "
+            "without cross-referencing another table."
+        ),
+    )
 
     # ── Extraction window ─────────────────────────────────────────────────────
     extraction_window_start: datetime | None = Field(
@@ -135,6 +143,13 @@ class PipelineStageContract(BaseModel):
         if value not in allowed:
             raise ValueError(f"environment must be one of {sorted(allowed)}, got '{value}'.")
         return value
+
+    @field_validator("tenant_code", mode="before")
+    @classmethod
+    def validate_tenant_code_field(cls, value: str) -> str:
+        from contracts.identifier_policy import validate_tenant_code
+
+        return validate_tenant_code(value)
 
     # ── Timing ────────────────────────────────────────────────────────────────
     completed_at: datetime = Field(

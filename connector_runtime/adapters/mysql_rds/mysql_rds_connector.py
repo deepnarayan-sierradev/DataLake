@@ -11,6 +11,20 @@ Design:
   - Private VPC connectivity — the RDS endpoint is never publicly accessible.
   - SSL enforced on all connections (ssl_disabled=False in pymysql.connect).
 
+Performance (PERF-1, PERF-2):
+  - Cursor class is SSDictCursor (server-side/streaming cursor), not the
+    default buffered DictCursor. execute() no longer pulls the entire result
+    set into client memory — MySqlIncrementalExtractor's fetchmany() loop
+    streams rows from the server in bounded batches, giving genuine O(batch)
+    peak memory instead of O(full result set).
+  - Connections are pooled in a module-level, warm-container-scoped cache
+    keyed by (host, port, user, database) so repeated Lambda invocations in
+    the same warm container reuse one open connection instead of opening (and
+    always closing) a fresh one per extraction run — this materially reduces
+    pressure on the source RDS instance's max_connections at multi-tenant
+    scale. A cached connection is health-checked (ping, with reconnect) before
+    reuse since it can go stale between invocations.
+
 Credentials:
   - Fetched from AWS Secrets Manager via MySqlRdsCredentialsClient.
   - Never in constructor arguments, env vars, or logs.
@@ -57,6 +71,22 @@ from observability.structured_logger import get_platform_logger
 _logger = get_platform_logger(__name__)
 
 _SOURCE_ID: Final[str] = "mysql-rds"
+
+# ---------------------------------------------------------------------------
+# Connection pooling (PERF-2)
+# ---------------------------------------------------------------------------
+# Module-level cache, scoped to the lifetime of the Lambda execution
+# environment (a "warm container"). Keyed by connection identity — NOT by
+# table_name, since multiple entities on the same MySQL database legitimately
+# share one connection. Every entry is a live pymysql Connection using
+# SSDictCursor (PERF-1).
+_ConnectionCacheKey = tuple[str, int, str, str]
+_connection_cache: dict[_ConnectionCacheKey, Any] = {}
+
+
+def _connection_cache_key(params: Any) -> _ConnectionCacheKey:
+    """Cache key identifying a distinct MySQL connection target."""
+    return (params.host, params.port, params.username, params.database)
 
 
 @connector_registry.register(_SOURCE_ID)
@@ -135,11 +165,15 @@ class MySqlRdsConnector(ConnectorInterface):
                 exclude_fields=exclude_fields,
             )
             # Transfer ownership: keep connection alive for execute_extraction.
-            # The connection is closed in execute_extraction's finally block.
+            # Left open (and pooled) on success; execute_extraction decides
+            # whether to keep it pooled or evict it once extraction finishes.
             self._reusable_conn = conn
             return result
         except Exception:
-            conn.close()  # close only on failure; success path reuses the conn
+            # Discovery failed on this connection — it may be in an unknown
+            # state (e.g. mid-transaction). Evict it from the pool rather than
+            # risk handing a poisoned connection to the next invocation.
+            self._evict_connection(conn)
             raise
 
     def build_extraction_query(
@@ -174,9 +208,15 @@ class MySqlRdsConnector(ConnectorInterface):
         """
         Execute the SQL query and yield records.
 
-        Opens a fresh connection for this extraction run.  The connection
-        is closed in a finally block regardless of success or failure.
-        SSL is enforced on every connection (in-transit encryption).
+        Reuses the pooled connection opened by discover_queryable_fields (or
+        the module-level connection pool directly) rather than always opening
+        a fresh TCP+TLS connection (PERF-2). On full, successful consumption
+        the connection is left open and pooled for reuse by a subsequent
+        (possibly warm-container) invocation. On any error, or if the caller
+        stops iterating before the result set is exhausted, the connection is
+        evicted from the pool and closed — a partially-consumed SSDictCursor
+        (PERF-1's streaming cursor) can leave unread bytes on the socket that
+        would corrupt the next query issued on a reused connection.
         """
         _logger.info(
             "mysql_rds_extraction_started",
@@ -188,21 +228,29 @@ class MySqlRdsConnector(ConnectorInterface):
         )
 
         # Reuse the connection opened by discover_queryable_fields if available;
-        # open a fresh connection only when called without prior discovery
-        # (e.g. direct invocation in tests or replay scenarios).
+        # open a fresh (or pooled) connection only when called without prior
+        # discovery (e.g. direct invocation in tests or replay scenarios).
         conn = getattr(self, "_reusable_conn", None)
         self._reusable_conn = None  # consume — do not reuse again
         if conn is None:
             params = self._creds_client.get_connection_parameters()
             conn = self._open_connection(params)
         record_count = 0
+        fully_consumed = False
         try:
             extractor = MySqlIncrementalExtractor(connection=conn)
             for record in extractor.extract(query_contract):
                 record_count += 1
                 yield record
+            fully_consumed = True
         finally:
-            conn.close()  # always closed here; no double-close possible
+            if fully_consumed:
+                # Healthy connection — leave it open and pooled (PERF-2)
+                # instead of closing and reopening a fresh connection on the
+                # next extraction run.
+                pass
+            else:
+                self._evict_connection(conn)
 
         _logger.info(
             "mysql_rds_extraction_completed",
@@ -241,7 +289,17 @@ class MySqlRdsConnector(ConnectorInterface):
     @staticmethod
     def _open_connection(params: Any) -> Any:
         """
-        Open a pymysql connection with SSL enforced.
+        Return a pooled pymysql connection, opening a new one only when none
+        is cached for these connection parameters or the cached connection
+        fails its health check (PERF-2).
+
+        Cursor class is SSDictCursor — a server-side/streaming cursor that
+        returns dict rows without buffering the full result set in client
+        memory on execute() (PERF-1). NOTE: SSCursor's rowcount is only
+        accurate after the result set has been fully iterated; no code path
+        in this connector reads rowcount immediately after execute()
+        (MySqlIncrementalExtractor.extract() and MySqlSchemaIntrospectionClient
+        only ever call fetchmany()/fetchall() in a loop), so this is safe.
 
         SSL is enforced by setting ssl_disabled=False (the pymysql default
         when ssl_disabled is not explicitly set, but we set it explicitly
@@ -249,17 +307,75 @@ class MySqlRdsConnector(ConnectorInterface):
 
         The password is passed to pymysql but never logged.
         """
-        return pymysql.connect(
+        key = _connection_cache_key(params)
+        cached = _connection_cache.get(key)
+        if cached is not None:
+            try:
+                # pymysql's ping(reconnect=True) health-checks the socket and
+                # transparently re-establishes it on a stale/dropped
+                # connection, reusing the same Connection object.
+                cached.ping(reconnect=True)
+            except Exception:
+                _logger.warning(
+                    "mysql_rds_cached_connection_unhealthy_reconnecting",
+                    host=params.host,
+                    database=params.database,
+                )
+                _connection_cache.pop(key, None)
+                try:
+                    cached.close()
+                except Exception as close_exc:
+                    _logger.info(
+                        "mysql_rds_stale_connection_close_failed",
+                        host=params.host,
+                        database=params.database,
+                        error=str(close_exc),
+                    )
+            else:
+                _logger.info(
+                    "mysql_rds_connection_reused",
+                    host=params.host,
+                    database=params.database,
+                )
+                return cached
+
+        conn = pymysql.connect(
             host=params.host,
             port=params.port,
             user=params.username,
             password=params.password,
             database=params.database,
             charset="utf8mb4",
-            cursorclass=pymysql.cursors.DictCursor,
+            cursorclass=pymysql.cursors.SSDictCursor,
             ssl_disabled=False,
             connect_timeout=10,
         )
+        _connection_cache[key] = conn
+        return conn
+
+    @staticmethod
+    def _evict_connection(conn: Any) -> None:
+        """
+        Remove `conn` from the module-level connection pool (if present) and
+        close it.
+
+        Called when a connection may be left in an inconsistent state — a
+        discovery/extraction error, or a generator closed before a streaming
+        SSDictCursor result set was fully consumed can leave unread bytes on
+        the socket, which would corrupt the next query issued on a pooled
+        connection.
+        """
+        for key, cached_conn in list(_connection_cache.items()):
+            if cached_conn is conn:
+                del _connection_cache[key]
+                break
+        try:
+            conn.close()
+        except Exception as close_exc:
+            _logger.info(
+                "mysql_rds_evicted_connection_close_failed",
+                error=str(close_exc),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -305,3 +421,7 @@ def _build_mysql_rds(
 
 
 connector_registry.register_builder(_SOURCE_ID, _build_mysql_rds)
+
+from connector_runtime.adapters.mysql_rds.mysql_rds_params import MySqlRdsConnectorParams
+
+connector_registry.register_params_model(_SOURCE_ID, MySqlRdsConnectorParams)

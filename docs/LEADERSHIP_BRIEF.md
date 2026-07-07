@@ -87,7 +87,7 @@ If any step fails: automatic retry with exponential backoff → alerting → dea
 | PII exposure in analytics | Uncontrolled | Masked/tokenised at pipeline level |
 | Audit trail | None | Full lineage from source to serving |
 | New source onboarding | 2–4 weeks (code change + deployment) | 2–3 days (configuration only) |
-| Credential security | Scripts and shared .env files | AWS Secrets Manager with auto-rotation |
+| Credential security | Scripts and shared .env files | AWS Secrets Manager with daily expiry-check alerting (auto-rotation planned) |
 | Compliance readiness | Manual documentation | Automated lineage + retention enforcement |
 | Data quality visibility | No monitoring | Quality report per entity per run |
 
@@ -123,7 +123,7 @@ If any step fails: automatic retry with exponential backoff → alerting → dea
 ## Security and Compliance
 
 - **Least privilege IAM** — each Lambda has its own role scoped to exactly the resources it needs
-- **No credentials in code** — all secrets stored in AWS Secrets Manager with 90-day auto-rotation
+- **No credentials in code** — all secrets stored in AWS Secrets Manager; a daily automated check alerts the platform team via SNS if rotation is overdue (automatic rotation itself is a planned follow-up, not yet implemented)
 - **PII masking at pipeline level** — sensitive fields masked before they reach the analytics layer
 - **Immutable raw layer** — S3 Object Lock prevents accidental or malicious deletion
 - **Full audit trail** — every pipeline run writes a lineage record (who, what, when, from where, to where)

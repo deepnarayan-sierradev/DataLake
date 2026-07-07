@@ -21,8 +21,9 @@ The Enterprise Data Lake Platform pays for itself in labor savings within **2–
 | **S3 Storage** | Raw: 2.5 TB/mo; Curated: 1 TB/mo; Analytics: 0.5 TB/mo | $120 | 7-yr raw retention; S3 Intelligent-Tiering for analytics after 30 days |
 | **S3 Data Transfer** | 4 TB outbound to Athena / analytics tools | $180 | Inbound to S3 is free; outbound charges apply |
 | **Lambda execution** | ~200 runs/month × 5–10 min avg × 512 MB memory | $80 | Streaming architecture keeps memory flat regardless of dataset size |
-| **DynamoDB** | 5 tables (config, watermark, audit log, onboarding, telemetry); ~2 GB | $150 | On-demand pricing; easily upgrades to provisioned if DLQ depth grows |
-| **Secrets Manager** | 5 secrets (Salesforce, NetSuite, MySQL, Sage Intacct, Sage X3); 90-day rotation | $10 | $0.40/secret/month × 5 + $6/month secret retrieval charges |
+| **DynamoDB** | 5 tables (config, watermark, audit log, onboarding, entity type registry); ~2 GB | $150 | On-demand pricing; easily upgrades to provisioned if DLQ depth grows |
+| **Secrets Manager** | 5 secrets (Salesforce, NetSuite, MySQL, Sage Intacct, Sage X3); daily expiry-check alerting (auto-rotation planned, not yet implemented) | $10 | $0.40/secret/month × 5 + $6/month secret retrieval charges |
+| **Control plane** (Cognito + API Gateway + Lambda) | New SaaS control-plane API for tenant/entity self-service, plus `credential_expiry_notifier`, `pipeline_trigger`, and `dlq_processor` Lambdas | $10–$20 | Rough placeholder at current low traffic — not yet load-tested |
 | **CloudWatch Logs** | ~50 MB/day × 30 days (structured logging) | $30 | Log retention: 30 days in hot storage, then archive to S3 |
 | **CloudWatch Metrics & Alarms** | 50 custom metrics + 15 alarm instances | $40 | Custom metrics beyond standard Lambda/S3 metrics |
 | **AWS Glue Catalog** | Data catalog entries (~100 tables); no compute cost | $0 | Only catalog storage; query compute runs on Athena |
@@ -32,7 +33,7 @@ The Enterprise Data Lake Platform pays for itself in labor savings within **2–
 | **Step Functions** | 200 executions/month × 16 state transitions | $3 | $0.000025/transition |
 | **EventBridge Scheduler** | 12 schedules (per entity) × 30 days × 1 invocation/day | $1 | $0.10/month per schedule |
 | **NAT Gateway** | 1 NAT Gateway for VPC egress to internet (if needed) | $45 | **Optional if all sources are accessible via PrivateLink** |
-| **Total AWS** | | **$699/month** | *or **$654** without NAT Gateway* |
+| **Total AWS** | | **$699/month** | *or **$654** without NAT Gateway. Excludes the ~$10–$20/month control-plane placeholder above (not yet load-tested); add that in for a fully current estimate* |
 
 ### Operational Staffing Costs (Replaced)
 
@@ -217,10 +218,11 @@ This section maps each AWS service to its cost driver and the optimisation alrea
 | **S3 Data Transfer** | GB transferred out | Partitioned Athena scans minimise outbound; S3→Lambda intra-region is free | $180 |
 | **AWS Lambda** | GB-seconds × invocations | Streaming architecture (constant RAM regardless of dataset size); 512 MB allocation | $80 |
 | **AWS ECS Fargate** | vCPU-hours + GB-hours (large jobs only) | Only invoked for datasets > 5 M records; otherwise Lambda | Included in Lambda est. |
-| **Amazon DynamoDB** | Read/write capacity units | On-demand pricing; PITR adds ~25% to storage cost | $150 |
+| **Amazon DynamoDB** | Read/write capacity units | On-demand pricing; PITR adds ~25% to storage cost; 5 tables (config, watermark, audit log, onboarding, entity type registry) | $150 |
 | **AWS Step Functions** | State transitions | 16 transitions per pipeline run; Standard Workflow for staging/prod | $3 |
 | **Amazon EventBridge Scheduler** | Invocations | 12 schedules × 1/day × 30 days | $1 |
-| **AWS Secrets Manager** | Secrets stored + API calls | 5 secrets (Salesforce, NetSuite, MySQL, Sage Intacct, Sage X3); retrieval cached per Lambda invocation | $10 |
+| **AWS Secrets Manager** | Secrets stored + API calls | 5 secrets (Salesforce, NetSuite, MySQL, Sage Intacct, Sage X3); retrieval cached per Lambda invocation; daily expiry-check alerting (auto-rotation planned, not yet implemented) | $10 |
+| **Cognito + API Gateway + Lambda** (control plane) | Requests + Lambda invocations | New SaaS control-plane API (tenant/entity self-service) plus `credential_expiry_notifier`, `pipeline_trigger`, `dlq_processor` Lambdas; rough placeholder, not yet load-tested | $10–$20 |
 | **Amazon Athena** | TB scanned | Year/month/day partitioning limits scan to relevant partition (1–10 GB typical) | $25 |
 | **AWS Glue Data Catalog** | Catalog entries | Catalog-only cost (no Glue ETL jobs used) | $0 |
 | **Amazon CloudWatch** | Log ingestion + storage + metrics + alarms | Structured JSON logs (compact); 30-day hot retention; 50 custom metrics | $70 |

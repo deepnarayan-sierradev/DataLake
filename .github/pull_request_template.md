@@ -24,6 +24,7 @@ verified by automated CI pipeline gates.
 - [ ] **Dependency scan** — pip-audit reports no vulnerabilities
 - [ ] **IaC security** — checkov reports no HIGH/CRITICAL findings on Terraform changes
 - [ ] **Terraform validate** — all environments validate cleanly
+- [ ] **Secret scan** — `detect-secrets` baseline unchanged (no new unaudited findings)
 
 ---
 
@@ -43,10 +44,12 @@ verified by automated CI pipeline gates.
 ### Architecture Alignment
 
 - [ ] Changes conform to the naming standards in the specification (no `helper`, `util`, `manager`, `phase1`)
-- [ ] New connector adapter implements `ConnectorInterface` fully (no partial implementations)
+- [ ] New connector adapter implements `ConnectorInterface` fully (no partial implementations) and extends the shared base classes in `connector_runtime/credential_client.py`, `raw_layer_writer.py`, and `query_builders/incremental_query_builder.py` rather than reimplementing them — see `connector_runtime/CLAUDE.md`
 - [ ] Raw layer writes are append-only (no updates or deletes to existing raw files)
 - [ ] Watermark is not advanced in this PR (watermark advancement belongs to orchestration only)
 - [ ] Schema drift detection is not bypassed
+- [ ] Any new S3 key or DynamoDB item involving `source_id`/`entity_id` carries `tenant_code`, validated via `contracts/identifier_policy.py` — never a locally re-derived regex
+- [ ] If this PR touches a tenant-scoped repository class, `tests/test_tenant_isolation.py` still passes
 
 ---
 

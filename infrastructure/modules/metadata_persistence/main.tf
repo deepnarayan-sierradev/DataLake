@@ -27,7 +27,7 @@ resource "aws_dynamodb_table" "watermark_repository" {
   billing_mode = "PAY_PER_REQUEST" # Auto-scales; no capacity planning for control plane data
 
   hash_key  = "source_id"
-  range_key = "entity_id_env" # Composite: entity_id#environment
+  range_key = "entity_id"
 
   attribute {
     name = "source_id"
@@ -35,7 +35,7 @@ resource "aws_dynamodb_table" "watermark_repository" {
   }
 
   attribute {
-    name = "entity_id_env"
+    name = "entity_id"
     type = "S"
   }
 
@@ -51,10 +51,10 @@ resource "aws_dynamodb_table" "watermark_repository" {
 
   # GSI: query all watermarks for a given environment (for operational dashboards)
   global_secondary_index {
-    name               = "environment-watermark-index"
-    hash_key           = "environment"
-    range_key          = "last_successful_watermark"
-    projection_type    = "ALL"
+    name            = "environment-watermark-index"
+    hash_key        = "environment"
+    range_key       = "last_successful_watermark"
+    projection_type = "ALL"
   }
 
   # Encryption at rest with customer-managed KMS key
@@ -71,9 +71,14 @@ resource "aws_dynamodb_table" "watermark_repository" {
   # DynamoDB Streams: disabled for watermark table (not needed for this use case)
   stream_enabled = false
 
+  # Prevent accidental destruction — watermark state is irreplaceable in production.
+  lifecycle {
+    prevent_destroy = true
+  }
+
   tags = merge(local.common_tags, {
-    Name       = "${var.environment}-edl-watermark-repository"
-    Purpose    = "watermark-state"
+    Name    = "${var.environment}-edl-watermark-repository"
+    Purpose = "watermark-state"
   })
 }
 
@@ -87,10 +92,16 @@ resource "aws_dynamodb_table" "run_audit_log" {
   name         = "${var.environment}-edl-run-audit-log"
   billing_mode = "PAY_PER_REQUEST"
 
-  hash_key = "run_id"
+  hash_key  = "run_id"
+  range_key = "stage"
 
   attribute {
     name = "run_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "stage"
     type = "S"
   }
 
@@ -129,9 +140,111 @@ resource "aws_dynamodb_table" "run_audit_log" {
 
   stream_enabled = false
 
+  # Prevent accidental destruction — run audit log is an immutable compliance record.
+  lifecycle {
+    prevent_destroy = true
+  }
+
   tags = merge(local.common_tags, {
     Name    = "${var.environment}-edl-run-audit-log"
     Purpose = "pipeline-audit-trail"
+  })
+}
+
+# ---------------------------------------------------------------------------
+# Entity Extraction Config — DynamoDB
+# Configuration records for each source entity (load type, watermark field,
+# field mappings, etc.). Read-only by the extraction and transformation runtimes.
+# ---------------------------------------------------------------------------
+
+resource "aws_dynamodb_table" "entity_extraction_config" {
+  name         = "${var.environment}-edl-entity-extraction-config"
+  billing_mode = "PAY_PER_REQUEST"
+
+  hash_key  = "source_id"
+  range_key = "entity_id"
+
+  attribute {
+    name = "source_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "entity_id"
+    type = "S"
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = var.database_kms_key_arn
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  stream_enabled = false
+
+  # Prevent accidental destruction — entity extraction config is the source of
+  # truth for all pipeline behaviour; recreating it requires manual re-seeding.
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  tags = merge(local.common_tags, {
+    Name    = "${var.environment}-edl-entity-extraction-config"
+    Purpose = "entity-extraction-config"
+  })
+}
+
+# ---------------------------------------------------------------------------
+# Entity Type Registry (ARCH-2)
+#
+# Single-table design, PK=tenant_code:
+#   - Per-entity_id item:   sk = "entity_id#{entity_id}"     -> {entity_type}
+#   - Per-entity_type item: sk = "entity_type#{entity_type}" -> {pk_field, contributing_sources}
+#
+# Replaces the hardcoded ENTITY_ID_TO_TYPE / ENTITY_TYPE_PK_FIELD /
+# ENTITY_TYPE_SOURCES dicts in entity_resolution/entity_type_registry.py —
+# those constants remain as seed data / fallback for entities not yet
+# migrated to this table (see EntityTypeRegistryClient's docstring).
+# ---------------------------------------------------------------------------
+
+resource "aws_dynamodb_table" "entity_type_registry" {
+  name         = "${var.environment}-edl-entity-type-registry"
+  billing_mode = "PAY_PER_REQUEST"
+
+  hash_key  = "tenant_code"
+  range_key = "sk"
+
+  attribute {
+    name = "tenant_code"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = var.database_kms_key_arn
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  stream_enabled = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  tags = merge(local.common_tags, {
+    Name    = "${var.environment}-edl-entity-type-registry"
+    Purpose = "entity-type-registry"
   })
 }
 

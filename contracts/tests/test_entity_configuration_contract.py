@@ -243,3 +243,104 @@ class TestEntityExtractionConfigMergeFields:
             primary_key_field="Id",
         )
         assert config.primary_key_field == "Id"
+
+
+
+class TestTenantCodeField:
+    def _base(self) -> dict[str, object]:
+        return {
+            "source_id": "salesforce",
+            "entity_id": "salesforce-account",
+            "config_version": "1.0.0",
+            "load_type": LoadType.INCREMENTAL,
+            "watermark_field": "SystemModstamp",
+            "target_raw_s3_prefix": "s3://raw/salesforce/account/",
+            "schema_snapshot_s3_prefix": "s3://schema-snapshots/salesforce/account/",
+        }
+
+    def test_default_tenant_code_is_demo(self) -> None:
+        config = EntityExtractionConfig(**self._base())
+        assert config.tenant_code == "demo"
+
+    def test_valid_tenant_code_accepted(self) -> None:
+        config = EntityExtractionConfig(**{**self._base(), "tenant_code": "acme-corp"})
+        assert config.tenant_code == "acme-corp"
+
+    def test_demo_tenant_code_is_valid(self) -> None:
+        config = EntityExtractionConfig(**{**self._base(), "tenant_code": "demo"})
+        assert config.tenant_code == "demo"
+
+    def test_invalid_tenant_code_uppercase_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            EntityExtractionConfig(**{**self._base(), "tenant_code": "ACME"})
+
+    def test_invalid_tenant_code_starts_with_digit_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            EntityExtractionConfig(**{**self._base(), "tenant_code": "1tenant"})
+
+    def test_invalid_tenant_code_underscore_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            EntityExtractionConfig(**{**self._base(), "tenant_code": "has_underscore"})
+
+    def test_invalid_tenant_code_too_long_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            EntityExtractionConfig(**{**self._base(), "tenant_code": "a" * 49})
+
+    def test_tenant_code_single_char_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            EntityExtractionConfig(**{**self._base(), "tenant_code": "a"})
+
+    def test_tenant_code_with_hyphens_valid(self) -> None:
+        config = EntityExtractionConfig(**{**self._base(), "tenant_code": "my-tenant-01"})
+        assert config.tenant_code == "my-tenant-01"
+
+    def test_config_is_frozen(self) -> None:
+        """tenant_code must be immutable after construction."""
+        config = EntityExtractionConfig(**{**self._base(), "tenant_code": "demo"})
+        with pytest.raises(Exception):
+            config.tenant_code = "changed"  # type: ignore[misc]
+
+
+class TestLambdaExecutionTuningFields:
+    def _base(self) -> dict[str, object]:
+        return {
+            "source_id": "salesforce",
+            "entity_id": "salesforce-account",
+            "config_version": "1.0.0",
+            "load_type": LoadType.INCREMENTAL,
+            "watermark_field": "SystemModstamp",
+            "target_raw_s3_prefix": "s3://raw/salesforce/account/",
+            "schema_snapshot_s3_prefix": "s3://schema-snapshots/salesforce/account/",
+        }
+
+    def test_lambda_memory_mb_defaults_to_none(self) -> None:
+        config = EntityExtractionConfig(**self._base())
+        assert config.lambda_memory_mb is None
+
+    def test_lambda_memory_mb_valid(self) -> None:
+        config = EntityExtractionConfig(**{**self._base(), "lambda_memory_mb": 4096})
+        assert config.lambda_memory_mb == 4096
+
+    def test_lambda_memory_mb_below_minimum_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            EntityExtractionConfig(**{**self._base(), "lambda_memory_mb": 512})
+
+    def test_lambda_memory_mb_above_maximum_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            EntityExtractionConfig(**{**self._base(), "lambda_memory_mb": 10241})
+
+    def test_max_records_per_lambda_run_defaults_to_none(self) -> None:
+        config = EntityExtractionConfig(**self._base())
+        assert config.max_records_per_lambda_run is None
+
+    def test_max_records_per_lambda_run_valid(self) -> None:
+        config = EntityExtractionConfig(**{**self._base(), "max_records_per_lambda_run": 500_000})
+        assert config.max_records_per_lambda_run == 500_000
+
+    def test_max_records_per_lambda_run_zero_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            EntityExtractionConfig(**{**self._base(), "max_records_per_lambda_run": 0})
+
+    def test_max_records_per_lambda_run_negative_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            EntityExtractionConfig(**{**self._base(), "max_records_per_lambda_run": -1})

@@ -29,6 +29,21 @@ Pagination:
     - SageConnector.execute_extraction() manages the start/size/next cursor loop.
     - The query engine produces the template query; start and size are injected
       by the connector at execution time, NOT stored in QueryContract.query_text.
+
+DUP-4 scope note: Salesforce SOQL, NetSuite SuiteQL, and MySQL SQL query
+builders share a "SELECT {fields} FROM {table} [WHERE ...]" text-assembly
+step, now extracted to
+connector_runtime.query_builders.incremental_query_builder.build_incremental_select().
+This engine is intentionally NOT built on that shared function: it produces
+a structured JSON request body (an "object"/"fields"/"filters"/"orderBy"
+dict) for a REST query service, not a SQL-shaped text string — there is no
+FROM clause, no flat WHERE string, and its placeholder substitution
+(bind_parameters() below) operates on a parsed dict rather than text.
+Forcing this into the SQL-family template would mean inventing a "FROM
+clause" and "WHERE string" concept that don't exist in the Intacct query
+DSL, trading a real duplication reduction for a leaky abstraction. The
+field/watermark validation pattern below is structurally similar to the SQL
+builders but is kept standalone for the same reason.
 """
 
 from __future__ import annotations
@@ -73,7 +88,7 @@ _UPPER_BOUND_PLACEHOLDER: Final[str] = "__SAGE_UPPER_BOUND__"
 
 # SageQueryBuildError is defined in common/sage_errors.py and re-exported here
 # so existing imports from this module keep working.
-from connector_runtime.adapters.sage.common.sage_errors import SageQueryBuildError  # noqa: F401
+from connector_runtime.adapters.sage.common.sage_errors import SageQueryBuildError
 
 
 class IntacctQueryEngine:

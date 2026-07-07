@@ -54,31 +54,31 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from typing import Any, Final
 
 import boto3
 import structlog
 
+from contracts.identifier_policy import DEFAULT_TENANT_CODE, TENANT_CODE_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from entity_resolution.canonical_record_publisher.canonical_record_publisher import (
     GoldenRecordPublicationError,
     GoldenRecordPublisher,
 )
+from entity_resolution.entity_type_registry import EntityTypeRegistryClient
 from entity_resolution.resolution_config.resolution_config_registry import (
     ResolutionConfigNotFoundError,
     ResolutionConfigRegistry,
 )
-from entity_resolution.entity_type_registry import (
-    ENTITY_ID_TO_TYPE as _ENTITY_ID_TO_TYPE,
-    ENTITY_TYPE_PK_FIELD as _ENTITY_TYPE_PK_FIELD,
-    ENTITY_TYPE_SOURCES as _ENTITY_TYPE_SOURCES,
-)
+from observability.lambda_utils import check_lambda_timeout, configure_xray, require_env
+from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
-from observability.lambda_utils import require_env, check_lambda_timeout
 from transformation.curated_utils import (
     find_latest_curated_prefix,
-    load_curated_records,
-    SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN,
+    load_curated_records_duckdb,
+)
+from transformation.curated_utils import (
     source_id_to_domain as _source_id_to_domain,
 )
 
@@ -104,6 +104,7 @@ _SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
 # ---------------------------------------------------------------------------
 
 _registry: ResolutionConfigRegistry | None = None
+_entity_type_registry: EntityTypeRegistryClient | None = None
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -134,28 +135,88 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     environment: str = event["environment"]
     run_id: str = event["run_id"]
     curated_s3_prefix: str = event["curated_s3_prefix"]
+    tenant_code: str = str(event.get("tenant_code") or DEFAULT_TENANT_CODE)
+
+    _stage_start_ms = time.monotonic() * 1000
+
+    # Instrument AWS SDK calls with X-Ray subsegments (§5.5).
+    configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id, run_id=run_id)
 
     # Bind run context to every log line emitted in this Lambda invocation.
+    # Cleared in the `finally` block below (OBS-1) — without this, a warm
+    # container's NEXT invocation could log under this run's stale run_id if
+    # it fails before rebinding (e.g. in _validate_event).
     structlog.contextvars.bind_contextvars(
         run_id=run_id,
         source_id=source_id,
         entity_id=entity_id,
+        tenant_code=tenant_code,
     )
 
+    try:
+        return _run_entity_resolution(
+            event=event,
+            source_id=source_id,
+            entity_id=entity_id,
+            environment=environment,
+            run_id=run_id,
+            curated_s3_prefix=curated_s3_prefix,
+            tenant_code=tenant_code,
+            stage_start_ms=_stage_start_ms,
+        )
+    except Exception as exc:
+        _logger.error(
+            "entity_resolution_stage_failed",
+            source_id=source_id,
+            entity_id=entity_id,
+            run_id=run_id,
+            environment=environment,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise
+    finally:
+        structlog.contextvars.clear_contextvars()
+
+
+def _run_entity_resolution(
+    event: dict[str, Any],
+    source_id: str,
+    entity_id: str,
+    environment: str,
+    run_id: str,
+    curated_s3_prefix: str,
+    tenant_code: str,
+    stage_start_ms: float,
+) -> dict[str, Any]:
+    """Business logic for the entity resolution stage, isolated from handler plumbing."""
     # ── Env vars ─────────────────────────────────────────────────────────────
     region_name = require_env("AWS_REGION")
     curated_s3_bucket = require_env("CURATED_S3_BUCKET")
     analytics_s3_bucket = require_env("ANALYTICS_S3_BUCKET")
     governance_s3_bucket: str | None = os.environ.get("GOVERNANCE_S3_BUCKET") or None
 
-    # ── Resolve entity type ───────────────────────────────────────────────────
-    entity_type = _ENTITY_ID_TO_TYPE.get(entity_id)
+    # ── Resolve entity type (ARCH-2: tenant-scoped, DynamoDB-backed) ──────────
+    global _entity_type_registry
+    if _entity_type_registry is None:
+        _entity_type_registry = EntityTypeRegistryClient(
+            environment=environment, region_name=region_name
+        )
+    entity_type = _entity_type_registry.get_entity_type(entity_id, tenant_code=tenant_code)
     if entity_type is None:
         raise ValueError(
-            f"No entity type mapping found for entity_id={entity_id!r}. "
-            "Add it to ENTITY_ID_TO_TYPE in entity_resolution/entity_type_registry.py."
+            f"No entity type mapping found for entity_id={entity_id!r} and "
+            f"tenant_code={tenant_code!r}. Register it via "
+            "EntityTypeRegistryClient.register_entity_type(), or add it to "
+            "ENTITY_ID_TO_TYPE in entity_resolution/entity_type_registry.py "
+            f"for the {tenant_code!r} tenant's default fallback."
         )
-    pk_field = _ENTITY_TYPE_PK_FIELD[entity_type]
+    pk_field = _entity_type_registry.get_pk_field(entity_type, tenant_code=tenant_code)
+    if pk_field is None:
+        raise ValueError(
+            f"No primary-key field registered for entity_type={entity_type!r} and "
+            f"tenant_code={tenant_code!r}."
+        )
 
     _logger.info(
         "entity_resolution_handler_invoked",
@@ -169,57 +230,18 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     s3 = boto3.client("s3", region_name=region_name)
 
-    # ── Load curated records from all contributing sources ────────────────────
-    # The triggering source's records come from the exact prefix Step Functions
-    # passed in.  All other configured sources are located by scanning the
-    # curated bucket for their latest partition — skipped gracefully if absent.
-    all_curated_records: list[dict[str, Any]] = []
-    loaded_prefixes: list[str] = []
-
-    for contrib_source_id, contrib_entity_id in _ENTITY_TYPE_SOURCES.get(entity_type, []):
-        contrib_domain = _source_id_to_domain(contrib_source_id)
-
-        if contrib_source_id == source_id and contrib_entity_id == entity_id:
-            # Current run — load from the exact prefix passed in by Step Functions.
-            prefix = curated_s3_prefix
-            if prefix is None:
-                # Transformation wrote no records (empty extract) — nothing to load.
-                _logger.info(
-                    "entity_resolution_source_skipped_no_records",
-                    contrib_source_id=contrib_source_id,
-                    contrib_entity_id=contrib_entity_id,
-                )
-                continue
-        else:
-            # Other source — find the latest curated partition in the bucket.
-            prefix = find_latest_curated_prefix(
-                s3, curated_s3_bucket, contrib_domain, contrib_entity_id
-            )
-            if prefix is None:
-                _logger.info(
-                    "entity_resolution_source_skipped_no_data",
-                    contrib_source_id=contrib_source_id,
-                    contrib_entity_id=contrib_entity_id,
-                )
-                continue
-
-        records = load_curated_records(s3, curated_s3_bucket, prefix)
-        _logger.info(
-            "entity_resolution_source_loaded",
-            contrib_source_id=contrib_source_id,
-            contrib_entity_id=contrib_entity_id,
-            record_count=len(records),
-        )
-
-        # Tag each record with a unified cross-source identifier and source label.
-        # _record_id is constructed server-side; never derived from event input.
-        for rec in records:
-            pk_value = str(rec.get(pk_field, ""))
-            rec["_record_id"] = f"{contrib_source_id}:{pk_value}"
-            rec["_source_id"] = contrib_source_id
-
-        all_curated_records.extend(records)
-        loaded_prefixes.append(prefix)
+    contributing_sources = _entity_type_registry.get_contributing_sources(
+        entity_type, tenant_code=tenant_code
+    )
+    all_curated_records, loaded_prefixes = _load_all_contributing_records(
+        s3=s3,
+        curated_s3_bucket=curated_s3_bucket,
+        source_id=source_id,
+        entity_id=entity_id,
+        curated_s3_prefix=curated_s3_prefix,
+        pk_field=pk_field,
+        contributing_sources=contributing_sources,
+    )
 
     if not all_curated_records:
         raise GoldenRecordPublicationError(
@@ -227,8 +249,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "Ensure the transformation stage completed successfully."
         )
 
+    _warn_if_large_entity(all_curated_records)
+
     # ── Load resolution config + build publisher ──────────────────────────────
-    global _registry  # noqa: PLW0603  — module-level warm-invocation cache
+    global _registry
     if _registry is None:
         _registry = ResolutionConfigRegistry(
             s3_bucket=curated_s3_bucket,
@@ -271,6 +295,35 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         analytics_s3_prefix=result.analytics_s3_prefix,
     )
 
+    # ── Emit CloudWatch metrics (§5.2) ────────────────────────────────────────
+    try:
+        _metrics_emitter = CloudWatchMetricsEmitter(region_name=region_name)
+        _metrics_emitter.set_tenant_context(tenant_code)
+        _stage_duration_ms = time.monotonic() * 1000 - stage_start_ms
+        _metrics_emitter.emit_stage_duration(
+            source_id=source_id,
+            entity_id=entity_id,
+            environment=environment,
+            stage="entity_resolution",
+            duration_ms=_stage_duration_ms,
+        )
+        _metrics_emitter.emit_golden_record_count(
+            source_id=source_id,
+            entity_id=entity_id,
+            environment=environment,
+            count=result.golden_record_count,
+        )
+        _metrics_emitter.emit_cluster_count(
+            source_id=source_id,
+            entity_id=entity_id,
+            environment=environment,
+            count=result.cluster_count,
+        )
+        _metrics_emitter.flush()
+    except Exception as _exc:
+        # Metric emission must never fail a pipeline run (OWASP A09 — graceful degradation).
+        _logger.warning("entity_resolution_metrics_emission_failed", error=str(_exc))
+
     return {
         "canonical_prefix":           result.analytics_s3_prefix,
         "entity_type":                result.entity_type,
@@ -285,6 +338,110 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_LARGE_ENTITY_THRESHOLD: Final[int] = 500_000
+
+
+def _load_all_contributing_records(
+    s3: Any,
+    curated_s3_bucket: str,
+    source_id: str,
+    entity_id: str,
+    curated_s3_prefix: str,
+    pk_field: str,
+    contributing_sources: list[tuple[str, str]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """
+    Load and tag curated records from every source contributing to an entity type.
+
+    The triggering source's records come from the exact prefix Step Functions
+    passed in. All other configured sources are located by scanning the
+    curated bucket for their latest partition — skipped gracefully if absent.
+
+    Returns (all_curated_records, loaded_prefixes).
+
+    Performance (PERF-3): each source's curated Parquet is read via DuckDB's
+    read_parquet() (load_curated_records_duckdb) rather than the hand-rolled
+    Python S3 list + download + pq.read_table() loop (load_curated_records).
+    DuckDB reads the Parquet objects directly from S3 — the full file no
+    longer crosses into Python memory before a columnar engine touches it.
+    AWS_REGION is read here (not threaded through the signature) so this
+    function's public shape is unchanged for _run_entity_resolution.
+    """
+    region_name = require_env("AWS_REGION")
+    all_curated_records: list[dict[str, Any]] = []
+    loaded_prefixes: list[str] = []
+
+    for contrib_source_id, contrib_entity_id in contributing_sources:
+        contrib_domain = _source_id_to_domain(contrib_source_id)
+
+        prefix: str | None
+        if contrib_source_id == source_id and contrib_entity_id == entity_id:
+            # Current run — load from the exact prefix passed in by Step Functions.
+            prefix = curated_s3_prefix
+            if prefix is None:
+                # Transformation wrote no records (empty extract) — nothing to load.
+                _logger.info(
+                    "entity_resolution_source_skipped_no_records",
+                    contrib_source_id=contrib_source_id,
+                    contrib_entity_id=contrib_entity_id,
+                )
+                continue
+        else:
+            # Other source — find the latest curated partition in the bucket.
+            prefix = find_latest_curated_prefix(
+                s3, curated_s3_bucket, contrib_domain, contrib_entity_id
+            )
+            if prefix is None:
+                _logger.info(
+                    "entity_resolution_source_skipped_no_data",
+                    contrib_source_id=contrib_source_id,
+                    contrib_entity_id=contrib_entity_id,
+                )
+                continue
+
+        # DuckDB reads this source's curated Parquet directly from S3
+        # (read_parquet) rather than a Python-side list+download loop
+        # (PERF-3). The result is still materialised into a tagged dict list
+        # here because the match engine's public contract requires
+        # list[dict[str, Any]] (record_blocker.py / match_rule_engine.py) —
+        # but the S3 file read itself is no longer duplicated Python-side
+        # work. For each source we tag then immediately extend the combined
+        # pool — the per-source list is released after extend() so only one
+        # source's untagged data is in memory at a time during loading.
+        source_records = load_curated_records_duckdb(
+            s3, curated_s3_bucket, prefix, region_name
+        )
+        _logger.info(
+            "entity_resolution_source_loaded",
+            contrib_source_id=contrib_source_id,
+            contrib_entity_id=contrib_entity_id,
+            record_count=len(source_records),
+        )
+
+        # Tag each record with a unified cross-source identifier and source label.
+        # _record_id is constructed server-side; never derived from event input.
+        for rec in source_records:
+            pk_value = str(rec.get(pk_field, ""))
+            rec["_record_id"] = f"{contrib_source_id}:{pk_value}"
+            rec["_source_id"] = contrib_source_id
+
+        all_curated_records.extend(source_records)
+        loaded_prefixes.append(prefix)
+        del source_records  # release per-source list after merging into combined pool
+
+    return all_curated_records, loaded_prefixes
+
+
+def _warn_if_large_entity(all_curated_records: list[dict[str, Any]]) -> None:
+    """Warn for large datasets where in-memory matching may exhaust Lambda memory."""
+    if len(all_curated_records) > _LARGE_ENTITY_THRESHOLD:
+        _logger.warning(
+            "entity_resolution_large_record_count",
+            total_records=len(all_curated_records),
+            threshold=_LARGE_ENTITY_THRESHOLD,
+            message="Consider merge_strategy=glue_merge for entities exceeding 500K records.",
+        )
 
 
 def _validate_event(event: dict[str, Any]) -> None:
@@ -317,4 +474,12 @@ def _validate_event(event: dict[str, Any]) -> None:
     if not _SAFE_S3_PREFIX_PATTERN.match(curated_prefix.rstrip("/")):
         raise ValueError(
             f"curated_s3_prefix={curated_prefix!r} contains disallowed characters."
+        )
+
+    # tenant_code is optional (defaults to DEFAULT_TENANT_CODE) but must be
+    # well-formed when present (OWASP A03 / SEC-5).
+    tenant_code = event.get("tenant_code")
+    if tenant_code is not None and not TENANT_CODE_PATTERN.match(str(tenant_code)):
+        raise ValueError(
+            f"tenant_code={tenant_code!r} does not conform to the tenant code format."
         )
