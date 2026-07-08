@@ -1,7 +1,7 @@
 """
 Pipeline Trigger Lambda — SQS FIFO to Step Functions burst buffer.
 
-Consumes messages from the {env}-edl-pipeline-trigger.fifo FIFO queue
+Consumes messages from the EdlPipelineTrigger.fifo FIFO queue
 (populated by EventBridge Scheduler) and starts one Step Functions execution
 per message.
 
@@ -9,7 +9,7 @@ Architecture:
   EventBridge Scheduler (N simultaneous fires)
       │
       ▼ (writes to SQS FIFO queue — absorbs burst instantly)
-  SQS FIFO Queue: {env}-edl-pipeline-trigger.fifo
+  SQS FIFO Queue: EdlPipelineTrigger.fifo
       │
       ▼ (ESM batch_size=1, reserved_concurrency=50 caps execution rate)
   This Lambda (pipeline_trigger_handler)
@@ -19,10 +19,16 @@ Architecture:
 
 Idempotency:
   Each Step Functions execution is started with a deterministic `name`
-  parameter: `{source_id}--{entity_id}--{schedule_tick_iso}`.
+  parameter: `{tenant_code}--{source_id}--{entity_id}--{schedule_tick_iso}`.
   Step Functions rejects duplicate execution names with ExecutionAlreadyExists,
   which this handler treats as a successful no-op.  This guarantees exactly-once
   semantics even if SQS re-delivers a message after a visibility timeout.
+  The 80-char SFN name limit is enforced by truncating the tenant/source/entity
+  prefix, never the trailing schedule_tick_iso — the tick is what disambiguates
+  two ticks for the same tenant/source/entity, and tenant_code is what
+  disambiguates two tenants sharing a source/entity (ARCH-1); truncating from
+  the tail (as a naive slice would) can silently drop the tick and collide two
+  unrelated executions as ExecutionAlreadyExists.
 
 Security (OWASP A03, A05):
   - All message body fields validated with Pydantic before use in any AWS call.
@@ -49,7 +55,7 @@ from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field, field_validator
 
 from contracts.identifier_policy import STABLE_ID_PATTERN, TENANT_CODE_PATTERN
-from observability.lambda_utils import require_env, check_lambda_timeout
+from observability.lambda_utils import check_lambda_timeout, require_env
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -77,7 +83,13 @@ class TriggerMessage(BaseModel):
     environment: str = Field(..., pattern=r"^(dev|staging|prod)$")
     connector_params: dict[str, str] = Field(default_factory=dict)
     is_replay: bool = Field(default=False)
-    tenant_code: str = Field(default="demo", min_length=2, max_length=48)
+    # No default (ARCH-17, pre-go-live fix): a message that omits tenant_code
+    # must fail Pydantic validation, not silently run under the "demo" tenant.
+    # A fail-open default here would let a malformed or truncated message
+    # start a real Step Functions execution against the wrong tenant's data
+    # (OWASP A01 — broken access control via an implicit, attacker-reachable
+    # default identity).
+    tenant_code: str = Field(..., min_length=2, max_length=48)
     schedule_tick_iso: str = Field(
         default="",
         description="ISO-8601 UTC timestamp of the schedule tick; used in execution name.",
@@ -87,18 +99,14 @@ class TriggerMessage(BaseModel):
     @classmethod
     def _validate_stable_id(cls, v: str) -> str:
         if not STABLE_ID_PATTERN.match(v):
-            raise ValueError(
-                f"{v!r} does not conform to the stable identifier format."
-            )
+            raise ValueError(f"{v!r} does not conform to the stable identifier format.")
         return v
 
     @field_validator("tenant_code")
     @classmethod
     def _validate_tenant_code(cls, v: str) -> str:
         if not TENANT_CODE_PATTERN.match(v):
-            raise ValueError(
-                f"tenant_code {v!r} does not conform to the tenant code format."
-            )
+            raise ValueError(f"tenant_code {v!r} does not conform to the tenant code format.")
         return v
 
 
@@ -138,6 +146,27 @@ def lambda_handler(event: dict[str, Any], context: Any) -> None:
         _process_record(record, state_machine_arn)
 
 
+def _build_execution_name(tenant_code: str, source_id: str, entity_id: str, tick: str) -> str:
+    """
+    Build a Step Functions execution name that fits the 80-char limit without
+    ever truncating away the trailing tick or the leading tenant_code (ARCH-1).
+
+    A naive `f"{tenant_code}--{source_id}--{entity_id}--{tick}"[:80]` slice can
+    drop the tick entirely when source_id/entity_id are long (each up to 64
+    chars, well past the limit on its own) — two unrelated ticks would then
+    collide on the same truncated name and the second's start_execution call
+    would silently no-op as ExecutionAlreadyExists. Truncating the
+    tenant/source/entity prefix instead, and always keeping the full tick
+    suffix, preserves both per-tick and per-tenant uniqueness.
+    """
+    safe_tick = _EXEC_NAME_SAFE.sub("-", tick)
+    suffix = f"--{safe_tick}"
+    prefix_budget = max(_EXEC_NAME_MAX_LEN - len(suffix), 0)
+    raw_prefix = f"{tenant_code}--{source_id}--{entity_id}"
+    safe_prefix = _EXEC_NAME_SAFE.sub("-", raw_prefix)[:prefix_budget]
+    return f"{safe_prefix}{suffix}"[:_EXEC_NAME_MAX_LEN]
+
+
 def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
     """Process a single SQS record — validate, build execution name, start SFN."""
     message_id: str = record.get("messageId", "unknown")
@@ -166,9 +195,7 @@ def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
 
     # --- Build deterministic, idempotent execution name ---
     tick = msg.schedule_tick_iso or datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-    raw_name = f"{msg.source_id}--{msg.entity_id}--{tick}"
-    # Sanitise: Step Functions execution names allow letters, digits, hyphens, underscores
-    exec_name = _EXEC_NAME_SAFE.sub("-", raw_name)[:_EXEC_NAME_MAX_LEN]
+    exec_name = _build_execution_name(msg.tenant_code, msg.source_id, msg.entity_id, tick)
 
     # --- Build Step Functions input payload ---
     sfn_input = json.dumps(

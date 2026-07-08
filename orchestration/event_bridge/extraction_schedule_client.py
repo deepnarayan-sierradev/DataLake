@@ -5,9 +5,28 @@ Manages per-entity extraction schedules in an EventBridge Scheduler schedule
 group.  Each entity has exactly one schedule; create_or_update_schedule()
 is idempotent — it creates a new schedule or updates an existing one.
 
-Schedule naming: {source_id}--{entity_id}
-  - Double hyphen separates source and entity to avoid ambiguity with
-    single-hyphen stable identifiers (e.g. "netsuite" / "netsuite-customer").
+Schedule naming: {tenant_code}--{source_id}--{entity_id}
+  - Double hyphen separates ALL THREE components (tenant, source, entity) —
+    not just source/entity — to avoid ambiguity with single-hyphen stable
+    identifiers (e.g. "netsuite" / "netsuite-customer") AND with hyphenated
+    tenant codes (e.g. "acme-corp" / "globex-eu"). A single-hyphen join
+    between tenant_code and source_id previously let two distinct tenants
+    collide on the same literal schedule name — e.g. tenant="acme",
+    source="corp-salesforce" produced the same name as tenant="acme-corp",
+    source="salesforce" (ARCH-16, pre-go-live blocker). Since
+    create_or_update_schedule() tries an update first, that collision meant
+    Tenant B's onboarding would silently clobber Tenant A's cron,
+    connector_params, and the tenant_code embedded in its own Step Functions
+    input — a cross-tenant data/schedule leak, not just a cosmetic clash.
+  - tenant_code prefix (ARCH-1) prevents two tenants onboarding the same
+    source/entity from silently overwriting each other's live schedule.
+  - EventBridge Scheduler schedule names are capped at 64 characters. Since
+    tenant_code (up to 48 chars) and source_id/entity_id (up to 64 chars
+    each) can individually exceed that budget once joined, names longer than
+    64 chars are deterministically collapsed to a truncated-prefix +
+    content-hash form (see `_build_schedule_name()` / `_MAX_SCHEDULE_NAME_LEN`)
+    rather than naively sliced — a naive slice could make two distinct
+    long-id tenants collide on the same truncated name.
 
 Schedule target: the Step Functions state machine that runs the extraction
 pipeline.  The schedule passes the source_id, entity_id, and connector_params
@@ -24,6 +43,7 @@ Security (OWASP A01, A05):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any, Final
@@ -31,6 +51,7 @@ from typing import Any, Final
 import boto3
 from botocore.exceptions import ClientError
 
+from contracts.identifier_policy import validate_tenant_code
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -38,8 +59,20 @@ _logger = get_platform_logger(__name__)
 # Stable identifier format — same constraint used platform-wide.
 _STABLE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}$")
 
-# Schedule name: {source_id}--{entity_id}
+# Schedule name: {tenant_code}--{source_id}--{entity_id}
 _SCHEDULE_NAME_SEP: Final[str] = "--"
+
+# EventBridge Scheduler hard limit on schedule name length (AWS API constraint).
+_MAX_SCHEDULE_NAME_LEN: Final[int] = 64
+
+# Length of the deterministic content-hash suffix appended when a schedule
+# name would otherwise exceed _MAX_SCHEDULE_NAME_LEN. 10 hex chars (40 bits)
+# of the full untruncated name's SHA-256 digest is enough to make two
+# different max-length tenant/source/entity combinations that happen to share
+# a truncated prefix resolve to different final names deterministically
+# (OWASP A03 — the fallback must not be attacker-controllable or guessable
+# to a colliding value; a content hash of validated stable identifiers is not).
+_SCHEDULE_NAME_HASH_LEN: Final[int] = 10
 
 # EventBridge Scheduler flexible time window (OFF = exact schedule time).
 _FLEXIBLE_WINDOW_OFF: Final[dict[str, str]] = {"Mode": "OFF"}
@@ -126,6 +159,10 @@ class ExtractionScheduleClient:
             Step Functions input payload.  Must NOT contain credentials.
         timezone : str
             IANA timezone name (default 'UTC').
+        tenant_code : str
+            Tenant identity for this schedule (ARCH-1) — prefixes the schedule
+            name so two tenants onboarding the same source/entity never share
+            (and silently overwrite) one schedule.
 
         Returns
         -------
@@ -141,8 +178,9 @@ class ExtractionScheduleClient:
         """
         _validate_stable_id("source_id", source_id)
         _validate_stable_id("entity_id", entity_id)
+        tenant_code = validate_tenant_code(tenant_code)
 
-        schedule_name = _build_schedule_name(source_id, entity_id)
+        schedule_name = _build_schedule_name(tenant_code, source_id, entity_id)
         sfn_input = json.dumps(
             {
                 "source_id": source_id,
@@ -198,7 +236,7 @@ class ExtractionScheduleClient:
         )
         return schedule_arn
 
-    def delete_schedule(self, source_id: str, entity_id: str) -> None:
+    def delete_schedule(self, source_id: str, entity_id: str, tenant_code: str = "demo") -> None:
         """
         Delete the extraction schedule for a source entity.
 
@@ -208,6 +246,9 @@ class ExtractionScheduleClient:
             Stable source identifier.
         entity_id : str
             Stable entity identifier.
+        tenant_code : str
+            Tenant identity — must match the tenant the schedule was created
+            under, or the wrong (non-existent) schedule name is targeted.
 
         Raises
         ------
@@ -218,8 +259,9 @@ class ExtractionScheduleClient:
         """
         _validate_stable_id("source_id", source_id)
         _validate_stable_id("entity_id", entity_id)
+        tenant_code = validate_tenant_code(tenant_code)
 
-        schedule_name = _build_schedule_name(source_id, entity_id)
+        schedule_name = _build_schedule_name(tenant_code, source_id, entity_id)
         try:
             self._scheduler.delete_schedule(
                 GroupName=self._group_name,
@@ -239,7 +281,9 @@ class ExtractionScheduleClient:
             schedule_name=schedule_name,
         )
 
-    def get_schedule(self, source_id: str, entity_id: str) -> dict[str, Any] | None:
+    def get_schedule(
+        self, source_id: str, entity_id: str, tenant_code: str = "demo"
+    ) -> dict[str, Any] | None:
         """
         Retrieve the current schedule configuration for a source entity.
 
@@ -249,6 +293,8 @@ class ExtractionScheduleClient:
             Stable source identifier.
         entity_id : str
             Stable entity identifier.
+        tenant_code : str
+            Tenant identity the schedule was created under.
 
         Returns
         -------
@@ -257,8 +303,9 @@ class ExtractionScheduleClient:
         """
         _validate_stable_id("source_id", source_id)
         _validate_stable_id("entity_id", entity_id)
+        tenant_code = validate_tenant_code(tenant_code)
 
-        schedule_name = _build_schedule_name(source_id, entity_id)
+        schedule_name = _build_schedule_name(tenant_code, source_id, entity_id)
         try:
             response: dict[str, Any] = self._scheduler.get_schedule(
                 GroupName=self._group_name,
@@ -271,9 +318,9 @@ class ExtractionScheduleClient:
             raise
 
     @staticmethod
-    def build_schedule_name(source_id: str, entity_id: str) -> str:
-        """Return the deterministic schedule name for a source/entity pair."""
-        return _build_schedule_name(source_id, entity_id)
+    def build_schedule_name(source_id: str, entity_id: str, tenant_code: str = "demo") -> str:
+        """Return the deterministic schedule name for a tenant/source/entity tuple."""
+        return _build_schedule_name(validate_tenant_code(tenant_code), source_id, entity_id)
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +338,29 @@ def _validate_stable_id(field_name: str, value: str) -> None:
         )
 
 
-def _build_schedule_name(source_id: str, entity_id: str) -> str:
-    """Build the EventBridge Scheduler schedule name for a source/entity pair."""
-    return f"{source_id}{_SCHEDULE_NAME_SEP}{entity_id}"
+def _build_schedule_name(tenant_code: str, source_id: str, entity_id: str) -> str:
+    """
+    Build the EventBridge Scheduler schedule name for a tenant/source/entity tuple.
+
+    All three components are joined with the same double-hyphen separator
+    (ARCH-16) — joining tenant_code and source_id with a single hyphen let two
+    distinct tenants collide on one literal name (e.g. tenant="acme",
+    source="corp-salesforce" vs. tenant="acme-corp", source="salesforce"),
+    and create_or_update_schedule() is update-first, so the collision was a
+    silent cross-tenant schedule clobber, not just a cosmetic name clash.
+
+    EventBridge Scheduler caps schedule names at _MAX_SCHEDULE_NAME_LEN (64)
+    characters. tenant_code (<=48 chars) and source_id/entity_id (<=64 chars
+    each) can individually push the joined name past that cap, so names that
+    would exceed it are deterministically collapsed to a truncated prefix of
+    the full name plus a short content-hash suffix — never a naive slice,
+    which could make two distinct long-id tuples collide on the same
+    truncated name.
+    """
+    name = f"{tenant_code}{_SCHEDULE_NAME_SEP}{source_id}{_SCHEDULE_NAME_SEP}{entity_id}"
+    if len(name) <= _MAX_SCHEDULE_NAME_LEN:
+        return name
+
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:_SCHEDULE_NAME_HASH_LEN]
+    prefix_budget = _MAX_SCHEDULE_NAME_LEN - len(digest) - len(_SCHEDULE_NAME_SEP)
+    return f"{name[:prefix_budget]}{_SCHEDULE_NAME_SEP}{digest}"

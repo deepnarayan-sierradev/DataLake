@@ -27,7 +27,7 @@ help:
 	@echo "                      REQUIRED after every terraform apply — without it no cron triggers exist"
 	@echo ""
 	@echo "Required env vars for lambda-upload / seed-entity-config / seed-schedules:"
-	@echo "  ARTIFACTS_BUCKET    S3 bucket for Lambda zip (e.g. dev-edl-terraform-state)"
+	@echo "  ARTIFACTS_BUCKET    S3 bucket for Lambda zip (e.g. edl-terraform-state-087972550871)"
 	@echo "  AWS_PROFILE         AWS CLI profile to use (or leave unset for default)"
 	@echo "  AWS_REGION          Default: us-east-1"
 	@echo ""
@@ -110,7 +110,7 @@ iac-fmt:
 
 # ─── Lambda Packaging ────────────────────────────────────────────────────────
 
-ARTIFACTS_BUCKET ?= dev-edl-terraform-state
+ARTIFACTS_BUCKET ?= edl-terraform-state-087972550871
 AWS_REGION       ?= us-east-1
 LAMBDA_S3_KEY    ?= lambda/extraction-pipeline.zip
 LAMBDA_ZIP       := dist/extraction-pipeline.zip

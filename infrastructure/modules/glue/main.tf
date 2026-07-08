@@ -1,6 +1,6 @@
 locals {
-  curated_db_name   = "${var.environment}_edl_curated"
-  analytics_db_name = "${var.environment}_edl_analytics"
+  curated_db_name   = "edl_curated"
+  analytics_db_name = "edl_analytics"
 }
 
 # ---------------------------------------------------------------------------
@@ -9,7 +9,7 @@ locals {
 
 resource "aws_glue_catalog_database" "curated" {
   name        = local.curated_db_name
-  description = "AWS Glue Data Catalog database for ${var.environment} curated domain datasets."
+  description = "AWS Glue Data Catalog database for curated domain datasets."
 
   create_table_default_permission {
     permissions = ["SELECT"]
@@ -27,7 +27,7 @@ resource "aws_glue_catalog_database" "curated" {
 
 resource "aws_glue_catalog_database" "analytics" {
   name        = local.analytics_db_name
-  description = "AWS Glue Data Catalog database for ${var.environment} analytics consumption datasets."
+  description = "AWS Glue Data Catalog database for analytics consumption datasets."
 
   create_table_default_permission {
     permissions = ["SELECT"]
@@ -71,8 +71,8 @@ resource "aws_glue_resource_policy" "catalog_account_isolation" {
 # ---------------------------------------------------------------------------
 
 resource "aws_athena_workgroup" "analytics" {
-  name        = "${var.environment}-edl-analytics"
-  description = "Athena workgroup for ${var.environment} analytics layer queries."
+  name        = "EdlAnalytics"
+  description = "Athena workgroup for analytics layer queries."
   state       = "ENABLED"
 
   configuration {

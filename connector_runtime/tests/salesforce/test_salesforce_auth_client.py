@@ -21,7 +21,7 @@ from moto import mock_aws
 
 from connector_runtime.adapters.salesforce.salesforce_auth_client import (
     _PROACTIVE_REFRESH_SECONDS,
-    _SECRET_PATH_TEMPLATE,
+    _SECRET_PATH,
     SalesforceAuthClient,
     SalesforceAuthError,
     SalesforceCredentialError,
@@ -29,11 +29,11 @@ from connector_runtime.adapters.salesforce.salesforce_auth_client import (
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_SECRET_ID = _SECRET_PATH_TEMPLATE.format(environment=_ENV)
+_SECRET_ID = _SECRET_PATH
 _INSTANCE_URL = "https://myorg.my.salesforce.com"
 _CLIENT_ID = "test-client-id"
-_CLIENT_SECRET = "test-client-secret"  # noqa: S105 — test credential
-_ACCESS_TOKEN = "test-access-token-value"  # noqa: S105 — test value
+_CLIENT_SECRET = "test-client-secret"
+_ACCESS_TOKEN = "test-access-token-value"
 
 
 def _put_secret(sm_client: object, value: dict) -> None:  # type: ignore[type-arg]

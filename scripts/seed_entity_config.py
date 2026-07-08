@@ -5,7 +5,7 @@ Seed entity extraction configuration records into DynamoDB for local dev testing
 Usage:
     python scripts/seed_entity_config.py --environment dev --region us-east-1
 
-This writes one record per source entity into the {environment}-edl-entity-extraction-config
+This writes one record per source entity into the EdlEntityExtractionConfig
 DynamoDB table.  All records are safe to re-run — they use put_item which is idempotent.
 
 Prerequisite:
@@ -33,36 +33,45 @@ import sys
 import boto3
 
 
-def _table_name(environment: str) -> str:
-    return f"{environment}-edl-entity-extraction-config"
+def _table_name() -> str:
+    return "EdlEntityExtractionConfig"
 
 
-def _raw_prefix(
-    environment: str, source_id: str, entity_id: str, tenant_code: str = "demo"
-) -> str:
+def _account_id(region: str) -> str:
+    """Resolve the AWS account ID of the caller's credentials.
+
+    Bucket names are suffixed with the account ID rather than the
+    environment name — S3 bucket names are unique across all of AWS, and
+    each environment is already a separate AWS account, so the account ID
+    is what actually guarantees no collision with dev/staging/prod.
+    """
+    return boto3.client("sts", region_name=region).get_caller_identity()["Account"]
+
+
+def _raw_prefix(account_id: str, source_id: str, entity_id: str, tenant_code: str = "demo") -> str:
     """Full s3:// URI for the raw layer partition root.
 
-    With multi-tenancy: {tenant_code}/raw/{source_id}/{entity_id}/
+    With multi-tenancy: {tenant_code}/{source_id}/{entity_id}/
     """
-    return f"s3://{environment}-edl-raw-layer/{tenant_code}/raw/{source_id}/{entity_id}/"
+    return f"s3://edl-raw-{account_id}/{tenant_code}/{source_id}/{entity_id}/"
 
 
 def _sage_raw_prefix(
-    environment: str, product_name: str, entity_id: str, tenant_code: str = "demo"
+    account_id: str, product_name: str, entity_id: str, tenant_code: str = "demo"
 ) -> str:
     """Full s3:// URI for Sage raw layer partition root."""
-    return f"s3://{environment}-edl-raw-layer/{tenant_code}/raw/sage/{product_name}/{entity_id}/"
+    return f"s3://edl-raw-{account_id}/{tenant_code}/sage-{product_name}/{entity_id}/"
 
 
 def _snapshot_prefix(
-    environment: str, source_id: str, entity_id: str, tenant_code: str = "demo"
+    account_id: str, source_id: str, entity_id: str, tenant_code: str = "demo"
 ) -> str:
     """Full s3:// URI for schema snapshot storage."""
-    return f"s3://{environment}-edl-schema-snapshots/{tenant_code}/{source_id}/{entity_id}/"
+    return f"s3://edl-schema-snapshots-{account_id}/{tenant_code}/{source_id}/{entity_id}/"
 
 
-def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str, object]]:
-    """Build entity extraction config records with environment-specific s3:// URIs."""
+def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str, object]]:
+    """Build entity extraction config records with account-specific s3:// URIs."""
     return [
         {
             "source_id": "salesforce",
@@ -76,8 +85,12 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
-            "target_raw_s3_prefix": _raw_prefix(environment, "salesforce", "salesforce-account", tenant_code),
-            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "salesforce", "salesforce-account", tenant_code),
+            "target_raw_s3_prefix": _raw_prefix(
+                account_id, "salesforce", "salesforce-account", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "salesforce", "salesforce-account", tenant_code
+            ),
             "output_format": "parquet",
             "connector_params": {"object_name": "Account"},
             "schedule_cron": "cron(0 2 * * ? *)",
@@ -105,8 +118,12 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": ["IsDeleted"],
-            "target_raw_s3_prefix": _raw_prefix(environment, "salesforce", "salesforce-contact", tenant_code),
-            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "salesforce", "salesforce-contact", tenant_code),
+            "target_raw_s3_prefix": _raw_prefix(
+                account_id, "salesforce", "salesforce-contact", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "salesforce", "salesforce-contact", tenant_code
+            ),
             "output_format": "parquet",
             "connector_params": {"object_name": "Contact"},
             "schedule_cron": "cron(15 2 * * ? *)",
@@ -132,8 +149,12 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
-            "target_raw_s3_prefix": _raw_prefix(environment, "netsuite", "netsuite-customer", tenant_code),
-            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "netsuite", "netsuite-customer", tenant_code),
+            "target_raw_s3_prefix": _raw_prefix(
+                account_id, "netsuite", "netsuite-customer", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "netsuite", "netsuite-customer", tenant_code
+            ),
             "output_format": "parquet",
             "connector_params": {},
             "schedule_cron": None,
@@ -156,8 +177,12 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
-            "target_raw_s3_prefix": _raw_prefix(environment, "mysql-rds", "mysql-rds-contracts", tenant_code),
-            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "mysql-rds", "mysql-rds-contracts", tenant_code),
+            "target_raw_s3_prefix": _raw_prefix(
+                account_id, "mysql-rds", "mysql-rds-contracts", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "mysql-rds", "mysql-rds-contracts", tenant_code
+            ),
             "output_format": "parquet",
             "connector_params": {"table_name": "Contracts"},
             "schedule_cron": "cron(30 2 * * ? *)",
@@ -186,10 +211,17 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
-            "target_raw_s3_prefix": _sage_raw_prefix(environment, "intacct", "sage-intacct-customer", tenant_code),
-            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-intacct-customer", tenant_code),
+            "target_raw_s3_prefix": _sage_raw_prefix(
+                account_id, "intacct", "sage-intacct-customer", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "sage", "sage-intacct-customer", tenant_code
+            ),
             "output_format": "parquet",
-            "connector_params": {"sage_product": "intacct", "object_path": "accounts-receivable/customer"},
+            "connector_params": {
+                "sage_product": "intacct",
+                "object_path": "accounts-receivable/customer",
+            },
             "schedule_cron": "cron(45 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
@@ -207,10 +239,17 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
-            "target_raw_s3_prefix": _sage_raw_prefix(environment, "intacct", "sage-intacct-vendor", tenant_code),
-            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-intacct-vendor", tenant_code),
+            "target_raw_s3_prefix": _sage_raw_prefix(
+                account_id, "intacct", "sage-intacct-vendor", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "sage", "sage-intacct-vendor", tenant_code
+            ),
             "output_format": "parquet",
-            "connector_params": {"sage_product": "intacct", "object_path": "accounts-payable/vendor"},
+            "connector_params": {
+                "sage_product": "intacct",
+                "object_path": "accounts-payable/vendor",
+            },
             "schedule_cron": "cron(50 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
@@ -228,10 +267,17 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
-            "target_raw_s3_prefix": _sage_raw_prefix(environment, "intacct", "sage-intacct-arinvoice", tenant_code),
-            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-intacct-arinvoice", tenant_code),
+            "target_raw_s3_prefix": _sage_raw_prefix(
+                account_id, "intacct", "sage-intacct-arinvoice", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "sage", "sage-intacct-arinvoice", tenant_code
+            ),
             "output_format": "parquet",
-            "connector_params": {"sage_product": "intacct", "object_path": "accounts-receivable/invoice"},
+            "connector_params": {
+                "sage_product": "intacct",
+                "object_path": "accounts-receivable/invoice",
+            },
             "schedule_cron": "cron(55 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
@@ -249,8 +295,12 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
-            "target_raw_s3_prefix": _sage_raw_prefix(environment, "intacct", "sage-intacct-apbill", tenant_code),
-            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-intacct-apbill", tenant_code),
+            "target_raw_s3_prefix": _sage_raw_prefix(
+                account_id, "intacct", "sage-intacct-apbill", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "sage", "sage-intacct-apbill", tenant_code
+            ),
             "output_format": "parquet",
             "connector_params": {"sage_product": "intacct", "object_path": "accounts-payable/bill"},
             "schedule_cron": "cron(5 3 * * ? *)",
@@ -271,8 +321,12 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
-            "target_raw_s3_prefix": _sage_raw_prefix(environment, "x3", "sage-x3-customer", tenant_code),
-            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-x3-customer", tenant_code),
+            "target_raw_s3_prefix": _sage_raw_prefix(
+                account_id, "x3", "sage-x3-customer", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "sage", "sage-x3-customer", tenant_code
+            ),
             "output_format": "parquet",
             "connector_params": {"sage_product": "x3", "object_path": "BPCUSTOMER"},
             "schedule_cron": "cron(55 2 * * ? *)",
@@ -292,8 +346,12 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
             "field_mode": "all",
             "include_fields": [],
             "exclude_fields": [],
-            "target_raw_s3_prefix": _sage_raw_prefix(environment, "x3", "sage-x3-supplier", tenant_code),
-            "schema_snapshot_s3_prefix": _snapshot_prefix(environment, "sage", "sage-x3-supplier", tenant_code),
+            "target_raw_s3_prefix": _sage_raw_prefix(
+                account_id, "x3", "sage-x3-supplier", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "sage", "sage-x3-supplier", tenant_code
+            ),
             "output_format": "parquet",
             "connector_params": {"sage_product": "x3", "object_path": "BPSUPPLIER"},
             "schedule_cron": "cron(0 3 * * ? *)",
@@ -306,9 +364,13 @@ def _build_records(environment: str, tenant_code: str = "demo") -> list[dict[str
 
 
 def seed(environment: str, region: str, dry_run: bool = False, tenant_code: str = "demo") -> None:
-    table_name = _table_name(environment)
-    records = _build_records(environment, tenant_code=tenant_code)
-    print(f"Target table: {table_name}  (region: {region}, tenant_code: {tenant_code})")
+    table_name = _table_name()
+    account_id = _account_id(region)
+    records = _build_records(account_id, tenant_code=tenant_code)
+    print(
+        f"Target table: {table_name}  "
+        f"(account: {account_id}, region: {region}, tenant_code: {tenant_code})"
+    )
 
     if dry_run:
         print("\n[DRY RUN] Would write the following records:")

@@ -32,12 +32,16 @@ _BASE_EVENT: dict[str, Any] = {
     "curated_s3_prefix": (
         "curated/salesforce/salesforce-account/curated_date=2026-01-01/run_id=run-1/"
     ),
+    "tenant_code": "demo",
 }
 
 
 class TestValidateEventTenantCode:
-    def test_missing_tenant_code_is_allowed(self) -> None:
-        _validate_event(dict(_BASE_EVENT))  # must not raise
+    def test_missing_tenant_code_raises(self) -> None:
+        """ARCH-4: tenant_code must fail closed, not silently default."""
+        event = {k: v for k, v in _BASE_EVENT.items() if k != "tenant_code"}
+        with pytest.raises(ValueError, match="tenant_code"):
+            _validate_event(event)
 
     def test_valid_tenant_code_is_allowed(self) -> None:
         _validate_event({**_BASE_EVENT, "tenant_code": "acme-corp"})
@@ -136,6 +140,7 @@ class TestLoadAllContributingRecords:
             curated_s3_prefix=self._PREFIX,
             pk_field="Id",
             contributing_sources=[("salesforce", "salesforce-account")],
+            tenant_code="demo",
         )
 
         assert len(calls) == 1
@@ -149,9 +154,7 @@ class TestLoadAllContributingRecords:
         ]
         assert prefixes == [self._PREFIX]
 
-    def test_does_not_call_python_list_based_loader(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_does_not_call_python_list_based_loader(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The old fully-materialising loader must not be imported/used anymore."""
         monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.setattr(
@@ -169,6 +172,7 @@ class TestLoadAllContributingRecords:
             curated_s3_prefix=self._PREFIX,
             pk_field="Id",
             contributing_sources=[("salesforce", "salesforce-account")],
+            tenant_code="demo",
         )
         assert records[0]["_record_id"] == "salesforce:9"
 
@@ -181,7 +185,7 @@ class TestLoadAllContributingRecords:
         monkeypatch.setattr(
             handler_module,
             "find_latest_curated_prefix",
-            lambda s3, bucket, domain, entity_id: other_prefix,
+            lambda s3, bucket, domain, entity_id, tenant_code: other_prefix,
         )
         loaded_prefixes_seen: list[str] = []
 
@@ -202,6 +206,7 @@ class TestLoadAllContributingRecords:
                 ("salesforce", "salesforce-account"),
                 ("netsuite", "ns-customer"),
             ],
+            tenant_code="demo",
         )
 
         assert loaded_prefixes_seen == [self._PREFIX, other_prefix]
@@ -219,4 +224,5 @@ class TestLoadAllContributingRecords:
                 curated_s3_prefix=self._PREFIX,
                 pk_field="Id",
                 contributing_sources=[("salesforce", "salesforce-account")],
+                tenant_code="demo",
             )

@@ -70,9 +70,7 @@ X3_ODATA_DISCRIMINANT: Final[str] = "_x3_odata"
 
 # Validates Sage X3 endpoint names: uppercase letters and digits only.
 # e.g. "BPCUSTOMER", "BPSUPPLIER", "SORDER", "SINVOICE", "PITM"
-_SAFE_X3_ENDPOINT_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[A-Z][A-Z0-9]{1,63}$"
-)
+_SAFE_X3_ENDPOINT_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9]{1,63}$")
 
 # Validates X3 field names (short names).
 # X3 fields: uppercase, digits, underscores — e.g. BPCNUM_0, MODDAT_0, CRY_0
@@ -169,9 +167,7 @@ class X3QueryEngine:
             X3QueryBuildError: validation failure.
         """
         if load_type == LoadType.INCREMENTAL and not watermark_field:
-            raise X3QueryBuildError(
-                "watermark_field is required for INCREMENTAL load type."
-            )
+            raise X3QueryBuildError("watermark_field is required for INCREMENTAL load type.")
 
         # Validate and collect field names from the FieldContract.
         field_names: list[str] = []
@@ -216,10 +212,10 @@ class X3QueryEngine:
         orderby_str = f"{orderby_field} asc"
 
         query_body: dict[str, Any] = {
-            X3_ODATA_DISCRIMINANT: True,   # discriminant for SageConnector dispatch
+            X3_ODATA_DISCRIMINANT: True,  # discriminant for SageConnector dispatch
             "endpoint": self._endpoint,
             "select": select_str,
-            "filter": filter_str,           # None for FULL loads
+            "filter": filter_str,  # None for FULL loads
             "orderby": orderby_str,
         }
 

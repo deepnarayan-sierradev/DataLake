@@ -12,7 +12,7 @@ Extracting these helpers into a shared module eliminates duplication and ensures
 that curated layer access semantics are consistent across all stages.
 
 Curated path structure (spec §14):
-  curated/{domain}/{entity_id}/curated_date={YYYY-MM-DD}/run_id={run_id}/data.parquet
+  {tenant_code}/curated/{domain}/{entity_id}/curated_date={YYYY-MM-DD}/run_id={run_id}/data.parquet
 
 Security (OWASP A03 / CWE-22):
   - All S3 prefix inputs are validated against a safe pattern before use to
@@ -36,9 +36,7 @@ _logger = get_platform_logger(__name__)
 # S3 prefix safety: no path traversal sequences, no leading slash (OWASP A03).
 # Hive-style partition paths (curated_date=2026-07-02, run_id=...) require '=' and '-'.
 # Single definition — imported wherever prefix validation is needed (no duplication).
-SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[a-zA-Z0-9][a-zA-Z0-9\-_/=]{0,511}$"
-)
+SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-_/=]{0,511}$")
 
 
 def source_id_to_domain(source_id: str) -> str:
@@ -64,12 +62,13 @@ def find_latest_curated_prefix(
     bucket: str,
     domain: str,
     entity_id: str,
+    tenant_code: str,
 ) -> str | None:
     """
     Scan the curated bucket for the most recent run prefix for (domain, entity_id).
 
     Curated path structure:
-      curated/{domain}/{entity_id}/curated_date={YYYY-MM-DD}/run_id={run_id}/
+      {tenant_code}/curated/{domain}/{entity_id}/curated_date={YYYY-MM-DD}/run_id={run_id}/
 
     Traversal order:
       1. List all curated_date= partitions — ISO date strings sort lexicographically.
@@ -81,9 +80,12 @@ def find_latest_curated_prefix(
         no curated data exists yet (first run for this entity).
 
     Security: domain and entity_id are server-side derived values — never accepted
-    from user input (OWASP A03).
+    from user input (OWASP A03). tenant_code must be pre-validated by the caller
+    (ARCH-1) — this must match CuratedLayerWriter's actual tenant-prefixed write
+    path, or every lookup silently finds nothing (or, worse, another tenant's data
+    if the tenant_code segment were ever omitted here).
     """
-    base_prefix = f"curated/{domain}/{entity_id}/"
+    base_prefix = f"{tenant_code}/curated/{domain}/{entity_id}/"
     paginator = s3.get_paginator("list_objects_v2")
 
     # Collect curated_date= partition prefixes using the delimiter trick
@@ -108,9 +110,7 @@ def find_latest_curated_prefix(
 
     # Within the date partition, collect run_id= sub-prefixes.
     run_prefixes: list[str] = []
-    for page in paginator.paginate(
-        Bucket=bucket, Prefix=latest_date_prefix, Delimiter="/"
-    ):
+    for page in paginator.paginate(Bucket=bucket, Prefix=latest_date_prefix, Delimiter="/"):
         for cp in page.get("CommonPrefixes", []):
             pfx = cp["Prefix"]
             if "run_id=" in pfx:
@@ -180,16 +180,12 @@ def load_curated_records(
     if ".." in clean_prefix or clean_prefix.startswith("/"):
         raise ValueError(f"Unsafe curated prefix rejected: {clean_prefix!r}")
     if not SAFE_S3_PREFIX_PATTERN.match(clean_prefix.rstrip("/")):
-        raise ValueError(
-            f"Curated prefix {clean_prefix!r} contains disallowed characters."
-        )
+        raise ValueError(f"Curated prefix {clean_prefix!r} contains disallowed characters.")
 
     paginator = s3.get_paginator("list_objects_v2")
     records: list[dict[str, Any]] = []
 
-    for page in paginator.paginate(
-        Bucket=bucket, Prefix=clean_prefix.rstrip("/") + "/"
-    ):
+    for page in paginator.paginate(Bucket=bucket, Prefix=clean_prefix.rstrip("/") + "/"):
         for obj in page.get("Contents", []):
             if not obj["Key"].endswith(".parquet"):
                 continue
@@ -255,9 +251,7 @@ def load_curated_records_duckdb(
     if ".." in clean_prefix or clean_prefix.startswith("/"):
         raise ValueError(f"Unsafe curated prefix rejected: {clean_prefix!r}")
     if not SAFE_S3_PREFIX_PATTERN.match(clean_prefix.rstrip("/")):
-        raise ValueError(
-            f"Curated prefix {clean_prefix!r} contains disallowed characters."
-        )
+        raise ValueError(f"Curated prefix {clean_prefix!r} contains disallowed characters.")
 
     try:
         import duckdb
@@ -361,13 +355,11 @@ def merge_with_duckdb(
         return list(delta_records)
 
     # Validate field names before SQL interpolation (OWASP A03).
-    _FIELD_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
-    if not _FIELD_NAME_PATTERN.match(pk_field):
+    field_name_pattern = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
+    if not field_name_pattern.match(pk_field):
         raise ValueError(f"pk_field {pk_field!r} contains unsafe characters for SQL interpolation.")
-    if soft_delete_field and not _FIELD_NAME_PATTERN.match(soft_delete_field):
-        raise ValueError(
-            f"soft_delete_field {soft_delete_field!r} contains unsafe characters."
-        )
+    if soft_delete_field and not field_name_pattern.match(soft_delete_field):
+        raise ValueError(f"soft_delete_field {soft_delete_field!r} contains unsafe characters.")
 
     try:
         import duckdb
@@ -387,6 +379,7 @@ def merge_with_duckdb(
             if r.get(pk_field) is not None and str(r.get(pk_field, "")) != ""
         }
         from transformation.curated_accumulator import merge_records
+
         return merge_records(previous_state, delta_records, pk_field, soft_delete_field)
 
     con = duckdb.connect(":memory:")
@@ -414,19 +407,18 @@ def merge_with_duckdb(
         # SCD Type 1 MERGE:
         #   - Rows from previous state NOT present in delta (unchanged records)
         #   - UNION ALL new/updated delta records (excluding soft-deleted ones)
-        sql = f"""
-            SELECT prev.*
-            FROM read_parquet('{previous_glob}') AS prev
-            WHERE CAST(prev.{pk_field} AS VARCHAR) NOT IN (
-                SELECT CAST({pk_field} AS VARCHAR) FROM delta
-            )
-            UNION ALL
-            SELECT delta.*
-            FROM delta
-            WHERE CAST({pk_field} AS VARCHAR) IS NOT NULL
-              AND CAST({pk_field} AS VARCHAR) != ''
-              {soft_delete_filter}
-        """
+        # OWASP A03: pk_field/soft_delete_field are validated above against
+        # field_name_pattern; previous_glob is built from internal S3
+        # bucket/prefix state, not raw user input.
+        sql = (
+            f"SELECT prev.* FROM read_parquet('{previous_glob}') AS prev "  # noqa: S608
+            f"WHERE CAST(prev.{pk_field} AS VARCHAR) NOT IN ("
+            f"SELECT CAST({pk_field} AS VARCHAR) FROM delta) "
+            f"UNION ALL SELECT delta.* FROM delta "
+            f"WHERE CAST({pk_field} AS VARCHAR) IS NOT NULL "
+            f"AND CAST({pk_field} AS VARCHAR) != '' "
+            f"{soft_delete_filter}"
+        )
         result_table = con.execute(sql).arrow()
 
         # Return as Python list for compatibility with existing pipeline.
@@ -464,8 +456,8 @@ def merge_with_duckdb(
         from transformation.curated_accumulator import (
             merge_records,  # local import to avoid circular
         )
+
         return merge_records(previous_state, delta_records, pk_field, soft_delete_field)
 
     finally:
         con.close()
-

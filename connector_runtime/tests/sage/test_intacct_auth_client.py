@@ -22,23 +22,21 @@ Coverage:
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import requests_mock as requests_mock_lib
 
 from connector_runtime.adapters.sage.common.sage_credential_manager import SageCredentialError
 from connector_runtime.adapters.sage.common.sage_http_client import (
-    SageAuthenticationError,
     SageHttpClient,
-    SageRateLimitError,
 )
 from connector_runtime.adapters.sage.products.intacct.intacct_auth import (
+    _DEFAULT_TOKEN_TTL_SECONDS,
+    _PROACTIVE_REFRESH_SECONDS,
     IntacctAuthClient,
     IntacctAuthError,
     IntacctCredentialError,
-    _PROACTIVE_REFRESH_SECONDS,
-    _DEFAULT_TOKEN_TTL_SECONDS,
 )
 
 _TOKEN_URL = "https://api.intacct.com/ia/api/v1/auth/token"
@@ -75,9 +73,7 @@ def _make_auth(creds: dict[str, str] | None = None) -> IntacctAuthClient:
 
 
 class TestTokenAcquisition:
-    def test_get_access_token_returns_token(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_get_access_token_returns_token(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         token = auth.get_access_token()
@@ -115,9 +111,7 @@ class TestTokenAcquisition:
         assert t1 == t2
         assert requests_mock.call_count == 1
 
-    def test_expires_in_taken_from_response(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_expires_in_taken_from_response(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json={**_TOKEN_RESPONSE, "expires_in": 1800})
         auth = _make_auth()
         auth.get_access_token()
@@ -155,9 +149,7 @@ class TestTokenRefresh:
         auth.get_access_token()
         assert requests_mock.call_count == 2  # second fetch triggered
 
-    def test_invalidate_token_forces_refetch(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_invalidate_token_forces_refetch(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         auth.get_access_token()

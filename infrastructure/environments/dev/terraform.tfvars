@@ -9,11 +9,11 @@ github_repo = "enterprise-data-lake"
 alert_email = "" # Set to ops team email when ready
 
 # Lambda deployment package — produced by 'make lambda-package && make lambda-upload'
-lambda_package_s3_bucket   = "dev-edl-terraform-state"
+lambda_package_s3_bucket   = "edl-terraform-state-087972550871"
 lambda_package_s3_key      = "lambda/extraction-pipeline.zip"
-lambda_package_source_hash = "4YCKilL2O9Tmes5oHHr1T07fJdsX78IT4yDrbZV36hQ="
+lambda_package_source_hash = "DzNW3lgbfXlocSAAXNvwOWDa2Ih1F4sR7/ywU78xpSs="
 
 # Pipeline stage Lambda ARNs (required by Step Functions orchestration module)
 # Populate after deploying each Lambda stage package.
-extraction_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:087972550871:function:dev-extraction-pipeline"
-# serving_store_loader_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:dev-serving-store-loader"
+extraction_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:087972550871:function:EdlExtractionPipeline"
+# serving_store_loader_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:EdlServingStoreLoader"

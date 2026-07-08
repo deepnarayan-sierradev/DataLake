@@ -49,15 +49,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
 
-from connector_runtime.adapters.sage.common.sage_http_client import (
-    SageHttpClient,
-    SageHttpError,
-    SageObjectNotFoundError,
-)
 from connector_runtime.adapters.sage.common.sage_errors import (
     SageMetadataDeterministicError,
     SageMetadataError,
     SageMetadataTransientError,
+)
+from connector_runtime.adapters.sage.common.sage_http_client import (
+    SageHttpClient,
+    SageHttpError,
+    SageObjectNotFoundError,
 )
 from connector_runtime.adapters.sage.products.x3.x3_auth import X3AuthClient
 from connector_runtime.interfaces.connector_interface import FieldContract, FieldDescriptor
@@ -67,9 +67,7 @@ from observability.structured_logger import get_platform_logger
 _logger = get_platform_logger(__name__)
 
 # Validates Sage X3 endpoint names — same pattern as X3QueryEngine.
-_SAFE_X3_ENDPOINT_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[A-Z][A-Z0-9]{1,63}$"
-)
+_SAFE_X3_ENDPOINT_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9]{1,63}$")
 
 # ISO-8601 date/datetime pattern — used to infer "date" type from string values.
 _ISO8601_VALUE_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -82,9 +80,9 @@ class X3FieldSchema:
     """Raw X3 field descriptor inferred from a sample record or static registry."""
 
     name: str
-    data_type: str   # "string", "integer", "decimal", "boolean", "date"
+    data_type: str  # "string", "integer", "decimal", "boolean", "date"
     is_nullable: bool
-    label: str       # Human-readable label; same as name for inferred fields
+    label: str  # Human-readable label; same as name for inferred fields
 
 
 # ---------------------------------------------------------------------------
@@ -93,70 +91,70 @@ class X3FieldSchema:
 
 _X3_STATIC_SCHEMAS: Final[dict[str, list[X3FieldSchema]]] = {
     "BPCUSTOMER": [
-        X3FieldSchema("BPCNUM_0",  "string",  False, "Customer Code"),
-        X3FieldSchema("BPCNAM_0",  "string",  False, "Customer Name"),
-        X3FieldSchema("BCGCOD_0",  "string",  True,  "Customer Category"),
-        X3FieldSchema("CRY_0",     "string",  True,  "Country"),
-        X3FieldSchema("SALFCY_0",  "string",  True,  "Sales Site"),
-        X3FieldSchema("CUR_0",     "string",  True,  "Currency"),
-        X3FieldSchema("TEL_0",     "string",  True,  "Telephone"),
-        X3FieldSchema("FAX_0",     "string",  True,  "Fax"),
-        X3FieldSchema("WEB_0",     "string",  True,  "Website"),
-        X3FieldSchema("EACNUM_0",  "string",  True,  "Email"),
-        X3FieldSchema("REP_0",     "string",  True,  "State/Region Code"),
-        X3FieldSchema("ITMREF_0",  "string",  True,  "Default Product"),
-        X3FieldSchema("CREDAT_0",  "date",    True,  "Creation Date"),
-        X3FieldSchema("MODDAT_0",  "date",    True,  "Last Modified Date"),
-        X3FieldSchema("ENAFLG_0",  "integer", True,  "Active Flag (1=active, 2=inactive)"),
+        X3FieldSchema("BPCNUM_0", "string", False, "Customer Code"),
+        X3FieldSchema("BPCNAM_0", "string", False, "Customer Name"),
+        X3FieldSchema("BCGCOD_0", "string", True, "Customer Category"),
+        X3FieldSchema("CRY_0", "string", True, "Country"),
+        X3FieldSchema("SALFCY_0", "string", True, "Sales Site"),
+        X3FieldSchema("CUR_0", "string", True, "Currency"),
+        X3FieldSchema("TEL_0", "string", True, "Telephone"),
+        X3FieldSchema("FAX_0", "string", True, "Fax"),
+        X3FieldSchema("WEB_0", "string", True, "Website"),
+        X3FieldSchema("EACNUM_0", "string", True, "Email"),
+        X3FieldSchema("REP_0", "string", True, "State/Region Code"),
+        X3FieldSchema("ITMREF_0", "string", True, "Default Product"),
+        X3FieldSchema("CREDAT_0", "date", True, "Creation Date"),
+        X3FieldSchema("MODDAT_0", "date", True, "Last Modified Date"),
+        X3FieldSchema("ENAFLG_0", "integer", True, "Active Flag (1=active, 2=inactive)"),
     ],
     "BPSUPPLIER": [
-        X3FieldSchema("BPSNUM_0",  "string",  False, "Supplier Code"),
-        X3FieldSchema("BPSNAM_0",  "string",  False, "Supplier Name"),
-        X3FieldSchema("BCGCOD_0",  "string",  True,  "Supplier Category"),
-        X3FieldSchema("CRY_0",     "string",  True,  "Country"),
-        X3FieldSchema("CUR_0",     "string",  True,  "Currency"),
-        X3FieldSchema("TEL_0",     "string",  True,  "Telephone"),
-        X3FieldSchema("EACNUM_0",  "string",  True,  "Email"),
-        X3FieldSchema("REP_0",     "string",  True,  "State/Region Code"),
-        X3FieldSchema("CREDAT_0",  "date",    True,  "Creation Date"),
-        X3FieldSchema("MODDAT_0",  "date",    True,  "Last Modified Date"),
-        X3FieldSchema("ENAFLG_0",  "integer", True,  "Active Flag (1=active, 2=inactive)"),
+        X3FieldSchema("BPSNUM_0", "string", False, "Supplier Code"),
+        X3FieldSchema("BPSNAM_0", "string", False, "Supplier Name"),
+        X3FieldSchema("BCGCOD_0", "string", True, "Supplier Category"),
+        X3FieldSchema("CRY_0", "string", True, "Country"),
+        X3FieldSchema("CUR_0", "string", True, "Currency"),
+        X3FieldSchema("TEL_0", "string", True, "Telephone"),
+        X3FieldSchema("EACNUM_0", "string", True, "Email"),
+        X3FieldSchema("REP_0", "string", True, "State/Region Code"),
+        X3FieldSchema("CREDAT_0", "date", True, "Creation Date"),
+        X3FieldSchema("MODDAT_0", "date", True, "Last Modified Date"),
+        X3FieldSchema("ENAFLG_0", "integer", True, "Active Flag (1=active, 2=inactive)"),
     ],
     "SORDER": [
-        X3FieldSchema("NUM_0",     "string",  False, "Sales Order Number"),
-        X3FieldSchema("BPCORD_0",  "string",  True,  "Customer Code"),
-        X3FieldSchema("BPCNAM_0",  "string",  True,  "Customer Name"),
-        X3FieldSchema("ORDDAT_0",  "date",    True,  "Order Date"),
-        X3FieldSchema("DLVDAT_0",  "date",    True,  "Delivery Date"),
-        X3FieldSchema("CUR_0",     "string",  True,  "Currency"),
-        X3FieldSchema("ORDATI_0",  "decimal", True,  "Total Amount Incl. Tax"),
-        X3FieldSchema("ORDATEXC_0","decimal", True,  "Total Amount Excl. Tax"),
-        X3FieldSchema("STAFCY_0",  "string",  True,  "Status"),
-        X3FieldSchema("CREDAT_0",  "date",    True,  "Creation Date"),
-        X3FieldSchema("MODDAT_0",  "date",    True,  "Last Modified Date"),
+        X3FieldSchema("NUM_0", "string", False, "Sales Order Number"),
+        X3FieldSchema("BPCORD_0", "string", True, "Customer Code"),
+        X3FieldSchema("BPCNAM_0", "string", True, "Customer Name"),
+        X3FieldSchema("ORDDAT_0", "date", True, "Order Date"),
+        X3FieldSchema("DLVDAT_0", "date", True, "Delivery Date"),
+        X3FieldSchema("CUR_0", "string", True, "Currency"),
+        X3FieldSchema("ORDATI_0", "decimal", True, "Total Amount Incl. Tax"),
+        X3FieldSchema("ORDATEXC_0", "decimal", True, "Total Amount Excl. Tax"),
+        X3FieldSchema("STAFCY_0", "string", True, "Status"),
+        X3FieldSchema("CREDAT_0", "date", True, "Creation Date"),
+        X3FieldSchema("MODDAT_0", "date", True, "Last Modified Date"),
     ],
     "SINVOICE": [
-        X3FieldSchema("NUM_0",     "string",  False, "Invoice Number"),
-        X3FieldSchema("BPCORD_0",  "string",  True,  "Customer Code"),
-        X3FieldSchema("BPCNAM_0",  "string",  True,  "Customer Name"),
-        X3FieldSchema("INVDAT_0",  "date",    True,  "Invoice Date"),
-        X3FieldSchema("DUDDAT_0",  "date",    True,  "Due Date"),
-        X3FieldSchema("CUR_0",     "string",  True,  "Currency"),
-        X3FieldSchema("AMTATI_0",  "decimal", True,  "Amount Incl. Tax"),
-        X3FieldSchema("AMTNOTATI_0","decimal",True,  "Amount Excl. Tax"),
-        X3FieldSchema("CREDATTIM_0","date",   True,  "Creation Datetime"),
-        X3FieldSchema("UPDDATTIM_0","date",   True,  "Last Modified Datetime"),
+        X3FieldSchema("NUM_0", "string", False, "Invoice Number"),
+        X3FieldSchema("BPCORD_0", "string", True, "Customer Code"),
+        X3FieldSchema("BPCNAM_0", "string", True, "Customer Name"),
+        X3FieldSchema("INVDAT_0", "date", True, "Invoice Date"),
+        X3FieldSchema("DUDDAT_0", "date", True, "Due Date"),
+        X3FieldSchema("CUR_0", "string", True, "Currency"),
+        X3FieldSchema("AMTATI_0", "decimal", True, "Amount Incl. Tax"),
+        X3FieldSchema("AMTNOTATI_0", "decimal", True, "Amount Excl. Tax"),
+        X3FieldSchema("CREDATTIM_0", "date", True, "Creation Datetime"),
+        X3FieldSchema("UPDDATTIM_0", "date", True, "Last Modified Datetime"),
     ],
     "PITM": [
-        X3FieldSchema("ITMREF_0",  "string",  False, "Product Reference"),
-        X3FieldSchema("ITMDES_0",  "string",  True,  "Product Description"),
-        X3FieldSchema("TCLCOD_0",  "string",  True,  "Product Category"),
-        X3FieldSchema("ITMSTA_0",  "integer", True,  "Product Status"),
-        X3FieldSchema("UOM_0",     "string",  True,  "Unit of Measure"),
-        X3FieldSchema("SAUPRI_0",  "decimal", True,  "Sales Price"),
-        X3FieldSchema("PURPRI_0",  "decimal", True,  "Purchase Price"),
-        X3FieldSchema("CREDAT_0",  "date",    True,  "Creation Date"),
-        X3FieldSchema("UPDDAT_0",  "date",    True,  "Last Modified Date"),
+        X3FieldSchema("ITMREF_0", "string", False, "Product Reference"),
+        X3FieldSchema("ITMDES_0", "string", True, "Product Description"),
+        X3FieldSchema("TCLCOD_0", "string", True, "Product Category"),
+        X3FieldSchema("ITMSTA_0", "integer", True, "Product Status"),
+        X3FieldSchema("UOM_0", "string", True, "Unit of Measure"),
+        X3FieldSchema("SAUPRI_0", "decimal", True, "Sales Price"),
+        X3FieldSchema("PURPRI_0", "decimal", True, "Purchase Price"),
+        X3FieldSchema("CREDAT_0", "date", True, "Creation Date"),
+        X3FieldSchema("UPDDAT_0", "date", True, "Last Modified Date"),
     ],
 }
 
@@ -206,7 +204,7 @@ class X3MetadataClient:
             )
         self._auth = auth_client
         self._http = http_client
-        self._endpoint = object_path   # For X3, object_path IS the endpoint name
+        self._endpoint = object_path  # For X3, object_path IS the endpoint name
         self._cached_fields: list[X3FieldSchema] | None = None
 
     def discover_fields(
@@ -239,9 +237,9 @@ class X3MetadataClient:
                 name=f.name,
                 data_type=f.data_type,
                 is_nullable=f.is_nullable,
-                is_queryable=True,   # All fields from the sampler are queryable by definition
+                is_queryable=True,  # All fields from the sampler are queryable by definition
                 length=None,
-                is_custom=False,     # X3 has no standard custom-field prefix to detect
+                is_custom=False,  # X3 has no standard custom-field prefix to detect
                 source_label=f.label,
             )
             for f in filtered
@@ -311,8 +309,7 @@ class X3MetadataClient:
             ) from None
         except SageHttpError as exc:
             raise SageMetadataTransientError(
-                f"X3 sampling request failed for endpoint {self._endpoint!r}: "
-                f"{type(exc).__name__}"
+                f"X3 sampling request failed for endpoint {self._endpoint!r}: {type(exc).__name__}"
             ) from None
 
         value_list: list[dict[str, Any]] = response_body.get("value", [])
@@ -379,6 +376,7 @@ class X3MetadataClient:
 # ---------------------------------------------------------------------------
 # Schema inference helpers
 # ---------------------------------------------------------------------------
+
 
 def _infer_type(value: Any) -> str:
     """Infer the platform data_type string from a JSON Python value."""

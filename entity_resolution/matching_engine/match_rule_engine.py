@@ -344,7 +344,44 @@ def _field_similarity(a: str, b: str, kind: str) -> float:
     return 1.0 if a_norm == b_norm else 0.0
 
 
-def _jaro_winkler(s1: str, s2: str) -> float:  # noqa: C901
+def _jaro_char_matches(s1: str, s2: str, match_dist: int) -> tuple[list[bool], list[bool], int]:
+    """Find matching characters within match_dist, per the Jaro algorithm."""
+    s1_matches = [False] * len(s1)
+    s2_matches = [False] * len(s2)
+    matches = 0
+
+    for i in range(len(s1)):
+        start = max(0, i - match_dist)
+        end = min(i + match_dist + 1, len(s2))
+        for j in range(start, end):
+            if s2_matches[j] or s1[i] != s2[j]:
+                continue
+            s1_matches[i] = True
+            s2_matches[j] = True
+            matches += 1
+            break
+
+    return s1_matches, s2_matches, matches
+
+
+def _jaro_count_transpositions(
+    s1: str, s2: str, s1_matches: list[bool], s2_matches: list[bool]
+) -> int:
+    """Count transpositions among already-matched characters."""
+    transpositions = 0
+    k = 0
+    for i in range(len(s1)):
+        if not s1_matches[i]:
+            continue
+        while not s2_matches[k]:
+            k += 1
+        if s1[i] != s2[k]:
+            transpositions += 1
+        k += 1
+    return transpositions
+
+
+def _jaro_winkler(s1: str, s2: str) -> float:
     """Simplified Jaro-Winkler similarity (no external deps required)."""
     if s1 == s2:
         return 1.0
@@ -354,35 +391,11 @@ def _jaro_winkler(s1: str, s2: str) -> float:  # noqa: C901
     len1, len2 = len(s1), len(s2)
     match_dist = max(len1, len2) // 2 - 1
 
-    s1_matches = [False] * len1
-    s2_matches = [False] * len2
-    matches = 0
-    transpositions = 0
-
-    for i in range(len1):
-        start = max(0, i - match_dist)
-        end = min(i + match_dist + 1, len2)
-        for j in range(start, end):
-            if s2_matches[j] or s1[i] != s2[j]:
-                continue
-            s1_matches[i] = True
-            s2_matches[j] = True
-            matches += 1
-            break
-
+    s1_matches, s2_matches, matches = _jaro_char_matches(s1, s2, match_dist)
     if matches == 0:
         return 0.0
 
-    k = 0
-    for i in range(len1):
-        if not s1_matches[i]:
-            continue
-        while not s2_matches[k]:
-            k += 1
-        if s1[i] != s2[k]:
-            transpositions += 1
-        k += 1
-
+    transpositions = _jaro_count_transpositions(s1, s2, s1_matches, s2_matches)
     jaro = (matches / len1 + matches / len2 + (matches - transpositions / 2) / matches) / 3
 
     prefix = 0

@@ -28,8 +28,8 @@ Usage:
         --entity-id sage-intacct-customer --window-days 7
 
 Note:
-    Local scripts cannot write to dev-edl-raw-layer (bucket policy restricts
-    writes to the dev-extraction-runtime-role Lambda IAM role only).
+    Local scripts cannot write to edl-raw-087972550871 (bucket policy restricts
+    writes to the EdlExtractionRuntimeRole Lambda IAM role only).
     Use --dry-run for local connectivity and schema validation.
     Full extraction must be triggered via Step Functions.
 """
@@ -45,7 +45,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import os
+import os  # noqa: E402
 
 # ── Default to dev profile/region if not already configured ─────────────────
 if "AWS_PROFILE" not in os.environ:
@@ -53,12 +53,11 @@ if "AWS_PROFILE" not in os.environ:
 if "AWS_DEFAULT_REGION" not in os.environ:
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
-# Register the Sage connector at import time (triggers @register decorator)
+# Register the Sage connector at import time (triggers @register decorator).
+# These imports must come after the sys.path manipulation above (this script
+# runs standalone, not as an installed package), hence noqa: E402 throughout.
 import connector_runtime.adapters.sage.sage_connector  # noqa: E402, F401
-
-from connector_runtime.adapters.sage.common.sage_credential_manager import SageCredentialManager  # noqa: E402
 from connector_runtime.adapters.sage.common.sage_http_client import SageHttpClient  # noqa: E402
-from connector_runtime.adapters.sage.common.sage_product_registry import resolve_product_strategies  # noqa: E402
 from connector_runtime.adapters.sage.sage_connector import SageConnector  # noqa: E402
 from connector_runtime.configuration_repository.configuration_repository import (  # noqa: E402
     ConfigurationRepositoryClient,
@@ -66,13 +65,15 @@ from connector_runtime.configuration_repository.configuration_repository import 
 from connector_runtime.interfaces.connector_interface import FieldContract  # noqa: E402
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType  # noqa: E402
 from observability.structured_logger import get_platform_logger  # noqa: E402
-from watermark_management.watermark_repository.watermark_repository import WatermarkRepository  # noqa: E402
+from watermark_management.watermark_repository.watermark_repository import (  # noqa: E402
+    WatermarkRepository,
+)
 
 _logger = get_platform_logger(__name__)
 
 _ENVIRONMENT = "dev"
 _REGION = "us-east-1"
-_RAW_S3_BUCKET = "dev-edl-raw-layer"
+_RAW_S3_BUCKET = "edl-raw-087972550871"
 _SOURCE_ID = "sage"
 
 # Known entity IDs and their Sage object paths
@@ -102,6 +103,7 @@ _DRY_RUN_RECORD_LIMIT = 5
 # Step 1 + 2: Credential fetch + OAuth token validation
 # ---------------------------------------------------------------------------
 
+
 def test_connection(entity_id: str) -> tuple[bool, object]:
     """
     Fetch credentials from Secrets Manager and obtain an Intacct OAuth token.
@@ -111,11 +113,11 @@ def test_connection(entity_id: str) -> tuple[bool, object]:
     cfg = _ENTITY_CONFIG[entity_id]
     sage_product = cfg["sage_product"]
 
-    print(f"\n[1/4] Fetching credentials from Secrets Manager ...")
-    print(f"      Secret path: {_ENVIRONMENT}/sources/sage/{sage_product}/credentials")
+    print("\n[1/4] Fetching credentials from Secrets Manager ...")
+    print(f"      Secret path: edl/sources/sage/{sage_product}/credentials")
 
-    from connector_runtime.adapters.sage.products.intacct.intacct_auth import IntacctAuthClient
     from connector_runtime.adapters.sage.common.sage_credential_manager import SageCredentialManager
+    from connector_runtime.adapters.sage.products.intacct.intacct_auth import IntacctAuthClient
 
     required_keys = frozenset({"base_url", "token_url", "client_id", "client_secret", "company_id"})
     credential_manager = SageCredentialManager(
@@ -149,6 +151,7 @@ def test_connection(entity_id: str) -> tuple[bool, object]:
 # Step 3: Schema discovery via Intacct Models endpoint
 # ---------------------------------------------------------------------------
 
+
 def discover_schema(
     connector: SageConnector,
     entity_id: str,
@@ -177,6 +180,7 @@ def discover_schema(
 # ---------------------------------------------------------------------------
 # Step 4: Extraction (dry-run peeks first N records, full run writes Parquet)
 # ---------------------------------------------------------------------------
+
 
 def run_extraction(
     connector: SageConnector,
@@ -220,13 +224,14 @@ def run_extraction(
         print(f"\n      Dry-run complete. Records seen: {records_seen}")
     else:
         print(
-            "\n      NOTE: Local scripts cannot write to dev-edl-raw-layer.\n"
-            "      The bucket policy restricts writes to dev-extraction-runtime-role only.\n"
+            "\n      NOTE: Local scripts cannot write to edl-raw-087972550871.\n"
+            "      The bucket policy restricts writes to EdlExtractionRuntimeRole only.\n"
             "      To run a full extraction, trigger via Step Functions:\n\n"
             f"        AWS_PROFILE=dev python scripts/trigger_extraction.py \\\n"
             f"          --source-id {_SOURCE_ID} --entity-id {entity_id} \\\n"
             f"          --environment {_ENVIRONMENT} --region {_REGION} \\\n"
-            f"          --state-machine-arn arn:aws:states:{_REGION}:087972550871:stateMachine:{_ENVIRONMENT}-extraction-pipeline \\\n"
+            f"          --state-machine-arn "
+            f"arn:aws:states:{_REGION}:087972550871:stateMachine:EdlExtractionPipeline \\\n"
             f"          --param sage_product={_ENTITY_CONFIG[entity_id]['sage_product']} \\\n"
             f"          --param object_path={_ENTITY_CONFIG[entity_id]['object_path']}"
         )
@@ -235,6 +240,7 @@ def run_extraction(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -290,6 +296,7 @@ def main() -> None:
     if args.window_days is not None:
         # Patch the config to use the overridden window (useful for testing)
         import dataclasses
+
         config = dataclasses.replace(config, extraction_window_days=args.window_days)
     print(f"  load_type      : {config.load_type}")
     print(f"  watermark_field: {config.watermark_field or '(none)'}")

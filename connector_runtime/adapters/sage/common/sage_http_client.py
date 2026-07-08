@@ -32,7 +32,7 @@ from observability.structured_logger import get_platform_logger
 _logger = get_platform_logger(__name__)
 
 # Default timeout for all Sage REST API calls.
-# Intacct documentation recommends 30–60 seconds; 45 s is a conservative middle ground.
+# Intacct documentation recommends 30-60 seconds; 45 s is a conservative middle ground.
 _DEFAULT_TIMEOUT_SECONDS: Final[int] = 45
 
 

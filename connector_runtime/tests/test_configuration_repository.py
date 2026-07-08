@@ -26,8 +26,8 @@ from contracts.entity_configuration_contract import EntityExtractionConfig, Load
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_TABLE = f"{_ENV}-edl-entity-extraction-config"
-_BUCKET = f"{_ENV}-entity-extraction-config-s3"
+_TABLE = "EdlEntityExtractionConfig"
+_BUCKET = "edl-entity-extraction-config-s3"
 
 _VALID_RECORD: dict[str, Any] = {
     "source_id": "salesforce",

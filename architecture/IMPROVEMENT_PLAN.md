@@ -36,7 +36,7 @@ by guessing a prefix; there is no access boundary.
 
 *Tenant code format:*  
 Each tenant is identified by a `tenant_code`: a stable, human-readable slug
-chosen at onboarding time (e.g., `acme-corp`, `globex-eu`, `initech`). Because
+chosen at onboarding time (e.g., `demo`, `globex-eu`, `initech`). Because
 it is a slug and not an opaque UUID, an operator navigating the AWS S3 console
 can immediately identify which tenant's data they are looking at without
 cross-referencing a lookup table.
@@ -53,8 +53,8 @@ raw/{source_id}/{entity_id}/extraction_date={date}/run_id={run_id}/
 # S3 raw layer (with multi-tenancy — tenant_code is the root directory)
 {tenant_code}/raw/{source_id}/{entity_id}/extraction_date={date}/run_id={run_id}/
 
-# Concrete example for tenant "acme-corp"
-acme-corp/raw/salesforce/salesforce-account/extraction_date=2026-07-06/run_id=run-.../
+# Concrete example for tenant "demo"
+demo/raw/salesforce/salesforce-account/extraction_date=2026-07-06/run_id=run-.../
 ```
 
 Each tenant owns their root directory directly — browsing the S3 console shows
@@ -75,21 +75,21 @@ table: `GSI: tenant_code (PK) + entity_id (SK)` for tenant-scoped queries.
 
 *Secrets Manager path extension:*
 ```
-# Today:  {env}/sources/{source_id}/credentials
+# Today:  edl/sources/{source_id}/credentials
 # SaaS:   {env}/{tenant_code}/sources/{source_id}/credentials
 
 # Concrete example
-dev/acme-corp/sources/salesforce/credentials
+dev/demo/sources/salesforce/credentials
 ```
 
 *IAM path-scoped policies (per-tenant role or resource tag):*  
 Extraction runtime role gets a `Condition` restricting `s3:*` to the
-`{tenant_code}/*` prefix (e.g., `acme-corp/*`). Use `aws:RequestTag/TenantCode`
+`{tenant_code}/*` prefix (e.g., `demo/*`). Use `aws:RequestTag/TenantCode`
 or resource-based S3 bucket prefix policies.
 
 *Step Functions execution name namespace:*  
 Prefix all execution names with `{tenant_code}-` so CloudWatch Logs and execution
-history are filterable per tenant (e.g., `acme-corp-salesforce-account-run-...`).
+history are filterable per tenant (e.g., `demo-salesforce-account-run-...`).
 
 *EventBridge schedule name namespace:*  
 All schedules are prefixed `{tenant_code}-{source_id}-{entity_id}`.
@@ -132,7 +132,7 @@ scripts/trigger_extraction.py                       — tenant_code argument
 ```
 
 **Acceptance criteria:**
-- Each tenant owns a top-level root directory in S3 (e.g., `acme-corp/` and
+- Each tenant owns a top-level root directory in S3 (e.g., `demo/` and
   `globex-eu/` are sibling root folders — no shared `tenants/` parent)
 - An IAM role for Tenant A cannot `s3:GetObject` on Tenant B's root prefix
 - All existing dev pipeline runs still succeed with `tenant_code=default`
@@ -265,7 +265,7 @@ mappings). A `SurvivorshipPolicyRegistryClient` loads them per
 s3://{curated-bucket}/{tenant_code}/survivorship-policies/{entity_type}/v{n}.json
 
 # Concrete example
-s3://dev-edl-curated-layer/acme-corp/survivorship-policies/company/v1.json
+s3://edl-curated-087972550871/demo/survivorship-policies/company/v1.json
 ```
 
 Schema of `v1.json`:
@@ -311,7 +311,7 @@ state (`terraform import`) rather than recreated:
 ```bash
 terraform import \
   module.metadata_persistence.aws_dynamodb_table.entity_extraction_config \
-  dev-entity-extraction-config
+  EdlEntityExtractionConfig
 ```
 
 Add a `scripts/bootstrap_environment.sh` that runs table creation + terraform
@@ -365,7 +365,7 @@ EventBridge Scheduler (N schedules fire simultaneously)
         │
         ▼
 SQS FIFO Queue  ─── absorbs all N messages instantly; no loss
-  ({env}-edl-pipeline-trigger.fifo)
+  (EdlPipelineTrigger.fifo)
         │  (drains at controlled rate via Lambda ESM)
         ▼
 Pipeline Trigger Lambda  ─── reserved_concurrency=50 caps execution start rate
@@ -1025,7 +1025,7 @@ Add a DLQ processor Lambda (`orchestration/dlq_processor/dlq_processor_handler.p
 that:
 1. Reads messages from the DLQ
 2. Validates the message schema (Pydantic)
-3. Logs an audit record to `{env}-edl-run-audit-log` with `stage=dlq_received`
+3. Logs an audit record to `EdlRunAuditLog` with `stage=dlq_received`
 4. Optionally re-submits to Step Functions for replay (when `auto_replay: true`
    in config; disabled by default)
 5. Sends SNS notification with run_id, source_id, entity_id, and failure reason

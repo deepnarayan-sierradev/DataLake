@@ -26,7 +26,7 @@ from schema_management.snapshot_repository.snapshot_repository import (
 )
 
 _REGION = "us-east-1"
-_BUCKET = "dev-edl-schema-snapshots"
+_BUCKET = "edl-schema-snapshots-087972550871"
 
 
 def _make_snapshot(
@@ -222,7 +222,9 @@ class TestWriteDriftReport:
             extraction_date="2026-06-11",
             report_json='{"overall_classification":"no_drift","field_changes":[]}',
         )
-        expected_key = "demo/salesforce/salesforce-account/abc123def456/drift-report-2026-06-11.json"
+        expected_key = (
+            "demo/salesforce/salesforce-account/abc123def456/drift-report-2026-06-11.json"
+        )
         assert key == expected_key
         s3 = boto3.client("s3", region_name=_REGION)
         response = s3.get_object(Bucket=_BUCKET, Key=key)

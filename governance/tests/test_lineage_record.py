@@ -151,9 +151,7 @@ class TestLineageFactories:
 class TestLineageEmitterErrorPaths:
     def setup_method(self, method: object = None) -> None:
         boto3.client("s3", region_name=_REGION).create_bucket(Bucket=_BUCKET)
-        self.emitter = LineageEmitter(
-            governance_s3_bucket=_BUCKET, region_name=_REGION
-        )
+        self.emitter = LineageEmitter(governance_s3_bucket=_BUCKET, region_name=_REGION)
 
     def test_emit_s3_failure_raises_lineage_emission_error(self) -> None:
         from unittest.mock import MagicMock

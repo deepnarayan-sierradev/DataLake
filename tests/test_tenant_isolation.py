@@ -17,13 +17,31 @@ Isolation mechanisms covered:
     SchemaSnapshotRepository): genuinely two distinct objects; an IAM
     bucket-policy condition on the tenant_code prefix can enforce this today.
   - DynamoDB application-level guards (ConfigurationRepositoryClient
-    DynamoDB backend, WatermarkRepository, EntityTypeRegistryClient): the
-    tables are NOT yet tenant-partitioned at the key level (see SEC-2 in
+    DynamoDB backend, EntityTypeRegistryClient): the entity-config table is
+    NOT yet tenant-partitioned at the key level (see SEC-2 in
     architecture/GAP_ANALYSIS_FINDINGS.md), so isolation here is enforced in
     application code, not IAM. These tests exist specifically to catch a
     regression in that application-level guard, since IAM cannot back it up.
+  - WatermarkRepository DynamoDB key isolation: genuinely tenant-scoped as of
+    ARCH-1's fix (tenant_scoped_key() applied to the source_id key
+    attribute) — the key-collision regression test below proves two tenants
+    extracting the same source_id/entity_id no longer share one item.
+  - RawLayerWriter S3 partition isolation (ARCH-1): the tenant_code root
+    segment prevents two tenants' raw Parquet for the same source/entity
+    from landing in the same prefix.
+  - Circuit breaker tenant isolation (ARCH-1): one tenant's consecutive
+    extraction failures on a shared connector type never opens the circuit
+    for another tenant.
   - Control-plane API: a run lookup for another tenant's run_id returns 404
     (not 403), so the API never confirms a foreign run's existence.
+
+Analytics-publisher and golden/canonical-record-publisher S3 path isolation
+(also fixed under ARCH-1) are covered in their own modules'
+test suites — analytics_publisher/tests/test_analytics_publisher_handler.py
+and entity_resolution/tests/test_canonical_record_publisher.py — since
+proving them requires the same Glue/S3/registry fakes those suites already
+build; duplicating that harness here would just be a second copy to keep in
+sync, not new coverage.
 
 Explicitly NOT covered (documented gap, not a false-positive test):
   - Secrets Manager: credentials are provisioned per-source-connector, not
@@ -45,14 +63,27 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from connector_runtime.adapters.mysql_rds.mysql_rds_raw_layer_writer import (
+    MySqlRdsRawLayerWriter,
+)
+from connector_runtime.adapters.netsuite.netsuite_raw_layer_writer import (
+    NetSuiteRawLayerWriter,
+)
+from connector_runtime.adapters.sage.common.sage_raw_layer_writer import SageRawLayerWriter
+from connector_runtime.adapters.salesforce.salesforce_raw_layer_writer import (
+    SalesforceRawLayerWriter,
+)
 from connector_runtime.api.control_plane_handler import lambda_handler as control_plane_handler
 from connector_runtime.configuration_repository.configuration_repository import (
     ConfigurationBackend,
     ConfigurationNotFoundError,
     ConfigurationRepositoryClient,
 )
+from connector_runtime.interfaces.connector_interface import ExtractionRecord
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType
+from contracts.identifier_policy import DEFAULT_TENANT_CODE
 from entity_resolution.entity_type_registry import EntityTypeRecord, EntityTypeRegistryClient
+from orchestration.step_functions.extraction_retry_policy import ExtractionRetryPolicy
 from schema_management.snapshot_repository.snapshot_repository import (
     FieldSnapshot,
     SchemaSnapshot,
@@ -73,7 +104,7 @@ _TENANT_B = "tenant-beta"
 
 
 class TestConfigurationRepositoryS3Isolation:
-    _BUCKET = f"{_ENV}-edl-entity-config"
+    _BUCKET = "edl-entity-config"
 
     def _config(self, tenant_code: str) -> EntityExtractionConfig:
         return EntityExtractionConfig(
@@ -119,7 +150,7 @@ class TestConfigurationRepositoryS3Isolation:
 
 
 class TestConfigurationRepositoryDynamoDbIsolation:
-    _TABLE = f"{_ENV}-edl-entity-extraction-config"
+    _TABLE = "EdlEntityExtractionConfig"
 
     def _create_table(self) -> None:
         boto3.resource("dynamodb", region_name=_REGION).create_table(
@@ -169,7 +200,7 @@ class TestConfigurationRepositoryDynamoDbIsolation:
 
 
 class TestWatermarkRepositoryIsolation:
-    _TABLE = f"{_ENV}-edl-watermark-repository"
+    _TABLE = "EdlWatermarkRepository"
 
     def _create_table(self) -> None:
         boto3.resource("dynamodb", region_name=_REGION).create_table(
@@ -209,12 +240,220 @@ class TestWatermarkRepositoryIsolation:
 
 
 # ---------------------------------------------------------------------------
+# WatermarkRepository — genuine key-collision proof (ARCH-1 fix)
+# ---------------------------------------------------------------------------
+
+
+class TestWatermarkRepositoryKeyIsolation:
+    """
+    Regression test for the ARCH-1 fix: WatermarkRepository's DynamoDB key is
+    now tenant-scoped (tenant_scoped_key() applied to the source_id
+    attribute). Before the fix, two tenants extracting the same
+    source_id/entity_id shared one DynamoDB item — a post-read tenant check
+    masked the collision for get_watermark(), but advance_watermark() would
+    still silently overwrite the other tenant's watermark value. This proves
+    the write side, not just the read side, using the exact tenant pair
+    (DEFAULT_TENANT_CODE / "acme-test") named in
+    architecture/MULTI_TENANT_ROLLOUT_PLAN.md's Phase 2 exit criterion.
+    """
+
+    _TABLE = "EdlWatermarkRepository"
+    _OTHER_TENANT = "acme-test"
+
+    def _create_table(self) -> None:
+        boto3.resource("dynamodb", region_name=_REGION).create_table(
+            TableName=self._TABLE,
+            KeySchema=[
+                {"AttributeName": "source_id", "KeyType": "HASH"},
+                {"AttributeName": "entity_id", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "source_id", "AttributeType": "S"},
+                {"AttributeName": "entity_id", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+    @mock_aws
+    def test_advancing_one_tenants_watermark_does_not_affect_the_other(self) -> None:
+        self._create_table()
+        repo = WatermarkRepository(environment=_ENV, region_name=_REGION)
+
+        repo.initialise_watermark(
+            "salesforce",
+            "salesforce-account",
+            upper_watermark=datetime(2026, 7, 1, tzinfo=UTC),
+            run_id="run-demo-001",
+            tenant_code=DEFAULT_TENANT_CODE,
+        )
+        repo.initialise_watermark(
+            "salesforce",
+            "salesforce-account",
+            upper_watermark=datetime(2026, 7, 1, tzinfo=UTC),
+            run_id="run-acme-001",
+            tenant_code=self._OTHER_TENANT,
+        )
+
+        demo_record = repo.get_watermark(
+            "salesforce", "salesforce-account", tenant_code=DEFAULT_TENANT_CODE
+        )
+        assert demo_record is not None
+        repo.advance_watermark(
+            current=demo_record,
+            new_upper_watermark=datetime(2026, 7, 5, tzinfo=UTC),
+            run_id="run-demo-002",
+        )
+
+        # The other tenant's watermark must be completely untouched by
+        # demo's advance — this is the write-side proof the old
+        # post-read-only guard could never provide.
+        other_record = repo.get_watermark(
+            "salesforce", "salesforce-account", tenant_code=self._OTHER_TENANT
+        )
+        assert other_record is not None
+        assert other_record.upper_watermark == datetime(2026, 7, 1, tzinfo=UTC)
+        assert other_record.run_id == "run-acme-001"
+
+        demo_record_after = repo.get_watermark(
+            "salesforce", "salesforce-account", tenant_code=DEFAULT_TENANT_CODE
+        )
+        assert demo_record_after is not None
+        assert demo_record_after.upper_watermark == datetime(2026, 7, 5, tzinfo=UTC)
+
+
+# ---------------------------------------------------------------------------
+# RawLayerWriter — genuine S3 partition isolation (ARCH-1 fix)
+# ---------------------------------------------------------------------------
+
+
+def _new_salesforce_writer(bucket: str, tenant_code: str) -> Any:
+    return SalesforceRawLayerWriter(s3_bucket=bucket, region_name=_REGION, tenant_code=tenant_code)
+
+
+def _new_netsuite_writer(bucket: str, tenant_code: str) -> Any:
+    return NetSuiteRawLayerWriter(s3_bucket=bucket, region_name=_REGION, tenant_code=tenant_code)
+
+
+def _new_mysql_rds_writer(bucket: str, tenant_code: str) -> Any:
+    return MySqlRdsRawLayerWriter(s3_bucket=bucket, region_name=_REGION, tenant_code=tenant_code)
+
+
+def _new_sage_writer(bucket: str, tenant_code: str) -> Any:
+    return SageRawLayerWriter(
+        s3_bucket=bucket,
+        sage_product="intacct",
+        region_name=_REGION,
+        tenant_code=tenant_code,
+    )
+
+
+# (writer_factory, source_id, entity_id, expected_source_segment) per connector
+# adapter. expected_source_segment is the single, hyphenated path segment
+# production wiring now produces (RAW-1) — no s3_prefix, no doubled segment.
+_RAW_LAYER_WRITER_CASES = [
+    (_new_salesforce_writer, "salesforce", "salesforce-account", "salesforce"),
+    (_new_netsuite_writer, "netsuite", "netsuite-customer", "netsuite"),
+    (_new_mysql_rds_writer, "mysql-rds", "mysql-rds-orders", "mysql-rds"),
+    (_new_sage_writer, "sage", "sage-intacct-customer", "sage-intacct"),
+]
+
+
+class TestRawLayerWriterPathIsolation:
+    """
+    Regression test for ARCH-1: RawLayerWriter previously had no tenant_code
+    parameter at all, so every tenant's raw Parquet for a given
+    source/entity/run_id landed at the same S3 prefix.
+
+    Parametrized across all four connector adapters — a prior version of
+    this test only exercised the Salesforce subclass, which proved the
+    shared base-class mechanism but would not have caught a regression
+    isolated to one adapter's constructor (e.g. Sage forgetting to forward
+    tenant_code to super().__init__()).
+    """
+
+    _BUCKET = "edl-raw-tenant-isolation-test"
+
+    @pytest.mark.parametrize(
+        "make_writer, source_id, entity_id, expected_source_segment",
+        _RAW_LAYER_WRITER_CASES,
+        ids=["salesforce", "netsuite", "mysql-rds", "sage"],
+    )
+    @mock_aws
+    def test_two_tenants_same_run_id_produce_distinct_prefixes(
+        self,
+        make_writer: Any,
+        source_id: str,
+        entity_id: str,
+        expected_source_segment: str,
+    ) -> None:
+        boto3.client("s3", region_name=_REGION).create_bucket(Bucket=self._BUCKET)
+        records = [ExtractionRecord(payload={"Id": "1", "Name": "Acme"})]
+
+        writer_a = make_writer(self._BUCKET, _TENANT_A)
+        writer_b = make_writer(self._BUCKET, _TENANT_B)
+
+        key_a = writer_a.write_partition(
+            records, source_id, entity_id, "run-shared-001", "a" * 64, "2026-07-01"
+        )
+        key_b = writer_b.write_partition(
+            records, source_id, entity_id, "run-shared-001", "a" * 64, "2026-07-01"
+        )
+
+        assert key_a != key_b
+
+        # RAW-1: exactly {tenant_code}/{source}/{entity_id}/... — a single
+        # source segment, no s3_prefix, no doubled "{source}/{source}".
+        expected_a = (
+            f"{_TENANT_A}/{expected_source_segment}/{entity_id}"
+            f"/extraction_date=2026-07-01/run_id=run-shared-001/data.parquet"
+        )
+        expected_b = (
+            f"{_TENANT_B}/{expected_source_segment}/{entity_id}"
+            f"/extraction_date=2026-07-01/run_id=run-shared-001/data.parquet"
+        )
+        assert key_a == expected_a
+        assert key_b == expected_b
+        assert key_a.startswith(f"{_TENANT_A}/")
+        assert key_b.startswith(f"{_TENANT_B}/")
+
+        # Both objects genuinely exist independently — neither write
+        # overwrote the other.
+        s3 = boto3.client("s3", region_name=_REGION)
+        assert s3.get_object(Bucket=self._BUCKET, Key=key_a)["Body"].read()
+        assert s3.get_object(Bucket=self._BUCKET, Key=key_b)["Body"].read()
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker — tenant isolation (ARCH-1 fix)
+# ---------------------------------------------------------------------------
+
+
+class TestCircuitBreakerTenantIsolation:
+    """
+    Regression test for ARCH-1: the circuit breaker's key was previously
+    `source_id:entity_id` with no tenant dimension, so one tenant's
+    consecutive extraction failures on a shared connector type (e.g. both
+    tenants running "salesforce") could open the circuit and block another
+    tenant's healthy runs.
+    """
+
+    def test_tenant_a_failures_do_not_open_circuit_for_tenant_b(self) -> None:
+        policy = ExtractionRetryPolicy(circuit_open_threshold=2)
+
+        policy.record_failure("salesforce", tenant_code=_TENANT_A)
+        policy.record_failure("salesforce", tenant_code=_TENANT_A)
+
+        assert policy.is_circuit_open("salesforce", tenant_code=_TENANT_A) is True
+        assert policy.is_circuit_open("salesforce", tenant_code=_TENANT_B) is False
+
+
+# ---------------------------------------------------------------------------
 # SchemaSnapshotRepository (genuine S3 prefix isolation)
 # ---------------------------------------------------------------------------
 
 
 class TestSchemaSnapshotRepositoryIsolation:
-    _BUCKET = f"{_ENV}-edl-schema-snapshots"
+    _BUCKET = "edl-schema-snapshots-087972550871"
 
     def _snapshot(self) -> SchemaSnapshot:
         return SchemaSnapshot(
@@ -252,7 +491,7 @@ class TestSchemaSnapshotRepositoryIsolation:
 
 
 class TestEntityTypeRegistryIsolation:
-    _TABLE = f"{_ENV}-edl-entity-type-registry"
+    _TABLE = "EdlEntityTypeRegistry"
 
     def _create_table(self) -> None:
         boto3.resource("dynamodb", region_name=_REGION).create_table(
@@ -301,9 +540,9 @@ class TestEntityTypeRegistryIsolation:
 
 
 class TestControlPlaneRunLookupIsolation:
-    _ENTITY_CONFIG_TABLE = f"{_ENV}-edl-entity-extraction-config"
-    _ENTITY_TYPE_REGISTRY_TABLE = f"{_ENV}-edl-entity-type-registry"
-    _AUDIT_LOG_TABLE = f"{_ENV}-edl-run-audit-log"
+    _ENTITY_CONFIG_TABLE = "EdlEntityExtractionConfig"
+    _ENTITY_TYPE_REGISTRY_TABLE = "EdlEntityTypeRegistry"
+    _AUDIT_LOG_TABLE = "EdlRunAuditLog"
 
     def _env_vars(self) -> dict[str, str]:
         return {

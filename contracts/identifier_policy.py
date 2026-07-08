@@ -32,7 +32,7 @@ from typing import Final
 
 STABLE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}$")
 
-# Tenant code format: lowercase letters, digits, hyphens; 2–48 characters; starts with a letter.
+# Tenant code format: lowercase letters, digits, hyphens; 2-48 characters; starts with a letter.
 # Examples: "acme-corp", "globex-eu", "demo".
 TENANT_CODE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,47}$")
 

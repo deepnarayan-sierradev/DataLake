@@ -56,6 +56,11 @@ packages = [
 [tool.ruff]
 target-version = "py314"
 line-length = 100
+extend-exclude = [
+    "pptx",
+    "scripts/generate_presentation.py",
+    "scripts/_gen_html.py",
+]
 
 [tool.ruff.lint]
 select = [
@@ -75,8 +80,8 @@ select = [
 ignore = ["ANN401"]  # Any is legitimately needed for boto3 clients, pyarrow tables, and dynamic record dicts
 
 [tool.ruff.lint.per-file-ignores]
-"*/tests/*" = ["S101", "ANN", "T20", "S608"]  # assert, annotations, print, and SQL-in-test-fixture allowed in tests
-"tests/*" = ["S101", "ANN", "T20", "S608"]  # top-level cross-cutting integration tests (same rationale as above)
+"**/tests/**" = ["S101", "ANN", "T20", "S608", "S105", "S106", "S107"]  # assert, annotations, print, SQL-in-test-fixture, and mock credential/token literals allowed in tests
+"tests/*" = ["S101", "ANN", "T20", "S608", "S105", "S106", "S107"]  # top-level cross-cutting integration tests (same rationale as above)
 "scripts/*" = ["T20", "ANN", "S603", "S607"]  # CLI scripts: print, annotations, subprocess allowed
 
 [tool.ruff.lint.mccabe]

@@ -35,9 +35,7 @@ from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATT
 # record.get(field) performs top-level dict lookup only.  Dotted paths like
 # 'auditInfo.id' would silently return None and break merge logic.
 # Sourced from server-side entity config only — never from event input (OWASP A03).
-_FIELD_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[a-zA-Z_][a-zA-Z0-9_]{0,127}$"
-)
+_FIELD_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,127}$")
 
 
 class LoadType(StrEnum):
@@ -178,11 +176,15 @@ class EntityExtractionConfig(BaseModel):
     )
     schedule_enabled: bool = Field(
         default=True,
-        description="Whether the EventBridge schedule should be active. Ignored when schedule_cron is None.",
+        description=(
+            "Whether the EventBridge schedule should be active. Ignored when schedule_cron is None."
+        ),
     )
     schedule_timezone: str = Field(
         default="UTC",
-        description="IANA timezone for the cron schedule (e.g. 'America/New_York'). Defaults to UTC.",
+        description=(
+            "IANA timezone for the cron schedule (e.g. 'America/New_York'). Defaults to UTC."
+        ),
     )
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────

@@ -28,7 +28,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
 import os
 import sys
@@ -45,11 +44,16 @@ if "AWS_PROFILE" not in os.environ:
 if "AWS_DEFAULT_REGION" not in os.environ:
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
-# Register connector by importing its module (triggers @register decorator)
+# Register connector by importing its module (triggers @register decorator).
+# These imports must come after the sys.path manipulation above (this script
+# runs standalone, not as an installed package), hence noqa: E402 throughout.
 import connector_runtime.adapters.salesforce.salesforce_connector  # noqa: E402, F401
-
-from connector_runtime.adapters.salesforce.salesforce_connector import SalesforceConnector  # noqa: E402
-from connector_runtime.adapters.salesforce.salesforce_auth_client import SalesforceAuthClient  # noqa: E402
+from connector_runtime.adapters.salesforce.salesforce_auth_client import (  # noqa: E402
+    SalesforceAuthClient,
+)
+from connector_runtime.adapters.salesforce.salesforce_connector import (  # noqa: E402
+    SalesforceConnector,
+)
 from connector_runtime.adapters.salesforce.salesforce_raw_layer_writer import (  # noqa: E402
     SalesforceRawLayerWriter,
 )
@@ -59,9 +63,9 @@ from connector_runtime.configuration_repository.configuration_repository import 
 from connector_runtime.interfaces.connector_interface import FieldContract  # noqa: E402
 from contracts.entity_configuration_contract import (  # noqa: E402
     EntityExtractionConfig,
-    FieldMode,
     LoadType,
 )
+from contracts.identifier_policy import DEFAULT_TENANT_CODE  # noqa: E402
 from observability.structured_logger import get_platform_logger  # noqa: E402
 from watermark_management.watermark_repository.watermark_repository import (  # noqa: E402
     WatermarkRepository,
@@ -71,8 +75,7 @@ _logger = get_platform_logger(__name__)
 
 _ENVIRONMENT = "dev"
 _REGION = "us-east-1"
-_RAW_S3_BUCKET = "dev-edl-raw-layer"
-_RAW_S3_PREFIX = "raw"
+_RAW_S3_BUCKET = "edl-raw-087972550871"
 _SOURCE_ID = "salesforce"
 
 # Map entity_id → Salesforce object API name
@@ -85,6 +88,7 @@ _ENTITY_OBJECT_MAP: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Step 1 + 2: Connection test (OAuth token fetch)
 # ---------------------------------------------------------------------------
+
 
 def test_connection(region: str, environment: str) -> tuple[bool, SalesforceAuthClient]:
     """Fetch credentials from Secrets Manager, obtain an OAuth token, confirm connectivity."""
@@ -110,6 +114,7 @@ def test_connection(region: str, environment: str) -> tuple[bool, SalesforceAuth
 # Step 3: Schema discovery
 # ---------------------------------------------------------------------------
 
+
 def discover_schema(
     connector: SalesforceConnector,
     entity_id: str,
@@ -129,7 +134,8 @@ def discover_schema(
         nullable = "NULL" if fd.is_nullable else "NOT NULL"
         print(f"        {fd.name:<40} {fd.data_type:<20} {nullable}")
     if len(field_contract.fields) > 20:
-        print(f"        ... and {len(field_contract.fields) - 20} more fields (omitted for brevity)")
+        remaining = len(field_contract.fields) - 20
+        print(f"        ... and {remaining} more fields (omitted for brevity)")
     print(f"      Fingerprint: {field_contract.schema_fingerprint}\n")
     return field_contract
 
@@ -137,6 +143,7 @@ def discover_schema(
 # ---------------------------------------------------------------------------
 # Step 4: Extraction + S3 write
 # ---------------------------------------------------------------------------
+
 
 def run_extraction(
     connector: SalesforceConnector,
@@ -147,10 +154,10 @@ def run_extraction(
     watermark_upper: str,
     dry_run: bool,
     raw_s3_bucket: str,
-    raw_s3_prefix: str,
     region: str,
+    tenant_code: str,
 ) -> None:
-    """Build SOQL query, execute via Bulk API 2.0, and stream Parquet to S3 (or peek rows if dry-run)."""
+    """Build SOQL query, execute via Bulk API 2.0, and stream to S3 (or peek rows if dry-run)."""
     print("[4/4] Running extraction ...")
 
     query_contract = connector.build_extraction_query(
@@ -198,8 +205,8 @@ def run_extraction(
     print("      Streaming records to S3 in batches ...")
     writer = SalesforceRawLayerWriter(
         s3_bucket=raw_s3_bucket,
-        s3_prefix=raw_s3_prefix,
         region_name=region,
+        tenant_code=tenant_code,
     )
     record_iter = connector.execute_extraction(
         query_contract=query_contract,
@@ -226,6 +233,7 @@ def run_extraction(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run the Salesforce connector locally against dev AWS resources."
@@ -250,7 +258,7 @@ def main() -> None:
     parser.add_argument("--region", default=_REGION)
     parser.add_argument("--environment", default=_ENVIRONMENT)
     parser.add_argument("--raw-s3-bucket", default=_RAW_S3_BUCKET)
-    parser.add_argument("--raw-s3-prefix", default=_RAW_S3_PREFIX)
+    parser.add_argument("--tenant-code", default=DEFAULT_TENANT_CODE)
 
     args = parser.parse_args()
 
@@ -258,15 +266,17 @@ def main() -> None:
     object_name: str = _ENTITY_OBJECT_MAP[entity_id]
     region: str = args.region
     environment: str = args.environment
+    tenant_code: str = args.tenant_code
 
     print("=" * 60)
     print("  Salesforce Connector — Local Test Runner")
     print("=" * 60)
     print(f"  Entity      : {entity_id}")
     print(f"  SF Object   : {object_name}")
+    print(f"  Tenant      : {tenant_code}")
     print(f"  Env         : {environment}")
     print(f"  Region      : {region}")
-    print(f"  S3 bucket   : {args.raw_s3_bucket}/{args.raw_s3_prefix}")
+    print(f"  S3 bucket   : {args.raw_s3_bucket}")
     print(f"  Dry run     : {args.dry_run}")
     print("=" * 60)
 
@@ -277,7 +287,9 @@ def main() -> None:
 
     # ── Load entity config from DynamoDB ─────────────────────────────────────
     config_client = ConfigurationRepositoryClient(environment=environment, region_name=region)
-    config = config_client.load_config(source_id=_SOURCE_ID, entity_id=entity_id)
+    config = config_client.load_config(
+        source_id=_SOURCE_ID, entity_id=entity_id, tenant_code=tenant_code
+    )
 
     if args.window_days is not None:
         config = config.model_copy(update={"extraction_window_days": args.window_days})
@@ -304,7 +316,9 @@ def main() -> None:
 
     if config.load_type == LoadType.INCREMENTAL:
         watermark_repo = WatermarkRepository(environment=environment, region_name=region)
-        record = watermark_repo.get_watermark(source_id=_SOURCE_ID, entity_id=entity_id)
+        record = watermark_repo.get_watermark(
+            source_id=_SOURCE_ID, entity_id=entity_id, tenant_code=tenant_code
+        )
         if record is not None:
             watermark_lower = record.last_successful_watermark.strftime("%Y-%m-%dT%H:%M:%SZ")
             print(f"  Watermark lower : {watermark_lower}")
@@ -312,7 +326,10 @@ def main() -> None:
             # First-time incremental run — use an epoch lower bound to capture all records.
             # The upper bound limits how much data we pull on this first pass.
             watermark_lower = "2000-01-01T00:00:00Z"
-            print(f"  No prior watermark — first-time incremental, lower bound set to {watermark_lower}")
+            print(
+                f"  No prior watermark — first-time incremental, "
+                f"lower bound set to {watermark_lower}"
+            )
 
     print(f"  Watermark upper : {watermark_upper}\n")
 
@@ -326,8 +343,8 @@ def main() -> None:
         watermark_upper=watermark_upper,
         dry_run=args.dry_run,
         raw_s3_bucket=args.raw_s3_bucket,
-        raw_s3_prefix=args.raw_s3_prefix,
         region=region,
+        tenant_code=tenant_code,
     )
 
     print("\n  Done.\n")

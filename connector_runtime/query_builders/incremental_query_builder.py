@@ -41,11 +41,15 @@ from collections.abc import Callable
 
 from contracts.entity_configuration_contract import LoadType
 
-#: Identity quoting — used by SOQL and SuiteQL, which never quote identifiers.
-NO_QUOTE: Callable[[str], str] = lambda identifier: identifier  # noqa: E731
 
-#: Backtick quoting — used by MySQL, whose identifiers must be backtick-wrapped.
-BACKTICK_QUOTE: Callable[[str], str] = lambda identifier: f"`{identifier}`"  # noqa: E731
+def NO_QUOTE(identifier: str) -> str:  # noqa: N802 -- public constant-style API, not a method
+    """Identity quoting — used by SOQL and SuiteQL, which never quote identifiers."""
+    return identifier
+
+
+def BACKTICK_QUOTE(identifier: str) -> str:  # noqa: N802 -- public constant-style API
+    """Backtick quoting — used by MySQL, whose identifiers must be backtick-wrapped."""
+    return f"`{identifier}`"
 
 
 def build_incremental_select(
@@ -96,9 +100,9 @@ def build_incremental_select(
         triple every call site assembles into its own QueryContract.
     """
     select_clause = ", ".join(quote(name) for name in field_names)
-    # Identifiers are pre-validated by the caller against a strict allowlist
-    # pattern before reaching this function — no user-controlled input can
-    # reach this f-string unvalidated.
+    # OWASP A03: identifiers are pre-validated by the caller against a strict
+    # allowlist pattern before reaching this function — no user-controlled
+    # input can reach this f-string unvalidated.
     query_text = f"SELECT {select_clause} FROM {quote(table)}"  # noqa: S608
     query_parameters: dict[str, str | None] = {}
     effective_watermark_field: str | None = None

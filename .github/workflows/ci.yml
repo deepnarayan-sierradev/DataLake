@@ -43,6 +43,19 @@ jobs:
         run: ruff format --check .
 
   # ──────────────────────────────────────────────────────────────────────────
+  # Stage 1b: Banned identifiers (generic names rejected per spec §10.4)
+  # ──────────────────────────────────────────────────────────────────────────
+  banned-names:
+    name: "Banned Identifiers (helper/util/common/manager)"
+    runs-on: ubuntu-latest
+    steps:
+      # Pin to SHA digest — prevents supply chain attack if tag is moved (OWASP A03)
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Run banned-names check
+        run: make banned-names
+
+  # ──────────────────────────────────────────────────────────────────────────
   # Stage 2: Type checking
   # ──────────────────────────────────────────────────────────────────────────
   typecheck:
@@ -60,7 +73,16 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run mypy
-        run: mypy .
+        # Bare `mypy .` dies with a duplicate-module error: scripts/generate_presentation.py
+        # and pptx/generate_presentation.py share a basename, which mypy's default
+        # (non-namespace-package) module resolution treats as a collision. Scope to the
+        # first-party packages instead (per CLAUDE.md: "Never run bare mypy .") — this
+        # also matches how the repo is meant to be checked locally. scripts/ and pptx/
+        # are intentionally excluded; they are not type-checked packages.
+        run: |
+          mypy -p connector_runtime -p transformation -p entity_resolution \
+               -p analytics_publisher -p orchestration -p observability \
+               -p watermark_management -p schema_management -p contracts -p governance
 
   # ──────────────────────────────────────────────────────────────────────────
   # Stage 3: Unit tests with coverage gate

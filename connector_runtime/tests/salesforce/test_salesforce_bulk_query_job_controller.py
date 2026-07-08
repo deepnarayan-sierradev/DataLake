@@ -33,7 +33,7 @@ _BASE_BULK = f"{_INSTANCE_URL}/services/data/v59.0/jobs/query"
 _LIMITS_URL = f"{_INSTANCE_URL}/services/data/v59.0/limits"
 
 
-def _make_auth(token: str = "tok") -> object:  # noqa: S107
+def _make_auth(token: str = "tok") -> object:
     from unittest.mock import MagicMock
 
     auth = MagicMock()

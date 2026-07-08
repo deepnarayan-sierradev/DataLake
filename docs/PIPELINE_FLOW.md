@@ -100,9 +100,9 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 
 | Layer | Purpose | Storage | Format | Mutability |
 |---|---|---|---|---|
-| **Raw** | Exact copy of source data, no transformation | `{env}-edl-raw-layer` S3 | Parquet (large_utf8 columns) | Immutable — Object Lock GOVERNANCE |
-| **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked. For incremental entities with `primary_key_field` set, each partition holds the **full current state** (SCD Type 1 merge — not just the day's delta) | `{env}-edl-curated-layer` S3 | Parquet (Snappy) | Full-load entities: append-only per run_id. Incremental entities with merge: full snapshot per run_id (overwrites previous state within the partition) |
-| **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Contains curated domain datasets (`curated/` prefix) and canonical (entity-resolved) outputs (`canonical/` prefix) | `{env}-edl-analytics-layer` S3 | Parquet (Snappy) | Append-only |
+| **Raw** | Exact copy of source data, no transformation | `edl-raw-{account_id}` S3 | Parquet (large_utf8 columns) | Immutable — Object Lock GOVERNANCE |
+| **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked. For incremental entities with `primary_key_field` set, each partition holds the **full current state** (SCD Type 1 merge — not just the day's delta) | `edl-curated-{account_id}` S3 | Parquet (Snappy) | Full-load entities: append-only per run_id. Incremental entities with merge: full snapshot per run_id (overwrites previous state within the partition) |
+| **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Contains curated domain datasets (`curated/` prefix) and canonical (entity-resolved) outputs (`canonical/` prefix) | `edl-analytics-{account_id}` S3 | Parquet (Snappy) | Append-only |
 | **Serving Store** | Optional operational store for low-latency API and application reads | MySQL RDS (private VPC) | SQL rows | Upsert (REPLACE INTO) |
 
 ### Multi-tenancy
@@ -128,7 +128,7 @@ EventBridge Scheduler (cron per entity)
           │
           ▼
 SQS FIFO Queue  ── absorbs burst; exactly-once per entity per tick
-  ({env}-edl-pipeline-trigger.fifo)
+  (EdlPipelineTrigger.fifo)
           │  (drains via Pipeline Trigger Lambda, reserved_concurrency=50)
           ▼
 Step Functions: START EXECUTION
@@ -223,7 +223,7 @@ Step Functions: START EXECUTION
   {Stage}Failed (Fail state)
           │
           ▼
-  SQS DLQ ({env}-edl-extraction-failure-dlq)
+  SQS DLQ (EdlExtractionFailureDlq)
           │
           ▼
   dlq_processor Lambda (event source mapping, batch_size=1)
@@ -268,7 +268,7 @@ Step Functions: START EXECUTION
 - Retries transient Lambda errors with exponential backoff (3 attempts, 10s initial, 2× backoff)
 - Terminal failures route to a per-stage `Fail` state (`ExtractionFailed`, `TransformationFailed`, `EntityResolutionFailed`, `AnalyticsPublishFailed`) and enqueue to DLQ
 - The `ExecuteExtraction` state's `Catch` block matches `LambdaTimeoutWarning` (PERF-5 mid-run checkpoint) *before* the generic `States.ALL` catch-all — first match wins in ASL, so a checkpoint does **not** fall through to `ExtractionFailed`/the DLQ. It routes instead to a terminal `ExtractionCheckpointed` `Succeed` state: non-fatal, partial watermark already committed, remaining window not yet processed. Automatic resume from a checkpoint is **not yet implemented** (documented as a gap in `extraction_workflow.py`'s own module docstring, PERF-5) — it needs a manual re-trigger.
-- DLQ messages (`{env}-edl-extraction-failure-dlq`) are consumed by the `dlq_processor` Lambda, which writes a `RunStatus.FAILED` audit record, emits an SNS alert, and optionally auto-replays (`AUTO_REPLAY` env var, default `false`)
+- DLQ messages (`EdlExtractionFailureDlq`) are consumed by the `dlq_processor` Lambda, which writes a `RunStatus.FAILED` audit record, emits an SNS alert, and optionally auto-replays (`AUTO_REPLAY` env var, default `false`)
 
 **Branching logic:**
 
@@ -311,7 +311,7 @@ Any stage's Task fails after retries exhausted (States.ALL)?
 
 **Component:** AWS Secrets Manager  
 **Purpose:** Retrieves short-lived source credentials (OAuth tokens, API keys, DB passwords). Credentials never appear in code, environment variables, or logs.  
-**Secret path pattern:** `{environment}/sources/{source}/credentials`  
+**Secret path pattern:** `edl/sources/{source}/credentials`  
 **Failure behaviour:** Raises credential error → classified as `DETERMINISTIC_INVALID_CREDENTIALS` → no retry.
 
 ---
@@ -474,11 +474,11 @@ Each survivorship policy declares an explicit `output_fields` list. Only those f
 
 **Production entry point — `GoldenRecordPublisher.from_registry()`:**
 ```python
-registry = ResolutionConfigRegistry(s3_bucket="dev-edl-curated", region_name="us-east-1")
+registry = ResolutionConfigRegistry(s3_bucket="edl-curated-087972550871", region_name="us-east-1")
 publisher = GoldenRecordPublisher.from_registry(
     registry=registry,
     entity_type="company",
-    analytics_s3_bucket="dev-edl-analytics",
+    analytics_s3_bucket="edl-analytics-087972550871",
     region_name="us-east-1",
 )
 ```
@@ -496,7 +496,7 @@ s3://{analytics-layer}/canonical/{entity_type}/match-decisions/{run_id}/decision
 ### Stage 15 — Analytics Layer Publish
 
 **Component:** `AnalyticsLayerPublisher`  
-**Purpose:** Promotes curated domain datasets to consumption-optimised Parquet in the analytics layer and registers/updates Glue Catalog tables. The analytics layer (`{env}-edl-analytics-layer`) is the single bucket for all consumption — it holds curated domain datasets under the `curated/` prefix and canonical (entity-resolved) outputs under the `canonical/` prefix.  
+**Purpose:** Promotes curated domain datasets to consumption-optimised Parquet in the analytics layer and registers/updates Glue Catalog tables. The analytics layer (`edl-analytics-{account_id}`) is the single bucket for all consumption — it holds curated domain datasets under the `curated/` prefix and canonical (entity-resolved) outputs under the `canonical/` prefix.  
 **Partition scheme:** `s3://{bucket}/analytics/{domain}/{entity_id}/analytics_date={date}/run_id={run_id}/data.parquet`  
 **Consumers:** Athena, QuickSight, ML feature stores, data science notebooks.
 
@@ -729,7 +729,7 @@ python scripts/seed_entity_resolution_configs.py --environment dev --entity-type
 | Watermark concurrency conflict | Concurrency | No retry | Returns `PARTIAL_SUCCESS` |
 | Mid-run Lambda timeout (checkpoint) | `LambdaTimeoutWarning` (PERF-5, non-fatal) | N/A — routes to terminal `ExtractionCheckpointed` Succeed state, not a retry | No DLQ — partial watermark + `'{run_id}-partN'` audit record already committed; auto-resume not implemented, needs manual re-trigger |
 
-**DLQ processing:** Messages landing in `{env}-edl-extraction-failure-dlq` are consumed by the **`dlq_processor`** Lambda (`orchestration/dlq_processor/dlq_processor_handler.py`, SQS event source mapping with `batch_size=1`). It validates the message body (Pydantic), writes a `RunStatus.FAILED` audit record to the run audit log table, emits an SNS notification to the platform alerts topic (run_id, source_id, entity_id, failure_reason), and — only if `AUTO_REPLAY=true` (default `false`) — re-invokes the Step Functions state machine to replay the failed run. With auto-replay off (the default), an operator reviews the DLQ message and replays manually per the command below.
+**DLQ processing:** Messages landing in `EdlExtractionFailureDlq` are consumed by the **`dlq_processor`** Lambda (`orchestration/dlq_processor/dlq_processor_handler.py`, SQS event source mapping with `batch_size=1`). It validates the message body (Pydantic), writes a `RunStatus.FAILED` audit record to the run audit log table, emits an SNS notification to the platform alerts topic (run_id, source_id, entity_id, failure_reason), and — only if `AUTO_REPLAY=true` (default `false`) — re-invokes the Step Functions state machine to replay the failed run. With auto-replay off (the default), an operator reviews the DLQ message and replays manually per the command below.
 
 **Replay a failed run:**
 
@@ -768,23 +768,23 @@ aws sts get-caller-identity
 
 # 2. Entity config exists in DynamoDB
 aws dynamodb get-item \
-  --table-name dev-edl-entity-extraction-config \
+  --table-name EdlEntityExtractionConfig \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
 # 3. Field mapping published to S3
-aws s3 ls s3://dev-edl-curated-layer/field-mappings/salesforce/salesforce-account/
+aws s3 ls s3://edl-curated-087972550871/field-mappings/salesforce/salesforce-account/
 
 # 4. Source credentials exist in Secrets Manager (pick the source you run)
 aws secretsmanager describe-secret \
-  --secret-id dev/sources/salesforce/credentials
+  --secret-id edl/sources/salesforce/credentials
 aws secretsmanager describe-secret \
-  --secret-id dev/sources/netsuite/credentials
+  --secret-id edl/sources/netsuite/credentials
 aws secretsmanager describe-secret \
-  --secret-id dev/sources/mysql-rds/credentials
+  --secret-id edl/sources/mysql-rds/credentials
 
 # 5. Current watermark state
 aws dynamodb get-item \
-  --table-name dev-edl-watermark-repository \
+  --table-name EdlWatermarkRepository \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 ```
 
@@ -802,28 +802,28 @@ python scripts/trigger_extraction.py \
 
 ```bash
 # Raw files written
-aws s3 ls s3://dev-edl-raw-layer/salesforce/salesforce-account/ --recursive
+aws s3 ls s3://edl-raw-087972550871/salesforce/salesforce-account/ --recursive
 
 # Watermark advanced
 aws dynamodb get-item \
-  --table-name dev-edl-watermark-repository \
+  --table-name EdlWatermarkRepository \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
 # Schema snapshot written — path is tenant-prefixed (default tenant: demo)
-aws s3 ls s3://dev-edl-schema-snapshots/demo/salesforce/salesforce-account/ --recursive
+aws s3 ls s3://edl-schema-snapshots-087972550871/demo/salesforce/salesforce-account/ --recursive
 
 # No breaking drift (check drift_report) — path is tenant-prefixed (default tenant: demo)
-aws s3 cp s3://dev-edl-schema-snapshots/demo/salesforce/salesforce-account/latest.json -
+aws s3 cp s3://edl-schema-snapshots-087972550871/demo/salesforce/salesforce-account/latest.json -
 ```
 
 ### Post-transformation verification
 
 ```bash
 # Curated Parquet written — path is tenant-prefixed (default tenant: demo)
-aws s3 ls s3://dev-edl-curated-layer/demo/curated/customer/salesforce-account/ --recursive
+aws s3 ls s3://edl-curated-087972550871/demo/curated/customer/salesforce-account/ --recursive
 
 # Quality report — check is_publication_blocked=false
-aws s3 cp s3://dev-edl-curated-layer/quality-reports/salesforce/salesforce-account/<run_id>/quality-report.json -
+aws s3 cp s3://edl-curated-087972550871/quality-reports/salesforce/salesforce-account/<run_id>/quality-report.json -
 ```
 
 ---
@@ -841,7 +841,7 @@ Before deploying to staging or prod, verify all of the following:
 - [ ] `seed_entity_resolution_configs.py` run against target environment (dry-run first)
 - [ ] `seed_entity_config.py` run against target environment (dry-run first)
 - [ ] Source credentials created in Secrets Manager for target environment
-- [ ] Sage credentials created: `{env}/sources/sage/intacct/credentials` and `{env}/sources/sage/x3/credentials`
+- [ ] Sage credentials created: `edl/sources/sage/intacct/credentials` and `edl/sources/sage/x3/credentials`
 - [ ] NAT Gateway public IPs added to Salesforce/NetSuite IP allowlists
 - [ ] CloudWatch alarms reviewed and SNS alert email set
 - [ ] DLQ URL verified accessible by replay operator role
@@ -859,21 +859,21 @@ This section maps each pipeline stage to the exact tools, AWS services, Python l
 |---|---|
 | Stage 1 — Event Scheduling | Amazon EventBridge Scheduler; Amazon SQS FIFO (pipeline trigger queue); AWS Lambda (pipeline trigger) |
 | Stage 2 — Step Functions Orchestration | AWS Step Functions (Standard / Express Workflow) |
-| Stage 3 — Configuration Load | Amazon DynamoDB (`{env}-edl-entity-extraction-config`) |
-| Stage 4 — Credential Retrieval | AWS Secrets Manager (`{env}/sources/{source}/credentials`) |
+| Stage 3 — Configuration Load | Amazon DynamoDB (`EdlEntityExtractionConfig`) |
+| Stage 4 — Credential Retrieval | AWS Secrets Manager (`edl/sources/{source}/credentials`) |
 | Stage 5 — Metadata Discovery | Source APIs (no AWS; called from Lambda/ECS over VPC) |
 | Stage 6 — Query Construction | In-process (no AWS service); ISO-8601 validated |
 | Stage 7 — Extraction | AWS Lambda (< 5 M records) or AWS ECS Fargate (≥ 5 M records); Amazon S3 (raw layer write) |
-| Stage 8 — Schema Snapshot | Amazon S3 (`{env}-edl-schema-snapshots`) |
+| Stage 8 — Schema Snapshot | Amazon S3 (`edl-schema-snapshots-{account_id}`) |
 | Stage 9 — Drift Evaluation | In-process (no AWS service); writes drift report to Amazon S3 |
 | Stage 10 — Raw Layer Write | Amazon S3 (Object Lock GOVERNANCE); CloudWatch metric emit |
-| Stage 11 — Watermark Update | Amazon DynamoDB (`{env}-edl-watermark-repository`; conditional put) |
+| Stage 11 — Watermark Update | Amazon DynamoDB (`EdlWatermarkRepository`; conditional put) |
 | Stage 12 — Transformation | AWS Lambda or AWS Glue; Amazon S3 (curated layer); AWS Glue Data Catalog |
 | Stage 13 — Entity Resolution | AWS Lambda; Amazon S3 (curated source read + analytics write) |
 | Stage 14 — Golden Record Publish | AWS Lambda; Amazon S3 (analytics layer `canonical/` prefix) |
 | Stage 15 — Analytics Layer Publish | Amazon S3 (analytics layer); AWS Glue Data Catalog |
 | Stage 16 — Serving Store Load | Amazon RDS MySQL 8 (private VPC); AWS Secrets Manager |
-| DLQ Processing (failure path) | AWS Lambda (`dlq_processor`); Amazon SQS (`{env}-edl-extraction-failure-dlq`, event source mapping `batch_size=1`); Amazon DynamoDB (run audit log); Amazon SNS (platform alerts topic); AWS Step Functions (optional auto-replay) |
+| DLQ Processing (failure path) | AWS Lambda (`dlq_processor`); Amazon SQS (`EdlExtractionFailureDlq`, event source mapping `batch_size=1`); Amazon DynamoDB (run audit log); Amazon SNS (platform alerts topic); AWS Step Functions (optional auto-replay) |
 | All stages | Amazon CloudWatch Logs; Amazon CloudWatch Metrics; AWS X-Ray; Amazon SQS (DLQ) |
 
 ### Python Libraries by Component

@@ -11,6 +11,7 @@ Step Functions execution input schema:
     "entity_id":        str   — stable entity identifier
     "environment":      str   — "dev" | "staging" | "prod"
     "connector_params": dict  — source-specific non-secret parameters
+    "tenant_code":      str   — tenant identity for this run (ARCH-4: required, fails closed)
     "is_replay":        bool  — true when re-running a DLQ entry
     "replay_of_run_id": str   — original run_id (required when is_replay=true)
   }
@@ -44,8 +45,8 @@ from connector_runtime.configuration_repository.configuration_repository import 
 )
 from connector_runtime.registry import connector_registry
 from connector_runtime.run_lifecycle.run_lifecycle import RunCoordinator
-from contracts.identifier_policy import DEFAULT_TENANT_CODE, TENANT_CODE_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from contracts.identifier_policy import TENANT_CODE_PATTERN
 from observability.lambda_utils import check_lambda_timeout, configure_xray, require_env
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
@@ -58,7 +59,7 @@ from watermark_management.watermark_repository.watermark_repository import Water
 _logger = get_platform_logger(__name__)
 
 _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
-    {"source_id", "entity_id", "environment", "connector_params"}
+    {"source_id", "entity_id", "environment", "connector_params", "tenant_code"}
 )
 _KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
 
@@ -106,11 +107,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     connector_params: dict[str, str] = event["connector_params"]
     is_replay: bool = bool(event.get("is_replay", False))
     replay_of_run_id: str | None = event.get("replay_of_run_id")
-    # Tenant code for data-plane isolation (§1.1 / ARCH-4). Optional for
-    # backward compatibility with Step Functions definitions that do not yet
-    # pass it; validated in _validate_event when present so an untrusted or
-    # malformed value can never reach a DynamoDB key or S3 path (OWASP A03).
-    tenant_code: str = str(event.get("tenant_code") or DEFAULT_TENANT_CODE)
+    # Tenant code for data-plane isolation (§1.1 / ARCH-4). Required — a
+    # missing or malformed tenant_code must fail closed rather than silently
+    # run as another tenant (OWASP A03); validated in _validate_event.
+    tenant_code: str = str(event["tenant_code"])
 
     # Instrument AWS SDK calls with X-Ray subsegments (§5.5).
     configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id)
@@ -162,7 +162,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # Resolve connector + raw-layer writer from the registry builder.
     builder = connector_registry.resolve_builder(source_id)
-    connector, raw_writer = builder(environment, region_name, connector_params, raw_s3_bucket)
+    connector, raw_writer = builder(
+        environment, region_name, connector_params, raw_s3_bucket, tenant_code
+    )
 
     workflow = ExtractionWorkflow(
         run_coordinator=coordinator,
@@ -261,19 +263,15 @@ def _validate_event(event: dict[str, Any]) -> None:
     if not isinstance(event.get("connector_params", {}), dict):
         raise ValueError("connector_params must be a JSON object (dict).")
 
-    # tenant_code is optional (defaults to DEFAULT_TENANT_CODE) but must be
-    # well-formed when present — an unvalidated value must never reach a
-    # DynamoDB key or S3 path (OWASP A03 / SEC-5).
-    tenant_code = event.get("tenant_code")
-    if tenant_code is not None and not TENANT_CODE_PATTERN.match(str(tenant_code)):
-        raise ValueError(
-            f"tenant_code={tenant_code!r} does not conform to the tenant code format."
-        )
+    # tenant_code is required (ARCH-4) and must always be well-formed
+    # (OWASP A03 / SEC-5) — a missing or malformed tenant_code must fail
+    # closed rather than silently default to another tenant's identity.
+    tenant_code = str(event["tenant_code"])
+    if not TENANT_CODE_PATTERN.match(tenant_code):
+        raise ValueError(f"tenant_code={tenant_code!r} does not conform to the tenant code format.")
 
 
-def _validate_connector_params(
-    source_id: str, connector_params: dict[str, str]
-) -> None:
+def _validate_connector_params(source_id: str, connector_params: dict[str, str]) -> None:
     """
     Validate connector_params using the per-connector Pydantic model (§2.2).
 
@@ -288,7 +286,8 @@ def _validate_connector_params(
 
     params_model_cls = connector_registry.get_params_model(source_id)
     if params_model_cls is None:
-        return  # No model registered — passthrough (OWASP: fail-open not fail-closed here is intentional)
+        # No model registered — passthrough (OWASP: fail-open not fail-closed here is intentional).
+        return
     try:
         params_model_cls.model_validate(connector_params)
     except ValidationError as exc:

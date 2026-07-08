@@ -20,6 +20,21 @@ Security (OWASP A03, A07, A09):
   - SuiteQL built from validated, discovered field names only.
   - Watermark values substituted via bind_parameters() with ISO-8601 validation.
   - Credentials never in logs or exception messages.
+
+Known limitation — SuiteQL offset pagination ceiling:
+  NetSuite's REST SuiteQL endpoint unconditionally rejects any request whose
+  ``offset`` parameter exceeds 100,000, regardless of the underlying result
+  set size. Because pagination here is plain offset/limit (not a keyset /
+  cursor scheme), any single extraction window whose result set spans more
+  than 100,000 rows hits that ceiling and fails deterministically — the same
+  offset will be rejected on every retry, permanently wedging the entity
+  until the operator intervenes. A full keyset-pagination redesign (walking
+  a monotonic column instead of offset/limit) is the real fix but is
+  deferred; in the meantime, execute_extraction() fails fast with
+  NetSuiteSuiteQLOffsetLimitExceededError as soon as the next page would
+  cross the ceiling, instructing the operator to narrow the extraction
+  window (e.g. lower entity_configuration extraction_window_days) or reduce
+  the watermark increment so each run's result set stays under 100,000 rows.
 """
 
 from __future__ import annotations
@@ -37,6 +52,7 @@ from connector_runtime.adapters.netsuite.netsuite_metadata_adapter import (
     NetSuiteMetadataAdapter,
     NetSuiteMetadataAdapterError,
 )
+from connector_runtime.adapters.netsuite.netsuite_params import NetSuiteConnectorParams
 from connector_runtime.interfaces.connector_interface import (
     ConnectorCapabilities,
     ConnectorInterface,
@@ -61,15 +77,39 @@ _SUITEQL_URL_TEMPLATE: Final[str] = (
 )
 
 # NetSuite SuiteQL maximum page size is 10,000 rows per request.
-# Default set to 10,000 (§3.6) — reduces API calls 10× vs the previous 1,000.
+# Default set to 10,000 (§3.6) — reduces API calls 10x vs the previous 1,000.
 # Individual entities can override via connector_params.page_size.
 _PAGE_SIZE: Final[int] = 10_000
+
+# NetSuite's REST SuiteQL endpoint rejects any request whose `offset` query
+# parameter exceeds this value (HTTP 400) — a hard platform ceiling, not a
+# per-account or configurable limit. See the module docstring's "Known
+# limitation" section for why this is handled as a fail-fast rather than a
+# retry, and for the deferred full fix (keyset pagination).
+_MAX_SUITEQL_OFFSET: Final[int] = 100_000
 
 
 class NetSuiteSuiteQLRateLimitError(TransientConnectorError):
     """Raised when NetSuite returns HTTP 429 (SuiteQL rate limit exceeded)."""
 
     classification = ExtractionErrorClassification.TRANSIENT_THROTTLE
+
+
+class NetSuiteSuiteQLOffsetLimitExceededError(DeterministicConnectorError):
+    """
+    Raised when the next SuiteQL page would require an offset beyond
+    NetSuite's hard 100,000-row pagination ceiling (_MAX_SUITEQL_OFFSET).
+
+    This is deterministic, not transient: NetSuite rejects the offending
+    offset on every request regardless of retry count, so the reliability
+    framework's exponential-backoff retry would just burn through its retry
+    budget and fail identically each time, permanently wedging the entity.
+    The only fix is operator action — narrow the extraction window (e.g.
+    lower entity_configuration extraction_window_days) or reduce the
+    watermark increment so each run's result set stays under 100,000 rows.
+    """
+
+    classification = ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
 
 
 @connector_registry.register(_SOURCE_ID)
@@ -198,6 +238,22 @@ class NetSuiteConnector(ConnectorInterface):
         offset = 0
 
         while True:
+            if offset > _MAX_SUITEQL_OFFSET:
+                # Stop BEFORE issuing a request NetSuite will reject outright —
+                # see module docstring "Known limitation" and
+                # NetSuiteSuiteQLOffsetLimitExceededError's docstring.
+                raise NetSuiteSuiteQLOffsetLimitExceededError(
+                    f"NetSuite SuiteQL pagination for source_id={query_contract.source_id!r}, "
+                    f"entity_id={query_contract.entity_id!r} (record_type={self._record_type!r}) "
+                    f"would require offset={offset}, which exceeds NetSuite's hard "
+                    f"{_MAX_SUITEQL_OFFSET:,}-row pagination ceiling. This extraction window "
+                    "has more matching rows than SuiteQL offset/limit pagination can page "
+                    "through, and retrying will fail identically every time. Narrow the "
+                    "extraction window (e.g. lower entity_configuration "
+                    "extraction_window_days) or reduce the watermark increment so each run's "
+                    "result set stays under 100,000 rows, then re-run this entity."
+                )
+
             page_rows = list(
                 self._fetch_page(
                     suiteql_url=suiteql_url,
@@ -233,10 +289,11 @@ class NetSuiteConnector(ConnectorInterface):
         """
         Classify a NetSuite extraction exception for the retry framework.
 
-        Credential, auth, query-planner, and rate-limit exceptions carry their
-        own classification via the shared TransientConnectorError /
-        DeterministicConnectorError markers (DP-3) — see netsuite_auth_client.py,
-        netsuite_incremental_query_planner.py, and NetSuiteSuiteQLRateLimitError
+        Credential, auth, query-planner, rate-limit, and SuiteQL-offset-limit
+        exceptions carry their own classification via the shared
+        TransientConnectorError / DeterministicConnectorError markers (DP-3) —
+        see netsuite_auth_client.py, netsuite_incremental_query_planner.py,
+        NetSuiteSuiteQLRateLimitError, and NetSuiteSuiteQLOffsetLimitExceededError
         above. NetSuiteMetadataAdapterError is deliberately excluded from that
         hierarchy: metadata discovery failure may be transient (API unavailable)
         or deterministic (invalid record type), so it stays UNKNOWN for DLQ
@@ -310,6 +367,7 @@ def _build_netsuite(
     region_name: str,
     connector_params: dict[str, str],
     raw_s3_bucket: str,
+    tenant_code: str,
 ) -> tuple[ConnectorInterface, Any]:
     """
     Factory used by the extraction pipeline Lambda to construct a fully-wired
@@ -336,14 +394,11 @@ def _build_netsuite(
     )
     writer = NetSuiteRawLayerWriter(
         s3_bucket=raw_s3_bucket,
-        s3_prefix="netsuite",
         region_name=region_name,
+        tenant_code=tenant_code,
     )
     return connector, writer
 
 
 connector_registry.register_builder(_SOURCE_ID, _build_netsuite)
-
-from connector_runtime.adapters.netsuite.netsuite_params import NetSuiteConnectorParams
-
 connector_registry.register_params_model(_SOURCE_ID, NetSuiteConnectorParams)

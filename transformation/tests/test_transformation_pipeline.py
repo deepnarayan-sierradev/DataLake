@@ -191,6 +191,7 @@ class TestTransformationPipelineHappyPath:
 class TestTransformationContextValidation:
     def test_invalid_domain_raises(self) -> None:
         import pytest
+
         with pytest.raises(ValueError, match="domain"):
             TransformationContext(
                 run_id="run-pipeline-test-001",
@@ -206,6 +207,7 @@ class TestTransformationContextValidation:
 
     def test_dotdot_prefix_raises(self) -> None:
         import pytest
+
         with pytest.raises(ValueError, match="invalid path"):
             TransformationContext(
                 run_id="run-pipeline-test-001",
@@ -221,6 +223,7 @@ class TestTransformationContextValidation:
 
     def test_absolute_prefix_raises(self) -> None:
         import pytest
+
         with pytest.raises(ValueError, match="invalid path"):
             TransformationContext(
                 run_id="run-pipeline-test-001",
@@ -236,6 +239,7 @@ class TestTransformationContextValidation:
 
     def test_disallowed_chars_in_prefix_raises(self) -> None:
         import pytest
+
         with pytest.raises(ValueError, match="characters not permitted"):
             TransformationContext(
                 run_id="run-pipeline-test-001",
@@ -271,6 +275,7 @@ class TestTransformationOptionalPaths:
         from unittest.mock import MagicMock
 
         from observability.metrics_emitter import CloudWatchMetricsEmitter
+
         records = [{"Id": "001", "Name": "Acme"}]
         _write_raw_parquet(self.s3, _RAW_BUCKET, "raw/metrics/", records)
 
@@ -383,16 +388,19 @@ class TestModuleLevelHelpers:
 
     def test_iter_raw_records_dotdot_raises(self) -> None:
         from transformation.transformation_pipeline import _iter_raw_records
+
         with pytest.raises(ValueError, match="Unsafe raw_s3_prefix"):
             list(_iter_raw_records(self.s3, _RAW_BUCKET, "../etc/passwd"))
 
     def test_iter_raw_records_absolute_raises(self) -> None:
         from transformation.transformation_pipeline import _iter_raw_records
+
         with pytest.raises(ValueError, match="Unsafe raw_s3_prefix"):
             list(_iter_raw_records(self.s3, _RAW_BUCKET, "/absolute/path"))
 
     def test_iter_raw_records_disallowed_chars_raises(self) -> None:
         from transformation.transformation_pipeline import _iter_raw_records
+
         with pytest.raises(ValueError, match="disallowed characters"):
             list(_iter_raw_records(self.s3, _RAW_BUCKET, "raw/<script>/"))
 
@@ -400,12 +408,14 @@ class TestModuleLevelHelpers:
         import pyarrow as pa
 
         from transformation.transformation_pipeline import _table_to_records
+
         empty_table = pa.table({})
         assert _table_to_records(empty_table) == []
 
     def test_catalog_registration_failure_swallowed(self) -> None:
         """_register_curated_catalog exception is swallowed, not propagated."""
         from unittest.mock import patch
+
         records = [{"Id": "001"}]
         _write_raw_parquet(self.s3, _RAW_BUCKET, "raw/cat-fail/", records)
 
@@ -435,6 +445,7 @@ class TestModuleLevelHelpers:
     def test_lineage_failure_swallowed(self) -> None:
         """_emit_transformation_lineage exception is swallowed, not propagated."""
         from unittest.mock import patch
+
         records = [{"Id": "001"}]
         _write_raw_parquet(self.s3, _RAW_BUCKET, "raw/lineage-fail/", records)
 
@@ -781,3 +792,225 @@ class TestAutoClassification:
 
         curated = self._read_curated_records(streaming_s3, result.curated_s3_prefix)
         assert curated[0]["email"] == "REDACTED"
+
+
+# ---------------------------------------------------------------------------
+# Pre-go-live fix 1 (BLOCKER): tenant-scoped curated Glue table names
+# ---------------------------------------------------------------------------
+
+
+@mock_aws
+class TestTenantScopedCuratedCatalogTableName:
+    """
+    Two tenants running the same entity/domain must register distinct Glue
+    tables, each pointing at its own tenant-scoped curated S3 location.
+
+    Without the tenant_code prefix on the table name, the second tenant's
+    register_dataset() call would silently overwrite the first tenant's
+    table Location in the shared edl_curated database, causing cross-tenant
+    Athena reads.
+    """
+
+    _DATABASE = "shared_curated_db"
+
+    def setup_method(self, method: object = None) -> None:
+        s3 = boto3.client("s3", region_name=_REGION)
+        for bucket in (_RAW_BUCKET, _CURATED_BUCKET, _MAPPING_BUCKET):
+            s3.create_bucket(Bucket=bucket)
+        glue = boto3.client("glue", region_name=_REGION)
+        glue.create_database(DatabaseInput={"Name": self._DATABASE})
+        self.s3 = s3
+        self.glue = glue
+        self.registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
+
+    def _run_for_tenant(self, tenant_code: str, raw_prefix: str) -> str:
+        records = [{"Id": "001", "Name": "Acme"}]
+        _write_raw_parquet(self.s3, _RAW_BUCKET, raw_prefix, records)
+        pipeline = _make_pipeline(self.registry_client)
+        ctx = TransformationContext(
+            run_id=f"run-{tenant_code}",
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            domain="customer",
+            raw_s3_bucket=_RAW_BUCKET,
+            raw_s3_prefix=raw_prefix,
+            mapping_bucket=_MAPPING_BUCKET,
+            curated_s3_bucket=_CURATED_BUCKET,
+            region_name=_REGION,
+            curated_date=date(2024, 1, 15),
+            glue_catalog_database=self._DATABASE,
+            tenant_code=tenant_code,
+        )
+        result = pipeline.execute(ctx)
+        assert result.curated_s3_prefix is not None
+        return result.curated_s3_prefix
+
+    def test_two_tenants_same_entity_domain_register_distinct_tables_and_locations(
+        self,
+    ) -> None:
+        prefix_a = self._run_for_tenant("tenant-a", "raw/tenant-a/")
+        prefix_b = self._run_for_tenant("tenant-b", "raw/tenant-b/")
+
+        assert prefix_a.startswith("tenant-a/curated/")
+        assert prefix_b.startswith("tenant-b/curated/")
+
+        table_names = {
+            t["Name"] for t in self.glue.get_tables(DatabaseName=self._DATABASE)["TableList"]
+        }
+        table_a_name = "tenant_a_salesforce_account_customer_curated"
+        table_b_name = "tenant_b_salesforce_account_customer_curated"
+        assert table_a_name in table_names
+        assert table_b_name in table_names
+
+        table_a = self.glue.get_table(DatabaseName=self._DATABASE, Name=table_a_name)["Table"]
+        table_b = self.glue.get_table(DatabaseName=self._DATABASE, Name=table_b_name)["Table"]
+
+        assert table_a["StorageDescriptor"]["Location"] == f"s3://{_CURATED_BUCKET}/{prefix_a}"
+        assert table_b["StorageDescriptor"]["Location"] == f"s3://{_CURATED_BUCKET}/{prefix_b}"
+
+
+# ---------------------------------------------------------------------------
+# Pre-go-live fix 2: curated_date partition registration
+# ---------------------------------------------------------------------------
+
+
+@mock_aws
+class TestCuratedPartitionRegistration:
+    """
+    Each transformation run must register its curated_date partition so
+    Athena can query newly-written curated data without a manual MSCK
+    REPAIR TABLE. A same-day re-run must tolerate AlreadyExistsException
+    (update, not fail) rather than raising.
+    """
+
+    _DATABASE = "partition_test_db"
+    _TABLE = "demo_salesforce_account_customer_curated"
+
+    def setup_method(self, method: object = None) -> None:
+        s3 = boto3.client("s3", region_name=_REGION)
+        for bucket in (_RAW_BUCKET, _CURATED_BUCKET, _MAPPING_BUCKET):
+            s3.create_bucket(Bucket=bucket)
+        glue = boto3.client("glue", region_name=_REGION)
+        glue.create_database(DatabaseInput={"Name": self._DATABASE})
+        self.s3 = s3
+        self.glue = glue
+        self.registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
+
+    def _ctx(self, run_id: str, raw_prefix: str) -> TransformationContext:
+        return TransformationContext(
+            run_id=run_id,
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            domain="customer",
+            raw_s3_bucket=_RAW_BUCKET,
+            raw_s3_prefix=raw_prefix,
+            mapping_bucket=_MAPPING_BUCKET,
+            curated_s3_bucket=_CURATED_BUCKET,
+            region_name=_REGION,
+            curated_date=date(2024, 3, 1),
+            glue_catalog_database=self._DATABASE,
+        )
+
+    def test_partition_registered_after_run(self) -> None:
+        records = [{"Id": "001", "Name": "Acme"}]
+        _write_raw_parquet(self.s3, _RAW_BUCKET, "raw/part-run1/", records)
+        pipeline = _make_pipeline(self.registry_client)
+        result = pipeline.execute(self._ctx("run-part-1", "raw/part-run1/"))
+        assert result.curated_s3_prefix is not None
+
+        partitions = self.glue.get_partitions(DatabaseName=self._DATABASE, TableName=self._TABLE)[
+            "Partitions"
+        ]
+        assert len(partitions) == 1
+        assert partitions[0]["Values"] == ["2024-03-01"]
+        assert result.curated_s3_prefix in partitions[0]["StorageDescriptor"]["Location"]
+
+    def test_second_run_same_day_tolerates_already_exists(self) -> None:
+        records = [{"Id": "001", "Name": "Acme"}]
+        pipeline = _make_pipeline(self.registry_client)
+
+        _write_raw_parquet(self.s3, _RAW_BUCKET, "raw/part-run2a/", records)
+        result1 = pipeline.execute(self._ctx("run-part-2a", "raw/part-run2a/"))
+        assert result1.curated_s3_prefix is not None
+
+        # Second run, same curated_date, different run_id — must not raise
+        # even though a partition value for 2024-03-01 already exists.
+        _write_raw_parquet(self.s3, _RAW_BUCKET, "raw/part-run2b/", records)
+        result2 = pipeline.execute(self._ctx("run-part-2b", "raw/part-run2b/"))
+        assert result2.curated_s3_prefix is not None
+
+        partitions = self.glue.get_partitions(DatabaseName=self._DATABASE, TableName=self._TABLE)[
+            "Partitions"
+        ]
+        # Updated in place, not duplicated.
+        assert len(partitions) == 1
+        assert partitions[0]["Values"] == ["2024-03-01"]
+        assert result2.curated_s3_prefix in partitions[0]["StorageDescriptor"]["Location"]
+
+
+# ---------------------------------------------------------------------------
+# Pre-go-live fix 3 (HIGH): auto-classification for pass-through entities
+# ---------------------------------------------------------------------------
+
+
+class TestPassThroughAutoClassification:
+    """
+    Entities with NO field-mapping rule set (pure pass-through / identity
+    mapping) must still have PII-shaped raw field names auto-classified and
+    masked in the curated output — absence of a rule set must never bypass
+    PII protection (OWASP A01).
+    """
+
+    def _read_curated_records(self, s3_client, prefix: str) -> list[dict]:
+        objects = s3_client.list_objects_v2(Bucket=_CURATED_BUCKET, Prefix=prefix)
+        records: list[dict] = []
+        for obj in objects.get("Contents", []):
+            body = s3_client.get_object(Bucket=_CURATED_BUCKET, Key=obj["Key"])["Body"].read()
+            table = pq.read_table(io.BytesIO(body))
+            records.extend(table.to_pylist())
+        return records
+
+    def test_pass_through_pii_named_field_is_masked(self, streaming_s3) -> None:
+        """A pass-through entity (no rule set) with a raw 'email' field must
+        have it masked in the curated output."""
+        records = [{"Id": "001", "email": "carol@example.com"}]
+        _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/pt-mask/", records)
+
+        registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
+        pipeline = _make_pipeline(registry_client)
+        ctx = _make_ctx("raw/pt-mask/")
+        result = pipeline.execute(ctx)
+
+        assert result.canonical_record_count == 1
+        curated = self._read_curated_records(streaming_s3, result.curated_s3_prefix)
+        assert len(curated) == 1
+        assert curated[0]["email"] != "carol@example.com"
+        assert "carol@example.com" not in curated[0]["email"]
+
+    def test_pass_through_no_pii_fields_still_streams(self, streaming_s3) -> None:
+        """A pass-through entity with no PII-shaped field names must still
+        take the fast streaming path and write records unmasked."""
+        records = [{"Id": "001", "region": "west"}]
+        _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/pt-nomask/", records)
+
+        registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
+        pipeline = _make_pipeline(registry_client)
+        ctx = _make_ctx("raw/pt-nomask/")
+        result = pipeline.execute(ctx)
+
+        assert result.canonical_record_count == 1
+        curated = self._read_curated_records(streaming_s3, result.curated_s3_prefix)
+        assert curated[0]["region"] == "west"
+        assert curated[0]["Id"] == "001"
+
+    def test_pass_through_empty_raw_prefix_produces_no_curated_output(self, streaming_s3) -> None:
+        """Peeking an empty raw prefix must not raise and must behave like
+        the pre-existing empty-prefix case (no records, no curated write)."""
+        registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
+        pipeline = _make_pipeline(registry_client)
+        ctx = _make_ctx("raw/pt-empty/")
+        result = pipeline.execute(ctx)
+
+        assert result.raw_record_count == 0
+        assert result.canonical_record_count == 0
+        assert result.curated_s3_prefix is None

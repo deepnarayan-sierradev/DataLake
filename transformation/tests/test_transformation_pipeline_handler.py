@@ -19,14 +19,14 @@ import pyarrow.parquet as pq
 import pytest
 from moto import mock_aws
 
-from transformation.transformation_pipeline_handler import lambda_handler
+from transformation.transformation_pipeline_handler import _validate_event, lambda_handler
 
 _REGION = "us-east-1"
 _ENVIRONMENT = "dev"
-_RAW_BUCKET = "dev-edl-raw-layer"
-_CURATED_BUCKET = "dev-edl-curated-layer"
-_MAPPING_BUCKET = "dev-edl-curated-layer"
-_CONFIG_TABLE = f"{_ENVIRONMENT}-edl-entity-extraction-config"
+_RAW_BUCKET = "edl-raw-087972550871"
+_CURATED_BUCKET = "edl-curated-087972550871"
+_MAPPING_BUCKET = "edl-curated-087972550871"
+_CONFIG_TABLE = "EdlEntityExtractionConfig"
 
 
 @pytest.fixture()
@@ -72,6 +72,7 @@ def _base_event(raw_s3_prefix: str) -> dict:
         "environment": _ENVIRONMENT,
         "run_id": "run-handler-test-001",
         "raw_s3_prefix": raw_s3_prefix,
+        "tenant_code": "demo",
     }
 
 
@@ -138,3 +139,20 @@ class TestConfigurationRepositoryClientRealConstructor:
 
         # The real, required signature:
         ConfigurationRepositoryClient(environment=_ENVIRONMENT, region_name=_REGION)
+
+
+class TestEventValidation:
+    """ARCH-4: tenant_code must be required and fail closed, not silently default."""
+
+    def test_missing_tenant_code_raises(self) -> None:
+        event = {k: v for k, v in _base_event("raw/x/").items() if k != "tenant_code"}
+        with pytest.raises(ValueError, match="tenant_code"):
+            _validate_event(event)
+
+    def test_invalid_tenant_code_raises(self) -> None:
+        event = {**_base_event("raw/x/"), "tenant_code": "BAD_CODE"}
+        with pytest.raises(ValueError, match="tenant_code"):
+            _validate_event(event)
+
+    def test_valid_tenant_code_is_allowed(self) -> None:
+        _validate_event({**_base_event("raw/x/"), "tenant_code": "acme-corp"})

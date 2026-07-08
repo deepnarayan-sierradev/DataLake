@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 # Type alias for a connector builder callable.
 ConnectorBuilder = Callable[
-    [str, str, dict[str, str], str],
+    [str, str, dict[str, str], str, str],
     "tuple[ConnectorInterface, Any]",
 ]
 
@@ -116,7 +116,7 @@ class ConnectorRegistry:
 
         Called once per adapter module at import time (after register()):
 
-            def _build_salesforce(env, region, params, bucket):
+            def _build_salesforce(env, region, params, bucket, tenant_code):
                 ...
                 return SalesforceConnector(...), SalesforceRawLayerWriter(...)
 
@@ -126,7 +126,8 @@ class ConnectorRegistry:
             source_id: The stable source identifier this builder handles.
             builder:   Callable with signature
                        (environment: str, region_name: str,
-                        connector_params: dict[str, str], raw_s3_bucket: str)
+                        connector_params: dict[str, str], raw_s3_bucket: str,
+                        tenant_code: str)
                        -> tuple[ConnectorInterface, RawLayerWriter]
 
         Raises:
@@ -167,9 +168,7 @@ class ConnectorRegistry:
         self._builders.clear()
         self._params_models.clear()
 
-    def register_params_model(
-        self, source_id: str, model_cls: type[BaseModel]
-    ) -> None:
+    def register_params_model(self, source_id: str, model_cls: type[BaseModel]) -> None:
         """
         Register a Pydantic model class for connector_params validation (§2.2).
 

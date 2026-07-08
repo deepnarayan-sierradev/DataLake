@@ -56,6 +56,7 @@ _VALID_ENTRY_BODY = json.dumps(
         "error_code": "transient_network",
         "error_message": "Connection timed out",
         "enqueued_at": datetime.now(UTC).isoformat(),
+        "tenant_code": "acme-corp",
     }
 )
 
@@ -92,6 +93,7 @@ class TestParseDlqEntry:
         assert entry.environment == "dev"
         assert entry.failed_stage == "extraction"
         assert entry.error_code == "transient_network"
+        assert entry.tenant_code == "acme-corp"
 
     def test_invalid_json_raises(self) -> None:
         controller, _ = _make_controller()
@@ -128,6 +130,13 @@ class TestParseDlqEntry:
         raw = json.loads(_VALID_ENTRY_BODY)
         raw["run_id"] = "../../../bad-run-id"
         with pytest.raises(ReplayValidationError, match="run_id"):
+            controller.parse_dlq_entry(json.dumps(raw))
+
+    def test_invalid_tenant_code_raises(self) -> None:
+        controller, _ = _make_controller()
+        raw = json.loads(_VALID_ENTRY_BODY)
+        raw["tenant_code"] = "BAD_CODE"
+        with pytest.raises(ReplayValidationError, match="tenant_code"):
             controller.parse_dlq_entry(json.dumps(raw))
 
     def test_unknown_environment_raises(self) -> None:
@@ -174,6 +183,18 @@ class TestStartReplayExecution:
         call_kwargs = mock_sfn.start_execution.call_args[1]
         payload = json.loads(call_kwargs["input"])
         assert payload["replay_of_run_id"] == _RUN_ID
+
+    def test_input_payload_carries_tenant_code(self) -> None:
+        """Regression: a replay must preserve the original tenant_code (ARCH-1) —
+        previously dropped, so a replay silently defaulted to another tenant."""
+        controller, mock_sfn = _make_controller()
+        entry = controller.parse_dlq_entry(_VALID_ENTRY_BODY)
+
+        controller.start_replay_execution(entry, _CONNECTOR_PARAMS)
+
+        call_kwargs = mock_sfn.start_execution.call_args[1]
+        payload = json.loads(call_kwargs["input"])
+        assert payload["tenant_code"] == "acme-corp"
 
     def test_input_payload_carries_connector_params(self) -> None:
         controller, mock_sfn = _make_controller()

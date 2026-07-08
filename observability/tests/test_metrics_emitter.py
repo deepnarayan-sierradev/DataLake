@@ -184,12 +184,16 @@ class TestTenantCodeDimension:
     def test_stage_and_tenant_code_both_present(self) -> None:
         emitter = CloudWatchMetricsEmitter(region_name="us-east-1", tenant_code="demo")
         emitter.emit_records_extracted(
-            source_id="sf", entity_id="sf-account", environment="dev", count=1,
-            stage="transformation"
+            source_id="sf",
+            entity_id="sf-account",
+            environment="dev",
+            count=1,
+            stage="transformation",
         )
         dim_names = [d["Name"] for d in emitter._pending[0]["Dimensions"]]
         assert "TenantCode" in dim_names
         assert "Stage" in dim_names
+
     def test_stage_dimension_included_when_provided(self) -> None:
         emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
         emitter.emit_records_extracted(
@@ -255,29 +259,34 @@ class TestCheckLambdaTimeoutPeriodic:
 
     def _make_context(self, remaining_ms: int):
         from unittest.mock import MagicMock
+
         ctx = MagicMock()
         ctx.get_remaining_time_in_millis.return_value = remaining_ms
         return ctx
 
     def test_sufficient_time_does_not_raise(self) -> None:
         from observability.lambda_utils import check_lambda_timeout_periodic
+
         ctx = self._make_context(remaining_ms=300_000)  # 5 minutes
         check_lambda_timeout_periodic(ctx, min_remaining_ms=120_000, operation_name="test_op")
         # Should not raise
 
     def test_insufficient_time_raises(self) -> None:
         from observability.lambda_utils import check_lambda_timeout_periodic
+
         ctx = self._make_context(remaining_ms=50_000)  # 50 seconds
         with pytest.raises(RuntimeError, match="test_op"):
             check_lambda_timeout_periodic(ctx, min_remaining_ms=120_000, operation_name="test_op")
 
     def test_none_context_is_noop(self) -> None:
         from observability.lambda_utils import check_lambda_timeout_periodic
+
         # Should not raise even with tight threshold
         check_lambda_timeout_periodic(None, min_remaining_ms=1_000_000, operation_name="test")
 
     def test_error_message_includes_remaining_time(self) -> None:
         from observability.lambda_utils import check_lambda_timeout_periodic
+
         ctx = self._make_context(remaining_ms=30_000)
         try:
             check_lambda_timeout_periodic(ctx, min_remaining_ms=120_000, operation_name="write_op")

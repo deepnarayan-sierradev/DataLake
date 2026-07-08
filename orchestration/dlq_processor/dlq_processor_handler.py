@@ -1,7 +1,7 @@
 """
 DLQ Processor Lambda — consumes extraction failure DLQ messages.
 
-Reads messages from the {env}-edl-extraction-failure-dlq, validates them,
+Reads messages from the EdlExtractionFailureDlq, validates them,
 writes an audit record to the run audit log DynamoDB table, emits an SNS
 notification, and optionally replays the failed run through Step Functions.
 
@@ -36,8 +36,8 @@ import boto3
 from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field, field_validator
 
-from contracts.identifier_policy import STABLE_ID_PATTERN
-from observability.lambda_utils import require_env, check_lambda_timeout
+from contracts.identifier_policy import STABLE_ID_PATTERN, TENANT_CODE_PATTERN
+from observability.lambda_utils import check_lambda_timeout, require_env
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -68,12 +68,28 @@ class DLQMessage(BaseModel):
     failure_stage: str = Field(default="unknown")
     connector_params: dict[str, str] = Field(default_factory=dict)
     is_replay: bool = Field(default=False)
+    # No default (ARCH-17, pre-go-live fix): a DLQ message missing tenant_code
+    # must fail validation and be logged as a structured error, not be
+    # replayed under the "demo" tenant. The prior "messages predating the fix"
+    # back-compat rationale for a default is void — dev DLQ contents are
+    # demo-only — so there is no live traffic this default was protecting
+    # (OWASP A01 — broken access control via an implicit, attacker-reachable
+    # default identity; a mis-tagged DLQ entry must not silently replay
+    # against, or write an audit record scoped to, the wrong tenant).
+    tenant_code: str = Field(..., min_length=2, max_length=48)
 
     @field_validator("source_id", "entity_id")
     @classmethod
     def _validate_stable_id(cls, v: str) -> str:
         if not STABLE_ID_PATTERN.match(v):
             raise ValueError(f"{v!r} does not conform to the stable identifier format.")
+        return v
+
+    @field_validator("tenant_code")
+    @classmethod
+    def _validate_tenant_code(cls, v: str) -> str:
+        if not TENANT_CODE_PATTERN.match(v):
+            raise ValueError(f"tenant_code {v!r} does not conform to the tenant code format.")
         return v
 
 
@@ -197,8 +213,16 @@ def _write_audit_record(
                 "failure_reason": msg.failure_reason,
                 "failure_stage": msg.failure_stage,
                 "received_at": received_at,
-                "source_entity_key": f"{msg.source_id}#{msg.entity_id}",
+                # Tenant-scoped GSI hash key (ARCH-18, pre-go-live fix): without the
+                # tenant_code prefix, two tenants' runs against the same source/entity
+                # collapse onto one source-entity-time-index partition, letting either
+                # tenant's audit query see the other's run history (OWASP A01 — broken
+                # access control via a shared, un-scoped index key). "#" is outside the
+                # STABLE_ID_PATTERN/TENANT_CODE_PATTERN charset, so it cannot collide
+                # with a value one of the three components could itself contain.
+                "source_entity_key": f"{msg.tenant_code}#{msg.source_id}#{msg.entity_id}",
                 "started_at": received_at,  # Required for GSI sort key
+                "tenant_code": msg.tenant_code,
             }
         )
         _logger.info(
@@ -228,6 +252,7 @@ def _send_sns_notification(
             "alert_type": "pipeline_dlq_message",
             "environment": environment,
             "run_id": msg.run_id,
+            "tenant_code": msg.tenant_code,
             "source_id": msg.source_id,
             "entity_id": msg.entity_id,
             "failure_reason": msg.failure_reason,
@@ -257,6 +282,7 @@ def _send_sns_notification(
 def _replay_failed_run(state_machine_arn: str, msg: DLQMessage) -> None:
     """Re-submit the failed run through Step Functions (auto_replay=true only)."""
     import re
+
     _safe = re.compile(r"[^a-zA-Z0-9\-_]")
     exec_name = _safe.sub("-", f"replay-{msg.run_id}")[:80]
 
@@ -268,6 +294,7 @@ def _replay_failed_run(state_machine_arn: str, msg: DLQMessage) -> None:
             "connector_params": msg.connector_params,
             "is_replay": True,
             "replay_of_run_id": msg.run_id,
+            "tenant_code": msg.tenant_code,
         },
         separators=(",", ":"),
     )

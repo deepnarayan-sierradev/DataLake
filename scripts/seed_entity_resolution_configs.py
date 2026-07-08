@@ -39,8 +39,19 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _CONFIGS_DIR = _REPO_ROOT / "config" / "entity_resolution"
 
 
-def _bucket_name(environment: str) -> str:
-    return f"{environment}-edl-curated-layer"
+def _account_id(region: str) -> str:
+    """Resolve the AWS account ID of the caller's credentials.
+
+    Bucket names are suffixed with the account ID rather than the
+    environment name — S3 bucket names are unique across all of AWS, and
+    each environment is already a separate AWS account, so the account ID
+    is what actually guarantees no collision with dev/staging/prod.
+    """
+    return boto3.client("sts", region_name=region).get_caller_identity()["Account"]
+
+
+def _bucket_name(region: str) -> str:
+    return f"edl-curated-{_account_id(region)}"
 
 
 def _collect_config_files(
@@ -68,10 +79,10 @@ def _collect_config_files(
             if stem == "latest":
                 continue  # we regenerate latest.json from discovered versions
             if stem.startswith("match_rules_"):
-                version = stem[len("match_rules_"):]
+                version = stem[len("match_rules_") :]
                 match_rules.append((version, "match_rules", f))
             elif stem.startswith("survivorship_"):
-                version = stem[len("survivorship_"):]
+                version = stem[len("survivorship_") :]
                 survivorship.append((version, "survivorship", f))
 
         if match_rules or survivorship:
@@ -85,6 +96,7 @@ def _collect_config_files(
 
 def _resolve_latest_version(versions: list[str]) -> str:
     """Return the highest version from a list like ['v1', 'v2', 'v10']."""
+
     def _key(v: str) -> int:
         try:
             return int(v.lstrip("v"))
@@ -115,7 +127,7 @@ def seed(
     entity_type_filter: str | None = None,
     dry_run: bool = False,
 ) -> None:
-    bucket = _bucket_name(environment)
+    bucket = _bucket_name(region)
     s3 = boto3.client("s3", region_name=region)
 
     # Verify bucket is reachable before uploading (fail-fast).
@@ -149,7 +161,7 @@ def seed(
         sv_versions: list[str] = []
 
         # Upload match_rules files
-        for version, kind, path in groups["match_rules"]:
+        for version, _kind, path in groups["match_rules"]:
             body = path.read_bytes()
             # Validate JSON before uploading
             try:
@@ -163,7 +175,7 @@ def seed(
             total_uploads += 1
 
         # Upload survivorship files
-        for version, kind, path in groups["survivorship"]:
+        for version, _kind, path in groups["survivorship"]:
             body = path.read_bytes()
             try:
                 json.loads(body)
@@ -192,11 +204,11 @@ def seed(
             dry_run,
         )
         total_uploads += 1
-        print(
-            f"  latest pointer → match_rules={latest_mr}, survivorship={latest_sv}"
-        )
+        print(f"  latest pointer → match_rules={latest_mr}, survivorship={latest_sv}")
 
-    print(f"\nDone. {total_uploads} object(s) {'would be ' if dry_run else ''}uploaded to s3://{bucket}/entity-resolution/")
+    print(
+        f"\nDone. {total_uploads} object(s) {'would be ' if dry_run else ''}uploaded to s3://{bucket}/entity-resolution/"
+    )
 
 
 def main() -> None:

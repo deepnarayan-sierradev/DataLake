@@ -43,7 +43,7 @@ variable "cicd_deployment_policy_arns" {
 variable "lambda_package_s3_bucket" {
   type        = string
   description = "S3 bucket that holds the extraction pipeline Lambda deployment zip."
-  default     = "dev-edl-terraform-state"
+  default     = "edl-terraform-state-087972550871"
 }
 
 variable "lambda_package_s3_key" {

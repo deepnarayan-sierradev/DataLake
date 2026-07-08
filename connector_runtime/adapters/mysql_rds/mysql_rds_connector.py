@@ -52,6 +52,7 @@ from connector_runtime.adapters.mysql_rds.mysql_rds_credentials_client import (
     MySqlRdsCredentialError,
     MySqlRdsCredentialsClient,
 )
+from connector_runtime.adapters.mysql_rds.mysql_rds_params import MySqlRdsConnectorParams
 from connector_runtime.adapters.mysql_rds.mysql_schema_introspection_client import (
     MySqlSchemaIntrospectionClient,
     MySqlSchemaIntrospectionClientError,
@@ -388,6 +389,7 @@ def _build_mysql_rds(
     region_name: str,
     connector_params: dict[str, str],
     raw_s3_bucket: str,
+    tenant_code: str,
 ) -> tuple[ConnectorInterface, Any]:
     """
     Factory used by the extraction pipeline Lambda to construct a fully-wired
@@ -414,14 +416,11 @@ def _build_mysql_rds(
     )
     writer = MySqlRdsRawLayerWriter(
         s3_bucket=raw_s3_bucket,
-        s3_prefix="mysql-rds",
         region_name=region_name,
+        tenant_code=tenant_code,
     )
     return connector, writer
 
 
 connector_registry.register_builder(_SOURCE_ID, _build_mysql_rds)
-
-from connector_runtime.adapters.mysql_rds.mysql_rds_params import MySqlRdsConnectorParams
-
 connector_registry.register_params_model(_SOURCE_ID, MySqlRdsConnectorParams)

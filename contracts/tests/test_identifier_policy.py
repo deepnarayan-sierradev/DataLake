@@ -127,7 +127,7 @@ class TestTenantCodePattern:
             "globex-eu",
             "initech",
             "tenant1",
-            "ab",       # minimum 2 chars
+            "ab",  # minimum 2 chars
             "a" + "x" * 47,  # maximum 48 chars
         ],
     )
@@ -137,16 +137,16 @@ class TestTenantCodePattern:
     @pytest.mark.parametrize(
         "value",
         [
-            "A",              # uppercase
-            "1bad",           # starts with digit
-            "-bad",           # starts with hyphen
-            "a",              # too short (1 char)
-            "",               # empty
-            "has space",      # space
-            "has_underscore", # underscore not allowed
-            "has.dot",        # dot not allowed
-            "UPPER",          # uppercase
-            "a" * 49,         # too long (49 chars)
+            "A",  # uppercase
+            "1bad",  # starts with digit
+            "-bad",  # starts with hyphen
+            "a",  # too short (1 char)
+            "",  # empty
+            "has space",  # space
+            "has_underscore",  # underscore not allowed
+            "has.dot",  # dot not allowed
+            "UPPER",  # uppercase
+            "a" * 49,  # too long (49 chars)
         ],
     )
     def test_invalid_tenant_codes_do_not_match(self, value: str) -> None:

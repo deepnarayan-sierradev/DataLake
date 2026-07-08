@@ -17,8 +17,8 @@ The run_id satisfies all platform invariants:
   - Matches the stable identifier format regex used by StructuredLogEvent
 
 AWS resources used:
-  - DynamoDB table: {environment}-edl-run-audit-log  (PK: run_id, SK: stage)
-  - SQS queue:      {environment}-edl-extraction-failure-dlq
+  - DynamoDB table: EdlRunAuditLog  (PK: run_id, SK: stage)
+  - SQS queue:      EdlExtractionFailureDlq
 
 Security:
   - Sensitive content is auto-scrubbed by PipelineStageContract validators.
@@ -45,8 +45,8 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-_AUDIT_TABLE_TEMPLATE: Final[str] = "{environment}-edl-run-audit-log"
-_DLQ_NAME_TEMPLATE: Final[str] = "{environment}-edl-extraction-failure-dlq"
+_AUDIT_TABLE_NAME: Final[str] = "EdlRunAuditLog"
+_DLQ_NAME: Final[str] = "EdlExtractionFailureDlq"
 
 
 # ---------------------------------------------------------------------------
@@ -152,10 +152,7 @@ class RunCoordinator:
         self._started_at: datetime = datetime.now(tz=UTC)
 
         dynamodb = boto3.resource("dynamodb", region_name=region_name)
-        _audit_table_name = (
-            os.environ.get("AUDIT_LOG_TABLE")
-            or _AUDIT_TABLE_TEMPLATE.format(environment=environment)
-        )
+        _audit_table_name = os.environ.get("AUDIT_LOG_TABLE") or _AUDIT_TABLE_NAME
         self._audit_table = dynamodb.Table(_audit_table_name)
         self._sqs = boto3.client("sqs", region_name=region_name)
         self._region = region_name
@@ -342,7 +339,9 @@ class RunCoordinator:
     def _persist_audit_record(self, contract: PipelineStageContract) -> None:
         """Write the stage contract to DynamoDB (best-effort — never propagates)."""
         try:
-            self._audit_table.put_item(Item=_serialise_contract(contract))
+            self._audit_table.put_item(
+                Item=_serialise_contract(contract, started_at=self._started_at)
+            )
         except ClientError:
             _logger.warning(
                 "audit_log_write_failed",
@@ -355,7 +354,7 @@ class RunCoordinator:
     def _resolve_dlq_url(self) -> str | None:
         if self._dlq_url is not None:
             return self._dlq_url
-        dlq_name = _DLQ_NAME_TEMPLATE.format(environment=self._environment)
+        dlq_name = _DLQ_NAME
         try:
             response = self._sqs.get_queue_url(QueueName=dlq_name)
             self._dlq_url = response["QueueUrl"]
@@ -369,8 +368,21 @@ class RunCoordinator:
 # ---------------------------------------------------------------------------
 
 
-def _serialise_contract(contract: PipelineStageContract) -> dict[str, Any]:
-    """Convert a PipelineStageContract to a DynamoDB-compatible item dict."""
+def _serialise_contract(contract: PipelineStageContract, started_at: datetime) -> dict[str, Any]:
+    """
+    Convert a PipelineStageContract to a DynamoDB-compatible item dict.
+
+    Args:
+        contract:   The stage contract being persisted.
+        started_at: The owning RunCoordinator's run-start timestamp — NOT
+            necessarily contract.completed_at. Populating source_entity_key /
+            started_at here (ARCH-18, pre-go-live fix) is what makes the
+            source-entity-time-index GSI actually cover every run: before
+            this fix, only DLQ-routed failures fed the GSI (dlq_processor_handler
+            writes its own item with these attributes), so a query for a
+            source/entity's full run history silently omitted every
+            successful run.
+    """
 
     def _dt(v: datetime | None) -> str | None:
         return v.isoformat() if v is not None else None
@@ -383,6 +395,13 @@ def _serialise_contract(contract: PipelineStageContract) -> dict[str, Any]:
         "status": str(contract.status),
         "environment": contract.environment,
         "tenant_code": contract.tenant_code,
+        # Tenant-scoped GSI hash key — must match dlq_processor_handler's
+        # "{tenant_code}#{source_id}#{entity_id}" format exactly so both
+        # write paths land in the same source-entity-time-index partition
+        # per tenant/source/entity (OWASP A01 — an un-scoped shared key would
+        # let one tenant's audit query surface another tenant's run history).
+        "source_entity_key": f"{contract.tenant_code}#{contract.source_id}#{contract.entity_id}",
+        "started_at": started_at.isoformat(),  # GSI range key
         "completed_at": _dt(contract.completed_at),
         "duration_ms": contract.duration_ms,
         "extraction_window_start": _dt(contract.extraction_window_start),

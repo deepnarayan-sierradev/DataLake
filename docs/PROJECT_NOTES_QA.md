@@ -10,9 +10,9 @@ table inventory, and the exact rules applied at each layer. See also
 ## 1. Pipeline run schedule
 
 > **AWS services to show live:** **EventBridge Scheduler** (Console → Amazon EventBridge →
-> Scheduler → Schedules, group `dev-extraction-schedules`) and **DynamoDB**
-> (`dev-edl-entity-extraction-config` table — holds `schedule_cron`/`schedule_enabled` per entity).
-> CLI: `aws scheduler list-schedules --group-name dev-extraction-schedules --region us-east-1`.
+> Scheduler → Schedules, group `EdlExtractionSchedules`) and **DynamoDB**
+> (`EdlEntityExtractionConfig` table — holds `schedule_cron`/`schedule_enabled` per entity).
+> CLI: `aws scheduler list-schedules --group-name EdlExtractionSchedules --region us-east-1`.
 
 All pipelines run **once daily, staggered a few minutes apart between 02:00–03:05 UTC**
 (likely to avoid overloading shared downstream resources when multiple pipelines fire).
@@ -33,7 +33,8 @@ All pipelines run **once daily, staggered a few minutes apart between 02:00–03
 **Where it lives in code** — schedules are **data in DynamoDB, not hardcoded in Terraform**:
 - Source of truth: `scripts/seed_entity_config.py` — a Python dict per entity with
   `schedule_cron`, `schedule_enabled`, `schedule_timezone` fields. Running it writes these
-  into the `{environment}-edl-entity-extraction-config` DynamoDB table.
+  into the `EdlEntityExtractionConfig` DynamoDB table (same table name in every environment —
+  each environment now lives in its own AWS account, so no env prefix is needed).
 - Sync to AWS: `scripts/seed_schedules.py` reads that DynamoDB table and calls
   `ExtractionScheduleClient.create_or_update_schedule(...)` to create/update the actual
   EventBridge Scheduler entry (named `{source_id}--{entity_id}`). Disabled entities have
@@ -50,18 +51,18 @@ All pipelines run **once daily, staggered a few minutes apart between 02:00–03
 
 ## 2. S3 buckets — 6 total
 
-> **AWS services to show live:** **S3** (Console → S3 → search `dev-edl-`) and **KMS**
+> **AWS services to show live:** **S3** (Console → S3 → search `edl-`) and **KMS**
 > (Console → Key Management Service → look up the CMK each bucket's default encryption
-> points to). CLI: `aws s3 ls | grep dev-edl`.
+> points to). CLI: `aws s3 ls | grep edl-`.
 
-| # | Bucket (dev name) | Purpose |
+| # | Bucket (dev account: `087972550871`) | Purpose |
 |---|---|---|
-| 1 | `dev-edl-raw-layer` | Immutable raw extraction output (Hive-partitioned Parquet). Object Lock enabled (GOVERNANCE mode, 30-day retention); only the extraction Lambda role can write/delete. |
-| 2 | `dev-edl-curated-layer` | Field-mapped, quality-checked Parquet with canonical column names; also stores field-mapping JSON config. |
-| 3 | `dev-edl-analytics-layer` | Golden (deduplicated) records + BI-ready Parquet, registered in Glue for Athena. Also doubles as the Athena query-results bucket. |
-| 4 | `dev-edl-schema-snapshots` | JSON schema fingerprints per extraction run, used for schema drift detection. |
-| 5 | `dev-edl-s3-access-logs` | Central S3 access-log target for the other 4 data buckets. Populated automatically by AWS. |
-| 6 | `dev-edl-terraform-state` | Dual-purpose: Terraform remote state (+ DynamoDB lock table) and Lambda deployment artifact storage. Bootstrapped manually, outside the Terraform `storage` module. |
+| 1 | `edl-raw-087972550871` | Immutable raw extraction output (Hive-partitioned Parquet). Object Lock enabled (GOVERNANCE mode, 30-day retention); only the extraction Lambda role can write/delete. |
+| 2 | `edl-curated-087972550871` | Field-mapped, quality-checked Parquet with canonical column names; also stores field-mapping JSON config. |
+| 3 | `edl-analytics-087972550871` | Golden (deduplicated) records + BI-ready Parquet, registered in Glue for Athena. Also doubles as the Athena query-results bucket. |
+| 4 | `edl-schema-snapshots-087972550871` | JSON schema fingerprints per extraction run, used for schema drift detection. |
+| 5 | `edl-access-logs-087972550871` | Central S3 access-log target for the other 4 data buckets. Populated automatically by AWS. |
+| 6 | `edl-terraform-state-087972550871` | Dual-purpose: Terraform remote state (+ DynamoDB lock table) and Lambda deployment artifact storage. Bootstrapped manually, outside the Terraform `storage` module. |
 
 **Defined in**: `infrastructure/modules/storage/main.tf` (buckets 1–5, each with KMS encryption,
 versioning, public-access-block, TLS-enforcement policy). Bucket 6 is set up separately,
@@ -75,18 +76,19 @@ variables but defaults to `""` and isn't actually created in dev — doesn't cou
 ## 3. Credential storage (Salesforce & MySQL)
 
 > **AWS services to show live:** **Secrets Manager** (Console → Secrets Manager → filter
-> `dev/sources`) and **IAM** (Console → IAM → Roles → extraction Lambda role → Permissions,
+> `edl/sources`) and **IAM** (Console → IAM → Roles → extraction Lambda role → Permissions,
 > to show the scoped `secretsmanager:GetSecretValue` policy). CLI:
 > `aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name'`.
 
 Stored **exclusively in AWS Secrets Manager — never in code, env vars, or config files.**
 
-Pattern: `{environment}/sources/{source_id}/credentials` → in dev:
+Pattern: `edl/sources/{source_id}/credentials` — the env segment was dropped since each
+environment now lives in its own AWS account, so the same path is correct everywhere:
 
 | Source | Secret path | Fields inside |
 |---|---|---|
-| Salesforce | `dev/sources/salesforce/credentials` | `instance_url`, `client_id`, `client_secret` (OAuth2 client-credentials flow) |
-| MySQL RDS | `dev/sources/mysql-rds/credentials` | `host`, `port`, `username`, `password`, `database` |
+| Salesforce | `edl/sources/salesforce/credentials` | `instance_url`, `client_id`, `client_secret` (OAuth2 client-credentials flow) |
+| MySQL RDS | `edl/sources/mysql-rds/credentials` | `host`, `port`, `username`, `password`, `database` |
 
 `connector_runtime/adapters/salesforce/salesforce_auth_client.py` states this explicitly as a
 security control (OWASP A07/A09): "Client credentials retrieved from Secrets Manager only —
@@ -94,12 +96,12 @@ never from env vars, constructor arguments, or config files." The token is cache
 only, never logged/persisted.
 
 **Access control**: `infrastructure/modules/iam/main.tf` grants the extraction Lambda role
-`secretsmanager:GetSecretValue` on the wildcard `arn:aws:secretsmanager:...:secret:{environment}/sources/*`.
+`secretsmanager:GetSecretValue` on the wildcard `arn:aws:secretsmanager:...:secret:edl/sources/*`.
 
 **Not seeded from code** — unlike entity config/schedules, there is no seeding script for
 secrets. The only related tooling is a read-only check:
 ```bash
-aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name' | grep dev/sources
+aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name' | grep edl/sources
 ```
 Secrets are created manually/out-of-band by whoever has AWS console/CLI access.
 
@@ -117,8 +119,8 @@ Secrets are created manually/out-of-band by whoever has AWS console/CLI access.
 ## 4. Role of AWS Glue
 
 > **AWS services to show live:** **AWS Glue Data Catalog** (Console → Glue → Data Catalog →
-> Databases → `dev_edl_analytics` → Tables — show `company`, `person`, `contract`, `supplier`,
-> `ar_invoice`, `ap_bill`). CLI: `aws glue get-tables --database-name dev_edl_analytics`.
+> Databases → `edl_analytics` → Tables — show `company`, `person`, `contract`, `supplier`,
+> `ar_invoice`, `ap_bill`). CLI: `aws glue get-tables --database-name edl_analytics`.
 
 **Glue is a pure metadata catalog here — not an ETL/Spark engine.** No `aws_glue_job`,
 `aws_glue_crawler`, or PySpark exists anywhere in the repo. All actual transformation happens
@@ -137,11 +139,11 @@ metadata in the Glue Data Catalog so Athena can query the S3 Parquet files.
 
 ## 5. Curated → Golden → Analytics data flow
 
-> **AWS services to show live:** **Lambda** (Console → Lambda → `dev-entity-resolution-pipeline`
-> and `dev-analytics-publisher` — show recent invocations), **S3** (bucket
-> `dev-edl-analytics-layer`, prefixes `canonical/{entity_type}/` then `analytics/{entity_type}/`),
+> **AWS services to show live:** **Lambda** (Console → Lambda → `EdlEntityResolutionPipeline`
+> and `EdlAnalyticsLayerPublisher` — show recent invocations), **S3** (bucket
+> `edl-analytics-087972550871`, prefixes `canonical/{entity_type}/` then `analytics/{entity_type}/`),
 > and **Glue** (table registered only after step 4 below). CLI:
-> `aws s3 ls s3://dev-edl-analytics-layer/canonical/ --recursive`.
+> `aws s3 ls s3://edl-analytics-087972550871/canonical/ --recursive`.
 
 1. **Entity Resolution reads curated data** — `entity_resolution/entity_resolution_pipeline_handler.py`
    loads curated Parquet from S3 for all sources feeding a given entity type.
@@ -153,7 +155,7 @@ metadata in the Glue Data Catalog so Athena can query the S3 Parquet files.
    (tagged `golden_id`, `contributing_source_records`, `field_provenance`), writes:
    `s3://{analytics_bucket}/canonical/{entity_type}/golden_date=.../golden.parquet`
    plus a `decisions.json` audit trail. **No Glue table is registered for this layer** (see §7).
-4. **Analytics Publisher** — Lambda `dev-analytics-layer-publisher`
+4. **Analytics Publisher** — Lambda `EdlAnalyticsLayerPublisher`
    (`analytics_publisher/analytics_publisher_handler.py`, handler
    `analytics_publisher.analytics_publisher_handler.lambda_handler`) reads the golden Parquet,
    strips internal bookkeeping fields, re-serializes, writes:
@@ -170,35 +172,38 @@ wired into the Step Functions state machine. That's a doc/code drift, not a seco
 
 ## 6. Lambda function names (AWS Console — dev environment)
 
-> **AWS services to show live:** **Lambda** (Console → Lambda → Functions → filter `dev-`) and
-> **Step Functions** (Console → Step Functions → State machines → `dev-extraction-pipeline` →
+> **AWS services to show live:** **Lambda** (Console → Lambda → Functions → filter `Edl`) and
+> **Step Functions** (Console → Step Functions → State machines → `EdlExtractionPipeline` →
 > Definition tab, to show how these four Lambda ARNs are wired into one workflow). CLI:
-> `aws lambda list-functions --region us-east-1 --query 'Functions[?starts_with(FunctionName, `dev-`)].FunctionName'`.
+> `aws lambda list-functions --region us-east-1 --query 'Functions[?starts_with(FunctionName, `Edl`)].FunctionName'`.
 
 | Pipeline stage | Console name | Handler |
 |---|---|---|
-| Extraction | `dev-extraction-pipeline` | — |
-| Transformation (raw→curated) | `dev-transformation-pipeline` | `transformation.transformation_pipeline_handler.lambda_handler` |
-| Entity Resolution (curated→golden) | `dev-entity-resolution-pipeline` | — |
-| Analytics Publisher (golden→analytics) | `dev-analytics-layer-publisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` |
+| Extraction | `EdlExtractionPipeline` | — |
+| Transformation (raw→curated) | `EdlTransformationPipeline` | `transformation.transformation_pipeline_handler.lambda_handler` |
+| Entity Resolution (curated→golden) | `EdlEntityResolutionPipeline` | — |
+| Analytics Publisher (golden→analytics) | `EdlAnalyticsLayerPublisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` |
 
-Confirmed via Terraform locals in each module's `main.tf` (`function_name = "${var.environment}-..."`)
-and by tracing the Step Functions orchestration module's `analytics_publisher_lambda_arn` wiring
-back to `module.analytics_publisher_lambda`.
+Confirmed via Terraform locals in each module's `main.tf` (`function_name = "Edl..."`, a fixed
+PascalCase literal — no longer interpolated with `var.environment`; the environment is tracked
+only via the `Environment` tag now) and by tracing the Step Functions orchestration module's
+`analytics_publisher_lambda_arn` wiring back to `module.analytics_publisher_lambda`.
 
-**Doc mismatch**: `docs/PLATFORM_STATUS.md` lists the analytics publisher as
-`dev-analytics-publisher` — outdated/shortened. The actual deployed name (per Terraform,
-the source of truth) is **`dev-analytics-layer-publisher`**.
+**Historical doc mismatch (resolved)**: `docs/PLATFORM_STATUS.md` used to list the analytics
+publisher as the shortened `dev-analytics-publisher`, while Terraform used the longer
+`dev-analytics-layer-publisher` — a real inconsistency under the old naming scheme. The new
+convention resolves this: there is exactly one correct name, **`EdlAnalyticsLayerPublisher`**,
+and it no longer varies by environment (only the AWS account does).
 
 **Four newer Lambdas exist outside the core 4-stage pipeline above** — not wired into the
-`dev-extraction-pipeline` state machine, so they're easy to miss if you only look there:
+`EdlExtractionPipeline` state machine, so they're easy to miss if you only look there:
 
 | Console name | Handler | Purpose |
 |---|---|---|
-| `dev-edl-control-plane` | `connector_runtime.api.control_plane_handler.lambda_handler` | SaaS control-plane REST API (Cognito/JWT auth) for self-service tenant provisioning — code-complete, not yet deployment-verified. See new §6.1 below. |
-| `dev-edl-credential-expiry-notifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` | Daily secret-age check, sends an SNS alert on stale credentials (see §3 and §11's rotation correction). |
-| `dev-edl-pipeline-trigger` | `orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler` | Rate-limited SQS FIFO → Step Functions trigger. |
-| `dev-edl-dlq-processor` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` | DLQ → audit log + SNS alert + optional replay. |
+| `EdlControlPlane` | `connector_runtime.api.control_plane_handler.lambda_handler` | SaaS control-plane REST API (Cognito/JWT auth) for self-service tenant provisioning — code-complete, not yet deployment-verified. See new §6.1 below. |
+| `EdlCredentialExpiryNotifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` | Daily secret-age check, sends an SNS alert on stale credentials (see §3 and §11's rotation correction). |
+| `EdlPipelineTrigger` | `orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler` | Rate-limited SQS FIFO → Step Functions trigger. |
+| `EdlDlqProcessor` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` | DLQ → audit log + SNS alert + optional replay. |
 
 Names confirmed via Terraform locals: `infrastructure/modules/control_plane/main.tf`
 (`control_plane_lambda_name`), `infrastructure/modules/secrets/main.tf` (`credential_expiry_notifier`
@@ -211,9 +216,9 @@ resource), `infrastructure/modules/orchestration/main.tf` (`pipeline_trigger_lam
 (e.g. `connector_runtime/configuration_repository/configuration_repository.py`,
 `watermark_management/watermark_repository/watermark_repository.py`,
 `schema_management/snapshot_repository/snapshot_repository.py`), plus a new
-`entity-type-registry` DynamoDB table that — unlike the other config tables in §13.3 — *is*
+`EdlEntityTypeRegistry` DynamoDB table that — unlike the other config tables in §13.3 — *is*
 Terraform-managed (`infrastructure/modules/metadata_persistence/`). A Cognito-authenticated SaaS
-control-plane API (`dev-edl-control-plane` above) now exists for self-service tenant
+control-plane API (`EdlControlPlane` above) now exists for self-service tenant
 provisioning. Both are code-complete but **not yet verified against a live AWS deployment** —
 treat as "built, not yet demoed." Canonical references: `tests/test_tenant_isolation.py` and the
 cross-tenant-incident scenario in `docs/PRODUCTION_INCIDENT_RUNBOOK.md`.
@@ -223,7 +228,7 @@ cross-tenant-incident scenario in `docs/PRODUCTION_INCIDENT_RUNBOOK.md`.
 ## 7. Combining multiple sources — which layer does it, and why query only Analytics
 
 > **AWS services to show live:** **Athena** (Console → Athena → Query editor → database
-> `dev_edl_analytics`, workgroup `dev-edl-analytics` — run a `SELECT *` on `company` to show
+> `edl_analytics`, workgroup `EdlAnalytics` — run a `SELECT *` on `company` to show
 > the merged row live), **Glue** (Data Catalog entry backing that table), and **IAM** (Role →
 > `entity-resolution-role` has no Glue permissions, which is *why* `canonical/` isn't
 > queryable — good to show the policy JSON directly to prove the point).
@@ -293,8 +298,8 @@ from whichever source has it — ready to query via Athena with no joins or dedu
 ## 8. All source tables/entities being extracted
 
 > **AWS services to show live:** **DynamoDB** (Console → DynamoDB → Tables →
-> `dev-edl-entity-extraction-config` → Explore table items — every row in the table below is one
-> item here). CLI: `aws dynamodb scan --table-name dev-edl-entity-extraction-config --region us-east-1`.
+> `EdlEntityExtractionConfig` → Explore table items — every row in the table below is one
+> item here). CLI: `aws dynamodb scan --table-name EdlEntityExtractionConfig --region us-east-1`.
 
 | Source | Entity ID | Actual table/object queried | Load type | Active? | Scheduled? |
 |---|---|---|---|---|---|
@@ -323,11 +328,11 @@ Source: `scripts/seed_entity_config.py`, cross-checked against each adapter's qu
 
 ## 9. Rules applied at each layer, with real examples
 
-> **AWS services to show live:** **S3** (schema snapshots in `dev-edl-schema-snapshots`,
-> quality reports in `dev-edl-curated-layer/quality-reports/...`), **Lambda**
-> (`dev-transformation-pipeline` logs), and **CloudWatch** (Console → CloudWatch → Alarms —
+> **AWS services to show live:** **S3** (schema snapshots in `edl-schema-snapshots-087972550871`,
+> quality reports in `edl-curated-087972550871/quality-reports/...`), **Lambda**
+> (`EdlTransformationPipeline` logs), and **CloudWatch** (Console → CloudWatch → Alarms —
 > where a BLOCKING quality violation or BREAKING drift would fire). CLI:
-> `aws s3 cp s3://dev-edl-schema-snapshots/salesforce/salesforce-account/latest.json -`.
+> `aws s3 cp s3://edl-schema-snapshots-087972550871/salesforce/salesforce-account/latest.json -`.
 
 ### 9.1 Raw layer — structural validation only, no data-value rules
 Fixed sequence per run (`orchestration/step_functions/extraction_workflow.py`): load config →
@@ -427,11 +432,11 @@ add more transformation logic.
 
 ## 10. Golden layer merge = row merge + column merge + new pipeline columns
 
-> **AWS services to show live:** **S3** (bucket `dev-edl-analytics-layer`, prefix
+> **AWS services to show live:** **S3** (bucket `edl-analytics-087972550871`, prefix
 > `canonical/company/golden_date=.../golden.parquet` — download and open one file to show the
 > 19 columns: 14 business + 5 system fields) and **Lambda**
-> (`dev-entity-resolution-pipeline` — the code that produces this file). CLI:
-> `aws s3 ls s3://dev-edl-analytics-layer/canonical/company/ --recursive`.
+> (`EdlEntityResolutionPipeline` — the code that produces this file). CLI:
+> `aws s3 ls s3://edl-analytics-087972550871/canonical/company/ --recursive`.
 
 The golden layer merges data in three ways at once, not just one:
 
@@ -516,9 +521,9 @@ each doc — just the points worth actually saying out loud.
   sources still leaves >290% annual ROI — the cost curve is flat relative to source count.
 
 ### `docs/PLATFORM_STATUS.md` (exact values to actually show on screen)
-- Athena: database `dev_edl_analytics`, workgroup `dev-edl-analytics` — always filter queries
+- Athena: database `edl_analytics`, workgroup `EdlAnalytics` — always filter queries
   by the latest `analytics_date` shown in this doc.
-- Live tables: `dev_edl_analytics.company` (34 rows), `.person` (49 rows), `.contract`
+- Live tables: `edl_analytics.company` (34 rows), `.person` (49 rows), `.contract`
   (35,971+ rows, filter `is_deleted = false` for the honest active count).
 - Connected sources today: Salesforce ✅, MySQL RDS ✅, Sage Intacct ✅, Sage X3 ✅ (customer
   active; supplier active but its schedule is disabled). NetSuite's connector is code-complete
@@ -567,7 +572,7 @@ each doc — just the points worth actually saying out loud.
 ## 12. Live demo walkthrough script (mixed business + technical audience)
 
 > **AWS services to show live, in the order the script uses them:** **EventBridge Scheduler**
-> (Step 2) → **Step Functions** (Step 3, console: State machines → `dev-extraction-pipeline`)
+> (Step 2) → **Step Functions** (Step 3, console: State machines → `EdlExtractionPipeline`)
 > → **S3** (Step 4, all three data buckets) → **Athena** (Step 5, query editor) →
 > **Glue** (implicit in Step 5 — the table backing the query) → **CloudWatch** (have Alarms
 > open in a spare tab in case Step 8's "what if it breaks" question comes up). Open all of
@@ -592,25 +597,25 @@ If live-triggering, use the exact pattern from `docs/DEVELOPER_GUIDE.md` §8:
 python scripts/trigger_extraction.py \
   --source-id salesforce --entity-id salesforce-account \
   --environment dev --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param object_name=Account
 ```
-Otherwise, open the Step Functions console for `dev-extraction-pipeline` and show a recent
+Otherwise, open the Step Functions console for `EdlExtractionPipeline` and show a recent
 successful execution's stage-by-stage timeline.
 
 ### Step 4 — Walk the three S3 layers
 Reference bucket purposes from this file's §2:
-- `dev-edl-raw-layer` — immutable, exactly as received from the source
-- `dev-edl-curated-layer` — field-mapped, quality-checked, PII-masked, full current state
+- `edl-raw-087972550871` — immutable, exactly as received from the source
+- `edl-curated-087972550871` — field-mapped, quality-checked, PII-masked, full current state
   (SCD Type 1 merge, see §10)
-- `dev-edl-analytics-layer` — golden records + BI-ready Parquet, registered in Glue
+- `edl-analytics-087972550871` — golden records + BI-ready Parquet, registered in Glue
 
 ### Step 5 — Query Athena live
 Use the exact working queries from `docs/PLATFORM_STATUS.md` ("Live Data" section):
 ```sql
-SELECT * FROM dev_edl_analytics.company WHERE analytics_date='2026-07-02';
-SELECT * FROM dev_edl_analytics.person  WHERE analytics_date='2026-06-29';
-SELECT COUNT(*) FROM dev_edl_analytics.contract
+SELECT * FROM edl_analytics.company WHERE analytics_date='2026-07-02';
+SELECT * FROM edl_analytics.person  WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.contract
 WHERE analytics_date='2026-07-02' AND is_deleted = false;
 ```
 Say: "This is real data, no exports, no scripts — anyone with Athena access can run this today."
@@ -675,12 +680,12 @@ where it's covered in more depth elsewhere in this file:
 
 1. **EventBridge Scheduler** — cron rule fires on a schedule (per source/entity). → **§1**
    (full cron table, where schedules live in DynamoDB vs. Terraform).
-2. **Step Functions** (`dev-extraction-pipeline`) — orchestrates every stage below as one
+2. **Step Functions** (`EdlExtractionPipeline`) — orchestrates every stage below as one
    workflow run. → **§6** (Lambda names wired into the state machine).
-3. **Config load (DynamoDB)** — reads the `entity-extraction-config` table to know what/how
+3. **Config load (DynamoDB)** — reads the `EdlEntityExtractionConfig` table to know what/how
    to extract. → **§1** and **§8** (source table inventory, config fields).
 4. **Secrets Manager** — fetches source credentials at
-   `{environment}/sources/{source_id}/credentials`. → **§3** (credential storage, access
+   `edl/sources/{source_id}/credentials`. → **§3** (credential storage, access
    control, known gaps).
 5. **Watermark read (DynamoDB)** — checks the last successfully extracted timestamp/id for
    incremental pulls. → **§8** (which entities are incremental vs. full) and **§9.1** (raw
@@ -691,7 +696,7 @@ where it's covered in more depth elsewhere in this file:
 7. **Schema snapshot & drift check** — compares incoming schema to the last snapshot, flags
    drift. → **§9.1** (drift classification table: BREAKING / POTENTIALLY_BREAKING /
    NON_BREAKING / NO_DRIFT).
-8. **S3 Raw layer** — writes extracted data as immutable Parquet. → **§2** (`dev-edl-raw-layer`
+8. **S3 Raw layer** — writes extracted data as immutable Parquet. → **§2** (`edl-raw-087972550871`
    bucket details, Object Lock).
 9. **Watermark update (DynamoDB)** — records progress for the next incremental run. → **§9.1**.
 10. **Transformation Lambda** — applies field mappings, data-quality checks, writes S3 Curated

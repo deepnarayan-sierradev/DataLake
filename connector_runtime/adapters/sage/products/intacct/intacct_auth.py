@@ -6,7 +6,7 @@ client_credentials grant.  Credentials are loaded exclusively from AWS
 Secrets Manager via SageCredentialManager — never from constructor arguments,
 environment variables, or config files.
 
-Required secret keys (stored at {env}/sources/sage/intacct/credentials):
+Required secret keys (stored at edl/sources/sage/intacct/credentials):
     base_url       — Intacct REST API base URL
                      (e.g. "https://api.intacct.com/ia/api/v1")
     token_url      — OAuth 2.0 token endpoint
@@ -111,9 +111,7 @@ class IntacctAuthClient:
         Populated after the first successful get_access_token() call.
         """
         if self._base_url is None:
-            raise RuntimeError(
-                "base_url is not available until get_access_token() succeeds."
-            )
+            raise RuntimeError("base_url is not available until get_access_token() succeeds.")
         return self._base_url
 
     def get_access_token(self) -> str:
@@ -188,13 +186,10 @@ class IntacctAuthClient:
             )
         except SageAuthenticationError as exc:
             raise IntacctAuthError(
-                "Intacct token endpoint rejected the client credentials: "
-                f"{type(exc).__name__}"
+                f"Intacct token endpoint rejected the client credentials: {type(exc).__name__}"
             ) from None
         except SageHttpError as exc:
-            raise IntacctAuthError(
-                f"Intacct token request failed: {type(exc).__name__}"
-            ) from None
+            raise IntacctAuthError(f"Intacct token request failed: {type(exc).__name__}") from None
 
         access_token = response_body.get("access_token")
         if not access_token:

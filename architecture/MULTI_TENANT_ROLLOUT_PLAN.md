@@ -16,13 +16,51 @@ design detail on items marked "open" below.
 
 ---
 
-## Implementation status (as of 2026-07-07)
+## Implementation status (as of 2026-07-08)
 
-Phases 0–6 were implemented in a single pass; see `architecture/GAP_ANALYSIS_FINDINGS.md`'s
-"Implementation status" table for per-finding detail and evidence. Summary:
+Phases 0–6 were implemented in a single pass on 2026-07-07; see
+`architecture/GAP_ANALYSIS_FINDINGS.md`'s "Implementation status" table for per-finding detail and
+evidence. **A follow-up pass on 2026-07-08 found Phase 2's "done" claim for `ARCH-1`/`ARCH-4` was
+overstated** — a repo-wide sweep for the same class of bug found `WatermarkRepository`'s DynamoDB
+key, the raw-layer S3 writer, the analytics-publisher output, both golden/canonical-record
+publishers, the cross-source curated lookup, the SCD-merge previous-state lookup, the EventBridge
+schedule name, the circuit breaker key, the SQS `MessageGroupId`/Step Functions execution name, and
+the DLQ replay path all had genuine tenant-collision bugs (guaranteed same-key overwrites in
+several cases, not just latent risk) despite the phase being marked complete. All are now fixed —
+see `ARCH-1`, `ARCH-4`, and new findings `ARCH-6` through `ARCH-9` in the findings doc — with
+regression coverage in `tests/test_tenant_isolation.py` and each affected module's own test suite.
+Three lower-severity gaps found in the same sweep (`ARCH-10`–`ARCH-12`: survivorship/match-rule
+config, field mapping registry, and `ConfigurationRepositoryClient`'s DynamoDB key are not
+tenant-scoped) are deliberately deferred — see their entries in the findings doc for why.
+
+**A second, independent adversarial audit (same day, 2026-07-08)** — five parallel review agents
+re-verified every `ARCH-1`/`ARCH-4`/`ARCH-6`–`ARCH-9` fix against the actual code (not the doc's own
+claims) and ran a fresh from-scratch sweep for anything the first pass missed. Eight of nine fix
+areas were confirmed genuinely correct with non-vacuous regression tests. The audit found and this
+pass then closed:
+- `ARCH-13`/`ARCH-14` (new, deferred): `governance/lineage_record.py` and
+  `transformation_pipeline.py`'s quality-report writer are unscoped by tenant — lower severity
+  (`run_id` prevents overwrite, just interleaves audit artifacts), tracked rather than fixed.
+- `ARCH-15` (new, **fixed**): a real, pre-existing, tenant-unrelated bug in
+  `orchestration/step_functions/extraction_workflow.py` — the circuit-breaker guard check omitted
+  `entity_id`, so it read a key nothing ever wrote to, meaning **the circuit breaker could never
+  open in production** regardless of real failure counts. Fixed; regression test added.
+- Two test-coverage gaps closed: `TestRawLayerWriterPathIsolation` now parametrizes across all 4
+  connector adapters (previously only proved Salesforce), and
+  `TestScheduleOperationsTenantConsistency` now proves `create_or_update_schedule`/`get_schedule`/
+  `delete_schedule` — not just the static `build_schedule_name` helper — honor a non-default
+  tenant end-to-end.
+- Doc staleness fixed: root `CLAUDE.md`, `docs/PRODUCTION_INCIDENT_RUNBOOK.md`'s Scenario 8 table,
+  and a test docstring all described `watermark-repository` isolation as a "post-read
+  application-level guard" — that mechanism was removed by the `ARCH-1` fix; isolation is now
+  genuine DynamoDB key-level scoping. All three corrected.
+
+Full verification suite (ruff, scoped mypy, `pytest -q` at 96.19% coverage, bandit,
+`make banned-names`) green after both passes. Summary:
 
 - **Phases 0–3** (correctness bugs, security hardening, tenant-code data-plane plumbing,
-  observability): done and verified.
+  observability): done and verified — Phase 2's tenant-code plumbing gaps found on 2026-07-08 are
+  now closed (see above).
 - **Phase 4** (performance): done — MySQL streaming cursor + connection pooling, DuckDB-based
   streaming loads in entity resolution/analytics, publisher consolidation onto the shared S3
   writer. Checkpoint/resume detection is implemented; automatic Step Functions re-invocation from
@@ -52,10 +90,10 @@ Verified against the current code before writing this plan, so effort isn't dupl
 
 | Item | Status | Notes |
 |---|---|---|
-| §1.1 Multi-Tenancy Data Model | **Partial** | Done on transformation/curated side; extraction/watermark/audit/schema-snapshot side not started — `ARCH-1`, `ARCH-4` |
+| §1.1 Multi-Tenancy Data Model | **Done (2026-07-08)** | Was marked "Partial" pending watermark/audit/raw-layer work; that work is now complete — see `ARCH-1`, `ARCH-4` in the findings doc for the full list of what was actually fixed on 2026-07-08 (watermark key, raw layer, analytics/golden/canonical publishers, curated lookups, schedule name, circuit breaker, SQS/SFN naming, DLQ replay) |
 | §1.2 SaaS Control Plane API | Open | Not started — `ARCH-3` |
 | §1.3 Config-Driven Entity Type Registry | Open | Not started — `ARCH-2` |
-| §1.4 Config-Driven Survivorship Policy | **Verify** | `survivorship_policy.py` is already versioned/dataclass-based; confirm during Phase 2 whether it meets the tenant-scoping bar or still needs the S3-backed registry client |
+| §1.4 Config-Driven Survivorship Policy | **Open (resolved 2026-07-08)** | The "Verify" was answered: `survivorship_policy.py` is versioned/dataclass-based logic only — its *persistence* layer (`resolution_config_registry.py`) is global, not tenant-scoped. This was never built, not merely unverified. Tracked as `ARCH-10`, deferred alongside `ARCH-11`/`ARCH-12` (same registry-client design work, no live second tenant needs it yet) |
 | §1.5 Terraform-managed DynamoDB tables | Open | Not verified as started; carried into Phase 2 |
 | §1.6 SQS Burst Buffer | **Done** | FIFO queue, `pipeline_trigger` Lambda, reserved concurrency, `Lambda.TooManyRequestsException` retry all confirmed in `infrastructure/modules/orchestration/main.tf` |
 | §2.1 Remove dead `_GATE_ORDER` | **Done** | Confirmed — single canonical `_GATE_ORDER` tuple, no dead variable |
@@ -138,21 +176,28 @@ tighten.
 
 ## Phase 2 — Complete the Multi-Tenant Data Plane
 
-**Goal:** Finish the tenant_code plumbing that Phase 1's IAM scoping depends on, and
-that transformation already has half-built.
+**Status: ✅ DONE (2026-07-08).** Goal was to finish the tenant_code plumbing that Phase 1's IAM
+scoping depends on. All items below are complete; `ARCH-1`/`ARCH-4` in particular required a second
+pass on 2026-07-08 after direct re-verification found the 2026-07-07 "done" mark was overstated
+(see `architecture/GAP_ANALYSIS_FINDINGS.md` for the full list of what was actually still broken).
 
-| ID | Work item | Files |
-|---|---|---|
-| `ARCH-4` | Require `tenant_code` in the extraction event contract; validate against `TENANT_CODE_PATTERN` | `connector_runtime/extraction_pipeline_handler.py:59-61,190,219-250` |
-| `ARCH-1` | Thread `tenant_code` through `run_lifecycle.py`, `configuration_repository.py`, `watermark_repository.py`, `snapshot_repository.py` table keys and S3 paths, matching the pattern already proven in `curated_layer_writer.py` | listed in finding |
-| `ARCH-2` | Replace `entity_type_registry.py` hardcoded dicts with a DynamoDB-backed `EntityTypeRegistryClient` keyed on `(tenant_code, entity_id)`; seed current dicts as the `default` tenant | `entity_resolution/entity_type_registry.py`, `entity_resolution/entity_resolution_pipeline_handler.py` |
-| §1.4 (verify/finish) | Confirm whether `survivorship_policy.py`'s existing versioned design needs an S3-backed, tenant-scoped registry client on top, per the original plan | `entity_resolution/survivorship_policy.py` |
-| §1.5 (finish) | Migrate DynamoDB tables into Terraform-managed resources (import existing state), add tenant GSIs where the above items need them | `infrastructure/modules/metadata_persistence/main.tf` |
+| ID | Work item | Files | Status |
+|---|---|---|---|
+| `ARCH-4` | Require `tenant_code` in every pipeline stage's event contract; validate against `TENANT_CODE_PATTERN` | All four Lambda handlers (`extraction_pipeline_handler.py`, `entity_resolution_pipeline_handler.py`, `analytics_publisher_handler.py`, `transformation_pipeline_handler.py`) | ✅ Done — required + always format-validated in all four, not just extraction |
+| `ARCH-1` | Thread `tenant_code` through every tenant-owned resource's table keys and S3 paths | `watermark_repository.py`, `raw_layer_writer.py` (+ 4 adapters), `analytics_publisher_handler.py`, golden/canonical record publishers, `curated_utils.py`, `curated_accumulator.py` | ✅ Done — see `ARCH-1` finding for the full list; `configuration_repository.py`/`snapshot_repository.py` were already correct from the 2026-07-07 pass |
+| `ARCH-2` | Replace `entity_type_registry.py` hardcoded dicts with a DynamoDB-backed `EntityTypeRegistryClient` keyed on `(tenant_code, entity_id)`; seed current dicts as the `default` tenant | `entity_resolution/entity_type_registry.py`, `entity_resolution/entity_resolution_pipeline_handler.py` | ✅ Done |
+| §1.4 (verify/finish) | Confirm whether `survivorship_policy.py`'s existing versioned design needs an S3-backed, tenant-scoped registry client on top | `entity_resolution/survivorship_policy.py` | **Resolved, still open** — it does need one; tracked as `ARCH-10`, deferred (design-sized work, see findings doc) |
+| §1.5 (finish) | Migrate DynamoDB tables into Terraform-managed resources (import existing state), add tenant GSIs where the above items need them | `infrastructure/modules/metadata_persistence/main.tf` | Not re-verified in this pass — carries forward as open |
 
-**Exit criteria:** A synthetic second tenant (`tenant_code=acme-test`) can run a full
-extraction → transformation → entity resolution → analytics pipeline end-to-end, with
-every S3 path, DynamoDB key, and audit record correctly prefixed/scoped, verified by an
-automated test that asserts zero cross-tenant path collisions with `tenant_code=default`.
+**Exit criteria (met for the code-level guarantee):** A synthetic second tenant
+(`tenant_code=acme-test`) can run extraction → transformation → entity resolution → analytics with
+every S3 path, DynamoDB key, and audit record correctly prefixed/scoped — proven at the
+repository/unit level by `tests/test_tenant_isolation.py` and each affected module's own test
+suite (`TestWatermarkRepositoryKeyIsolation`, `TestRawLayerWriterPathIsolation`,
+`TestCircuitBreakerTenantIsolation`, and the `TestTenantIsolation` classes in
+`analytics_publisher/tests/test_analytics_publisher_handler.py` and
+`entity_resolution/tests/test_canonical_record_publisher.py`). A live, deployed end-to-end run
+with a real second tenant is still Phase 7's job, not this phase's.
 
 **Backward compatibility:** `tenant_code` defaults to `"default"` everywhere until this
 phase completes; existing dev pipelines are unaffected. Do not remove the default until

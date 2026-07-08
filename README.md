@@ -40,18 +40,21 @@ Read in this order — each supersedes the previous **for sequencing only, not d
 
 Most connector credentials are loaded from AWS Secrets Manager using this path pattern:
 
-`{environment}/sources/{source_id}/credentials`
+`edl/sources/{source_id}/credentials`
+
+Not environment-prefixed — each environment (dev/staging/prod) is deployed to its own AWS
+account, so the secret path doesn't need to disambiguate environment within a single account.
 
 **Sage is the one exception** — it has an extra `{product_name}` segment because it has two
-distinct products (Intacct and X3) with separate credentials: `{environment}/sources/sage/{product_name}/credentials`.
+distinct products (Intacct and X3) with separate credentials: `edl/sources/sage/{product_name}/credentials`.
 
-| Source | Secret ID example (`environment=dev`) | Status | Required JSON keys |
+| Source | Secret ID | Status | Required JSON keys |
 |---|---|---|---|
-| Salesforce | `dev/sources/salesforce/credentials` | ✅ Connected | `instance_url`, `client_id`, `client_secret` |
-| MySQL RDS | `dev/sources/mysql-rds/credentials` | ✅ Connected | `host`, `port`, `username`, `password`, `database` |
-| Sage Intacct | `dev/sources/sage/intacct/credentials` | ✅ Connected | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
-| Sage X3 | `dev/sources/sage/x3/credentials` | ✅ Connected | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
-| NetSuite | `dev/sources/netsuite/credentials` | 🟡 Code-complete, not yet live — connector, auth client, and query planner are fully implemented (`connector_runtime/adapters/netsuite/`); confirm the secret is populated and entity config is schedule-enabled before assuming live extraction | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
+| Salesforce | `edl/sources/salesforce/credentials` | ✅ Connected | `instance_url`, `client_id`, `client_secret` |
+| MySQL RDS | `edl/sources/mysql-rds/credentials` | ✅ Connected | `host`, `port`, `username`, `password`, `database` |
+| Sage Intacct | `edl/sources/sage/intacct/credentials` | ✅ Connected | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
+| Sage X3 | `edl/sources/sage/x3/credentials` | ✅ Connected | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
+| NetSuite | `edl/sources/netsuite/credentials` | 🟡 Code-complete, not yet live — connector, auth client, and query planner are fully implemented (`connector_runtime/adapters/netsuite/`); confirm the secret is populated and entity config is schedule-enabled before assuming live extraction | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
 
 All five secrets above are Terraform-managed (`infrastructure/modules/secrets/main.tf` creates
 the empty secret shells with a resource policy restricting reads to the extraction runtime role)

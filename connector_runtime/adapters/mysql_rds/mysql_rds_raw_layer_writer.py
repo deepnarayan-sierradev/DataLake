@@ -4,8 +4,8 @@ MySQL RDS raw layer writer.
 Writes batches of ExtractionRecord to the S3 raw layer as Parquet files,
 following the platform raw layer partition scheme for MySQL RDS.
 
-Partition scheme (from spec §4.2):
-    s3://{bucket}/{prefix}/mysql_rds/{entity_id}/
+Partition scheme:
+    s3://{bucket}/{tenant_code}/mysql-rds/{entity_id}/
         extraction_date={YYYY-MM-DD}/
         run_id={run_id}/
             data.parquet
@@ -29,7 +29,7 @@ from typing import Final
 
 from connector_runtime.raw_layer_writer import RawLayerWriter, RawLayerWriterError
 
-_SOURCE_NAME: Final[str] = "mysql_rds"
+_SOURCE_NAME: Final[str] = "mysql-rds"
 
 
 class MySqlRdsRawLayerWriterError(RawLayerWriterError):
@@ -47,8 +47,8 @@ class MySqlRdsRawLayerWriter(RawLayerWriter):
 
         writer = MySqlRdsRawLayerWriter(
             s3_bucket="prod-raw-layer",
-            s3_prefix="raw",
             region_name="us-east-1",
+            tenant_code="demo",
         )
         data_key = writer.write_partition(
             records=records,
@@ -63,10 +63,10 @@ class MySqlRdsRawLayerWriter(RawLayerWriter):
     error_cls = MySqlRdsRawLayerWriterError
     log_prefix = "mysql_rds"
 
-    def __init__(self, s3_bucket: str, s3_prefix: str, region_name: str) -> None:
+    def __init__(self, s3_bucket: str, region_name: str, tenant_code: str) -> None:
         super().__init__(
             s3_bucket=s3_bucket,
-            s3_prefix=s3_prefix,
             path_segments=[_SOURCE_NAME],
             region_name=region_name,
+            tenant_code=tenant_code,
         )

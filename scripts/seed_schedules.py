@@ -1,7 +1,7 @@
 """
 Sync EventBridge Scheduler schedules from the DynamoDB entity config table.
 
-Reads every active entity from {environment}-edl-entity-extraction-config that has
+Reads every active entity from EdlEntityExtractionConfig that has
 schedule_cron set and schedule_enabled=True, then creates or updates the
 corresponding EventBridge schedule.  Entities with schedule_cron=None or
 schedule_enabled=False have their schedule deleted if one exists.
@@ -45,22 +45,29 @@ _logger = get_platform_logger(__name__)
 
 _ENV_CONFIG: dict[str, dict[str, str]] = {
     "dev": {
-        "schedule_group_name":  "dev-extraction-schedules",
-        "state_machine_arn":    "arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline",
-        "execution_role_arn":   "arn:aws:iam::087972550871:role/dev-extraction-schedule-trigger-role",
-        "region":               "us-east-1",
+        "schedule_group_name": "EdlExtractionSchedules",
+        "state_machine_arn": (
+            "arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline"
+        ),
+        "execution_role_arn": "arn:aws:iam::087972550871:role/EdlExtractionScheduleTriggerRole",
+        "region": "us-east-1",
     },
-    # Populate after staging/prod are deployed:
+    # Populate after staging/prod are deployed — resource names are the same
+    # across environments (each environment is a separate AWS account), only
+    # the account ID in the ARNs below differs. Replace ACCOUNT_ID with the
+    # real 12-digit staging/prod account IDs once those accounts exist.
     # "staging": {
-    #     "schedule_group_name":  "staging-extraction-schedules",
-    #     "state_machine_arn":    "arn:aws:states:us-east-1:087972550871:stateMachine:staging-extraction-pipeline",
-    #     "execution_role_arn":   "arn:aws:iam::087972550871:role/staging-extraction-schedule-trigger-role",
+    #     "schedule_group_name":  "EdlExtractionSchedules",
+    #     "state_machine_arn":    "arn:aws:states:us-east-1:ACCOUNT_ID:stateMachine:"
+    #                             "EdlExtractionPipeline",
+    #     "execution_role_arn":   "arn:aws:iam::ACCOUNT_ID:role/EdlExtractionScheduleTriggerRole",
     #     "region":               "us-east-1",
     # },
     # "prod": {
-    #     "schedule_group_name":  "prod-extraction-schedules",
-    #     "state_machine_arn":    "arn:aws:states:us-east-1:087972550871:stateMachine:prod-extraction-pipeline",
-    #     "execution_role_arn":   "arn:aws:iam::087972550871:role/prod-extraction-schedule-trigger-role",
+    #     "schedule_group_name":  "EdlExtractionSchedules",
+    #     "state_machine_arn":    "arn:aws:states:us-east-1:ACCOUNT_ID:stateMachine:"
+    #                             "EdlExtractionPipeline",
+    #     "execution_role_arn":   "arn:aws:iam::ACCOUNT_ID:role/EdlExtractionScheduleTriggerRole",
     #     "region":               "us-east-1",
     # },
 }
@@ -82,10 +89,7 @@ def _load_schedulable_entities(table_name: str, region: str) -> list[dict]:
         response = table.scan(**scan_kwargs)
         for item in response.get("Items", []):
             # DynamoDB returns Decimal for numbers — normalise to plain Python types.
-            items.append({
-                k: int(v) if isinstance(v, Decimal) else v
-                for k, v in item.items()
-            })
+            items.append({k: int(v) if isinstance(v, Decimal) else v for k, v in item.items()})
         last = response.get("LastEvaluatedKey")
         if not last:
             break
@@ -99,15 +103,75 @@ def _parse_args() -> argparse.Namespace:
         description="Sync EventBridge schedules from DynamoDB entity config."
     )
     p.add_argument(
-        "--environment", default="dev",
+        "--environment",
+        default="dev",
         choices=list(_ENV_CONFIG.keys()),
         help="Target environment (default: dev).",
     )
     p.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Print what would be created/updated/deleted without making AWS calls.",
     )
     return p.parse_args()
+
+
+def _print_dry_run(to_upsert: list[dict], to_disable: list[dict]) -> None:
+    print("[DRY RUN] Would upsert:")
+    for e in to_upsert:
+        print(
+            f"  {e['source_id']}--{e['entity_id']}  {e['schedule_cron']}  "
+            f"connector_params={e.get('connector_params', {})}"
+        )
+    if to_disable:
+        print("[DRY RUN] Would delete schedule for:")
+        for e in to_disable:
+            print(f"  {e['source_id']}--{e['entity_id']}")
+
+
+def _upsert_schedules(
+    client: ExtractionScheduleClient, to_upsert: list[dict]
+) -> tuple[int, list[str]]:
+    ok = 0
+    failed: list[str] = []
+    for e in to_upsert:
+        try:
+            name = client.create_or_update_schedule(
+                source_id=e["source_id"],
+                entity_id=e["entity_id"],
+                cron_expression=e["schedule_cron"],
+                connector_params=e.get("connector_params", {}),
+                timezone=e.get("schedule_timezone", "UTC"),
+                tenant_code=e.get("tenant_code", "demo"),
+            )
+            print(f"  OK    {name}  →  {e['schedule_cron']}")
+            ok += 1
+        except Exception as exc:
+            print(f"  FAIL  {e['source_id']}--{e['entity_id']}: {exc}", file=sys.stderr)
+            failed.append(e["entity_id"])
+    return ok, failed
+
+
+def _disable_schedules(
+    client: ExtractionScheduleClient, to_disable: list[dict]
+) -> tuple[int, list[str]]:
+    ok = 0
+    failed: list[str] = []
+    for e in to_disable:
+        try:
+            client.delete_schedule(
+                source_id=e["source_id"],
+                entity_id=e["entity_id"],
+                tenant_code=e.get("tenant_code", "demo"),
+            )
+            print(f"  DEL   {e['source_id']}--{e['entity_id']}")
+            ok += 1
+        except ScheduleNotFoundError:
+            pass  # already gone
+        except Exception as exc:
+            print(f"  FAIL  delete {e['source_id']}--{e['entity_id']}: {exc}", file=sys.stderr)
+            failed.append(e["entity_id"])
+    return ok, failed
 
 
 def main() -> None:
@@ -124,26 +188,21 @@ def main() -> None:
         sys.exit(1)
 
     cfg = _ENV_CONFIG[env]
-    table_name = f"{env}-edl-entity-extraction-config"
+    table_name = "EdlEntityExtractionConfig"
 
     entities = _load_schedulable_entities(table_name, cfg["region"])
 
     # Split into: should have a schedule vs. should not.
     to_upsert = [e for e in entities if e.get("schedule_enabled", True) and e.get("schedule_cron")]
-    to_disable = [e for e in entities if not e.get("schedule_enabled", True) and e.get("schedule_cron")]
+    to_disable = [
+        e for e in entities if not e.get("schedule_enabled", True) and e.get("schedule_cron")
+    ]
 
     print(f"Loaded {len(entities)} entity config(s) from {table_name}.")
     print(f"  {len(to_upsert)} to upsert, {len(to_disable)} to delete/disable.\n")
 
     if dry_run:
-        print("[DRY RUN] Would upsert:")
-        for e in to_upsert:
-            print(f"  {e['source_id']}--{e['entity_id']}  {e['schedule_cron']}  "
-                  f"connector_params={e.get('connector_params', {})}")
-        if to_disable:
-            print("[DRY RUN] Would delete schedule for:")
-            for e in to_disable:
-                print(f"  {e['source_id']}--{e['entity_id']}")
+        _print_dry_run(to_upsert, to_disable)
         return
 
     client = ExtractionScheduleClient(
@@ -154,37 +213,10 @@ def main() -> None:
         region_name=cfg["region"],
     )
 
-    ok = 0
-    failed: list[str] = []
-
-    for e in to_upsert:
-        try:
-            name = client.create_or_update_schedule(
-                source_id=e["source_id"],
-                entity_id=e["entity_id"],
-                cron_expression=e["schedule_cron"],
-                connector_params=e.get("connector_params", {}),
-                timezone=e.get("schedule_timezone", "UTC"),
-            )
-            print(f"  OK    {name}  →  {e['schedule_cron']}")
-            ok += 1
-        except Exception as exc:
-            print(f"  FAIL  {e['source_id']}--{e['entity_id']}: {exc}", file=sys.stderr)
-            failed.append(e["entity_id"])
-
-    for e in to_disable:
-        try:
-            client.delete_schedule(
-                source_id=e["source_id"],
-                entity_id=e["entity_id"],
-            )
-            print(f"  DEL   {e['source_id']}--{e['entity_id']}")
-            ok += 1
-        except ScheduleNotFoundError:
-            pass  # already gone
-        except Exception as exc:
-            print(f"  FAIL  delete {e['source_id']}--{e['entity_id']}: {exc}", file=sys.stderr)
-            failed.append(e["entity_id"])
+    upsert_ok, upsert_failed = _upsert_schedules(client, to_upsert)
+    disable_ok, disable_failed = _disable_schedules(client, to_disable)
+    ok = upsert_ok + disable_ok
+    failed = upsert_failed + disable_failed
 
     print(f"\nDone: {ok} synced, {len(failed)} failed.")
     if failed:

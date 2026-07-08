@@ -27,8 +27,8 @@ from contracts.pipeline_stage_contract import PipelineStageContract
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_AUDIT_TABLE = f"{_ENV}-edl-run-audit-log"
-_DLQ_NAME = f"{_ENV}-edl-extraction-failure-dlq"
+_AUDIT_TABLE = "EdlRunAuditLog"
+_DLQ_NAME = "EdlExtractionFailureDlq"
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +266,86 @@ class TestRunCoordinator:
 
 
 # ---------------------------------------------------------------------------
+# source_entity_key / started_at GSI population (ARCH-18)
+# ---------------------------------------------------------------------------
+
+
+@mock_aws
+class TestAuditRecordGsiFields:
+    """
+    Regression coverage for ARCH-18: before this fix, emit_stage() /
+    emit_checkpoint_stage() never populated source_entity_key or started_at,
+    so the source-entity-time-index GSI was only ever fed by
+    dlq_processor_handler's failure-path writes — a query for a source/
+    entity's run history silently missed every successful run.
+    """
+
+    def _make_coord(self, tenant_code: str = "demo", create_table: bool = True) -> RunCoordinator:
+        if create_table:
+            _create_audit_table(None)
+        return RunCoordinator(
+            environment=_ENV,
+            region_name=_REGION,
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            tenant_code=tenant_code,
+        )
+
+    def test_emit_stage_populates_tenant_scoped_source_entity_key(self) -> None:
+        coord = self._make_coord(tenant_code="acme-corp")
+        coord.emit_stage(stage=PipelineStage.EXTRACTION, status=RunStatus.SUCCESS)
+
+        ddb = boto3.resource("dynamodb", region_name=_REGION)
+        item = ddb.Table(_AUDIT_TABLE).get_item(
+            Key={"run_id": coord.run_id, "stage": "extraction"},
+            ConsistentRead=True,
+        )["Item"]
+        # Must match dlq_processor_handler's "{tenant_code}#{source_id}#{entity_id}"
+        # format exactly so both write paths land in the same GSI partition.
+        assert item["source_entity_key"] == "acme-corp#salesforce#salesforce-account"
+
+    def test_emit_stage_populates_started_at(self) -> None:
+        coord = self._make_coord()
+        coord.emit_stage(stage=PipelineStage.EXTRACTION, status=RunStatus.SUCCESS)
+
+        ddb = boto3.resource("dynamodb", region_name=_REGION)
+        item = ddb.Table(_AUDIT_TABLE).get_item(
+            Key={"run_id": coord.run_id, "stage": "extraction"},
+            ConsistentRead=True,
+        )["Item"]
+        assert item["started_at"] == coord.started_at.isoformat()
+
+    def test_two_tenants_get_distinct_source_entity_keys(self) -> None:
+        """Same source/entity, different tenants — GSI partitions must not mix."""
+        coord_a = self._make_coord(tenant_code="acme-corp")
+        coord_a.emit_stage(stage=PipelineStage.EXTRACTION, status=RunStatus.SUCCESS)
+        coord_b = self._make_coord(tenant_code="globex-eu", create_table=False)
+        coord_b.emit_stage(stage=PipelineStage.EXTRACTION, status=RunStatus.SUCCESS)
+
+        ddb = boto3.resource("dynamodb", region_name=_REGION)
+        table = ddb.Table(_AUDIT_TABLE)
+        item_a = table.get_item(
+            Key={"run_id": coord_a.run_id, "stage": "extraction"}, ConsistentRead=True
+        )["Item"]
+        item_b = table.get_item(
+            Key={"run_id": coord_b.run_id, "stage": "extraction"}, ConsistentRead=True
+        )["Item"]
+        assert item_a["source_entity_key"] != item_b["source_entity_key"]
+
+    def test_checkpoint_stage_also_populates_gsi_fields(self) -> None:
+        coord = self._make_coord(tenant_code="acme-corp")
+        coord.emit_checkpoint_stage(part_number=1, record_count=10)
+
+        ddb = boto3.resource("dynamodb", region_name=_REGION)
+        item = ddb.Table(_AUDIT_TABLE).get_item(
+            Key={"run_id": make_partial_run_id(coord.run_id, 1), "stage": "run_completion"},
+            ConsistentRead=True,
+        )["Item"]
+        assert item["source_entity_key"] == "acme-corp#salesforce#salesforce-account"
+        assert item["started_at"] == coord.started_at.isoformat()
+
+
+# ---------------------------------------------------------------------------
 # Regression tests for fixed bugs
 # ---------------------------------------------------------------------------
 
@@ -386,12 +466,14 @@ class TestRunCoordinatorProperties:
 
     def test_started_at_is_recent_utc(self) -> None:
         from datetime import UTC, datetime
+
         coord = self._make_coord()
         now = datetime.now(tz=UTC)
         assert abs((coord.started_at - now).total_seconds()) < 5
 
     def test_empty_environment_raises(self) -> None:
         import pytest
+
         with pytest.raises(ValueError, match="environment must not be empty"):
             RunCoordinator(
                 environment="",

@@ -137,7 +137,7 @@ class CuratedLayerWriter:
         Write records from a lazy iterator using streaming + multipart upload.
 
         Path scheme: {tenant_code}/curated/{domain}/{entity_id}/curated_date=.../run_id=.../
-        Peak memory: O(50K rows × avg_record_bytes) regardless of total count.
+        Peak memory: O(50K rows x avg_record_bytes) regardless of total count.
         """
         partition_date = curated_date or datetime.now(UTC).date()
         prefix = (

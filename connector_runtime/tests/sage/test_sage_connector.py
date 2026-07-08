@@ -39,36 +39,37 @@ Coverage:
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from connector_runtime.adapters.sage.common.sage_http_client import (
     SageAuthenticationError,
+    SageInvalidRequestError,
     SageNetworkError,
     SageObjectNotFoundError,
     SageRateLimitError,
     SageServiceUnavailableError,
     SageTimeoutError,
-    SageInvalidRequestError,
 )
 from connector_runtime.adapters.sage.common.sage_raw_layer_writer import SageRawLayerWriter
 from connector_runtime.adapters.sage.products.intacct.intacct_auth import (
     IntacctAuthError,
     IntacctCredentialError,
 )
-from connector_runtime.adapters.sage.products.intacct.intacct_metadata_client import SageMetadataError
+from connector_runtime.adapters.sage.products.intacct.intacct_metadata_client import (
+    SageMetadataError,
+)
 from connector_runtime.adapters.sage.products.intacct.intacct_query_engine import (
     PAGE_SIZE,
     SageQueryBuildError,
 )
 from connector_runtime.adapters.sage.products.x3.x3_auth import X3AuthError, X3CredentialError
 from connector_runtime.adapters.sage.products.x3.x3_query_engine import (
+    X3_ODATA_DISCRIMINANT,
     X3_PAGE_SIZE,
     X3QueryBuildError,
-    X3_ODATA_DISCRIMINANT,
 )
 from connector_runtime.adapters.sage.sage_connector import (
     SageConnector,
@@ -184,6 +185,7 @@ class TestRegistration:
     def test_sage_registered_in_connector_registry(self) -> None:
         # Import ensures the module is loaded and registration happened.
         import connector_runtime.adapters.sage.sage_connector  # noqa: F401
+
         assert "sage" in connector_registry.registered_source_ids
 
     def test_builder_registered_for_sage(self) -> None:
@@ -467,69 +469,95 @@ class TestClassifyExtractionError:
     # Transient errors — retry eligible
     def test_rate_limit_is_transient_throttle(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(SageRateLimitError("429")) == \
-            ExtractionErrorClassification.TRANSIENT_THROTTLE
+        assert (
+            c.classify_extraction_error(SageRateLimitError("429"))
+            == ExtractionErrorClassification.TRANSIENT_THROTTLE
+        )
 
     def test_timeout_is_transient_timeout(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(SageTimeoutError("timeout")) == \
-            ExtractionErrorClassification.TRANSIENT_TIMEOUT
+        assert (
+            c.classify_extraction_error(SageTimeoutError("timeout"))
+            == ExtractionErrorClassification.TRANSIENT_TIMEOUT
+        )
 
     def test_network_error_is_transient_network(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(SageNetworkError("net")) == \
-            ExtractionErrorClassification.TRANSIENT_NETWORK
+        assert (
+            c.classify_extraction_error(SageNetworkError("net"))
+            == ExtractionErrorClassification.TRANSIENT_NETWORK
+        )
 
     def test_service_unavailable_is_transient_network(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(SageServiceUnavailableError("503")) == \
-            ExtractionErrorClassification.TRANSIENT_NETWORK
+        assert (
+            c.classify_extraction_error(SageServiceUnavailableError("503"))
+            == ExtractionErrorClassification.TRANSIENT_NETWORK
+        )
 
     # Deterministic errors — fail-fast
     def test_auth_error_is_deterministic_invalid_credentials(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(SageAuthenticationError("401")) == \
-            ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
+        assert (
+            c.classify_extraction_error(SageAuthenticationError("401"))
+            == ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
+        )
 
     def test_intacct_auth_error_is_deterministic_invalid_credentials(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(IntacctAuthError("rejected")) == \
-            ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
+        assert (
+            c.classify_extraction_error(IntacctAuthError("rejected"))
+            == ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
+        )
 
     def test_intacct_credential_error_is_deterministic_invalid_credentials(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(IntacctCredentialError("no secret")) == \
-            ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
+        assert (
+            c.classify_extraction_error(IntacctCredentialError("no secret"))
+            == ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
+        )
 
     def test_object_not_found_is_deterministic_invalid_object(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(SageObjectNotFoundError("404")) == \
-            ExtractionErrorClassification.DETERMINISTIC_INVALID_OBJECT
+        assert (
+            c.classify_extraction_error(SageObjectNotFoundError("404"))
+            == ExtractionErrorClassification.DETERMINISTIC_INVALID_OBJECT
+        )
 
     def test_query_build_error_is_deterministic_invalid_configuration(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(SageQueryBuildError("bad field")) == \
-            ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
+        assert (
+            c.classify_extraction_error(SageQueryBuildError("bad field"))
+            == ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
+        )
 
     def test_invalid_request_is_deterministic_invalid_configuration(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(SageInvalidRequestError("400")) == \
-            ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
+        assert (
+            c.classify_extraction_error(SageInvalidRequestError("400"))
+            == ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
+        )
 
     def test_metadata_error_is_unknown(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(SageMetadataError("unknown")) == \
-            ExtractionErrorClassification.UNKNOWN
+        assert (
+            c.classify_extraction_error(SageMetadataError("unknown"))
+            == ExtractionErrorClassification.UNKNOWN
+        )
 
     def test_unrecognised_exception_is_unknown(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(RuntimeError("unexpected")) == \
-            ExtractionErrorClassification.UNKNOWN
+        assert (
+            c.classify_extraction_error(RuntimeError("unexpected"))
+            == ExtractionErrorClassification.UNKNOWN
+        )
 
     def test_value_error_is_unknown(self) -> None:
         c = _make_connector()
-        assert c.classify_extraction_error(ValueError("bad input")) == \
-            ExtractionErrorClassification.UNKNOWN
+        assert (
+            c.classify_extraction_error(ValueError("bad input"))
+            == ExtractionErrorClassification.UNKNOWN
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -545,6 +573,7 @@ class TestBuildSageFactory:
                 region_name=_REGION,
                 connector_params={"sage_product": "intacct"},  # missing object_path
                 raw_s3_bucket="test-bucket",
+                tenant_code="demo",
             )
 
     def test_missing_both_params_raises_value_error(self) -> None:
@@ -554,6 +583,7 @@ class TestBuildSageFactory:
                 region_name=_REGION,
                 connector_params={},
                 raw_s3_bucket="test-bucket",
+                tenant_code="demo",
             )
 
     def test_invalid_sage_product_raises_value_error(self) -> None:
@@ -566,6 +596,7 @@ class TestBuildSageFactory:
                     "object_path": _OBJECT_PATH,
                 },
                 raw_s3_bucket="test-bucket",
+                tenant_code="demo",
             )
 
     def test_valid_params_returns_connector_and_writer(self) -> None:
@@ -581,6 +612,7 @@ class TestBuildSageFactory:
                     "object_path": _OBJECT_PATH,
                 },
                 raw_s3_bucket="test-raw-bucket",
+                tenant_code="demo",
             )
         assert isinstance(connector, SageConnector)
         assert isinstance(writer, SageRawLayerWriter)
@@ -598,6 +630,7 @@ class TestBuildSageFactory:
                     "object_path": _OBJECT_PATH,
                 },
                 raw_s3_bucket="test-raw-bucket",
+                tenant_code="demo",
             )
         assert writer._sage_product == "intacct"  # type: ignore[attr-defined]
 
@@ -639,16 +672,18 @@ def _make_x3_query_contract(
         X3_ODATA_DISCRIMINANT: True,
         "endpoint": _X3_ENDPOINT,
         "select": "BPCNUM_0,BPCNAM_0,MODDAT_0",
-        "filter": f"{watermark_field} ge __X3_LOWER_BOUND__ and {watermark_field} lt __X3_UPPER_BOUND__"
-        if watermark_field else None,
+        "filter": (
+            f"{watermark_field} ge __X3_LOWER_BOUND__ and {watermark_field} lt __X3_UPPER_BOUND__"
+            if watermark_field
+            else None
+        ),
         "orderby": f"{watermark_field} asc" if watermark_field else "BPCNUM_0 asc",
     }
     return QueryContract(
         source_id="sage",
         entity_id=_X3_ENTITY_ID,
         query_text=json.dumps(body),
-        query_parameters={"lower_bound": _LOWER, "upper_bound": _UPPER}
-        if watermark_field else {},
+        query_parameters={"lower_bound": _LOWER, "upper_bound": _UPPER} if watermark_field else {},
         load_type=load_type,
         watermark_lower=_LOWER if watermark_field else None,
         watermark_upper=_UPPER if watermark_field else None,
@@ -708,8 +743,8 @@ class TestX3ExecuteExtraction:
         page1 = [{"BPCNUM_0": f"C{i:04d}"} for i in range(X3_PAGE_SIZE)]
         page2 = [{"BPCNUM_0": f"C{i + X3_PAGE_SIZE:04d}"} for i in range(3)]
         connector._http_client.get.side_effect = [
-            _x3_page(page1),   # full page → continue with $skip
-            _x3_page(page2),   # partial page, no nextLink → stop
+            _x3_page(page1),  # full page → continue with $skip
+            _x3_page(page2),  # partial page, no nextLink → stop
         ]
 
         qc = _make_x3_query_contract()
@@ -793,15 +828,21 @@ class TestX3ExecuteExtraction:
 class TestX3ClassifyExtractionError:
     def test_x3_auth_error_is_deterministic_invalid_credentials(self) -> None:
         c = _make_x3_connector()
-        assert c.classify_extraction_error(X3AuthError("rejected")) == \
-            ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
+        assert (
+            c.classify_extraction_error(X3AuthError("rejected"))
+            == ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
+        )
 
     def test_x3_credential_error_is_deterministic_invalid_credentials(self) -> None:
         c = _make_x3_connector()
-        assert c.classify_extraction_error(X3CredentialError("no secret")) == \
-            ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
+        assert (
+            c.classify_extraction_error(X3CredentialError("no secret"))
+            == ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
+        )
 
     def test_x3_query_build_error_is_deterministic_invalid_configuration(self) -> None:
         c = _make_x3_connector()
-        assert c.classify_extraction_error(X3QueryBuildError("bad endpoint")) == \
-            ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
+        assert (
+            c.classify_extraction_error(X3QueryBuildError("bad endpoint"))
+            == ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
+        )

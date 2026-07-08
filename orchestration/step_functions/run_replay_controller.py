@@ -39,6 +39,7 @@ from contracts.identifier_policy import (
 from contracts.identifier_policy import (
     STABLE_ID_PATTERN as _STABLE_ID_PATTERN,
 )
+from contracts.identifier_policy import validate_tenant_code
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -54,6 +55,7 @@ _REQUIRED_DLQ_FIELDS: Final[frozenset[str]] = frozenset(
         "error_code",
         "error_message",
         "enqueued_at",
+        "tenant_code",
     }
 )
 
@@ -86,6 +88,7 @@ class DlqEntry:
     error_code: str
     error_message: str
     enqueued_at: str
+    tenant_code: str
 
 
 class ReplayValidationError(Exception):
@@ -166,6 +169,7 @@ class RunReplayController:
         source_id = str(raw["source_id"])
         entity_id = str(raw["entity_id"])
         environment = str(raw["environment"])
+        tenant_code = str(raw["tenant_code"])
 
         # Validate run_id before it is used in a Step Functions execution name
         # (OWASP A03 — injection prevention in resource identifiers).
@@ -190,6 +194,13 @@ class RunReplayController:
                 f"environment.  Expected one of {sorted(_KNOWN_ENVIRONMENTS)}.  "
                 "Manual review required."
             )
+        try:
+            tenant_code = validate_tenant_code(tenant_code)
+        except ValueError as exc:
+            raise ReplayValidationError(
+                f"tenant_code {tenant_code!r} in DLQ entry does not conform to the "
+                "tenant code format.  Manual review required."
+            ) from exc
 
         return DlqEntry(
             run_id=run_id,
@@ -200,6 +211,7 @@ class RunReplayController:
             error_code=str(raw["error_code"]),
             error_message=str(raw["error_message"]),
             enqueued_at=str(raw["enqueued_at"]),
+            tenant_code=tenant_code,
         )
 
     def start_replay_execution(
@@ -247,6 +259,7 @@ class RunReplayController:
             "connector_params": connector_params,
             "is_replay": True,
             "replay_of_run_id": entry.run_id,
+            "tenant_code": entry.tenant_code,
         }
 
         _logger.info(

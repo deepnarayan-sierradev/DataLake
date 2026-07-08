@@ -12,12 +12,12 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  common_tags   = merge(var.tags, {
+  common_tags = merge(var.tags, {
     Environment = var.environment
     ManagedBy   = "terraform"
     Module      = "entity_resolution_lambda"
   })
-  function_name = "${var.environment}-entity-resolution-pipeline"
+  function_name = "EdlEntityResolutionPipeline"
 }
 
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ data "aws_vpc" "selected" {
 }
 
 resource "aws_security_group" "entity_resolution_lambda" {
-  name        = "${local.function_name}-sg"
+  name        = "${local.function_name}Sg"
   description = "Security group for the entity resolution pipeline Lambda. HTTPS egress to AWS VPC endpoints only."
   vpc_id      = data.aws_vpc.selected.id
 
@@ -66,7 +66,7 @@ resource "aws_security_group" "entity_resolution_lambda" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${local.function_name}-sg"
+    Name = "${local.function_name}Sg"
   })
 
   lifecycle {
@@ -147,5 +147,5 @@ resource "aws_lambda_permission" "allow_step_functions" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.entity_resolution_pipeline.function_name
   principal     = "states.amazonaws.com"
-  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.environment}-extraction-pipeline"
+  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:EdlExtractionPipeline"
 }

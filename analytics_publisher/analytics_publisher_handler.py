@@ -12,6 +12,7 @@ Step Functions input schema (Parameters block in PublishAnalytics state):
     "entity_id":         str  — entity_id from the triggering extraction run
     "environment":       str  — "dev" | "staging" | "prod"
     "run_id":            str  — run_id produced by the extraction stage
+    "tenant_code":       str  — tenant identity for this run (ARCH-4: required, fails closed)
     "canonical_prefix":  str  — S3 prefix of golden records (entity_resolution output)
     "curated_s3_prefix": str  — S3 prefix of curated records (transformation output)
   }
@@ -45,7 +46,6 @@ Security (OWASP A03, A07, A09):
 from __future__ import annotations
 
 import io
-import os
 import re
 import time
 from datetime import UTC, datetime
@@ -56,8 +56,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import structlog
 
-from contracts.identifier_policy import DEFAULT_TENANT_CODE, TENANT_CODE_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from contracts.identifier_policy import TENANT_CODE_PATTERN
 from entity_resolution.entity_type_registry import EntityTypeRegistryClient
 from governance.data_catalog_registration import (
     CatalogDatasetSpec,
@@ -82,21 +82,31 @@ _entity_type_registry: EntityTypeRegistryClient | None = None
 # golden_id is KEPT — it is the stable key for joins across entity types.
 # ---------------------------------------------------------------------------
 
-_INTERNAL_FIELDS_TO_DROP: Final[frozenset[str]] = frozenset({
-    "_record_id",          # cross-source surrogate key — internal to ER pipeline
-    "_source_id",          # source tag injected by ER handler — internal
-    "contributing_source_records",  # list of source record IDs — ER audit detail
-    "survivorship_version",         # policy version applied — ER audit detail
-    "match_run_id",                 # ER run identifier — duplicated in partition path
-    "field_provenance",             # JSON string — per-field winner metadata
-})
+_INTERNAL_FIELDS_TO_DROP: Final[frozenset[str]] = frozenset(
+    {
+        "_record_id",  # cross-source surrogate key — internal to ER pipeline
+        "_source_id",  # source tag injected by ER handler — internal
+        "contributing_source_records",  # list of source record IDs — ER audit detail
+        "survivorship_version",  # policy version applied — ER audit detail
+        "match_run_id",  # ER run identifier — duplicated in partition path
+        "field_provenance",  # JSON string — per-field winner metadata
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Validation constants (OWASP A03)
 # ---------------------------------------------------------------------------
 
 _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
-    {"source_id", "entity_id", "environment", "run_id", "canonical_prefix", "curated_s3_prefix"}
+    {
+        "source_id",
+        "entity_id",
+        "environment",
+        "run_id",
+        "canonical_prefix",
+        "curated_s3_prefix",
+        "tenant_code",
+    }
 )
 _KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
 _SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -105,27 +115,27 @@ _SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 # PyArrow type → Glue/Athena column type string
 _ARROW_TO_GLUE_TYPE: Final[dict[str, str]] = {
-    "int8":    "tinyint",
-    "int16":   "smallint",
-    "int32":   "int",
-    "int64":   "bigint",
-    "uint8":   "tinyint",
-    "uint16":  "smallint",
-    "uint32":  "int",
-    "uint64":  "bigint",
-    "float":   "float",
-    "double":  "double",
+    "int8": "tinyint",
+    "int16": "smallint",
+    "int32": "int",
+    "int64": "bigint",
+    "uint8": "tinyint",
+    "uint16": "smallint",
+    "uint32": "int",
+    "uint64": "bigint",
+    "float": "float",
+    "double": "double",
     "decimal128": "double",
-    "bool":    "boolean",
-    "date32":  "date",
-    "date64":  "date",
-    "timestamp[s]":  "timestamp",
+    "bool": "boolean",
+    "date32": "date",
+    "date64": "date",
+    "timestamp[s]": "timestamp",
     "timestamp[ms]": "timestamp",
     "timestamp[us]": "timestamp",
     "timestamp[ns]": "timestamp",
-    "string":  "string",
+    "string": "string",
     "large_string": "string",
-    "utf8":    "string",
+    "utf8": "string",
     "large_utf8": "string",
 }
 
@@ -152,7 +162,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     environment: str = event["environment"]
     run_id: str = event["run_id"]
     canonical_prefix: str = event["canonical_prefix"]
-    tenant_code: str = str(event.get("tenant_code") or DEFAULT_TENANT_CODE)
+    tenant_code: str = str(event["tenant_code"])
     # Optional — set by the extraction stage and threaded through Step
     # Functions Parameters at each stage boundary (§5.7 / OBS-4). Absent on
     # manually-triggered or older-format executions; e2e metric is skipped then.
@@ -215,7 +225,8 @@ def _run_analytics_publication(
     region_name = require_env("AWS_REGION")
     analytics_s3_bucket = require_env("ANALYTICS_S3_BUCKET")
     glue_catalog_database = require_env("GLUE_CATALOG_DATABASE")
-    governance_s3_bucket: str | None = os.environ.get("GOVERNANCE_S3_BUCKET") or None
+    # GOVERNANCE_S3_BUCKET (see module docstring) is read by future lineage-recording
+    # logic once it lands; not consumed yet, so it is intentionally not read here.
 
     # ── Resolve entity type (ARCH-2: tenant-scoped, DynamoDB-backed) ──────────
     global _entity_type_registry
@@ -270,10 +281,11 @@ def _run_analytics_publication(
     ]
 
     # ── Write analytics Parquet (§3.3 — multipart upload for large files) ─────
-    analytics_prefix = (
-        f"analytics/{entity_type}"
-        f"/analytics_date={analytics_date_str}/"
-    )
+    # Tenant-scoped root prefix, matching the {tenant_code}/... convention
+    # already used by the raw and curated layers — without it, two tenants
+    # publishing the same entity_type on the same day overwrite each other's
+    # entire daily analytics dataset (no run_id in this key to disambiguate).
+    analytics_prefix = f"{tenant_code}/analytics/{entity_type}/analytics_date={analytics_date_str}/"
     analytics_key = f"{analytics_prefix}data.parquet"
 
     s3_writer = S3ParquetWriter(s3)
@@ -300,9 +312,17 @@ def _run_analytics_publication(
     )
 
     # ── Register / update Glue catalog table ─────────────────────────────────
-    glue_table_name = entity_type  # e.g. "company", "person", "contract"
-    glue_columns = _arrow_schema_to_glue_columns(arrow_schema, drop_partition_keys={"analytics_date"})
-    s3_location = f"s3://{analytics_s3_bucket}/analytics/{entity_type}/"
+    # One Glue table per (tenant, entity_type) — Glue/Athena table names only
+    # allow [a-z0-9_] (governance/data_catalog_registration.py's
+    # _SAFE_NAME_PATTERN), so tenant_code's hyphens are normalised to
+    # underscores. Without this, two tenants' analytics for the same
+    # entity_type would register the same table pointing at the same S3
+    # location/partition, one clobbering the other's catalog entry.
+    glue_table_name = f"{tenant_code.replace('-', '_')}_{entity_type}"
+    glue_columns = _arrow_schema_to_glue_columns(
+        arrow_schema, drop_partition_keys={"analytics_date"}
+    )
+    s3_location = f"s3://{analytics_s3_bucket}/{tenant_code}/analytics/{entity_type}/"
 
     catalog_client = DataCatalogRegistrationClient(region_name=region_name)
     spec = CatalogDatasetSpec(
@@ -381,11 +401,11 @@ def _run_analytics_publication(
 
     return {
         "analytics_s3_prefix": analytics_prefix,
-        "entity_type":         entity_type,
-        "record_count":        record_count,
-        "glue_table":          f"{glue_catalog_database}.{glue_table_name}",
-        "analytics_date":      analytics_date_str,
-        "published_at":        published_at,
+        "entity_type": entity_type,
+        "record_count": record_count,
+        "glue_table": f"{glue_catalog_database}.{glue_table_name}",
+        "analytics_date": analytics_date_str,
+        "published_at": published_at,
     }
 
 
@@ -453,9 +473,7 @@ def _emit_metrics_and_e2e_sla(
         _logger.warning("analytics_publisher_metrics_emission_failed", error=str(_exc))
 
 
-def _load_parquet_records(
-    s3: Any, bucket: str, prefix: str
-) -> list[dict[str, Any]]:
+def _load_parquet_records(s3: Any, bucket: str, prefix: str) -> list[dict[str, Any]]:
     """Load all Parquet files from an S3 prefix into a list of dicts.
 
     Uses RecordBatch iteration (§2.3) — 10K rows materialised at a time.
@@ -516,28 +534,22 @@ def _validate_event(event: dict[str, Any]) -> None:
     for field in ("source_id", "entity_id", "run_id"):
         value = str(event[field])
         if not _STABLE_ID_PATTERN.match(value):
-            raise ValueError(
-                f"Event field {field}={value!r} contains disallowed characters."
-            )
+            raise ValueError(f"Event field {field}={value!r} contains disallowed characters.")
 
     environment = str(event["environment"])
     if environment not in _KNOWN_ENVIRONMENTS:
         raise ValueError(
-            f"Unknown environment={environment!r}. "
-            f"Expected one of {sorted(_KNOWN_ENVIRONMENTS)}."
+            f"Unknown environment={environment!r}. Expected one of {sorted(_KNOWN_ENVIRONMENTS)}."
         )
 
     for prefix_field in ("canonical_prefix", "curated_s3_prefix"):
         val = str(event[prefix_field])
         if not _SAFE_S3_PREFIX_PATTERN.match(val.rstrip("/")):
-            raise ValueError(
-                f"{prefix_field}={val!r} contains disallowed characters."
-            )
+            raise ValueError(f"{prefix_field}={val!r} contains disallowed characters.")
 
-    # tenant_code is optional (defaults to DEFAULT_TENANT_CODE) but must be
-    # well-formed when present (OWASP A03 / SEC-5).
-    tenant_code = event.get("tenant_code")
-    if tenant_code is not None and not TENANT_CODE_PATTERN.match(str(tenant_code)):
-        raise ValueError(
-            f"tenant_code={tenant_code!r} does not conform to the tenant code format."
-        )
+    # tenant_code is required (ARCH-4) and must always be well-formed
+    # (OWASP A03 / SEC-5) — a missing or malformed tenant_code must fail
+    # closed rather than silently default to another tenant's identity.
+    tenant_code = str(event["tenant_code"])
+    if not TENANT_CODE_PATTERN.match(tenant_code):
+        raise ValueError(f"tenant_code={tenant_code!r} does not conform to the tenant code format.")

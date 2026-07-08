@@ -167,10 +167,7 @@ class GoldenRecordSurvivorshipPolicy:
         # Apply output schema projection: drop any field not in output_fields.
         # System fields are excluded from the projection check — the publisher adds them.
         if self._policy.output_fields:
-            canonical = {
-                k: v for k, v in canonical.items()
-                if k in self._policy.output_fields
-            }
+            canonical = {k: v for k, v in canonical.items() if k in self._policy.output_fields}
             provenance = {k: v for k, v in provenance.items() if k in self._policy.output_fields}
 
         return SurvivorshipResult(

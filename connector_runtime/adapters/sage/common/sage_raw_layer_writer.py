@@ -5,16 +5,20 @@ Writes batches of ExtractionRecord to the S3 raw layer as Parquet files,
 following the platform raw layer partition scheme extended for Sage multi-product.
 
 Partition scheme:
-    s3://{bucket}/{prefix}/sage/{product_name}/{entity_id}/
+    s3://{bucket}/{tenant_code}/sage-{product_name}/{entity_id}/
         extraction_date={YYYY-MM-DD}/
         run_id={run_id}/
             data.parquet
             metadata.json
 
 Design:
-  - product_name is included in the path so that two different Sage products
-    that share an entity_id never collide (e.g. intacct and x3 both have a
-    "customer" concept but their records are structurally different).
+  - product_name is folded into a single hyphenated source segment
+    ("sage-intacct", "sage-x3" — matching the one-segment, source-id-style
+    convention every other adapter uses) rather than two nested path
+    segments, so that two different Sage products that share an entity_id
+    never collide (e.g. intacct and x3 both have a "customer" concept but
+    their records are structurally different) without doubling the "sage"
+    segment the way the pre-RAW-1 layout did.
   - Append-only writes — each run produces a unique partition path via run_id.
   - write_partition_streaming() keeps peak memory at O(chunk_size) for large datasets.
 
@@ -39,7 +43,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any
 
 from connector_runtime.interfaces.connector_interface import ExtractionRecord
 from connector_runtime.raw_layer_writer import (
@@ -51,9 +55,6 @@ from connector_runtime.raw_layer_writer import (
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
-
-# Top-level S3 prefix segment shared by all Sage products in the raw layer.
-_SAGE_ROOT: Final[str] = "sage"
 
 
 class SageRawLayerWriterError(RawLayerWriterError):
@@ -70,10 +71,10 @@ class SageRawLayerWriter(RawLayerWriter):
     Usage::
 
         writer = SageRawLayerWriter(
-            s3_bucket="dev-edl-raw-layer",
-            s3_prefix="raw",
+            s3_bucket="edl-raw-087972550871",
             sage_product="intacct",
             region_name="us-east-1",
+            tenant_code="demo",
         )
         data_key = writer.write_partition(
             records=records,
@@ -91,18 +92,18 @@ class SageRawLayerWriter(RawLayerWriter):
     def __init__(
         self,
         s3_bucket: str,
-        s3_prefix: str,
         sage_product: str,
         region_name: str,
+        tenant_code: str,
     ) -> None:
         if not sage_product:
             raise ValueError("sage_product must not be empty.")
         self._sage_product = sage_product
         super().__init__(
             s3_bucket=s3_bucket,
-            s3_prefix=s3_prefix,
-            path_segments=[_SAGE_ROOT, sage_product],
+            path_segments=[f"sage-{sage_product}"],
             region_name=region_name,
+            tenant_code=tenant_code,
         )
 
     def _extra_metadata_fields(self) -> dict[str, Any]:

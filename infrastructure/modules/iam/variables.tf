@@ -57,6 +57,11 @@ variable "kms_key_arns_for_transformation" {
   description = "KMS key ARNs the transformation job role is allowed to use."
 }
 
+variable "kms_key_arns_for_credential_expiry_notifier" {
+  type        = list(string)
+  description = "KMS key ARNs the credential expiry notifier role is allowed to use (decrypts its own Lambda environment variables)."
+}
+
 variable "dlq_arn" {
   type        = string
   description = "ARN of the dead-letter SQS queue for failed extraction runs."

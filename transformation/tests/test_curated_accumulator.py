@@ -30,6 +30,7 @@ from transformation.curated_accumulator import CuratedAccumulator, merge_records
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_parquet_bytes(records: list[dict[str, Any]]) -> bytes:
     """Serialize a list of dicts to Parquet bytes for mocking S3 responses."""
     table = pa.Table.from_pylist(records)
@@ -41,6 +42,7 @@ def _make_parquet_bytes(records: list[dict[str, Any]]) -> bytes:
 # ---------------------------------------------------------------------------
 # merge_records() — pure function tests (no I/O, no mocks)
 # ---------------------------------------------------------------------------
+
 
 class TestMergeRecordsFirstRun:
     def test_empty_previous_returns_delta(self):
@@ -81,9 +83,9 @@ class TestMergeRecordsUpsert:
         delta = [{"Id": "2", "Name": "Bobby"}]
         result = merge_records(previous, delta, pk_field="Id")
         result_by_id = {r["Id"]: r for r in result}
-        assert result_by_id["1"]["Name"] == "Alice"   # unchanged
-        assert result_by_id["2"]["Name"] == "Bobby"   # updated
-        assert result_by_id["3"]["Name"] == "Carol"   # unchanged
+        assert result_by_id["1"]["Name"] == "Alice"  # unchanged
+        assert result_by_id["2"]["Name"] == "Bobby"  # updated
+        assert result_by_id["3"]["Name"] == "Carol"  # unchanged
         assert len(result) == 3
 
     def test_empty_delta_previous_state_unchanged(self):
@@ -145,9 +147,9 @@ class TestMergeRecordsMissingPK:
         previous = {}
         delta = [
             {"Id": "1", "Name": "Alice"},
-            {"Name": "NoPK"},              # missing Id
+            {"Name": "NoPK"},  # missing Id
             {"Id": None, "Name": "NullPK"},  # None Id
-            {"Id": "", "Name": "EmptyPK"},   # empty string Id
+            {"Id": "", "Name": "EmptyPK"},  # empty string Id
         ]
         result = merge_records(previous, delta, pk_field="Id")
         assert len(result) == 1
@@ -186,6 +188,7 @@ class TestMergeRecordsIdempotency:
 # CuratedAccumulator.accumulate() — integration tests with mocked S3
 # ---------------------------------------------------------------------------
 
+
 class TestCuratedAccumulatorAccumulate:
     """Integration tests for CuratedAccumulator using a mocked S3 client."""
 
@@ -201,29 +204,31 @@ class TestCuratedAccumulatorAccumulate:
 
         if previous_records is None:
             # No previous partition — simulate empty S3
-            mock_s3.get_paginator.return_value.paginate.return_value = iter([
-                {"CommonPrefixes": [], "Contents": []}
-            ])
+            mock_s3.get_paginator.return_value.paginate.return_value = iter(
+                [{"CommonPrefixes": [], "Contents": []}]
+            )
         else:
             parquet_bytes = _make_parquet_bytes(previous_records)
 
-            def _paginate_side_effect(Bucket, Prefix, **kwargs):  # noqa: N803
+            def _paginate_side_effect(Bucket, Prefix, **kwargs):  # noqa: N803 -- kwarg names mirror the real boto3 S3 API
                 delimiter = kwargs.get("Delimiter")
                 if delimiter == "/" and "curated_date=" not in Prefix:
                     # List date partitions
-                    return iter([{"CommonPrefixes": [
-                        {"Prefix": f"curated/{domain}/{entity_id}/curated_date=2026-07-01/"}
-                    ]}])
+                    date_prefix = f"curated/{domain}/{entity_id}/curated_date=2026-07-01/"
+                    return iter([{"CommonPrefixes": [{"Prefix": date_prefix}]}])
                 elif delimiter == "/" and "curated_date=" in Prefix:
                     # List run_id sub-prefixes
-                    return iter([{"CommonPrefixes": [
-                        {"Prefix": f"curated/{domain}/{entity_id}/curated_date=2026-07-01/run_id=run-001/"}
-                    ]}])
+                    run_prefix = (
+                        f"curated/{domain}/{entity_id}/curated_date=2026-07-01/run_id=run-001/"
+                    )
+                    return iter([{"CommonPrefixes": [{"Prefix": run_prefix}]}])
                 else:
                     # List Parquet files
-                    return iter([{"Contents": [
-                        {"Key": f"curated/{domain}/{entity_id}/curated_date=2026-07-01/run_id=run-001/data.parquet"}
-                    ], "CommonPrefixes": []}])
+                    data_key = (
+                        f"curated/{domain}/{entity_id}/"
+                        "curated_date=2026-07-01/run_id=run-001/data.parquet"
+                    )
+                    return iter([{"Contents": [{"Key": data_key}], "CommonPrefixes": []}])
 
             mock_s3.get_paginator.return_value.paginate.side_effect = _paginate_side_effect
             mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: parquet_bytes)}
@@ -232,10 +237,14 @@ class TestCuratedAccumulatorAccumulate:
 
     def test_first_run_no_previous_state(self):
         mock_s3 = self._make_s3_mock(previous_records=None)
-        acc = CuratedAccumulator(mock_s3, "test-curated", primary_key_field="Id")
+        acc = CuratedAccumulator(
+            mock_s3, "test-curated", primary_key_field="Id", tenant_code="demo"
+        )
         delta = [{"Id": "1", "Name": "Alice"}, {"Id": "2", "Name": "Bob"}]
 
-        result = acc.accumulate(delta, domain="salesforce", entity_id="salesforce-contact", run_id="run-001")
+        result = acc.accumulate(
+            delta, domain="salesforce", entity_id="salesforce-contact", run_id="run-001"
+        )
 
         assert result.previous_record_count == 0
         assert result.delta_record_count == 2
@@ -250,10 +259,14 @@ class TestCuratedAccumulatorAccumulate:
             {"Id": "3", "Name": "Carol"},
         ]
         mock_s3 = self._make_s3_mock(previous_records=previous)
-        acc = CuratedAccumulator(mock_s3, "test-curated", primary_key_field="Id")
+        acc = CuratedAccumulator(
+            mock_s3, "test-curated", primary_key_field="Id", tenant_code="demo"
+        )
         delta = [{"Id": "2", "Name": "Bobby"}, {"Id": "4", "Name": "Dave"}]
 
-        result = acc.accumulate(delta, domain="salesforce", entity_id="salesforce-contact", run_id="run-002")
+        result = acc.accumulate(
+            delta, domain="salesforce", entity_id="salesforce-contact", run_id="run-002"
+        )
 
         # previous_record_count is -1 with DuckDB merge (not loaded into Python RAM)
         # or the actual count when DuckDB falls back to Python merge.
@@ -262,8 +275,8 @@ class TestCuratedAccumulatorAccumulate:
         assert result.merged_record_count == 4  # 3 previous + 1 new - 0 deleted
         result_by_id = {r["Id"]: r for r in result.merged_records}
         assert result_by_id["2"]["Name"] == "Bobby"  # updated
-        assert "4" in result_by_id                   # inserted
-        assert "1" in result_by_id                   # unchanged
+        assert "4" in result_by_id  # inserted
+        assert "1" in result_by_id  # unchanged
 
     def test_soft_delete_removes_record(self):
         previous = [
@@ -272,13 +285,17 @@ class TestCuratedAccumulatorAccumulate:
         ]
         mock_s3 = self._make_s3_mock(previous_records=previous)
         acc = CuratedAccumulator(
-            mock_s3, "test-curated",
+            mock_s3,
+            "test-curated",
             primary_key_field="Id",
+            tenant_code="demo",
             soft_delete_field="is_delete",
         )
         delta = [{"Id": "2", "Name": "Bob", "is_delete": True}]
 
-        result = acc.accumulate(delta, domain="salesforce", entity_id="salesforce-contact", run_id="run-003")
+        result = acc.accumulate(
+            delta, domain="salesforce", entity_id="salesforce-contact", run_id="run-003"
+        )
 
         assert result.deleted_record_count == 1
         assert result.merged_record_count == 1
@@ -289,28 +306,34 @@ class TestCuratedAccumulatorAccumulate:
 class TestCuratedAccumulatorDefensiveValidation:
     def test_empty_pk_field_raises_value_error(self) -> None:
         from unittest.mock import MagicMock
+
         with pytest.raises(ValueError, match="primary_key_field"):
             CuratedAccumulator(
                 s3=MagicMock(),
                 curated_s3_bucket="test",
                 primary_key_field="",
+                tenant_code="demo",
             )
 
     def test_whitespace_pk_field_raises_value_error(self) -> None:
         from unittest.mock import MagicMock
+
         with pytest.raises(ValueError, match="primary_key_field"):
             CuratedAccumulator(
                 s3=MagicMock(),
                 curated_s3_bucket="test",
                 primary_key_field="   ",
+                tenant_code="demo",
             )
 
     def test_valid_pk_field_constructs_successfully(self) -> None:
         from unittest.mock import MagicMock
+
         acc = CuratedAccumulator(
             s3=MagicMock(),
             curated_s3_bucket="test",
             primary_key_field="Id",
+            tenant_code="demo",
             region_name="us-east-1",
         )
         assert acc._pk_field == "Id"

@@ -21,36 +21,35 @@ import sys
 from pathlib import Path
 
 
-
 def run_command(cmd: list[str]) -> str:
     """Run a shell command and return stdout."""
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return result.stdout.strip()
-    except FileNotFoundError as e:
+    except FileNotFoundError as exc:
         print(f"Error: Command not found: {cmd[0]}", file=sys.stderr)
-        raise RuntimeError(f"Command not found: {cmd[0]}")
+        raise RuntimeError(f"Command not found: {cmd[0]}") from exc
     except subprocess.CalledProcessError as e:
         print(f"Error running {' '.join(cmd)}: {e.stderr}", file=sys.stderr)
         raise
 
+
 def get_terraform_outputs(environment: str = "dev") -> dict[str, str]:
     """Get Terraform outputs for the specified environment."""
     tf_dir = Path(__file__).parent.parent / "infrastructure" / "environments" / environment
-    
+
     if not tf_dir.exists():
         raise FileNotFoundError(f"Terraform directory not found: {tf_dir}")
-    
+
     # Change to terraform directory and get outputs as JSON
     original_cwd = os.getcwd()
     try:
         os.chdir(tf_dir)
         output_json = run_command(["terraform", "output", "-json"])
         os.chdir(original_cwd)
-    except Exception as e:
+    except Exception as exc:
         os.chdir(original_cwd)
-        raise RuntimeError(f"Failed to get Terraform outputs: {e}")
-    
+        raise RuntimeError(f"Failed to get Terraform outputs: {exc}") from exc
 
     # Parse JSON and flatten to simple key-value pairs
     outputs = json.loads(output_json)
@@ -65,8 +64,9 @@ def get_terraform_outputs(environment: str = "dev") -> dict[str, str]:
                 flattened[key] = val
         else:
             flattened[key] = value
-    
+
     return flattened
+
 
 def validate_aws_profile(profile: str) -> bool:
     """Verify AWS profile exists and is valid."""
@@ -84,40 +84,45 @@ def validate_secrets(profile: str, region: str) -> dict[str, bool]:
         "netsuite": f"{profile.split('-')[0]}/sources/netsuite/credentials",
         "mysql-rds": f"{profile.split('-')[0]}/sources/mysql-rds/credentials",
     }
-    
+
     results = {}
     for name, secret_id in secrets.items():
         try:
-            run_command([
-                "aws", "secretsmanager", "describe-secret",
-                "--secret-id", secret_id,
-                "--profile", profile,
-                "--region", region
-            ])
+            run_command(
+                [
+                    "aws",
+                    "secretsmanager",
+                    "describe-secret",
+                    "--secret-id",
+                    secret_id,
+                    "--profile",
+                    profile,
+                    "--region",
+                    region,
+                ]
+            )
             results[name] = True
         except subprocess.CalledProcessError:
             results[name] = False
-    
+
     return results
 
 
-def create_env_file(
-    outputs: dict[str, str],
-    profile: str,
-    region: str,
-    env_file: Path
-) -> None:
+def create_env_file(outputs: dict[str, str], profile: str, region: str, env_file: Path) -> None:
     """Create .env.local file with environment variables."""
-    
-    
+
     # Validate critical outputs exist
-    critical_outputs = ["raw_layer_bucket_id", "watermark_repository_table_name", "state_machine_arn"]
+    critical_outputs = [
+        "raw_layer_bucket_id",
+        "watermark_repository_table_name",
+        "state_machine_arn",
+    ]
     missing = [key for key in critical_outputs if not outputs.get(key)]
     if missing:
         print(f"⚠️  WARNING: Missing critical Terraform outputs: {missing}")
         print("   Terraform may not be initialized or applied. Check:")
         print("   cd infrastructure/environments/dev && terraform validate && terraform plan")
-    
+
     # Map Terraform outputs to environment variable names
     env_vars = {
         "AWS_PROFILE": profile,
@@ -133,12 +138,12 @@ def create_env_file(
         "EXTRACTION_RUNTIME_ROLE_ARN": outputs.get("extraction_runtime_role_arn", ""),
         "STATE_MACHINE_ARN": outputs.get("state_machine_arn", ""),
     }
-    
+
     with open(env_file, "w") as f:
         f.write("#!/bin/bash\n")
         f.write("# Auto-generated environment variables from Terraform outputs\n")
         f.write("# Source this file: source .env.local\n\n")
-        
+
         for key, value in env_vars.items():
             if key == "PYTHONPATH":
                 # PYTHONPATH uses shell parameter expansion
@@ -153,21 +158,21 @@ def create_env_file(
 
 def print_checklist(outputs: dict[str, str], secrets: dict[str, bool]) -> None:
     """Print a checklist of prerequisites."""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("LOCAL TESTING PREREQUISITES CHECKLIST")
-    print("="*80 + "\n")
-    
+    print("=" * 80 + "\n")
+
     print("AWS Resources from Terraform:")
     print(f"  ✅ Raw S3 Bucket: {outputs.get('raw_layer_bucket_id', 'NOT FOUND')}")
     print(f"  ✅ Watermark Table: {outputs.get('watermark_repository_table_name', 'NOT FOUND')}")
     print(f"  ✅ Audit Log Table: {outputs.get('run_audit_log_table_name', 'NOT FOUND')}")
     print(f"  ✅ State Machine ARN: {outputs.get('state_machine_arn', 'NOT FOUND')}")
-    
+
     print("\nSecrets Manager Status:")
     for name, exists in secrets.items():
         status = "✅ EXISTS" if exists else "❌ MISSING"
         print(f"  {status}: {name}")
-    
+
     print("\nNext Steps:")
     print("  1. Source the environment: source .env.local")
     print("  2. Verify AWS: aws sts get-caller-identity")
@@ -181,11 +186,11 @@ def main() -> None:
     profile = "dev"
     region = "us-east-1"
     env_file = Path(__file__).parent.parent / ".env.local"
-    
+
     print(f"Setting up local environment for {environment} account...")
     print(f"AWS Profile: {profile}")
     print(f"AWS Region: {region}\n")
-    
+
     # Validate AWS profile
     print("Validating AWS profile...")
     if not validate_aws_profile(profile):
@@ -193,8 +198,7 @@ def main() -> None:
         print("   Run: aws configure --profile dev")
         sys.exit(1)
     print(f"✅ AWS profile '{profile}' is valid\n")
-    
-    
+
     # Get Terraform outputs
     print("Reading Terraform outputs...")
     try:
@@ -211,7 +215,9 @@ def main() -> None:
         print(f"❌ Failed to read Terraform outputs: {e}")
         print("   Make sure:")
         print("   1. Terraform is installed: brew install terraform")
-        print("   2. Terraform is initialized: cd infrastructure/environments/dev && terraform init")
+        print(
+            "   2. Terraform is initialized: cd infrastructure/environments/dev && terraform init"
+        )
         print("   3. Terraform is applied: cd infrastructure/environments/dev && terraform apply")
         sys.exit(1)
     # Check secrets
@@ -223,10 +229,10 @@ def main() -> None:
         print("   Create them in AWS Secrets Manager before running extraction tests")
     else:
         print("✅ All required secrets exist\n")
-    
+
     # Create .env.local
     create_env_file(outputs, profile, region, env_file)
-    
+
     # Print summary
     print_checklist(outputs, secrets)
 

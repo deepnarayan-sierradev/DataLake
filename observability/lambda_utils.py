@@ -10,6 +10,10 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from observability.structured_logger import get_platform_logger
+
+_logger = get_platform_logger(__name__)
+
 
 def require_env(name: str) -> str:
     """
@@ -123,6 +127,7 @@ def configure_xray(
     """
     try:
         from aws_xray_sdk.core import patch_all, xray_recorder  # type: ignore[import-not-found]
+
         patch_all()
         if tenant_code:
             xray_recorder.put_annotation("tenant_code", tenant_code)
@@ -135,6 +140,6 @@ def configure_xray(
     except ImportError:
         # aws-xray-sdk not available in this environment — skip silently.
         pass
-    except Exception:
+    except Exception as exc:
         # X-Ray configuration failure must never interrupt a pipeline run.
-        pass
+        _logger.debug("xray_configuration_failed", error=str(exc))

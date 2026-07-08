@@ -32,7 +32,7 @@ from watermark_management.watermark_repository.watermark_repository import (
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_TABLE = f"{_ENV}-edl-watermark-repository"
+_TABLE = "EdlWatermarkRepository"
 
 _NOW = datetime(2026, 6, 11, 14, 0, 0, tzinfo=UTC)
 
@@ -451,7 +451,14 @@ class TestWatermarkRepositoryErrorPaths:
 
 
 class TestTenantScoping:
-    """§1.1 / ARCH-1: tenant_code is stored on every record and cross-checked on read."""
+    """
+    §1.1 / ARCH-1: tenant_code is stored on every record, and DynamoDB key
+    isolation (not a post-read cross-check) is what actually makes another
+    tenant's record invisible — get_watermark() builds its Key= from
+    tenant_scoped_key(tenant_code, source_id), so a different tenant's
+    request can never even fetch the item, let alone need a guard to reject
+    it after the fact.
+    """
 
     @mock_aws
     def test_initialise_watermark_stamps_tenant_code(self) -> None:
@@ -464,17 +471,23 @@ class TestTenantScoping:
 
     @mock_aws
     def test_get_watermark_wrong_tenant_returns_none(self) -> None:
-        """A watermark seeded for one tenant is invisible to another (SEC-2 app-level guard)."""
+        """A watermark seeded for one tenant is invisible to another — the DynamoDB
+        key itself is tenant-scoped (ARCH-1), so this is key-level isolation,
+        not an application-level guard rejecting a successful cross-tenant read."""
         _create_table()
         repo = _repo()
         repo.initialise_watermark(
             "salesforce", "salesforce-account", _NOW, "run-001", tenant_code="acme-corp"
         )
         # Requesting under a different tenant must behave like "first run".
-        other_tenant = repo.get_watermark("salesforce", "salesforce-account", tenant_code="globex-eu")
+        other_tenant = repo.get_watermark(
+            "salesforce", "salesforce-account", tenant_code="globex-eu"
+        )
         assert other_tenant is None
         # The owning tenant still sees it.
-        owning_tenant = repo.get_watermark("salesforce", "salesforce-account", tenant_code="acme-corp")
+        owning_tenant = repo.get_watermark(
+            "salesforce", "salesforce-account", tenant_code="acme-corp"
+        )
         assert owning_tenant is not None
 
     @mock_aws

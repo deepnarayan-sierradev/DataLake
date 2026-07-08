@@ -12,12 +12,26 @@ serialization + S3 upload (automatic single-PUT vs multipart selection by
 file size) instead of every adapter reimplementing that primitive from
 scratch.
 
-Partition scheme (shared across all sources):
-    s3://{bucket}/{prefix}/{path_segments...}/{entity_id}/
+Partition scheme (shared across all sources) — the canonical, final layout:
+    s3://{bucket}/{tenant_code}/{source}/{entity_id}/
         extraction_date={YYYY-MM-DD}/
         run_id={run_id}/
             data.parquet
             metadata.json
+
+``{source}`` is exactly ONE hyphenated, source-id-style path segment (e.g.
+"salesforce", "netsuite", "mysql-rds", "sage-intacct", "sage-x3") — supplied
+by each subclass's ``path_segments`` argument to ``RawLayerWriter.__init__``.
+Prior to the RAW-1 fix (2026-07-08), connectors additionally passed an
+``s3_prefix`` equal to the source name (e.g. ``s3_prefix="salesforce"``) on
+top of the writer's own ``path_segments=["salesforce"]``, doubling the source
+segment in every production raw key (``{tenant}/salesforce/salesforce/...``)
+and, for MySQL RDS, mixing underscore (``mysql_rds``) and hyphen
+(``mysql-rds``) spelling between the two occurrences. RawLayerWriter no
+longer accepts an ``s3_prefix`` — ``path_segments`` is the only mechanism for
+composing the source portion of the key, and it stays a list (rather than a
+single str) so multi-part sources remain representable without inventing a
+second parameter.
 
 Design requirements (unchanged from the pre-consolidation writers):
   - Append-only writes — each run produces a unique partition path via run_id.
@@ -56,6 +70,7 @@ import pyarrow.parquet as pq
 
 from connector_runtime.interfaces.connector_interface import ExtractionRecord
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from contracts.identifier_policy import validate_tenant_code
 from observability.s3_writer import S3ParquetWriter
 from observability.structured_logger import get_platform_logger
 
@@ -150,7 +165,9 @@ class RawLayerWriter:
     exception type) and `log_prefix` (structured-log event name / metadata
     prefix — e.g. "salesforce", "netsuite"), and pass their source-specific
     S3 partition-path segments to __init__ (e.g. ["salesforce"],
-    ["mysql_rds"], ["sage", sage_product]).
+    ["mysql-rds"], [f"sage-{sage_product}"]). Connectors do not pass an
+    S3 prefix separately — the writer's `path_segments` is the single source
+    of truth for the source portion of the key (see module docstring).
 
     One instance per extraction run. Responsible only for persistence — no
     transformation or field filtering is applied.
@@ -166,16 +183,17 @@ class RawLayerWriter:
     def __init__(
         self,
         s3_bucket: str,
-        s3_prefix: str,
         path_segments: list[str],
         region_name: str,
+        tenant_code: str,
     ) -> None:
         if not s3_bucket:
             raise ValueError("s3_bucket must not be empty.")
+        if not path_segments:
+            raise ValueError("path_segments must not be empty.")
         self._bucket = s3_bucket
-        # Normalise prefix: strip leading/trailing slashes for consistent key building.
-        self._prefix = s3_prefix.strip("/")
         self._path_segments = list(path_segments)
+        self._tenant_code = validate_tenant_code(tenant_code)
         self._s3 = boto3.client("s3", region_name=region_name)
         self._parquet_writer = S3ParquetWriter(self._s3)
 
@@ -377,17 +395,21 @@ class RawLayerWriter:
         """
         Build the S3 partition prefix.
 
-        Format: {prefix}/{path_segments...}/{entity_id}/extraction_date={date}/run_id={run_id}
+        Format: {tenant_code}/{path_segments...}/{entity_id}/
+                extraction_date={date}/run_id={run_id}
+
+        The tenant_code root segment (ARCH-1) matches the convention already
+        used by the curated and schema-snapshot layers — without it, two
+        tenants' raw data for the same source/entity is indistinguishable to
+        any downstream reader scanning "all raw data for this entity."
         """
-        parts = [self._prefix] if self._prefix else []
-        parts.extend(
-            [
-                *self._path_segments,
-                entity_id,
-                f"extraction_date={extraction_date}",
-                f"run_id={run_id}",
-            ]
-        )
+        parts = [
+            self._tenant_code,
+            *self._path_segments,
+            entity_id,
+            f"extraction_date={extraction_date}",
+            f"run_id={run_id}",
+        ]
         return "/".join(parts)
 
     def _validate_stable_id(self, field_name: str, value: str) -> None:

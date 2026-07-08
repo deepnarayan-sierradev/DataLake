@@ -47,7 +47,7 @@ data "aws_iam_policy_document" "extraction_runtime_assume_role" {
 }
 
 resource "aws_iam_role" "extraction_runtime" {
-  name               = "${var.environment}-extraction-runtime-role"
+  name               = "EdlExtractionRuntimeRole"
   assume_role_policy = data.aws_iam_policy_document.extraction_runtime_assume_role.json
   description        = "Role assumed by the connector runtime for entity extraction runs."
   tags               = local.common_tags
@@ -141,7 +141,7 @@ data "aws_iam_policy_document" "extraction_runtime_permissions" {
     effect  = "Allow"
     actions = ["secretsmanager:GetSecretValue"]
     resources = [
-      "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:${var.environment}/sources/*",
+      "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:edl/sources/*",
     ]
   }
 
@@ -169,8 +169,8 @@ data "aws_iam_policy_document" "extraction_runtime_permissions" {
       "logs:PutLogEvents",
     ]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/edl/${var.environment}/connector-runtime",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/edl/${var.environment}/connector-runtime:log-stream:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/edl/connector-runtime",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/edl/connector-runtime:log-stream:*",
     ]
   }
 
@@ -215,7 +215,7 @@ data "aws_iam_policy_document" "extraction_runtime_permissions" {
 }
 
 resource "aws_iam_role_policy" "extraction_runtime" {
-  name   = "${var.environment}-extraction-runtime-policy"
+  name   = "EdlExtractionRuntimePolicy"
   role   = aws_iam_role.extraction_runtime.id
   policy = data.aws_iam_policy_document.extraction_runtime_permissions.json
 }
@@ -247,7 +247,7 @@ data "aws_iam_policy_document" "transformation_runtime_assume_role" {
 }
 
 resource "aws_iam_role" "transformation_runtime" {
-  name               = "${var.environment}-transformation-runtime-role"
+  name               = "EdlTransformationRuntimeRole"
   assume_role_policy = data.aws_iam_policy_document.transformation_runtime_assume_role.json
   description        = "Role assumed by the transformation pipeline Lambda for curated layer processing."
   tags               = local.common_tags
@@ -306,8 +306,8 @@ data "aws_iam_policy_document" "transformation_runtime_permissions" {
     effect  = "Allow"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-transformation-pipeline",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-transformation-pipeline:log-stream:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlTransformationPipeline",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlTransformationPipeline:log-stream:*",
     ]
   }
 
@@ -340,8 +340,8 @@ data "aws_iam_policy_document" "transformation_runtime_permissions" {
     ]
     resources = [
       "arn:aws:glue:${local.region}:${local.account_id}:catalog",
-      "arn:aws:glue:${local.region}:${local.account_id}:database/${var.environment}_*",
-      "arn:aws:glue:${local.region}:${local.account_id}:table/${var.environment}_*/*",
+      "arn:aws:glue:${local.region}:${local.account_id}:database/edl_*",
+      "arn:aws:glue:${local.region}:${local.account_id}:table/edl_*/*",
     ]
   }
 
@@ -359,7 +359,7 @@ data "aws_iam_policy_document" "transformation_runtime_permissions" {
 }
 
 resource "aws_iam_role_policy" "transformation_runtime" {
-  name   = "${var.environment}-transformation-runtime-policy"
+  name   = "EdlTransformationRuntimePolicy"
   role   = aws_iam_role.transformation_runtime.id
   policy = data.aws_iam_policy_document.transformation_runtime_permissions.json
 }
@@ -389,7 +389,7 @@ data "aws_iam_policy_document" "entity_resolution_runtime_assume_role" {
 }
 
 resource "aws_iam_role" "entity_resolution_runtime" {
-  name               = "${var.environment}-entity-resolution-runtime-role"
+  name               = "EdlEntityResolutionRuntimeRole"
   assume_role_policy = data.aws_iam_policy_document.entity_resolution_runtime_assume_role.json
   description        = "Role assumed by the entity resolution pipeline Lambda for golden record production."
   tags               = local.common_tags
@@ -443,8 +443,8 @@ data "aws_iam_policy_document" "entity_resolution_runtime_permissions" {
     effect  = "Allow"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-entity-resolution-pipeline",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-entity-resolution-pipeline:log-stream:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlEntityResolutionPipeline",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlEntityResolutionPipeline:log-stream:*",
     ]
   }
 
@@ -475,7 +475,7 @@ data "aws_iam_policy_document" "entity_resolution_runtime_permissions" {
 }
 
 resource "aws_iam_role_policy" "entity_resolution_runtime" {
-  name   = "${var.environment}-entity-resolution-runtime-policy"
+  name   = "EdlEntityResolutionRuntimePolicy"
   role   = aws_iam_role.entity_resolution_runtime.id
   policy = data.aws_iam_policy_document.entity_resolution_runtime_permissions.json
 }
@@ -504,7 +504,7 @@ data "aws_iam_policy_document" "analytics_publisher_runtime_assume_role" {
 }
 
 resource "aws_iam_role" "analytics_publisher_runtime" {
-  name               = "${var.environment}-analytics-publisher-runtime-role"
+  name               = "EdlAnalyticsPublisherRuntimeRole"
   assume_role_policy = data.aws_iam_policy_document.analytics_publisher_runtime_assume_role.json
   description        = "Role assumed by the analytics publisher Lambda for BI Parquet production and Glue catalog registration."
   tags               = local.common_tags
@@ -544,8 +544,8 @@ data "aws_iam_policy_document" "analytics_publisher_runtime_permissions" {
     effect  = "Allow"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-analytics-layer-publisher",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-analytics-layer-publisher:log-stream:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlAnalyticsLayerPublisher",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlAnalyticsLayerPublisher:log-stream:*",
     ]
   }
 
@@ -578,8 +578,8 @@ data "aws_iam_policy_document" "analytics_publisher_runtime_permissions" {
     ]
     resources = [
       "arn:aws:glue:${local.region}:${local.account_id}:catalog",
-      "arn:aws:glue:${local.region}:${local.account_id}:database/${var.environment}_edl_analytics",
-      "arn:aws:glue:${local.region}:${local.account_id}:table/${var.environment}_edl_analytics/*",
+      "arn:aws:glue:${local.region}:${local.account_id}:database/edl_analytics",
+      "arn:aws:glue:${local.region}:${local.account_id}:table/edl_analytics/*",
     ]
   }
 
@@ -597,7 +597,7 @@ data "aws_iam_policy_document" "analytics_publisher_runtime_permissions" {
 }
 
 resource "aws_iam_role_policy" "analytics_publisher_runtime" {
-  name   = "${var.environment}-analytics-publisher-runtime-policy"
+  name   = "EdlAnalyticsPublisherRuntimePolicy"
   role   = aws_iam_role.analytics_publisher_runtime.id
   policy = data.aws_iam_policy_document.analytics_publisher_runtime_permissions.json
 }
@@ -626,7 +626,7 @@ data "aws_iam_policy_document" "transformation_job_assume_role" {
 }
 
 resource "aws_iam_role" "transformation_job" {
-  name               = "${var.environment}-transformation-job-role"
+  name               = "EdlTransformationJobRole"
   assume_role_policy = data.aws_iam_policy_document.transformation_job_assume_role.json
   description        = "Role assumed by Glue transformation jobs for curated layer processing."
   tags               = local.common_tags
@@ -692,8 +692,8 @@ data "aws_iam_policy_document" "transformation_job_permissions" {
     # the job to create arbitrary log groups in this account.
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/edl/${var.environment}/transformation",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/edl/${var.environment}/transformation:log-stream:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/edl/transformation",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/edl/transformation:log-stream:*",
     ]
   }
 
@@ -719,14 +719,14 @@ data "aws_iam_policy_document" "transformation_job_permissions" {
     ]
     resources = [
       "arn:aws:glue:${local.region}:${local.account_id}:catalog",
-      "arn:aws:glue:${local.region}:${local.account_id}:database/${var.environment}_*",
-      "arn:aws:glue:${local.region}:${local.account_id}:table/${var.environment}_*/*",
+      "arn:aws:glue:${local.region}:${local.account_id}:database/edl_*",
+      "arn:aws:glue:${local.region}:${local.account_id}:table/edl_*/*",
     ]
   }
 }
 
 resource "aws_iam_role_policy" "transformation_job" {
-  name   = "${var.environment}-transformation-job-policy"
+  name   = "EdlTransformationJobPolicy"
   role   = aws_iam_role.transformation_job.id
   policy = data.aws_iam_policy_document.transformation_job_permissions.json
 }
@@ -752,7 +752,7 @@ data "aws_iam_policy_document" "orchestration_sfn_assume_role" {
 }
 
 resource "aws_iam_role" "orchestration_step_functions" {
-  name               = "${var.environment}-extraction-orchestration-workflow-role"
+  name               = "EdlExtractionOrchestrationWorkflowRole"
   assume_role_policy = data.aws_iam_policy_document.orchestration_sfn_assume_role.json
   description        = "Role assumed by Step Functions for extraction pipeline orchestration."
   tags               = local.common_tags
@@ -764,10 +764,10 @@ data "aws_iam_policy_document" "orchestration_sfn_permissions" {
     effect  = "Allow"
     actions = ["lambda:InvokeFunction"]
     resources = [
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-extraction-pipeline",
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-transformation-pipeline",
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-entity-resolution-pipeline",
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-analytics-layer-publisher",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:EdlExtractionPipeline",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:EdlTransformationPipeline",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:EdlEntityResolutionPipeline",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:EdlAnalyticsLayerPublisher",
     ]
   }
 
@@ -807,7 +807,7 @@ data "aws_iam_policy_document" "orchestration_sfn_permissions" {
 }
 
 resource "aws_iam_role_policy" "orchestration_step_functions" {
-  name   = "${var.environment}-extraction-orchestration-workflow-policy"
+  name   = "EdlExtractionOrchestrationWorkflowPolicy"
   role   = aws_iam_role.orchestration_step_functions.id
   policy = data.aws_iam_policy_document.orchestration_sfn_permissions.json
 }
@@ -833,7 +833,7 @@ data "aws_iam_policy_document" "eventbridge_scheduler_assume_role" {
 }
 
 resource "aws_iam_role" "eventbridge_scheduler" {
-  name               = "${var.environment}-extraction-schedule-trigger-role"
+  name               = "EdlExtractionScheduleTriggerRole"
   assume_role_policy = data.aws_iam_policy_document.eventbridge_scheduler_assume_role.json
   description        = "Role assumed by EventBridge Scheduler to start extraction Step Functions workflows."
   tags               = local.common_tags
@@ -846,7 +846,7 @@ data "aws_iam_policy_document" "eventbridge_scheduler_permissions" {
     effect  = "Allow"
     actions = ["sqs:SendMessage"]
     resources = [
-      "arn:aws:sqs:${local.region}:${local.account_id}:${var.environment}-edl-pipeline-trigger.fifo",
+      "arn:aws:sqs:${local.region}:${local.account_id}:EdlPipelineTrigger.fifo",
     ]
   }
   # Keep direct Step Functions access as fallback for manual / replay triggers
@@ -855,13 +855,13 @@ data "aws_iam_policy_document" "eventbridge_scheduler_permissions" {
     effect  = "Allow"
     actions = ["states:StartExecution"]
     resources = [
-      "arn:aws:states:${local.region}:${local.account_id}:stateMachine:${var.environment}-extraction-pipeline",
+      "arn:aws:states:${local.region}:${local.account_id}:stateMachine:EdlExtractionPipeline",
     ]
   }
 }
 
 resource "aws_iam_role_policy" "eventbridge_scheduler" {
-  name   = "${var.environment}-extraction-schedule-trigger-policy"
+  name   = "EdlExtractionScheduleTriggerPolicy"
   role   = aws_iam_role.eventbridge_scheduler.id
   policy = data.aws_iam_policy_document.eventbridge_scheduler_permissions.json
 }
@@ -894,7 +894,7 @@ data "aws_iam_policy_document" "cicd_deployment_assume_role" {
 }
 
 resource "aws_iam_role" "cicd_deployment" {
-  name               = "${var.environment}-edl-cicd-deployment-role"
+  name               = "EdlCicdDeploymentRole"
   assume_role_policy = data.aws_iam_policy_document.cicd_deployment_assume_role.json
   description        = "Role assumed by GitHub Actions OIDC for Terraform deployments to ${var.environment}."
   tags               = local.common_tags
@@ -932,7 +932,7 @@ data "aws_iam_policy_document" "pipeline_trigger_assume_role" {
 }
 
 resource "aws_iam_role" "pipeline_trigger" {
-  name               = "${var.environment}-pipeline-trigger-role"
+  name               = "EdlPipelineTriggerRole"
   assume_role_policy = data.aws_iam_policy_document.pipeline_trigger_assume_role.json
   description        = "Role assumed by the pipeline trigger Lambda to drain SQS and start Step Functions executions."
   tags               = local.common_tags
@@ -949,7 +949,7 @@ data "aws_iam_policy_document" "pipeline_trigger_permissions" {
       "sqs:ChangeMessageVisibility",
     ]
     resources = [
-      "arn:aws:sqs:${local.region}:${local.account_id}:${var.environment}-edl-pipeline-trigger.fifo",
+      "arn:aws:sqs:${local.region}:${local.account_id}:EdlPipelineTrigger.fifo",
     ]
   }
 
@@ -958,7 +958,7 @@ data "aws_iam_policy_document" "pipeline_trigger_permissions" {
     effect  = "Allow"
     actions = ["states:StartExecution"]
     resources = [
-      "arn:aws:states:${local.region}:${local.account_id}:stateMachine:${var.environment}-extraction-pipeline",
+      "arn:aws:states:${local.region}:${local.account_id}:stateMachine:EdlExtractionPipeline",
     ]
   }
 
@@ -974,8 +974,8 @@ data "aws_iam_policy_document" "pipeline_trigger_permissions" {
     effect  = "Allow"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-pipeline-trigger",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-pipeline-trigger:log-stream:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlPipelineTrigger",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlPipelineTrigger:log-stream:*",
     ]
   }
 
@@ -988,7 +988,7 @@ data "aws_iam_policy_document" "pipeline_trigger_permissions" {
 }
 
 resource "aws_iam_role_policy" "pipeline_trigger" {
-  name   = "${var.environment}-pipeline-trigger-policy"
+  name   = "EdlPipelineTriggerPolicy"
   role   = aws_iam_role.pipeline_trigger.id
   policy = data.aws_iam_policy_document.pipeline_trigger_permissions.json
 }
@@ -1014,7 +1014,7 @@ data "aws_iam_policy_document" "dlq_processor_assume_role" {
 }
 
 resource "aws_iam_role" "dlq_processor" {
-  name               = "${var.environment}-dlq-processor-role"
+  name               = "EdlDlqProcessorRole"
   assume_role_policy = data.aws_iam_policy_document.dlq_processor_assume_role.json
   description        = "Role assumed by the DLQ processor Lambda to read, audit, and optionally replay failed runs."
   tags               = local.common_tags
@@ -1044,7 +1044,7 @@ data "aws_iam_policy_document" "dlq_processor_permissions" {
     sid       = "PublishAlertNotification"
     effect    = "Allow"
     actions   = ["sns:Publish"]
-    resources = ["arn:aws:sns:${local.region}:${local.account_id}:${var.environment}-edl-platform-alerts"]
+    resources = ["arn:aws:sns:${local.region}:${local.account_id}:EdlPlatformAlerts"]
   }
 
   statement {
@@ -1052,7 +1052,7 @@ data "aws_iam_policy_document" "dlq_processor_permissions" {
     effect  = "Allow"
     actions = ["states:StartExecution"]
     resources = [
-      "arn:aws:states:${local.region}:${local.account_id}:stateMachine:${var.environment}-extraction-pipeline",
+      "arn:aws:states:${local.region}:${local.account_id}:stateMachine:EdlExtractionPipeline",
     ]
   }
 
@@ -1068,14 +1068,14 @@ data "aws_iam_policy_document" "dlq_processor_permissions" {
     effect  = "Allow"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-dlq-processor",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-dlq-processor:log-stream:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlDlqProcessor",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlDlqProcessor:log-stream:*",
     ]
   }
 }
 
 resource "aws_iam_role_policy" "dlq_processor" {
-  name   = "${var.environment}-dlq-processor-policy"
+  name   = "EdlDlqProcessorPolicy"
   role   = aws_iam_role.dlq_processor.id
   policy = data.aws_iam_policy_document.dlq_processor_permissions.json
 }
@@ -1105,7 +1105,7 @@ data "aws_iam_policy_document" "credential_expiry_notifier_assume_role" {
 }
 
 resource "aws_iam_role" "credential_expiry_notifier" {
-  name               = "${var.environment}-credential-expiry-notifier-role"
+  name               = "EdlCredentialExpiryNotifierRole"
   assume_role_policy = data.aws_iam_policy_document.credential_expiry_notifier_assume_role.json
   description        = "Role assumed by the credential expiry notifier Lambda (SEC-6). Read-only secret metadata + SNS publish."
   tags               = local.common_tags
@@ -1116,14 +1116,14 @@ data "aws_iam_policy_document" "credential_expiry_notifier_permissions" {
     sid       = "DescribeSourceCredentialSecrets"
     effect    = "Allow"
     actions   = ["secretsmanager:DescribeSecret"]
-    resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:${var.environment}/sources/*"]
+    resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:edl/sources/*"]
   }
 
   statement {
     sid       = "PublishAlertNotification"
     effect    = "Allow"
     actions   = ["sns:Publish"]
-    resources = ["arn:aws:sns:${local.region}:${local.account_id}:${var.environment}-edl-platform-alerts"]
+    resources = ["arn:aws:sns:${local.region}:${local.account_id}:EdlPlatformAlerts"]
   }
 
   statement {
@@ -1131,14 +1131,23 @@ data "aws_iam_policy_document" "credential_expiry_notifier_permissions" {
     effect  = "Allow"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-credential-expiry-notifier",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-credential-expiry-notifier:log-stream:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlCredentialExpiryNotifier",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlCredentialExpiryNotifier:log-stream:*",
     ]
+  }
+
+  # Required for Lambda to decrypt its own KMS-encrypted environment variables
+  # at invocation time — without this the function fails to start.
+  statement {
+    sid       = "KmsDecrypt"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    resources = var.kms_key_arns_for_credential_expiry_notifier
   }
 }
 
 resource "aws_iam_role_policy" "credential_expiry_notifier" {
-  name   = "${var.environment}-credential-expiry-notifier-policy"
+  name   = "EdlCredentialExpiryNotifierPolicy"
   role   = aws_iam_role.credential_expiry_notifier.id
   policy = data.aws_iam_policy_document.credential_expiry_notifier_permissions.json
 }
@@ -1163,7 +1172,7 @@ data "aws_iam_policy_document" "credential_expiry_scheduler_assume_role" {
 }
 
 resource "aws_iam_role" "credential_expiry_scheduler" {
-  name               = "${var.environment}-credential-expiry-scheduler-role"
+  name               = "EdlCredentialExpirySchedulerRole"
   assume_role_policy = data.aws_iam_policy_document.credential_expiry_scheduler_assume_role.json
   description        = "Role assumed by EventBridge Scheduler to invoke the credential expiry notifier Lambda (SEC-6)."
   tags               = local.common_tags
@@ -1174,12 +1183,12 @@ data "aws_iam_policy_document" "credential_expiry_scheduler_permissions" {
     sid       = "InvokeCredentialExpiryNotifier"
     effect    = "Allow"
     actions   = ["lambda:InvokeFunction"]
-    resources = ["arn:aws:lambda:${local.region}:${local.account_id}:function:${var.environment}-edl-credential-expiry-notifier"]
+    resources = ["arn:aws:lambda:${local.region}:${local.account_id}:function:EdlCredentialExpiryNotifier"]
   }
 }
 
 resource "aws_iam_role_policy" "credential_expiry_scheduler" {
-  name   = "${var.environment}-credential-expiry-scheduler-policy"
+  name   = "EdlCredentialExpirySchedulerPolicy"
   role   = aws_iam_role.credential_expiry_scheduler.id
   policy = data.aws_iam_policy_document.credential_expiry_scheduler_permissions.json
 }
@@ -1215,7 +1224,7 @@ data "aws_iam_policy_document" "control_plane_assume_role" {
 }
 
 resource "aws_iam_role" "control_plane" {
-  name               = "${var.environment}-edl-control-plane-role"
+  name               = "EdlControlPlaneRole"
   assume_role_policy = data.aws_iam_policy_document.control_plane_assume_role.json
   description        = "Role assumed by the control-plane API Lambda for tenant provisioning, entity registration, pipeline triggering, and run status queries."
   tags               = local.common_tags
@@ -1253,7 +1262,7 @@ data "aws_iam_policy_document" "control_plane_permissions" {
     effect  = "Allow"
     actions = ["sqs:SendMessage"]
     resources = [
-      "arn:aws:sqs:${local.region}:${local.account_id}:${var.environment}-edl-pipeline-trigger.fifo",
+      "arn:aws:sqs:${local.region}:${local.account_id}:EdlPipelineTrigger.fifo",
     ]
   }
 
@@ -1269,8 +1278,8 @@ data "aws_iam_policy_document" "control_plane_permissions" {
     effect  = "Allow"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-control-plane",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.environment}-edl-control-plane:log-stream:*",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlControlPlane",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlControlPlane:log-stream:*",
     ]
   }
 
@@ -1283,7 +1292,7 @@ data "aws_iam_policy_document" "control_plane_permissions" {
 }
 
 resource "aws_iam_role_policy" "control_plane" {
-  name   = "${var.environment}-edl-control-plane-policy"
+  name   = "EdlControlPlanePolicy"
   role   = aws_iam_role.control_plane.id
   policy = data.aws_iam_policy_document.control_plane_permissions.json
 }

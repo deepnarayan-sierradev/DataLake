@@ -172,6 +172,7 @@ def _make_workflow(
     coordinator.started_at = datetime.now(UTC)
     coordinator.source_id = _SOURCE
     coordinator.entity_id = _ENTITY
+    coordinator.tenant_code = "demo"
     coordinator.emit_checkpoint_stage.return_value = MagicMock(run_id=f"{_RUN_ID}-part1")
 
     # Mock ConfigurationRepositoryClient
@@ -481,8 +482,13 @@ class TestFailurePropagation:
 class TestCircuitBreakerIntegration:
     def test_open_circuit_raises_before_any_aws_calls(self) -> None:
         policy = ExtractionRetryPolicy(circuit_open_threshold=2)
-        policy.record_failure(_SOURCE)
-        policy.record_failure(_SOURCE)
+        # Regression for the entity_id-omission bug: the guard check in
+        # execute() must key on the same (source_id, entity_id) pair that
+        # record_failure()/record_success() write under, or the circuit can
+        # never open. Seed failures under the real _ENTITY, matching what
+        # workflow.execute()'s guard now checks.
+        policy.record_failure(_SOURCE, _ENTITY)
+        policy.record_failure(_SOURCE, _ENTITY)
 
         workflow, mocks = _make_workflow(retry_policy=policy)
 
@@ -501,6 +507,29 @@ class TestCircuitBreakerIntegration:
         mocks["config_client"].load_config.assert_not_called()
         mocks["watermark_repo"].get_watermark.assert_not_called()
 
+    def test_failures_for_a_different_entity_do_not_open_the_circuit(self) -> None:
+        """
+        Regression for the entity_id-omission bug: failures recorded under a
+        different entity_id (same source_id) must not open the circuit for
+        this workflow's own entity_id. Before the fix, the guard check
+        dropped entity_id entirely, so it would have read the SAME key
+        regardless of which entity actually failed — this test would have
+        failed against that buggy guard by raising CircuitOpenError here.
+        """
+        policy = ExtractionRetryPolicy(circuit_open_threshold=2)
+        policy.record_failure(_SOURCE, "some-other-entity")
+        policy.record_failure(_SOURCE, "some-other-entity")
+
+        workflow, _mocks = _make_workflow(retry_policy=policy)
+
+        with patch(
+            "orchestration.step_functions.extraction_workflow.WatermarkRepository"
+            ".compute_extraction_window",
+            return_value=(datetime(2026, 6, 11, tzinfo=UTC), datetime(2026, 6, 12, tzinfo=UTC)),
+        ):
+            # Must complete normally — _ENTITY's own circuit is still closed.
+            workflow.execute()
+
     def test_success_calls_record_success_on_policy(self) -> None:
         policy = MagicMock(spec=ExtractionRetryPolicy)
         policy.is_circuit_open.return_value = False
@@ -513,7 +542,7 @@ class TestCircuitBreakerIntegration:
         ):
             workflow.execute()
 
-        policy.record_success.assert_called_once_with(_SOURCE, _ENTITY)
+        policy.record_success.assert_called_once_with(_SOURCE, _ENTITY, tenant_code="demo")
 
     def test_failure_calls_record_failure_on_policy(self) -> None:
         policy = MagicMock(spec=ExtractionRetryPolicy)
@@ -529,7 +558,7 @@ class TestCircuitBreakerIntegration:
             with pytest.raises(OSError):
                 workflow.execute()
 
-        policy.record_failure.assert_called_once_with(_SOURCE, _ENTITY)
+        policy.record_failure.assert_called_once_with(_SOURCE, _ENTITY, tenant_code="demo")
 
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ Security (OWASP A03, A05, A09):
 from __future__ import annotations
 
 import io
+import itertools
 import json
 import re
 from collections.abc import Iterator
@@ -73,6 +74,14 @@ _logger = get_platform_logger(__name__)
 _SAFE_DOMAIN_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 # Max prefix segment length to prevent S3 path traversal (OWASP A03)
 _MAX_PREFIX_SEGMENT_LEN: Final[int] = 256
+# Extracts the curated_date=YYYY-MM-DD partition value from a curated S3
+# prefix, so Glue partition registration always reflects the exact date the
+# curated writer used rather than re-deriving it independently.
+_CURATED_DATE_PARTITION_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"curated_date=(\d{4}-\d{2}-\d{2})"
+)
+
+
 @dataclass(frozen=True)
 class TransformationContext:
     """Input parameters for one transformation pipeline run."""
@@ -121,6 +130,7 @@ class TransformationContext:
         from contracts.identifier_policy import (
             TENANT_CODE_PATTERN as _TC_PATTERN,  # local import to avoid circular
         )
+
         if not _TC_PATTERN.match(self.tenant_code):
             raise ValueError(
                 f"tenant_code {self.tenant_code!r} does not conform to the tenant code format."
@@ -203,6 +213,13 @@ class TransformationPipeline:
         mapping_version = rule_set.mapping_version if rule_set else "identity"
         applicator = FieldMappingApplicator()
 
+        # Single lazy iterator over raw Parquet records, created once so both
+        # the classification peek below and the actual read (streaming or
+        # list) consume the same underlying S3 reads exactly once.
+        raw_records_iter: Iterator[dict[str, Any]] = _iter_raw_records(
+            s3, ctx.raw_s3_bucket, ctx.raw_s3_prefix
+        )
+
         # ── Data classification (OWASP A01 / spec §6.4) ──────────────────────
         # An explicit, data-steward-reviewed policy always wins. Absent one,
         # auto-classify from the mapped (canonical) field names using
@@ -213,25 +230,32 @@ class TransformationPipeline:
         # one pipeline instance may be reused across entities in a warm Lambda.
         effective_classification_policy = self._classification_policy
         if effective_classification_policy is None:
-            candidate_fields = (
-                [rule.canonical_field for rule in rule_set.rules] if rule_set is not None else []
-            )
-            if candidate_fields:
-                effective_classification_policy = build_auto_classification_policy(
-                    source_id=ctx.source_id,
-                    entity_id=ctx.entity_id,
-                    field_names=candidate_fields,
-                )
+            if rule_set is not None:
+                candidate_fields = [rule.canonical_field for rule in rule_set.rules]
+                if candidate_fields:
+                    effective_classification_policy = build_auto_classification_policy(
+                        source_id=ctx.source_id,
+                        entity_id=ctx.entity_id,
+                        field_names=candidate_fields,
+                    )
             else:
-                # No mapping rule set means field names are unknown until raw
-                # records are read (identity pass-through). Auto-classification
-                # cannot run ahead of time in this case — log so the gap is
-                # operable rather than silently skipping masking.
-                _logger.warning(
-                    "classification_auto_detect_skipped_no_rule_set",
+                # No mapping rule set (identity pass-through) means canonical
+                # field names equal raw field names, which are unknown until
+                # raw records are read. Peek the first raw record's field
+                # names and auto-classify from those — pass-through entities
+                # must never bypass PII protection purely because no rule set
+                # was registered (OWASP A01). The peeked record is restored to
+                # the front of the iterator so no data is lost.
+                effective_classification_policy, raw_records_iter = _classify_pass_through_entity(
+                    raw_records_iter=raw_records_iter,
                     source_id=ctx.source_id,
                     entity_id=ctx.entity_id,
-                    reason="identity_pass_through_no_known_field_names",
+                )
+                _logger.info(
+                    "classification_auto_detect_from_raw_fields",
+                    source_id=ctx.source_id,
+                    entity_id=ctx.entity_id,
+                    masking_required=effective_classification_policy is not None,
                 )
 
         # ── Fast path: no quality policy, no masking, no SCD merge ───────────
@@ -247,7 +271,7 @@ class TransformationPipeline:
         if can_stream:
             return self._execute_streaming(
                 ctx=ctx,
-                s3=s3,
+                raw_records_iter=raw_records_iter,
                 rule_set=rule_set,
                 applicator=applicator,
                 mapping_version=mapping_version,
@@ -258,6 +282,7 @@ class TransformationPipeline:
         return self._execute_with_list(
             ctx=ctx,
             s3=s3,
+            raw_records_iter=raw_records_iter,
             rule_set=rule_set,
             applicator=applicator,
             mapping_version=mapping_version,
@@ -268,7 +293,7 @@ class TransformationPipeline:
     def _execute_streaming(
         self,
         ctx: TransformationContext,
-        s3: Any,
+        raw_records_iter: Iterator[dict[str, Any]],
         rule_set: FieldMappingRuleSet | None,
         applicator: FieldMappingApplicator,
         mapping_version: str,
@@ -283,7 +308,7 @@ class TransformationPipeline:
         _streaming_failures = 0
 
         def _mapped_iter() -> Iterator[dict[str, Any]]:
-            for raw_record in _iter_raw_records(s3, ctx.raw_s3_bucket, ctx.raw_s3_prefix):
+            for raw_record in raw_records_iter:
                 if rule_set is None:
                     yield raw_record
                 else:
@@ -296,7 +321,9 @@ class TransformationPipeline:
 
         # Pre-write timeout guard: if Lambda has < 120s remaining, abort before
         # starting the potentially large S3 multipart write (§3.5 / graceful shutdown).
-        _check_timeout(ctx.lambda_context, min_remaining_ms=120_000, operation_name="curated_streaming_write")
+        _check_timeout(
+            ctx.lambda_context, min_remaining_ms=120_000, operation_name="curated_streaming_write"
+        )
 
         write_result = self._curated_writer.write_streaming(
             records_iter=_mapped_iter(),
@@ -355,10 +382,74 @@ class TransformationPipeline:
 
         return result
 
+    @staticmethod
+    def _map_raw_records(
+        raw_records_iter: Iterator[dict[str, Any]],
+        rule_set: FieldMappingRuleSet | None,
+        applicator: FieldMappingApplicator,
+    ) -> tuple[list[dict[str, Any]], int, int]:
+        """
+        Stream raw records through the mapping applicator.
+
+        Returns (canonical_records, mapping_failures, raw_record_count). Only
+        canonical records (post-mapping) are accumulated — peak memory is
+        O(canonical) rather than O(raw + canonical).
+        """
+        canonical_records: list[dict[str, Any]] = []
+        mapping_failures = 0
+        raw_record_count = 0
+
+        for raw_record in raw_records_iter:
+            raw_record_count += 1
+            if rule_set is None:
+                canonical_records.append(raw_record)
+            else:
+                mapped = applicator.apply(raw_record, rule_set)
+                if mapped is None:
+                    mapping_failures += 1
+                else:
+                    canonical_records.append(mapped)
+
+        return canonical_records, mapping_failures, raw_record_count
+
+    def _write_curated_and_register(
+        self,
+        ctx: TransformationContext,
+        records_to_write: list[dict[str, Any]],
+        canonical_record_count: int,
+    ) -> str | None:
+        """
+        Write the curated layer and register the Glue catalog dataset (spec §6.4 AC).
+
+        Returns the curated S3 prefix, or None if there was nothing to write.
+        """
+        # Pre-write timeout guard (§3.5): abort before large S3 write if < 120s remain.
+        _check_timeout(ctx.lambda_context, min_remaining_ms=120_000, operation_name="curated_write")
+        write_result = self._curated_writer.write(
+            records=records_to_write,
+            domain=ctx.domain,
+            entity_id=ctx.entity_id,
+            run_id=ctx.run_id,
+            curated_date=ctx.curated_date,
+            tenant_code=ctx.tenant_code,
+        )
+        curated_prefix = write_result.s3_prefix
+
+        if ctx.glue_catalog_database:
+            _register_curated_catalog(
+                ctx=ctx,
+                s3_prefix=curated_prefix,
+                record_count=canonical_record_count,
+                raw_s3_prefix=ctx.raw_s3_prefix,
+            )
+
+        return curated_prefix
+
     def _execute_with_list(
         self,
         ctx: TransformationContext,
         s3: Any,
+        raw_records_iter: Iterator[dict[str, Any]],
         rule_set: FieldMappingRuleSet | None,
         applicator: FieldMappingApplicator,
         mapping_version: str,
@@ -373,23 +464,10 @@ class TransformationPipeline:
         full-load entities with these features require sufficient Lambda memory.
         """
         # Stream raw Parquet records through the mapping applicator without
-        # materialising the full raw dataset in memory.  Only canonical records
-        # (post-mapping) are accumulated — peak memory is O(canonical) rather
-        # than O(raw + canonical).
-        canonical_records: list[dict[str, Any]] = []
-        mapping_failures = 0
-        raw_record_count = 0
-
-        for raw_record in _iter_raw_records(s3, ctx.raw_s3_bucket, ctx.raw_s3_prefix):
-            raw_record_count += 1
-            if rule_set is None:
-                canonical_records.append(raw_record)
-            else:
-                mapped = applicator.apply(raw_record, rule_set)
-                if mapped is None:
-                    mapping_failures += 1
-                else:
-                    canonical_records.append(mapped)
+        # materialising the full raw dataset in memory.
+        canonical_records, mapping_failures, raw_record_count = self._map_raw_records(
+            raw_records_iter, rule_set, applicator
+        )
 
         _logger.info("raw_records_streamed", count=raw_record_count, run_id=ctx.run_id)
 
@@ -425,26 +503,9 @@ class TransformationPipeline:
 
         # Write curated layer (only when not blocked and records exist)
         if not is_blocked and records_to_write:
-            # Pre-write timeout guard (§3.5): abort before large S3 write if < 120s remain.
-            _check_timeout(ctx.lambda_context, min_remaining_ms=120_000, operation_name="curated_write")
-            write_result = self._curated_writer.write(
-                records=records_to_write,
-                domain=ctx.domain,
-                entity_id=ctx.entity_id,
-                run_id=ctx.run_id,
-                curated_date=ctx.curated_date,
-                tenant_code=ctx.tenant_code,
+            curated_prefix = self._write_curated_and_register(
+                ctx, records_to_write, len(canonical_records)
             )
-            curated_prefix = write_result.s3_prefix
-
-            # Register curated dataset in Glue Data Catalog (spec §6.4 AC)
-            if ctx.glue_catalog_database:
-                _register_curated_catalog(
-                    ctx=ctx,
-                    s3_prefix=curated_prefix,
-                    record_count=len(canonical_records),
-                    raw_s3_prefix=ctx.raw_s3_prefix,
-                )
 
         completed_at = datetime.now(UTC).isoformat()
 
@@ -528,11 +589,44 @@ def _iter_raw_records_batched(
             del table  # release Arrow buffer memory before reading next file
 
 
-def _iter_raw_records(
-    s3: Any, bucket: str, raw_s3_prefix: str
-) -> Iterator[dict[str, Any]]:
+def _iter_raw_records(s3: Any, bucket: str, raw_s3_prefix: str) -> Iterator[dict[str, Any]]:
     """Backward-compatible alias for _iter_raw_records_batched."""
     return _iter_raw_records_batched(s3, bucket, raw_s3_prefix)
+
+
+def _classify_pass_through_entity(
+    raw_records_iter: Iterator[dict[str, Any]],
+    source_id: str,
+    entity_id: str,
+) -> tuple[EntityClassificationPolicy | None, Iterator[dict[str, Any]]]:
+    """
+    Auto-classify a pass-through entity (no field-mapping rule set) from the
+    field names of its own first raw record.
+
+    Without a registered rule set, canonical field names equal raw field
+    names, and those are unknown until raw records are read — so the
+    heuristic classification build_auto_classification_policy() normally
+    runs on cannot be computed ahead of time. This peeks exactly one record
+    off `raw_records_iter` to enumerate its fields, then restores that record
+    to the front of the returned iterator so the caller sees every record
+    exactly once (OWASP A01 — a pass-through entity must never skip PII
+    masking purely because no mapping rule set was registered).
+
+    Returns (None, raw_records_iter unchanged) when the raw prefix is empty —
+    there is nothing to classify and nothing to mask.
+    """
+    try:
+        first_record = next(raw_records_iter)
+    except StopIteration:
+        return None, raw_records_iter
+
+    policy = build_auto_classification_policy(
+        source_id=source_id,
+        entity_id=entity_id,
+        field_names=list(first_record.keys()),
+    )
+    restored_iter = itertools.chain([first_record], raw_records_iter)
+    return policy, restored_iter
 
 
 def _load_raw_records(s3: Any, bucket: str, raw_s3_prefix: str) -> list[dict[str, Any]]:
@@ -607,8 +701,8 @@ def _table_to_records(table: Any) -> list[dict[str, Any]]:
     Peak memory: O(max_chunksize) per file, not O(total_rows).
     """
     records: list[dict[str, Any]] = []
-    _BATCH_SIZE = 10_000
-    for batch in table.to_batches(max_chunksize=_BATCH_SIZE):
+    batch_size = 10_000
+    for batch in table.to_batches(max_chunksize=batch_size):
         batch_dict: dict[str, list[Any]] = batch.to_pydict()
         n = batch.num_rows
         cols = list(batch_dict.keys())
@@ -648,6 +742,25 @@ def _emit_transformation_metrics(
         )
 
 
+def _extract_curated_date_partition(s3_prefix: str) -> str:
+    """
+    Extract the curated_date=YYYY-MM-DD partition value from a curated S3
+    prefix produced by CuratedLayerWriter.
+
+    Parsing it from the actual written prefix (rather than recomputing
+    `ctx.curated_date or datetime.now(UTC).date()` independently) guarantees
+    the registered Glue partition always matches the date the data was
+    actually written under, even if this function runs a moment after
+    midnight UTC relative to the write.  Falls back to today's UTC date if
+    the prefix is unexpectedly malformed; catalog registration failures are
+    swallowed by the caller and must never block the curated write itself.
+    """
+    match = _CURATED_DATE_PARTITION_PATTERN.search(s3_prefix)
+    if match:
+        return match.group(1)
+    return datetime.now(UTC).date().isoformat()
+
+
 def _register_curated_catalog(
     ctx: TransformationContext,
     s3_prefix: str,
@@ -657,7 +770,19 @@ def _register_curated_catalog(
     """Register the curated dataset in Glue Data Catalog (spec §6.4 AC)."""
     if not ctx.glue_catalog_database:
         return
-    table_name = f"{ctx.entity_id.replace('-', '_')}_{ctx.domain}_curated"
+    # Tenant-scoped Glue table name (OWASP A01 — broken access control). The
+    # curated S3 *location* is already tenant-scoped (tenant_code prefix from
+    # CuratedLayerWriter), but without a matching tenant_code prefix on the
+    # *table name*, two tenants running the same entity_id/domain register
+    # the SAME table in the shared edl_curated database — the second
+    # tenant's register_dataset() call silently overwrites the first
+    # tenant's table Location, so an Athena query against that table then
+    # returns the other tenant's rows. Mirrors the analytics publisher's
+    # tenant-scoped table naming (analytics_publisher_handler.py:322).
+    table_name = (
+        f"{ctx.tenant_code.replace('-', '_')}_"
+        f"{ctx.entity_id.replace('-', '_')}_{ctx.domain}_curated"
+    )
     # Truncate to Glue max table name length (255) and enforce safe chars
     table_name = table_name[:128]
     spec = CatalogDatasetSpec(
@@ -680,6 +805,41 @@ def _register_curated_catalog(
             run_id=ctx.run_id,
             table_name=table_name,
             database=ctx.glue_catalog_database,
+        )
+
+        # Register this run's curated_date partition so Athena can query the
+        # newly-written data immediately, without a manual MSCK REPAIR TABLE.
+        # Mirrors the analytics publisher's per-run create_partition call
+        # (analytics_publisher_handler.py:357-375). Without this, the table
+        # declared partition_keys=("curated_date",) but no partition value
+        # was ever registered against it, so any partitioned Athena query
+        # (including the implicit ones most BI tools issue) returns zero
+        # rows even though the curated Parquet data exists in S3.
+        partition_value = _extract_curated_date_partition(s3_prefix)
+        glue_client = boto3.client("glue", region_name=ctx.region_name)
+        glue_table_meta = glue_client.get_table(
+            DatabaseName=ctx.glue_catalog_database, Name=table_name
+        )["Table"]
+        part_sd = glue_table_meta["StorageDescriptor"].copy()
+        part_sd["Location"] = f"s3://{ctx.curated_s3_bucket}/{s3_prefix}"
+        try:
+            glue_client.create_partition(
+                DatabaseName=ctx.glue_catalog_database,
+                TableName=table_name,
+                PartitionInput={"Values": [partition_value], "StorageDescriptor": part_sd},
+            )
+        except glue_client.exceptions.AlreadyExistsException:
+            glue_client.update_partition(
+                DatabaseName=ctx.glue_catalog_database,
+                TableName=table_name,
+                PartitionValueList=[partition_value],
+                PartitionInput={"Values": [partition_value], "StorageDescriptor": part_sd},
+            )
+        _logger.info(
+            "curated_catalog_partition_registered",
+            run_id=ctx.run_id,
+            table_name=table_name,
+            curated_date=partition_value,
         )
     except Exception as exc:
         # Catalog registration failure must not block curated write

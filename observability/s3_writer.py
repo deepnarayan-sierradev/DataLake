@@ -18,7 +18,7 @@ Security (OWASP A03, A05):
   - No credentials flow through this module.
 
 Performance:
-  - Peak memory per write: O(batch_size × avg_record_bytes) = ~20 MB at 50K rows.
+  - Peak memory per write: O(batch_size x avg_record_bytes) = ~20 MB at 50K rows.
   - Multipart parts are 64 MB each (AWS minimum is 5 MB; 64 MB is optimal).
   - PyArrow RecordBatchWriter streams directly without full-table materialisation.
 """
@@ -46,7 +46,7 @@ _MULTIPART_THRESHOLD_BYTES: Final[int] = 8 * 1024 * 1024  # 8 MB
 _PART_SIZE_BYTES: Final[int] = 64 * 1024 * 1024  # 64 MB
 
 # Records are batched into Arrow RecordBatches of this size before writing.
-# Peak RAM per batch: 50_000 rows × ~400 bytes = ~20 MB.
+# Peak RAM per batch: 50_000 rows x ~400 bytes = ~20 MB.
 _WRITE_BATCH_SIZE: Final[int] = 50_000
 
 

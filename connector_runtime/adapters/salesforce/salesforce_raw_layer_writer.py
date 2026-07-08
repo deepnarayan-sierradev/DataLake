@@ -3,8 +3,8 @@ Salesforce raw layer writer — Phase 3 deliverable §3.5.
 
 Writes batches of ExtractionRecord to the S3 raw layer as Parquet files.
 
-Partition scheme (from spec §3.5):
-    s3://{bucket}/{prefix}/salesforce/{entity_id}/
+Partition scheme:
+    s3://{bucket}/{tenant_code}/salesforce/{entity_id}/
         extraction_date={YYYY-MM-DD}/
         run_id={run_id}/
             data.parquet
@@ -57,8 +57,8 @@ class SalesforceRawLayerWriter(RawLayerWriter):
 
         writer = SalesforceRawLayerWriter(
             s3_bucket="prod-raw-layer",
-            s3_prefix="raw",
             region_name="us-east-1",
+            tenant_code="demo",
         )
         data_key = writer.write_partition(
             records=records,
@@ -76,12 +76,12 @@ class SalesforceRawLayerWriter(RawLayerWriter):
     def __init__(
         self,
         s3_bucket: str,
-        s3_prefix: str,
         region_name: str,
+        tenant_code: str,
     ) -> None:
         super().__init__(
             s3_bucket=s3_bucket,
-            s3_prefix=s3_prefix,
             path_segments=[_SOURCE_NAME],
             region_name=region_name,
+            tenant_code=tenant_code,
         )

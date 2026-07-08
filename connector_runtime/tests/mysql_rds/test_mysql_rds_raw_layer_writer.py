@@ -2,7 +2,8 @@
 Tests for MySqlRdsRawLayerWriter.
 
 Coverage:
-  - Partition path structure matches spec §4.2 (mysql_rds source name)
+  - Partition path structure matches production wiring (RAW-1): single
+    hyphenated "mysql-rds" source segment, no s3_prefix
   - Parquet file written to correct S3 key
   - Metadata JSON written alongside data.parquet
   - Payload fidelity — all fields preserved as strings
@@ -29,19 +30,19 @@ from connector_runtime.interfaces.connector_interface import ExtractionRecord
 
 _REGION = "us-east-1"
 _BUCKET = "test-raw-bucket"
-_PREFIX = "raw"
 _SOURCE_ID = "mysql-rds"
 _ENTITY_ID = "mysql-rds-orders"
 _RUN_ID = "run-20260612-120000000000-cd56ef78"
 _SCHEMA_FP = "b" * 64
 _DATE = "2026-06-12"
+_TENANT_CODE = "demo"
 
 
 def _make_writer() -> MySqlRdsRawLayerWriter:
     return MySqlRdsRawLayerWriter(
         s3_bucket=_BUCKET,
-        s3_prefix=_PREFIX,
         region_name=_REGION,
+        tenant_code=_TENANT_CODE,
     )
 
 
@@ -59,7 +60,8 @@ def _create_bucket() -> None:
 
 class TestPartitionPath:
     @mock_aws
-    def test_partition_path_contains_mysql_rds_source_name(self) -> None:
+    def test_partition_path_contains_single_hyphenated_source_segment(self) -> None:
+        """RAW-1: exactly one "mysql-rds" segment — no doubled/underscored variant."""
         _create_bucket()
         writer = _make_writer()
         data_key = writer.write_partition(
@@ -70,10 +72,16 @@ class TestPartitionPath:
             schema_fingerprint=_SCHEMA_FP,
             extraction_date=_DATE,
         )
-        assert "mysql_rds" in data_key
-        assert f"extraction_date={_DATE}" in data_key
-        assert f"run_id={_RUN_ID}" in data_key
-        assert data_key.endswith("data.parquet")
+        expected = (
+            f"{_TENANT_CODE}/mysql-rds/{_ENTITY_ID}"
+            f"/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
+        )
+        assert data_key == expected
+        # entity_id itself legitimately contains "mysql-rds" once — assert the
+        # *source segment* isn't doubled by checking the path component right
+        # after tenant_code, not a raw substring count.
+        assert data_key.split("/")[1] == "mysql-rds"
+        assert "mysql_rds" not in data_key
 
     @mock_aws
     def test_metadata_json_fields_are_correct(self) -> None:
@@ -89,7 +97,7 @@ class TestPartitionPath:
         )
         s3 = boto3.client("s3", region_name=_REGION)
         metadata_key = (
-            f"{_PREFIX}/mysql_rds/{_ENTITY_ID}"
+            f"{_TENANT_CODE}/mysql-rds/{_ENTITY_ID}"
             f"/extraction_date={_DATE}/run_id={_RUN_ID}/metadata.json"
         )
         body = s3.get_object(Bucket=_BUCKET, Key=metadata_key)["Body"].read()
@@ -116,7 +124,7 @@ class TestParquetOutput:
         )
         s3 = boto3.client("s3", region_name=_REGION)
         data_key = (
-            f"{_PREFIX}/mysql_rds/{_ENTITY_ID}"
+            f"{_TENANT_CODE}/mysql-rds/{_ENTITY_ID}"
             f"/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
         )
         parquet_bytes = s3.get_object(Bucket=_BUCKET, Key=data_key)["Body"].read()
@@ -144,7 +152,7 @@ class TestParquetOutput:
         )
         s3 = boto3.client("s3", region_name=_REGION)
         data_key = (
-            f"{_PREFIX}/mysql_rds/{_ENTITY_ID}"
+            f"{_TENANT_CODE}/mysql-rds/{_ENTITY_ID}"
             f"/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
         )
         parquet_bytes = s3.get_object(Bucket=_BUCKET, Key=data_key)["Body"].read()
@@ -184,4 +192,4 @@ class TestInputValidation:
 
     def test_empty_bucket_name_raises(self) -> None:
         with pytest.raises(ValueError, match="s3_bucket"):
-            MySqlRdsRawLayerWriter(s3_bucket="", s3_prefix="raw", region_name=_REGION)
+            MySqlRdsRawLayerWriter(s3_bucket="", region_name=_REGION, tenant_code=_TENANT_CODE)

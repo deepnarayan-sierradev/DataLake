@@ -86,9 +86,9 @@ These three resources must exist **before** `terraform init`. They hold Terrafor
 
 | Resource | Name pattern | How to create |
 |---|---|---|
-| S3 bucket (state file) | `{env}-edl-terraform-state` | `aws s3api create-bucket` (see Phase 1, Step 1.2) |
-| DynamoDB table (state lock) | `{env}-edl-terraform-state-lock` | `aws dynamodb create-table` (see Phase 1, Step 1.3) |
-| KMS key (state encryption) | alias `{env}-terraform-state` | `aws kms create-key` + `aws kms create-alias` (see Phase 1, Step 1.4) |
+| S3 bucket (state file) | `edl-terraform-state-<ACCOUNT_ID>` — S3 bucket names must be globally unique across all of AWS, so this is discriminated by AWS account ID rather than environment name | `aws s3api create-bucket` (see Phase 1, Step 1.2) |
+| DynamoDB table (state lock) | `EdlTerraformStateLock` — same literal name in every account, since the AWS account boundary (not the name) keeps dev/staging/prod state isolated | `aws dynamodb create-table` (see Phase 1, Step 1.3) |
+| KMS key (state encryption) | alias `EdlTerraformState` — same literal alias in every account (a separate key/alias *instance* is still created per account) | `aws kms create-key` + `aws kms create-alias` (see Phase 1, Step 1.4) |
 
 **Why Terraform cannot create these itself:** The S3 backend configuration in `backend.tf` is resolved _before_ any Terraform resources are applied. If the bucket doesn't exist, `terraform init` fails immediately with `NoSuchBucket`. There is no way around this — it is a fundamental constraint of how Terraform remote state works.
 
@@ -276,9 +276,9 @@ aws service-quotas list-service-quotas \
 Before running `terraform init` for any environment:
 
 - [ ] AWS account with admin access available (bootstrap only)
-- [ ] Terraform state S3 bucket created (`{env}-edl-terraform-state`)
-- [ ] Terraform state DynamoDB lock table created (`{env}-edl-terraform-state-lock`)
-- [ ] Bootstrap KMS key created (`alias/{env}-terraform-state`)
+- [ ] Terraform state S3 bucket created (`edl-terraform-state-<ACCOUNT_ID>`)
+- [ ] Terraform state DynamoDB lock table created (`EdlTerraformStateLock`)
+- [ ] Bootstrap KMS key created (`alias/EdlTerraformState`)
 - [ ] `backend.tf` updated to match the above names
 - [ ] GitHub Actions OIDC provider registered in AWS IAM (once per account)
 - [ ] Lambda deployment package built and uploaded to S3 (before `terraform apply`)
@@ -328,31 +328,32 @@ The Terraform remote state backend (S3 bucket + DynamoDB lock table) must exist 
 ```bash
 export AWS_PROFILE=your-admin-profile    # or set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY
 export AWS_REGION=us-east-1
-export ENV=dev                           # change to staging or prod when promoting
+export ENV=dev                           # selects infrastructure/environments/<env> (i.e. which AWS account you're bootstrapping) — change to staging or prod when promoting; no longer used to build resource name strings
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ```
 
 ### Step 1.2 — Create the Terraform state bucket
 
 ```bash
 aws s3api create-bucket \
-  --bucket ${ENV}-edl-terraform-state \
+  --bucket edl-terraform-state-${ACCOUNT_ID} \
   --region ${AWS_REGION} \
   --create-bucket-configuration LocationConstraint=${AWS_REGION}
 
 # Enable versioning (required — protects state file)
 aws s3api put-bucket-versioning \
-  --bucket ${ENV}-edl-terraform-state \
+  --bucket edl-terraform-state-${ACCOUNT_ID} \
   --versioning-configuration Status=Enabled
 
 # Block all public access
 aws s3api put-public-access-block \
-  --bucket ${ENV}-edl-terraform-state \
+  --bucket edl-terraform-state-${ACCOUNT_ID} \
   --public-access-block-configuration \
     "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 
 # Enable default SSE-S3 encryption (upgraded to KMS after bootstrap)
 aws s3api put-bucket-encryption \
-  --bucket ${ENV}-edl-terraform-state \
+  --bucket edl-terraform-state-${ACCOUNT_ID} \
   --server-side-encryption-configuration \
     '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 ```
@@ -361,12 +362,14 @@ aws s3api put-bucket-encryption \
 
 ```bash
 aws dynamodb create-table \
-  --table-name ${ENV}-edl-terraform-state-lock \
+  --table-name EdlTerraformStateLock \
   --attribute-definitions AttributeName=LockID,AttributeType=S \
   --key-schema AttributeName=LockID,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST \
   --region ${AWS_REGION}
 ```
+
+> The lock table name is a fixed literal (`EdlTerraformStateLock`) — it is no longer environment-prefixed, since each environment lives in its own AWS account and the account boundary, not the name, is what keeps them apart. You still create one *instance* of this table per account.
 
 ### Step 1.4 — Create the bootstrap KMS key for state encryption
 
@@ -378,12 +381,14 @@ KEY_ID=$(aws kms create-key \
   --output text)
 
 aws kms create-alias \
-  --alias-name alias/${ENV}-terraform-state \
+  --alias-name alias/EdlTerraformState \
   --target-key-id ${KEY_ID} \
   --region ${AWS_REGION}
 
 echo "KMS key ID: ${KEY_ID}"
 ```
+
+> As with the lock table, the alias (`alias/EdlTerraformState`) is the same literal string in every account — you still create a separate key/alias instance per account.
 
 ### Step 1.5 — Update backend.tf
 
@@ -392,12 +397,12 @@ Open `infrastructure/environments/${ENV}/backend.tf` and confirm the values matc
 ```hcl
 terraform {
   backend "s3" {
-    bucket         = "dev-edl-terraform-state"      # ← your bucket name
+    bucket         = "edl-terraform-state-087972550871" # ← your bucket name (dev account ID shown; substitute your own ACCOUNT_ID)
     key            = "environments/dev/terraform.tfstate"
     region         = "us-east-1"                    # ← your region
     encrypt        = true
-    kms_key_id     = "alias/dev-terraform-state"    # ← your KMS alias
-    dynamodb_table = "dev-edl-terraform-state-lock" # ← your lock table
+    kms_key_id     = "alias/EdlTerraformState"      # ← same alias name in every account
+    dynamodb_table = "EdlTerraformStateLock"        # ← same table name in every account
   }
 }
 ```
@@ -420,7 +425,7 @@ github_repo = "enterprise-data-lake"    # ← Your GitHub repo name
 alert_email = "ops-team@yourcompany.com" # ← Ops team email for CloudWatch alarms
 
 # Set AFTER running make lambda-package (Step 5.1 below)
-lambda_package_s3_bucket   = "dev-edl-terraform-state"
+lambda_package_s3_bucket   = "edl-terraform-state-087972550871"
 lambda_package_s3_key      = "lambda/extraction-pipeline.zip"
 lambda_package_source_hash = ""   # Fill in after running make lambda-package
 ```
@@ -506,15 +511,15 @@ There are **four deployed pipeline Lambda functions**, plus a fifth Lambda (`cre
 
 | Lambda | Handler | Purpose |
 |---|---|---|
-| `{env}-extraction-pipeline` | `connector_runtime.extraction_pipeline_handler.lambda_handler` | Stages 1–10: extract raw data |
-| `{env}-transformation-pipeline` | `transformation.transformation_pipeline_handler.lambda_handler` | Stage 11: raw → curated |
-| `{env}-entity-resolution-pipeline` | `entity_resolution.entity_resolution_pipeline_handler.lambda_handler` | Stage 12–13: cross-source matching + golden records |
-| `{env}-analytics-layer-publisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` | Stage 14: curated/golden → analytics layer |
-| `{env}-edl-credential-expiry-notifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` | Not a pipeline stage — daily EventBridge Scheduler check of source-credential secret age; SNS alert when rotation is overdue (see [Section 11.H](#h-cloudwatch-alarms--alert-thresholds)) |
+| `EdlExtractionPipeline` | `connector_runtime.extraction_pipeline_handler.lambda_handler` | Stages 1–10: extract raw data |
+| `EdlTransformationPipeline` | `transformation.transformation_pipeline_handler.lambda_handler` | Stage 11: raw → curated |
+| `EdlEntityResolutionPipeline` | `entity_resolution.entity_resolution_pipeline_handler.lambda_handler` | Stage 12–13: cross-source matching + golden records |
+| `EdlAnalyticsLayerPublisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` | Stage 14: curated/golden → analytics layer |
+| `EdlCredentialExpiryNotifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` | Not a pipeline stage — daily EventBridge Scheduler check of source-credential secret age; SNS alert when rotation is overdue (see [Section 11.H](#h-cloudwatch-alarms--alert-thresholds)) |
 
-> **There is no fifth pipeline-stage Lambda deployed today.** A "serving store" stage (analytics → MySQL RDS) was planned, and `transformation/serving_store_loader.py` exists as business logic, but **no Terraform module builds or deploys it** — there is no `{env}-serving-store-loader` function to package, upload, or verify. The orchestration module's `serving_store_loader_lambda_arn` variable defaults to `""`, and whenever it's empty (i.e. always, today) the Step Functions state machine substitutes a `Pass` state for that stage (see `infrastructure/modules/orchestration/main.tf`'s `load_serving_store_state` local) — the pipeline completes successfully after analytics publication. Do not add this Lambda to deploy/verify checklists until it's actually built and wired.
+> **There is no fifth pipeline-stage Lambda deployed today.** A "serving store" stage (analytics → MySQL RDS) was planned, and `transformation/serving_store_loader.py` exists as business logic, but **no Terraform module builds or deploys it** — there is no `EdlServingStoreLoader` function to package, upload, or verify. The orchestration module's `serving_store_loader_lambda_arn` variable defaults to `""`, and whenever it's empty (i.e. always, today) the Step Functions state machine substitutes a `Pass` state for that stage (see `infrastructure/modules/orchestration/main.tf`'s `load_serving_store_state` local) — the pipeline completes successfully after analytics publication. Do not add this Lambda to deploy/verify checklists until it's actually built and wired.
 
-There is also a sixth Lambda, `{env}-edl-control-plane`, that provisions tenants and triggers pipelines over HTTP — it's a separate concern from this pipeline table. See [Section 11.J — Control Plane API](#j-control-plane-api-cognito--api-gateway) below.
+There is also a sixth Lambda, `EdlControlPlane`, that provisions tenants and triggers pipelines over HTTP — it's a separate concern from this pipeline table. See [Section 11.J — Control Plane API](#j-control-plane-api-cognito--api-gateway) below.
 
 ### Step 3.1 — Build the Lambda package
 
@@ -536,11 +541,11 @@ lambda_package_source_hash = "abc123==..."   # ← paste the base64 hash here
 ### Step 3.2 — Upload to S3
 
 ```bash
-export ARTIFACTS_BUCKET=dev-edl-terraform-state
+export ARTIFACTS_BUCKET=edl-terraform-state-087972550871
 export AWS_REGION=us-east-1
 
 make lambda-upload
-# Uploads dist/extraction-pipeline.zip to s3://dev-edl-terraform-state/lambda/extraction-pipeline.zip
+# Uploads dist/extraction-pipeline.zip to s3://edl-terraform-state-087972550871/lambda/extraction-pipeline.zip
 ```
 
 ### Step 3.3 — Deploy Lambdas via Terraform
@@ -575,16 +580,16 @@ terraform output extraction_lambda_arn
 ### Step 3.5 — Verify all deployed Lambdas
 
 ```bash
-for fn in extraction-pipeline transformation-pipeline entity-resolution-pipeline analytics-layer-publisher edl-credential-expiry-notifier; do
+for fn in EdlExtractionPipeline EdlTransformationPipeline EdlEntityResolutionPipeline EdlAnalyticsLayerPublisher EdlCredentialExpiryNotifier; do
   aws lambda get-function \
-    --function-name "dev-${fn}" \
+    --function-name "${fn}" \
     --region us-east-1 \
     --query "Configuration.[FunctionName,State,LastModified]" \
     --output table
 done
 ```
 
-All five should show `State: Active`. (There is no `dev-serving-store-loader` to check — see the note above.)
+All five should show `State: Active`. (There is no `EdlServingStoreLoader` to check — see the note above.)
 
 ---
 
@@ -603,7 +608,7 @@ Add the ARN collected in Step 3.4 to `infrastructure/environments/dev/terraform.
 # transformation_pipeline_lambda_arn, entity_resolution_lambda_arn, and
 # analytics_publisher_lambda_arn are NOT set here — they come from the
 # corresponding Terraform module outputs automatically (see dev/main.tf).
-extraction_pipeline_lambda_arn  = "arn:aws:lambda:us-east-1:123456789012:function:dev-extraction-pipeline"
+extraction_pipeline_lambda_arn  = "arn:aws:lambda:us-east-1:123456789012:function:EdlExtractionPipeline"
 # serving_store_loader_lambda_arn intentionally left unset — Lambda not yet built.
 ```
 
@@ -643,7 +648,7 @@ Expected output:
 -----------------------------------------------------------
 |              DescribeStateMachine                       |
 +-----------------------------------------------+---------+
-|  dev-extraction-pipeline                      | ACTIVE  |
+|  EdlExtractionPipeline                        | ACTIVE  |
 |  STANDARD                                     |         |
 -----------------------------------------------------------
 ```
@@ -667,7 +672,7 @@ python scripts/seed_schedules.py --environment dev
 make seed-schedules
 ```
 
-> **Note:** Terraform creates the schedule *group* (`dev-extraction-schedules`) and the SQS FIFO trigger queue. The individual cron triggers inside the group are created entirely by `seed_schedules.py`. If you skip this step, the group is empty and the pipeline never runs automatically.
+> **Note:** Terraform creates the schedule *group* (`EdlExtractionSchedules`) and the SQS FIFO trigger queue. The individual cron triggers inside the group are created entirely by `seed_schedules.py`. If you skip this step, the group is empty and the pipeline never runs automatically.
 
 ### Step 4.5 — Test the full pipeline with a manual trigger
 
@@ -700,21 +705,20 @@ aws stepfunctions list-executions \
 After a successful run, verify each stage's S3 output:
 
 ```bash
-ENV=dev
 RUN_ID="run-20260616-..."  # from execution output
 
-# Stage A — Raw Parquet written
-aws s3 ls s3://${ENV}-edl-raw/salesforce/salesforce-account/ --recursive
+# Stage A — Raw Parquet written (dev bucket shown; substitute the bucket for your account)
+aws s3 ls s3://edl-raw-087972550871/salesforce/salesforce-account/ --recursive
 
 # Stage B — Curated Parquet written
-aws s3 ls s3://${ENV}-edl-curated/curated/customer/salesforce-account/ --recursive
+aws s3 ls s3://edl-curated-087972550871/curated/customer/salesforce-account/ --recursive
 
 # Stage B — Quality report (is_publication_blocked must be false)
-aws s3 cp s3://${ENV}-edl-curated/quality-reports/salesforce/salesforce-account/${RUN_ID}/quality-report.json -
+aws s3 cp s3://edl-curated-087972550871/quality-reports/salesforce/salesforce-account/${RUN_ID}/quality-report.json -
 
 # Stage C/D — Golden records and analytics
-aws s3 ls s3://${ENV}-edl-analytics/canonical/ --recursive
-aws s3 ls s3://${ENV}-edl-analytics/ --recursive
+aws s3 ls s3://edl-analytics-087972550871/canonical/ --recursive
+aws s3 ls s3://edl-analytics-087972550871/ --recursive
 ```
 
 ---
@@ -729,7 +733,7 @@ This step stores actual credentials. **Do this from a secure workstation only.**
 
 ```bash
 aws secretsmanager put-secret-value \
-  --secret-id "dev/sources/salesforce/credentials" \
+  --secret-id "edl/sources/salesforce/credentials" \
   --region us-east-1 \
   --secret-string '{
     "client_id":     "YOUR_SALESFORCE_CONNECTED_APP_CLIENT_ID",
@@ -742,7 +746,7 @@ aws secretsmanager put-secret-value \
 
 ```bash
 aws secretsmanager put-secret-value \
-  --secret-id "dev/sources/netsuite/credentials" \
+  --secret-id "edl/sources/netsuite/credentials" \
   --region us-east-1 \
   --secret-string '{
     "account_id":    "YOUR_NETSUITE_ACCOUNT_ID",
@@ -757,7 +761,7 @@ aws secretsmanager put-secret-value \
 
 ```bash
 aws secretsmanager put-secret-value \
-  --secret-id "dev/sources/mysql-rds/credentials" \
+  --secret-id "edl/sources/mysql-rds/credentials" \
   --region us-east-1 \
   --secret-string '{
     "host":     "your-rds-endpoint.us-east-1.rds.amazonaws.com",
@@ -768,13 +772,13 @@ aws secretsmanager put-secret-value \
   }'
 ```
 
-> **Security note:** The `extraction-service-role` IAM role created by Terraform has `GetSecretValue` permission on these exact secret ARNs only. No other role can read these credentials.
+> **Security note:** The `EdlExtractionServiceRole` IAM role created by Terraform has `GetSecretValue` permission on these exact secret ARNs only. No other role can read these credentials.
 
 **Sage Intacct credentials:**
 
 ```bash
 aws secretsmanager put-secret-value \
-  --secret-id "dev/sources/sage/intacct/credentials" \
+  --secret-id "edl/sources/sage/intacct/credentials" \
   --region us-east-1 \
   --secret-string '{
     "token_url":   "https://api.intacct.com/ia/api/v1/auth/oauth2/token",
@@ -789,7 +793,7 @@ aws secretsmanager put-secret-value \
 
 ```bash
 aws secretsmanager put-secret-value \
-  --secret-id "dev/sources/sage/x3/credentials" \
+  --secret-id "edl/sources/sage/x3/credentials" \
   --region us-east-1 \
   --secret-string '{
     "token_url":   "https://YOUR_X3_SERVER/auth/realms/sage/protocol/openid-connect/token",
@@ -874,7 +878,7 @@ Field mapping tells the transformation pipeline how to rename source fields to c
 Field mappings are **JSON files stored in S3**:
 
 ```
-s3://{env}-edl-mapping-config/
+s3://edl-mapping-config-<ACCOUNT_ID>/    # dev account ID shown elsewhere as 087972550871; staging/prod use their own account ID once bootstrapped
 └── field-mappings/
     └── {source_id}/
         └── {entity_id}/
@@ -979,7 +983,7 @@ python - <<'EOF'
 import boto3, json
 
 s3 = boto3.client("s3", region_name="us-east-1")
-BUCKET = "dev-edl-mapping-config"   # ← from terraform output mapping_bucket_name
+BUCKET = "edl-mapping-config-087972550871"   # ← from terraform output mapping_bucket_name
 
 with open("salesforce-account-mapping.json") as f:
     rule_set = json.load(f)
@@ -1001,7 +1005,7 @@ EOF
 **Option B — AWS CLI:**
 
 ```bash
-BUCKET=dev-edl-mapping-config
+BUCKET=edl-mapping-config-087972550871
 SOURCE_ID=salesforce
 ENTITY_ID=salesforce-account
 VERSION=1.0.0
@@ -1027,7 +1031,7 @@ from transformation.field_mapping.field_mapping_registry import (
 )
 
 client = FieldMappingRegistryClient(
-    s3_bucket="dev-edl-mapping-config",
+    s3_bucket="edl-mapping-config-087972550871",
     region_name="us-east-1"
 )
 
@@ -1070,7 +1074,7 @@ Entity resolution match rules and survivorship policies are stored as **versione
 ### Where entity resolution configs are stored
 
 ```
-s3://{env}-edl-curated/
+s3://edl-curated-<ACCOUNT_ID>/    # dev account ID shown elsewhere as 087972550871; staging/prod use their own account ID once bootstrapped
 └── entity-resolution/
     └── {entity_type}/
         ├── match_rules_v1.json     ← match rules (blocking + deterministic/probabilistic rules)
@@ -1132,11 +1136,11 @@ python scripts/seed_entity_resolution_configs.py --environment dev --entity-type
 # Check all configs exist in S3
 for entity in company person; do
   echo "--- ${entity} ---"
-  aws s3 ls "s3://dev-edl-curated/entity-resolution/${entity}/"
+  aws s3 ls "s3://edl-curated-087972550871/entity-resolution/${entity}/"
 done
 
 # Inspect the latest pointer
-aws s3 cp s3://dev-edl-curated/entity-resolution/company/latest.json -
+aws s3 cp s3://edl-curated-087972550871/entity-resolution/company/latest.json -
 # Expected: {"match_rules_version": "v1", "survivorship_version": "v1"}
 ```
 
@@ -1159,7 +1163,7 @@ Template files for promotion:
 | `github_org` | GitHub org for CI/CD OIDC trust (GitHub Actions → AWS) | `"your-github-org"` |
 | `github_repo` | GitHub repo name for OIDC trust | `"enterprise-data-lake"` |
 | `alert_email` | Email for CloudWatch alarm SNS notifications | `"ops@yourcompany.com"` |
-| `lambda_package_s3_bucket` | S3 bucket where Lambda zip is uploaded | `"dev-edl-terraform-state"` |
+| `lambda_package_s3_bucket` | S3 bucket where Lambda zip is uploaded | `"edl-terraform-state-087972550871"` (dev; account-ID suffix differs per environment/account) |
 | `lambda_package_s3_key` | S3 key of the Lambda zip | `"lambda/extraction-pipeline.zip"` |
 | `lambda_package_source_hash` | Base64 SHA-256 of zip (triggers Lambda update) | output of `make lambda-package` |
 
@@ -1169,29 +1173,29 @@ File: `infrastructure/environments/{env}/backend.tf`
 
 | Setting | What it is | Example |
 |---|---|---|
-| `bucket` | S3 bucket for Terraform state | `"dev-edl-terraform-state"` |
+| `bucket` | S3 bucket for Terraform state | `"edl-terraform-state-087972550871"` (dev; account-ID suffix differs per environment/account) |
 | `key` | S3 object key for the state file | `"environments/dev/terraform.tfstate"` |
 | `region` | State bucket region | `"us-east-1"` |
-| `kms_key_id` | KMS alias for state encryption | `"alias/dev-terraform-state"` |
-| `dynamodb_table` | DynamoDB table for state locking | `"dev-edl-terraform-state-lock"` |
+| `kms_key_id` | KMS alias for state encryption | `"alias/EdlTerraformState"` (same literal alias in every account) |
+| `dynamodb_table` | DynamoDB table for state locking | `"EdlTerraformStateLock"` (same literal table name in every account) |
 
 ### C. AWS Secrets Manager — Source credentials
 
-Secret path: `{environment}/sources/{source_id}/credentials`
+Secret path: `edl/sources/{source_id}/credentials` — same path in every environment/account now (the env segment was dropped)
 
 | Source | Secret path | Fields in JSON |
 |---|---|---|
-| Salesforce | `dev/sources/salesforce/credentials` | `instance_url`, `client_id`, `client_secret` |
-| NetSuite | `dev/sources/netsuite/credentials` | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
-| MySQL RDS | `dev/sources/mysql-rds/credentials` | `host`, `port`, `database`, `username`, `password` |
+| Salesforce | `edl/sources/salesforce/credentials` | `instance_url`, `client_id`, `client_secret` |
+| NetSuite | `edl/sources/netsuite/credentials` | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
+| MySQL RDS | `edl/sources/mysql-rds/credentials` | `host`, `port`, `database`, `username`, `password` |
 
 **How to set:** `aws secretsmanager put-secret-value` (see Step 6.1 above)  
-**Who can read:** Only the `extraction-service-role` IAM role (enforced by Secrets Manager resource policy)  
+**Who can read:** Only the `EdlExtractionServiceRole` IAM role (enforced by Secrets Manager resource policy)  
 **Where configured:** `infrastructure/modules/secrets/main.tf` — the secret ARNs and resource policies are created by Terraform
 
 ### D. DynamoDB — Entity extraction configuration
 
-Table: `{environment}-edl-entity-extraction-config`
+Table: `EdlEntityExtractionConfig` — same name in every environment/account now
 
 | Setting | How to set | Notes |
 |---|---|---|
@@ -1203,7 +1207,7 @@ Key fields you will configure per entity: `load_type`, `watermark_field`, `field
 
 ### E. S3 — Field mapping configuration
 
-Bucket: `{environment}-edl-mapping-config`  
+Bucket: `edl-mapping-config-<ACCOUNT_ID>` (dev: `edl-mapping-config-087972550871`)  
 Prefix: `field-mappings/{source_id}/{entity_id}/`
 
 | File | Purpose | How to set |
@@ -1213,7 +1217,7 @@ Prefix: `field-mappings/{source_id}/{entity_id}/`
 
 ### F. EventBridge Scheduler — Extraction schedules
 
-Schedule group: `{environment}-extraction-schedules` (created by Terraform)
+Schedule group: `EdlExtractionSchedules` — same name in every environment/account now (created by Terraform)
 
 | Setting | How to set | Example |
 |---|---|---|
@@ -1241,11 +1245,11 @@ list; check the specific handler's `require_env(...)` calls if you need another 
 | Environment variable | Value (from Terraform outputs) | Purpose |
 |---|---|---|
 | `PLATFORM_ENVIRONMENT` | `dev` / `staging` / `prod` | Determines DynamoDB table names and S3 bucket names (not `ENVIRONMENT` — that name isn't read anywhere in code) |
-| `RAW_S3_BUCKET` | `dev-edl-raw-layer` | S3 raw layer bucket |
-| `SCHEMA_SNAPSHOT_S3_BUCKET` | `dev-edl-schema-snapshots` | Schema snapshot bucket |
-| `ENTITY_CONFIG_TABLE` | `dev-edl-entity-extraction-config` | DynamoDB config table (note the `-edl-` infix — an older, incorrect form without it circulates in some docs/examples) |
-| `WATERMARK_TABLE` | `dev-edl-watermark-repository` | DynamoDB watermark table |
-| `AUDIT_LOG_TABLE` | `dev-edl-run-audit-log` | DynamoDB audit table (not `AUDIT_TABLE` — that name isn't read anywhere in code) |
+| `RAW_S3_BUCKET` | `edl-raw-087972550871` | S3 raw layer bucket |
+| `SCHEMA_SNAPSHOT_S3_BUCKET` | `edl-schema-snapshots-087972550871` | Schema snapshot bucket |
+| `ENTITY_CONFIG_TABLE` | `EdlEntityExtractionConfig` | DynamoDB config table (note the `Edl` prefix — an older, incorrect form without it circulates in some docs/examples) |
+| `WATERMARK_TABLE` | `EdlWatermarkRepository` | DynamoDB watermark table |
+| `AUDIT_LOG_TABLE` | `EdlRunAuditLog` | DynamoDB audit table (not `AUDIT_TABLE` — that name isn't read anywhere in code) |
 
 AWS Lambda provides `AWS_REGION` automatically as a reserved runtime env var — Terraform doesn't
 need to (and doesn't) set it explicitly. A previous version of this table incorrectly listed
@@ -1263,14 +1267,14 @@ Created by Terraform in `infrastructure/modules/observability/`. Key alarms:
 
 | Alarm name | Trigger | Action |
 |---|---|---|
-| `{env}-edl-extraction-failure-rate` | > 5% failure rate over 5 min | SNS → alert_email |
-| `{env}-edl-dlq-depth` | DLQ has > 0 messages for > 4 hours | SNS → alert_email |
-| `{env}-edl-watermark-lag` | Lag > 26 hours (daily entity) | SNS → alert_email |
-| `{env}-edl-breaking-drift` | Breaking drift event detected | SNS → alert_email |
+| `EdlExtractionFailureRate` | > 5% failure rate over 5 min | SNS → alert_email |
+| `EdlDlqDepth` | DLQ has > 0 messages for > 4 hours | SNS → alert_email |
+| `EdlWatermarkLag` | Lag > 26 hours (daily entity) | SNS → alert_email |
+| `EdlBreakingDrift` | Breaking drift event detected | SNS → alert_email |
 
 To change alert thresholds, edit `infrastructure/modules/observability/variables.tf` and run `terraform apply`.
 
-> **Credential expiry alerts (separate from the alarms above):** `{env}-edl-credential-expiry-notifier` is a Lambda (not a CloudWatch alarm) that runs daily on an EventBridge Scheduler rule (`{env}-edl-credential-expiry-check`, `rate(1 day)`, created by `infrastructure/modules/secrets/main.tf`). It checks the age of every source-credential secret and publishes directly to the same platform alerts SNS topic (`ALERT_SNS_TOPIC_ARN`) when a secret is approaching or past its rotation window (`ROTATION_WARNING_DAYS` / `SECRET_ROTATION_DAYS` env vars). This is the observability half of credential rotation — no connector actually auto-rotates credentials today, so this Lambda is what tells you a secret needs manual rotation.
+> **Credential expiry alerts (separate from the alarms above):** `EdlCredentialExpiryNotifier` is a Lambda (not a CloudWatch alarm) that runs daily on an EventBridge Scheduler rule (`EdlCredentialExpiryCheck`, `rate(1 day)`, created by `infrastructure/modules/secrets/main.tf`). It checks the age of every source-credential secret and publishes directly to the same platform alerts SNS topic (`ALERT_SNS_TOPIC_ARN`) when a secret is approaching or past its rotation window (`ROTATION_WARNING_DAYS` / `SECRET_ROTATION_DAYS` env vars). This is the observability half of credential rotation — no connector actually auto-rotates credentials today, so this Lambda is what tells you a secret needs manual rotation.
 
 ### I. IAM Least Privilege — What Each Role Can Access
 
@@ -1278,14 +1282,14 @@ The platform enforces a **zero-trust, need-to-know** IAM model. Every role is cr
 
 | IAM role | AWS services it can access | Explicit restrictions |
 |---|---|---|
-| `{env}-extraction-service-role` | S3 (`PutObject` on `raw/` prefix only) · DynamoDB (`GetItem`/`PutItem` on config, watermark, audit tables) · Secrets Manager (`GetSecretValue` on `{env}/sources/*` only) · CloudWatch Logs | Cannot write to curated or analytics buckets; cannot read Secrets Manager secrets from other environments |
-| `{env}-transformation-service-role` | S3 (`GetObject` on raw prefix; `PutObject` on curated prefix) · S3 (`GetObject`/`PutObject` on mapping-config bucket) · Glue (`CreateTable`, `UpdateTable` on the platform database only) · CloudWatch Logs | Cannot access raw layer for write; cannot read Secrets Manager |
-| `{env}-entity-resolution-role` | S3 (`GetObject` on curated prefix; `GetObject` on entity-resolution config prefix; `PutObject` on analytics `canonical/` prefix) · CloudWatch Logs | Cannot read raw or mapping-config buckets; cannot access Secrets Manager |
-| `{env}-analytics-publisher-role` | S3 (`GetObject` on curated prefix; `PutObject` on analytics `curated/` prefix) · Glue · CloudWatch Logs | Cannot write to canonical (entity-resolved) prefix |
-| `{env}-credential-expiry-notifier-role` | Secrets Manager (`DescribeSecret` on `{env}/sources/*` to read rotation metadata) · SNS (`Publish` on the platform alerts topic) · CloudWatch Logs | Cannot read secret values, only metadata; cannot write to any S3 bucket |
-| `ci-cd-deploy-role` | Terraform state S3 bucket · IAM (boundary-constrained role updates) · Lambda/ECS task deployments | Cannot access data buckets, Secrets Manager values, or DynamoDB data tables |
+| `EdlExtractionServiceRole` | S3 (`PutObject` on `raw/` prefix only) · DynamoDB (`GetItem`/`PutItem` on config, watermark, audit tables) · Secrets Manager (`GetSecretValue` on `edl/sources/*` only) · CloudWatch Logs | Cannot write to curated or analytics buckets; cannot read Secrets Manager secrets from other environments |
+| `EdlTransformationServiceRole` | S3 (`GetObject` on raw prefix; `PutObject` on curated prefix) · S3 (`GetObject`/`PutObject` on mapping-config bucket) · Glue (`CreateTable`, `UpdateTable` on the platform database only) · CloudWatch Logs | Cannot access raw layer for write; cannot read Secrets Manager |
+| `EdlEntityResolutionRole` | S3 (`GetObject` on curated prefix; `GetObject` on entity-resolution config prefix; `PutObject` on analytics `canonical/` prefix) · CloudWatch Logs | Cannot read raw or mapping-config buckets; cannot access Secrets Manager |
+| `EdlAnalyticsPublisherRole` | S3 (`GetObject` on curated prefix; `PutObject` on analytics `curated/` prefix) · Glue · CloudWatch Logs | Cannot write to canonical (entity-resolved) prefix |
+| `EdlCredentialExpiryNotifierRole` | Secrets Manager (`DescribeSecret` on `edl/sources/*` to read rotation metadata) · SNS (`Publish` on the platform alerts topic) · CloudWatch Logs | Cannot read secret values, only metadata; cannot write to any S3 bucket |
+| `EdlCicdDeploymentRole` | Terraform state S3 bucket · IAM (boundary-constrained role updates) · Lambda/ECS task deployments | Cannot access data buckets, Secrets Manager values, or DynamoDB data tables |
 
-> **There is no `{env}-serving-store-role`.** No Lambda or Terraform module exists for the serving-store stage (see [Phase 3](#6-phase-3--application-deployment-lambda)), so no role was created for it.
+> **There is no `EdlServingStoreRole`.** No Lambda or Terraform module exists for the serving-store stage (see [Phase 3](#6-phase-3--application-deployment-lambda)), so no role was created for it.
 >
 > This table shows the roles most relevant to data-plane access; the module actually defines **13 roles** in `infrastructure/modules/iam/main.tf`: `extraction_runtime`, `transformation_runtime`, `entity_resolution_runtime`, `analytics_publisher_runtime`, `transformation_job`, `orchestration_step_functions`, `eventbridge_scheduler`, `cicd_deployment`, `pipeline_trigger`, `dlq_processor`, `credential_expiry_notifier`, `credential_expiry_scheduler`, `control_plane`.
 
@@ -1309,7 +1313,7 @@ The platform enforces a **zero-trust, need-to-know** IAM model. Every role is cr
 | `aws_cognito_user_pool.control_plane` | Cognito User Pool — issues JWTs for API callers |
 | `aws_cognito_user_pool_client.control_plane` | App client used to obtain tokens |
 | `aws_apigatewayv2_api` + routes | HTTP API, JWT-authorized, fronting the control-plane Lambda |
-| `aws_lambda_function.control_plane` (`{env}-edl-control-plane`) | Single Lambda dispatching all routes, handler `connector_runtime.api.control_plane_handler.lambda_handler` |
+| `aws_lambda_function.control_plane` (`EdlControlPlane`) | Single Lambda dispatching all routes, handler `connector_runtime.api.control_plane_handler.lambda_handler` |
 
 **Routes** (method + path, all JWT-authorized except tenant creation which only requires an authenticated caller):
 
@@ -1336,9 +1340,9 @@ The deployment process for staging and production is the same as dev — the env
 
 Before Terraform can run for staging or prod, repeat **Section 2** for the new environment:
 
-- [ ] Terraform state S3 bucket (`staging-edl-terraform-state` or `prod-edl-terraform-state`)
-- [ ] DynamoDB lock table (`staging-edl-terraform-state-lock` or `prod-edl-terraform-state-lock`)
-- [ ] Bootstrap KMS key (`alias/staging-terraform-state` or `alias/prod-terraform-state`)
+- [ ] Terraform state S3 bucket (`edl-terraform-state-STAGING_ACCOUNT_ID` or `edl-terraform-state-PROD_ACCOUNT_ID` — substitute the real AWS account ID once that environment is bootstrapped)
+- [ ] DynamoDB lock table (`EdlTerraformStateLock` — same literal name as dev, since each account gets its own instance of a fixed-name table)
+- [ ] Bootstrap KMS key (`alias/EdlTerraformState` — same literal alias as dev)
 - [ ] GitHub OIDC provider — already registered (account-level, shared across all environments)
 - [ ] NAT Gateway IPs allowlisted in Salesforce, NetSuite, and MySQL RDS SG — **do after Terraform apply**
 
@@ -1351,12 +1355,13 @@ cp infrastructure/environments/staging/terraform.tfvars.example \
 # Edit staging/terraform.tfvars and update:
 #   alert_email                   = "staging-ops@yourcompany.com"
 #   github_org                    = "your-github-org"
-#   extraction_pipeline_lambda_arn     = "arn:aws:lambda:...:staging-extraction-pipeline"
+#   extraction_pipeline_lambda_arn     = "arn:aws:lambda:...:function:EdlExtractionPipeline"
 #
 # Do NOT set these — they are wired automatically from Terraform module outputs
-# in infrastructure/environments/staging/main.tf (functions will be named
-# staging-transformation-pipeline, staging-entity-resolution-pipeline, and
-# staging-analytics-layer-publisher respectively, but you never paste their ARNs):
+# in infrastructure/environments/staging/main.tf (functions are named identically
+# to dev's — EdlTransformationPipeline, EdlEntityResolutionPipeline, and
+# EdlAnalyticsLayerPublisher — since the AWS account boundary, not the name,
+# keeps staging separate from dev; you never paste their ARNs):
 #   transformation_pipeline_lambda_arn = module.transformation_lambda.lambda_function_arn
 #   entity_resolution_lambda_arn       = module.entity_resolution_lambda.lambda_function_arn
 #   analytics_publisher_lambda_arn     = module.analytics_publisher_lambda.lambda_function_arn
@@ -1365,7 +1370,8 @@ cp infrastructure/environments/staging/terraform.tfvars.example \
 #   serving_store_loader_lambda_arn
 #
 # For prod, copy from infrastructure/environments/prod/terraform.tfvars.example
-# and use the prod-* extraction Lambda ARN.
+# and use the extraction Lambda ARN from the prod account (same function name,
+# EdlExtractionPipeline, different account/ARN).
 ```
 
 ### Step 11.3 — Bootstrap staging backend
@@ -1399,7 +1405,7 @@ terraform output extraction_lambda_arn
 Add it to `infrastructure/environments/staging/terraform.tfvars`:
 
 ```hcl
-extraction_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:staging-extraction-pipeline"
+extraction_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:EdlExtractionPipeline"
 # transformation_pipeline_lambda_arn / entity_resolution_lambda_arn / analytics_publisher_lambda_arn
 # are NOT set here — see Step 11.2.
 # serving_store_loader_lambda_arn intentionally left unset — Lambda not yet built.
@@ -1430,11 +1436,11 @@ Log in to each source system and add these IPs:
 
 ### Step 11.8 — Populate staging secrets
 
-Repeat [Step 5.1](#step-51--populate-source-credentials-in-secrets-manager) with staging-specific credentials. The secret paths are:
+Repeat [Step 5.1](#step-51--populate-source-credentials-in-secrets-manager) with staging-specific credentials. The secret paths are the same literal paths as dev — now that each environment is its own AWS account, the path no longer needs an environment segment to avoid collisions:
 ```
-staging/sources/salesforce/credentials
-staging/sources/netsuite/credentials
-staging/sources/mysql-rds/credentials
+edl/sources/salesforce/credentials
+edl/sources/netsuite/credentials
+edl/sources/mysql-rds/credentials
 ```
 
 ### Step 11.9 — Seed staging entity configs, field mappings, and entity resolution configs
@@ -1481,17 +1487,17 @@ After completing all phases, verify the full deployment is healthy.
 ### Infrastructure
 
 ```bash
-# All DynamoDB tables exist
-aws dynamodb list-tables --region us-east-1 | grep edl
+# All DynamoDB tables exist (table names are now PascalCase, e.g. EdlWatermarkRepository)
+aws dynamodb list-tables --region us-east-1 | grep Edl
 
-# All S3 buckets exist and have encryption enabled
+# All S3 buckets exist and have encryption enabled (bucket names stay lowercase-hyphenated)
 aws s3api list-buckets --query "Buckets[?contains(Name,'edl')]"
 
 # All deployed pipeline + support Lambda functions are active
-# (there is no serving-store-loader function — see Phase 3)
-for fn in extraction-pipeline transformation-pipeline entity-resolution-pipeline analytics-layer-publisher edl-credential-expiry-notifier edl-control-plane; do
+# (there is no EdlServingStoreLoader function — see Phase 3)
+for fn in EdlExtractionPipeline EdlTransformationPipeline EdlEntityResolutionPipeline EdlAnalyticsLayerPublisher EdlCredentialExpiryNotifier EdlControlPlane; do
   aws lambda get-function \
-    --function-name "dev-${fn}" \
+    --function-name "${fn}" \
     --region us-east-1 \
     --query "Configuration.[FunctionName,State]" \
     --output text
@@ -1499,19 +1505,19 @@ done
 
 # Step Functions state machine is ACTIVE
 aws stepfunctions list-state-machines \
-  --query "stateMachines[?contains(name,'dev')].[name,type,creationDate]" \
+  --query "stateMachines[?contains(name,'Edl')].[name,type,creationDate]" \
   --output table \
   --region us-east-1
 
 # EventBridge schedule group exists
 aws scheduler list-schedule-groups \
-  --query "ScheduleGroups[?contains(Name,'dev')].[Name,State]" \
+  --query "ScheduleGroups[?contains(Name,'Edl')].[Name,State]" \
   --output table \
   --region us-east-1
 
 # Secrets exist (do not verify values here)
 aws secretsmanager list-secrets --region us-east-1 \
-  --query "SecretList[?contains(Name,'dev/sources')].[Name]"
+  --query "SecretList[?contains(Name,'edl/sources')].[Name]"
 ```
 
 ### Entity configuration
@@ -1519,7 +1525,7 @@ aws secretsmanager list-secrets --region us-east-1 \
 ```bash
 # Confirm at least one entity config record exists
 aws dynamodb scan \
-  --table-name dev-edl-entity-extraction-config \
+  --table-name EdlEntityExtractionConfig \
   --select COUNT \
   --region us-east-1
 ```
@@ -1530,7 +1536,7 @@ aws dynamodb scan \
 # Confirm the latest pointer exists for all configured entities
 for entity in salesforce/salesforce-account salesforce/salesforce-contact netsuite/netsuite-customer mysql-rds/mysql-rds-orders; do
   echo "--- ${entity} ---"
-  aws s3 ls "s3://dev-edl-mapping-config/field-mappings/${entity}/"
+  aws s3 ls "s3://edl-mapping-config-087972550871/field-mappings/${entity}/"
 done
 ```
 
@@ -1540,12 +1546,12 @@ done
 # Confirm configs exist for all entity types
 for entity in company person; do
   echo "--- ${entity} ---"
-  aws s3 ls "s3://dev-edl-curated/entity-resolution/${entity}/"
+  aws s3 ls "s3://edl-curated-087972550871/entity-resolution/${entity}/"
 done
 
 # Verify latest.json pointer is populated
-aws s3 cp s3://dev-edl-curated/entity-resolution/company/latest.json -
-aws s3 cp s3://dev-edl-curated/entity-resolution/person/latest.json -
+aws s3 cp s3://edl-curated-087972550871/entity-resolution/company/latest.json -
+aws s3 cp s3://edl-curated-087972550871/entity-resolution/person/latest.json -
 ```
 
 ### Full pipeline end-to-end test
@@ -1579,10 +1585,10 @@ Expected terminal status: `SUCCEEDED`
 
 | Stage | Lambda | Expected log event |
 |---|---|---|
-| Extraction | `dev-extraction-pipeline` | `run_complete` with `status: success` |
-| Transformation | `dev-transformation-pipeline` | `transformation_complete` with `curated_record_count > 0` |
-| Entity Resolution | `dev-entity-resolution-pipeline` | `golden_record_published` with `cluster_count > 0` |
-| Analytics | `dev-analytics-layer-publisher` | `analytics_publish_complete` |
+| Extraction | `EdlExtractionPipeline` | `run_complete` with `status: success` |
+| Transformation | `EdlTransformationPipeline` | `transformation_complete` with `curated_record_count > 0` |
+| Entity Resolution | `EdlEntityResolutionPipeline` | `golden_record_published` with `cluster_count > 0` |
+| Analytics | `EdlAnalyticsLayerPublisher` | `analytics_publish_complete` |
 
 There is no 5th "Serving Store" stage to check — the state machine's `ServingStoreLoad` state is a `Pass` state today (no Lambda invocation, no log event); see [Phase 3](#6-phase-3--application-deployment-lambda) and [Step 4.2](#step-42--apply-to-create-the-state-machine).
 
@@ -1590,16 +1596,16 @@ There is no 5th "Serving Store" stage to check — the state machine's `ServingS
 
 ```bash
 # Stage A — Raw Parquet
-aws s3 ls s3://dev-edl-raw/salesforce/salesforce-account/ --recursive | head -5
+aws s3 ls s3://edl-raw-087972550871/salesforce/salesforce-account/ --recursive | head -5
 
 # Stage B — Curated Parquet + quality report
-aws s3 ls s3://dev-edl-curated/curated/customer/salesforce-account/ --recursive | head -5
+aws s3 ls s3://edl-curated-087972550871/curated/customer/salesforce-account/ --recursive | head -5
 
 # Stage C/D — Golden records
-aws s3 ls s3://dev-edl-analytics/canonical/ --recursive | head -5
+aws s3 ls s3://edl-analytics-087972550871/canonical/ --recursive | head -5
 
 # Stage E — Analytics layer
-aws s3 ls s3://dev-edl-analytics/ --recursive | head -5
+aws s3 ls s3://edl-analytics-087972550871/ --recursive | head -5
 ```
 
 ### NAT Gateway IP allowlisting verification
@@ -1617,7 +1623,7 @@ terraform output nat_gateway_public_ips
 ```bash
 # Confirm no alarms are currently in ALARM state
 aws cloudwatch describe-alarms \
-  --alarm-name-prefix "dev-edl" \
+  --alarm-name-prefix "Edl" \
   --state-value ALARM \
   --query "MetricAlarms[*].[AlarmName,StateValue,StateReason]" \
   --output table \
@@ -1701,21 +1707,21 @@ Complete authoritative version reference for all tools used in deployment.
 
 | Service | Resource name pattern | Deployed by |
 |---|---|---|
-| **S3** | `{env}-edl-raw-layer`, `{env}-edl-curated-layer`, `{env}-edl-analytics-layer`, `{env}-edl-schema-snapshots` | `infrastructure/modules/storage/` |
-| **KMS** | alias `{env}-edl-platform-key` | `infrastructure/modules/kms/` |
-| **VPC** | `{env}-edl-vpc`; 3 private subnets; 5 VPC Endpoints | `infrastructure/modules/networking/` |
+| **S3** | `edl-raw-<ACCOUNT_ID>`, `edl-curated-<ACCOUNT_ID>`, `edl-analytics-<ACCOUNT_ID>`, `edl-schema-snapshots-<ACCOUNT_ID>` (dev account ID: `087972550871`) | `infrastructure/modules/storage/` |
+| **KMS** | alias `EdlPlatformKey` | `infrastructure/modules/kms/` |
+| **VPC** | `EdlVpc`; 3 private subnets; 5 VPC Endpoints | `infrastructure/modules/networking/` |
 | **IAM** | 13 roles total, including the OIDC CI/CD role (`cicd_deployment`) and one runtime role per Lambda (`extraction_runtime`, `control_plane`, `credential_expiry_notifier`, etc.) | `infrastructure/modules/iam/` |
-| **DynamoDB** | `{env}-edl-entity-extraction-config`, `{env}-edl-watermark-repository`, `{env}-edl-run-audit-log`, `{env}-edl-entity-type-registry`, `{env}-source-onboarding` | `infrastructure/modules/metadata_persistence/` |
-| **Secrets Manager** | `{env}/sources/salesforce/credentials`, `{env}/sources/netsuite/credentials`, `{env}/sources/mysql-rds/credentials` | `infrastructure/modules/secrets/` |
-| **Step Functions** | `{env}-extraction-orchestration-workflow` | `infrastructure/modules/orchestration/` |
+| **DynamoDB** | `EdlEntityExtractionConfig`, `EdlWatermarkRepository`, `EdlRunAuditLog`, `EdlEntityTypeRegistry`, `EdlSourceOnboardingRegistry` | `infrastructure/modules/metadata_persistence/` |
+| **Secrets Manager** | `edl/sources/salesforce/credentials`, `edl/sources/netsuite/credentials`, `edl/sources/mysql-rds/credentials` | `infrastructure/modules/secrets/` |
+| **Step Functions** | `EdlExtractionOrchestrationWorkflow` | `infrastructure/modules/orchestration/` |
 | **CloudWatch** | 5 log groups; namespace `EnterpriseDatalake`; 4 alarms; X-Ray group | `infrastructure/modules/observability/` |
-| **SNS** | `{env}-edl-platform-alerts` | `infrastructure/modules/observability/` |
-| **SQS (DLQ)** | `{env}-extraction-dlq` | `infrastructure/modules/metadata_persistence/` |
-| **Glue Data Catalog** | `{env}_curated`, `{env}_analytics` databases | Created at runtime by transformation pipeline |
+| **SNS** | `EdlPlatformAlerts` | `infrastructure/modules/observability/` |
+| **SQS (DLQ)** | `EdlExtractionDlq` | `infrastructure/modules/metadata_persistence/` |
+| **Glue Data Catalog** | `edl_curated`, `edl_analytics` databases | Created at runtime by transformation pipeline |
 | **EventBridge Schedules** | `{source_id}--{entity_id}` | Managed at runtime via `extraction_schedule_client.py` |
-| **EventBridge Scheduler (credential check)** | `{env}-edl-credential-expiry-check` (rate: 1 day) | `infrastructure/modules/secrets/` |
-| **Cognito + API Gateway (control plane)** | User pool `{env}-edl-control-plane`; HTTP API fronting `{env}-edl-control-plane` Lambda | `infrastructure/modules/control_plane/` — see [Section 11.J](#j-control-plane-api-cognito--api-gateway) |
-| **RDS MySQL** | `{env}-edl-serving-store` | `infrastructure/modules/serving_store/` |
+| **EventBridge Scheduler (credential check)** | `EdlCredentialExpiryCheck` (rate: 1 day) | `infrastructure/modules/secrets/` |
+| **Cognito + API Gateway (control plane)** | User pool `EdlControlPlane`; HTTP API fronting `EdlControlPlane` Lambda | `infrastructure/modules/control_plane/` — see [Section 11.J](#j-control-plane-api-cognito--api-gateway) |
+| **RDS MySQL** | `EdlServingStore` | `infrastructure/modules/serving_store/` |
 
 ### Data Format Specifications
 

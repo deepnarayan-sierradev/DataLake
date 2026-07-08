@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests_mock as requests_mock_lib
 
+import connector_runtime.adapters.netsuite.netsuite_connector as netsuite_connector_module
 from connector_runtime.adapters.netsuite.netsuite_auth_client import (
     NetSuiteAuthError,
     NetSuiteCredentialError,
@@ -27,6 +28,7 @@ from connector_runtime.adapters.netsuite.netsuite_auth_client import (
 from connector_runtime.adapters.netsuite.netsuite_connector import (
     _PAGE_SIZE,
     NetSuiteConnector,
+    NetSuiteSuiteQLOffsetLimitExceededError,
     NetSuiteSuiteQLRateLimitError,
 )
 from connector_runtime.adapters.netsuite.netsuite_incremental_query_planner import (
@@ -45,7 +47,7 @@ _ENV = "dev"
 _REGION = "us-east-1"
 _ACCOUNT_ID = "1234567"
 _RECORD_TYPE = "customer"
-_SECRET_NAME = f"{_ENV}/sources/netsuite/credentials"
+_SECRET_NAME = "edl/sources/netsuite/credentials"
 
 _VALID_SECRET = {
     "account_id": _ACCOUNT_ID,
@@ -200,6 +202,62 @@ class TestExecuteExtraction:
         requests_mock.post(_SUITEQL_URL, json={"items": [], "hasMore": False})
         records = list(connector.execute_extraction(_make_query_contract(), run_id="run-004"))
         assert records == []
+
+
+class TestSuiteQLOffsetPaginationCeiling:
+    """
+    NetSuite's REST SuiteQL endpoint hard-rejects any request whose offset
+    exceeds 100,000 (_MAX_SUITEQL_OFFSET). These tests shrink both
+    _PAGE_SIZE and _MAX_SUITEQL_OFFSET via monkeypatch so the ceiling is
+    reachable in a handful of mocked pages rather than needing 100,000+ rows.
+    """
+
+    def test_extraction_crossing_cap_raises_actionable_error(
+        self, requests_mock: requests_mock_lib.Mocker, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(netsuite_connector_module, "_PAGE_SIZE", 2)
+        monkeypatch.setattr(netsuite_connector_module, "_MAX_SUITEQL_OFFSET", 4)
+        connector = _make_connector()
+        # Every page is "full" (2 rows) and reports more data available, so
+        # offset keeps climbing: 0 -> 2 -> 4 -> 6, which exceeds the
+        # monkeypatched ceiling of 4 and must raise before the 4th request.
+        full_page = [{"id": str(i)} for i in range(2)]
+        requests_mock.post(_SUITEQL_URL, json={"items": full_page, "hasMore": True})
+
+        qc = _make_query_contract()
+        with pytest.raises(NetSuiteSuiteQLOffsetLimitExceededError) as exc_info:
+            list(connector.execute_extraction(qc, run_id="run-offset-cap"))
+
+        message = str(exc_info.value)
+        assert "narrow the extraction window" in message.lower()
+        assert "extraction_window_days" in message
+        assert "netsuite-customer" in message
+        assert "offset=6" in message  # the offset that would have been requested next
+
+    def test_offset_limit_error_classifies_as_deterministic_configuration(self) -> None:
+        connector = _make_connector()
+        result = connector.classify_extraction_error(
+            NetSuiteSuiteQLOffsetLimitExceededError("offset too large")
+        )
+        assert result == ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
+
+    def test_extraction_under_cap_is_unaffected(
+        self, requests_mock: requests_mock_lib.Mocker, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(netsuite_connector_module, "_PAGE_SIZE", 2)
+        monkeypatch.setattr(netsuite_connector_module, "_MAX_SUITEQL_OFFSET", 100)
+        connector = _make_connector()
+        page1_rows = [{"id": str(i)} for i in range(2)]
+        page2_rows = [{"id": "2"}]
+        responses = [
+            {"json": {"items": page1_rows, "hasMore": True}},
+            {"json": {"items": page2_rows, "hasMore": False}},
+        ]
+        requests_mock.post(_SUITEQL_URL, responses)
+
+        qc = _make_query_contract()
+        records = list(connector.execute_extraction(qc, run_id="run-under-cap"))
+        assert len(records) == 3
 
 
 class TestErrorClassification:

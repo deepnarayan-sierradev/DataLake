@@ -86,7 +86,9 @@ class ResolutionConfigRegistry:
 
     Usage::
 
-        registry = ResolutionConfigRegistry(s3_bucket="dev-edl-curated", region_name="us-east-1")
+        registry = ResolutionConfigRegistry(
+            s3_bucket="edl-curated-087972550871", region_name="us-east-1"
+        )
         config = registry.load("company")           # loads latest version
         config = registry.load("company", "v2")     # loads explicit version
     """
@@ -265,7 +267,9 @@ def _parse_match_rule_set(raw: dict[str, Any]) -> MatchRuleSet:
             blocking_strategy=blocking_strategy,
         )
     except KeyError as exc:
-        raise ResolutionConfigParseError(f"Missing required field in match_rules config: {exc}") from exc
+        raise ResolutionConfigParseError(
+            f"Missing required field in match_rules config: {exc}"
+        ) from exc
 
 
 def _parse_deterministic_rule(r: dict[str, Any]) -> DeterministicMatchRule:
@@ -298,9 +302,7 @@ def _parse_probabilistic_rule(r: dict[str, Any]) -> ProbabilisticMatchRule:
         )
     threshold = float(r.get("match_threshold", 0.8))
     if not 0.0 < threshold <= 1.0:
-        raise ResolutionConfigParseError(
-            f"match_threshold must be in (0.0, 1.0], got {threshold}"
-        )
+        raise ResolutionConfigParseError(f"match_threshold must be in (0.0, 1.0], got {threshold}")
     return ProbabilisticMatchRule(
         rule_id=r["rule_id"],
         fields=fields,
@@ -312,7 +314,9 @@ def _parse_blocking_strategy(b: dict[str, Any]) -> BlockingStrategy:
     try:
         key_type = BlockingKeyType(b["key_type"])
     except ValueError as exc:
-        raise ResolutionConfigParseError(f"Unknown blocking key_type: {b.get('key_type')!r}") from exc
+        raise ResolutionConfigParseError(
+            f"Unknown blocking key_type: {b.get('key_type')!r}"
+        ) from exc
     return BlockingStrategy(
         key_type=key_type,
         source_field=b["source_field"],
@@ -363,7 +367,9 @@ def _parse_survivorship_policy(raw: dict[str, Any]) -> SurvivorshipPolicy:
             f"Missing required field in survivorship config: {exc}"
         ) from exc
     except ValueError as exc:
-        raise ResolutionConfigParseError(f"Invalid enum value in survivorship config: {exc}") from exc
+        raise ResolutionConfigParseError(
+            f"Invalid enum value in survivorship config: {exc}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -373,13 +379,9 @@ def _parse_survivorship_policy(raw: dict[str, Any]) -> SurvivorshipPolicy:
 
 def _validate_entity_type(entity_type: str) -> None:
     if not _SAFE_ID_PATTERN.match(entity_type):
-        raise ValueError(
-            f"entity_type {entity_type!r} must match '^[a-z][a-z0-9\\-]{{0,63}}$'"
-        )
+        raise ValueError(f"entity_type {entity_type!r} must match '^[a-z][a-z0-9\\-]{{0,63}}$'")
 
 
 def _validate_version(version: str) -> None:
     if not _SAFE_VERSION_PATTERN.match(version):
-        raise ValueError(
-            f"version {version!r} must match '^v[0-9]{{1,4}}$' (e.g. 'v1', 'v12')"
-        )
+        raise ValueError(f"version {version!r} must match '^v[0-9]{{1,4}}$' (e.g. 'v1', 'v12')")

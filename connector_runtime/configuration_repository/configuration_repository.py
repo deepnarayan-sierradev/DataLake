@@ -5,7 +5,7 @@ Loads EntityExtractionConfig records from DynamoDB (primary) or S3 (alternate).
 All records are Pydantic-validated before being returned — invalid configurations
 are rejected before the connector runtime starts.
 
-DynamoDB table: {environment}-edl-entity-extraction-config
+DynamoDB table: EdlEntityExtractionConfig
   PK: source_id (str)
   SK: entity_id (str)
 
@@ -36,7 +36,7 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-_DYNAMODB_TABLE_TEMPLATE: str = "{environment}-edl-entity-extraction-config"
+_DYNAMODB_TABLE_NAME: str = "EdlEntityExtractionConfig"
 
 
 class ConfigurationBackend(StrEnum):
@@ -84,10 +84,7 @@ class ConfigurationRepositoryClient:
 
         if backend == ConfigurationBackend.DYNAMODB:
             self._dynamodb = boto3.resource("dynamodb", region_name=region_name)
-            self._table_name = (
-                os.environ.get("ENTITY_CONFIG_TABLE")
-                or _DYNAMODB_TABLE_TEMPLATE.format(environment=environment)
-            )
+            self._table_name = os.environ.get("ENTITY_CONFIG_TABLE") or _DYNAMODB_TABLE_NAME
             self._table = self._dynamodb.Table(self._table_name)
         else:
             if not s3_bucket:

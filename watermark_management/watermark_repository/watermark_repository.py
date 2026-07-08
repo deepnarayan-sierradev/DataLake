@@ -10,8 +10,10 @@ conditional expressions on the version attribute).  The watermark is advanced
 ONLY after a fully successful extraction run — partial or failed runs leave
 the watermark unchanged.
 
-DynamoDB table: {environment}-edl-watermark-repository
-  PK: source_id (string)
+DynamoDB table: EdlWatermarkRepository
+  PK: source_id (string) — stores tenant_scoped_key(tenant_code, source_id) (ARCH-1),
+      e.g. "demo#salesforce", so two tenants extracting the same source_id/entity_id
+      never share an item
   SK: entity_id (string)
 
 Replay support: callers compute a historic window using compute_replay_window()
@@ -36,12 +38,16 @@ from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field, field_validator
 
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType
-from contracts.identifier_policy import DEFAULT_TENANT_CODE, validate_tenant_code
+from contracts.identifier_policy import (
+    DEFAULT_TENANT_CODE,
+    tenant_scoped_key,
+    validate_tenant_code,
+)
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-_WATERMARK_TABLE_TEMPLATE: Final[str] = "{environment}-edl-watermark-repository"
+_WATERMARK_TABLE_NAME: Final[str] = "EdlWatermarkRepository"
 
 # Lower-bound sentinel used when no prior successful run exists (INCREMENTAL first run).
 _EPOCH: Final[datetime] = datetime(1970, 1, 1, tzinfo=UTC)
@@ -117,10 +123,7 @@ class WatermarkRepository:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        self._table_name = (
-            os.environ.get("WATERMARK_TABLE")
-            or _WATERMARK_TABLE_TEMPLATE.format(environment=environment)
-        )
+        self._table_name = os.environ.get("WATERMARK_TABLE") or _WATERMARK_TABLE_NAME
         dynamodb = boto3.resource("dynamodb", region_name=region_name)
         self._table = dynamodb.Table(self._table_name)
 
@@ -132,18 +135,18 @@ class WatermarkRepository:
         """
         Load the current watermark for a source entity.
 
-        Returns None on first run (no prior record exists), AND when a record
-        exists but belongs to a different tenant (§1.1 / ARCH-1 — SEC-2
-        app-level guard) — treated the same as "no prior run" rather than
-        raising, since that is always a safe, non-breaking default for a
-        watermark read.
+        Returns None on first run (no prior record exists for this tenant).
+        The DynamoDB key itself is tenant-scoped (ARCH-1: tenant_scoped_key()
+        applied to source_id), so a different tenant's record can never be
+        read here — not merely masked after the fact.
 
         Uses a strongly-consistent read to prevent stale-read races.
         """
         tenant_code = validate_tenant_code(tenant_code)
+        scoped_source_id = tenant_scoped_key(tenant_code, source_id)
         try:
             response = self._table.get_item(
-                Key={"source_id": source_id, "entity_id": entity_id},
+                Key={"source_id": scoped_source_id, "entity_id": entity_id},
                 ConsistentRead=True,
             )
         except ClientError as exc:
@@ -158,16 +161,11 @@ class WatermarkRepository:
         item = response.get("Item")
         if not item:
             return None
-        record = WatermarkRecord(**item)  # type: ignore[arg-type]
-        if record.tenant_code != tenant_code:
-            _logger.warning(
-                "watermark_tenant_mismatch",
-                source_id=source_id,
-                entity_id=entity_id,
-                requested_tenant_code=tenant_code,
-            )
-            return None
-        return record
+        # The stored item's "source_id" attribute is the tenant-scoped composite
+        # key value — restore the plain source_id before constructing the model
+        # so callers always see the unscoped identifier they passed in.
+        record_item = {**item, "source_id": source_id}
+        return WatermarkRecord(**record_item)  # type: ignore[arg-type]
 
     # ── Write ──────────────────────────────────────────────────────────────────
 
@@ -330,9 +328,14 @@ class WatermarkRepository:
 
 
 def _serialise_watermark(record: WatermarkRecord) -> dict[str, Any]:
-    """Convert a WatermarkRecord to a DynamoDB-compatible item dict."""
+    """
+    Convert a WatermarkRecord to a DynamoDB-compatible item dict.
+
+    The persisted "source_id" attribute is the tenant-scoped composite key
+    (ARCH-1) — get_watermark() restores the plain source_id when reading back.
+    """
     return {
-        "source_id": record.source_id,
+        "source_id": tenant_scoped_key(record.tenant_code, record.source_id),
         "entity_id": record.entity_id,
         "environment": record.environment,
         "last_successful_watermark": record.last_successful_watermark.isoformat(),

@@ -101,7 +101,9 @@ class CloudWatchMetricsEmitter:
             metric_name="ExtractionDurationMs",
             value=duration_ms,
             unit="Milliseconds",
-            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code
+            ),
         )
 
     def emit_records_extracted(
@@ -117,7 +119,9 @@ class CloudWatchMetricsEmitter:
             metric_name="RecordsExtracted",
             value=float(count),
             unit="Count",
-            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code
+            ),
         )
 
     def emit_records_failed(
@@ -133,7 +137,9 @@ class CloudWatchMetricsEmitter:
             metric_name="RecordsFailed",
             value=float(count),
             unit="Count",
-            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code
+            ),
         )
 
     def emit_retry_count(
@@ -149,7 +155,9 @@ class CloudWatchMetricsEmitter:
             metric_name="RetryCount",
             value=float(count),
             unit="Count",
-            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code
+            ),
         )
 
     def emit_schema_drift_count(
@@ -165,7 +173,9 @@ class CloudWatchMetricsEmitter:
             metric_name="SchemaDriftCount",
             value=float(count),
             unit="Count",
-            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code
+            ),
         )
 
     def emit_watermark_lag_seconds(
@@ -181,7 +191,9 @@ class CloudWatchMetricsEmitter:
             metric_name="WatermarkLagSeconds",
             value=lag_seconds,
             unit="Seconds",
-            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code
+            ),
         )
 
     def emit_stage_duration(
@@ -197,7 +209,9 @@ class CloudWatchMetricsEmitter:
             metric_name="StageDurationMs",
             value=duration_ms,
             unit="Milliseconds",
-            dimensions=self._build_dimensions(source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code),
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code
+            ),
         )
 
     def emit_golden_record_count(
@@ -212,7 +226,9 @@ class CloudWatchMetricsEmitter:
             metric_name="GoldenRecordCount",
             value=float(count),
             unit="Count",
-            dimensions=self._build_dimensions(source_id, entity_id, environment, tenant_code=self._tenant_code),
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, tenant_code=self._tenant_code
+            ),
         )
 
     def emit_cluster_count(
@@ -227,7 +243,9 @@ class CloudWatchMetricsEmitter:
             metric_name="ClusterCount",
             value=float(count),
             unit="Count",
-            dimensions=self._build_dimensions(source_id, entity_id, environment, tenant_code=self._tenant_code),
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, tenant_code=self._tenant_code
+            ),
         )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
@@ -290,11 +308,13 @@ class CloudWatchMetricsEmitter:
         dims: list[dict[str, str]] = []
         if tenant_code:
             dims.append({"Name": "TenantCode", "Value": tenant_code})
-        dims.extend([
-            {"Name": "SourceId", "Value": source_id},
-            {"Name": "EntityId", "Value": entity_id},
-            {"Name": "Environment", "Value": environment},
-        ])
+        dims.extend(
+            [
+                {"Name": "SourceId", "Value": source_id},
+                {"Name": "EntityId", "Value": entity_id},
+                {"Name": "Environment", "Value": environment},
+            ]
+        )
         if stage:
             dims.append({"Name": "Stage", "Value": stage})
         return dims

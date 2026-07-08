@@ -36,7 +36,7 @@ Security (OWASP A03, A04):
 Performance:
   - Previous state is loaded into a dict keyed by pk_value — O(1) lookup per
     delta record.  Peak memory = O(n) where n = total current state size.
-  - At 36 K records × ~200 bytes avg ≈ 7 MB — well within Lambda 1 GB limit.
+  - At 36 K records x ~200 bytes avg ≈ 7 MB — well within Lambda 1 GB limit.
   - For future entities with millions of records, primary_key_field can be left
     as None to bypass merge entirely (append-only behaviour).
 """
@@ -46,6 +46,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from contracts.identifier_policy import validate_tenant_code
 from observability.structured_logger import get_platform_logger
 from transformation.curated_utils import (
     find_latest_curated_prefix,
@@ -151,6 +152,7 @@ class CuratedAccumulator:
         s3: Any,
         curated_s3_bucket: str,
         primary_key_field: str,
+        tenant_code: str,
         soft_delete_field: str | None = None,
         region_name: str = "us-east-1",
     ) -> None:
@@ -159,6 +161,10 @@ class CuratedAccumulator:
             s3:                Boto3 S3 client.
             curated_s3_bucket: Curated layer S3 bucket name — from Lambda env var.
             primary_key_field: Canonical field used as the upsert key.
+            tenant_code:       Tenant identity for this run — the previous-state
+                               lookup must match CuratedLayerWriter's tenant-
+                               prefixed write path (ARCH-1), or SCD merge silently
+                               reads no previous state (or another tenant's).
             soft_delete_field: Optional canonical field whose truthy value marks a
                                record as soft-deleted.
             region_name:       AWS region for DuckDB httpfs S3 configuration.
@@ -174,6 +180,7 @@ class CuratedAccumulator:
         self._s3 = s3
         self._bucket = curated_s3_bucket
         self._pk_field = primary_key_field
+        self._tenant_code = validate_tenant_code(tenant_code)
         self._soft_delete_field = soft_delete_field
         self._region_name = region_name
 
@@ -202,7 +209,7 @@ class CuratedAccumulator:
         """
         # ── Load previous state ───────────────────────────────────────────────
         previous_prefix = find_latest_curated_prefix(
-            self._s3, self._bucket, domain, entity_id
+            self._s3, self._bucket, domain, entity_id, self._tenant_code
         )
 
         if previous_prefix is None:
@@ -237,19 +244,14 @@ class CuratedAccumulator:
         # the delta-driven heuristic: merged < (previous + delta) implies deletes.
         # This is an approximation — exact count is available in DuckDB logs.
         merged_pk_set = {
-            str(r.get(self._pk_field, ""))
-            for r in merged
-            if r.get(self._pk_field) is not None
+            str(r.get(self._pk_field, "")) for r in merged if r.get(self._pk_field) is not None
         }
         delta_pk_set = {
             str(r.get(self._pk_field, ""))
             for r in delta_records
             if r.get(self._pk_field) is not None
         }
-        deleted_count = sum(
-            1 for pk in delta_pk_set
-            if pk not in merged_pk_set
-        )
+        deleted_count = sum(1 for pk in delta_pk_set if pk not in merged_pk_set)
 
         result = AccumulateResult(
             merged_records=merged,

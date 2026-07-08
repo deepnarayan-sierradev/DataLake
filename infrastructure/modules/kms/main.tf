@@ -25,7 +25,7 @@ resource "aws_kms_key" "this" {
   policy = var.key_policy != null ? var.key_policy : data.aws_iam_policy_document.default_key_policy.json
 
   tags = merge(var.tags, {
-    Name        = "${var.environment}-${var.capability}-kms-key"
+    Name        = "Edl${title(var.capability)}KmsKey"
     Environment = var.environment
     Capability  = var.capability
     ManagedBy   = "terraform"
@@ -33,7 +33,7 @@ resource "aws_kms_key" "this" {
 }
 
 resource "aws_kms_alias" "this" {
-  name          = "alias/${var.environment}-${var.capability}"
+  name          = "alias/Edl${title(var.capability)}"
   target_key_id = aws_kms_key.this.key_id
 }
 

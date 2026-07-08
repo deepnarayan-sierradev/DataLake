@@ -298,7 +298,7 @@ class TestConnectorRegistry:
         stub_cls = self._make_stub_connector()
         registry.register("builder-source")(stub_cls)
 
-        def _build(env, region, params, bucket):  # type: ignore[no-untyped-def]
+        def _build(env, region, params, bucket, tenant_code):  # type: ignore[no-untyped-def]
             return stub_cls(), object()
 
         registry.register_builder("builder-source", _build)
@@ -310,7 +310,7 @@ class TestConnectorRegistry:
         stub_cls = self._make_stub_connector()
         registry.register("dup-builder")(stub_cls)
 
-        def _build(env, region, params, bucket):  # type: ignore[no-untyped-def]
+        def _build(env, region, params, bucket, tenant_code):  # type: ignore[no-untyped-def]
             return stub_cls(), object()
 
         registry.register_builder("dup-builder", _build)
@@ -327,7 +327,7 @@ class TestConnectorRegistry:
         stub_cls = self._make_stub_connector()
         registry.register("reset-source")(stub_cls)
 
-        def _build(env, region, params, bucket):  # type: ignore[no-untyped-def]
+        def _build(env, region, params, bucket, tenant_code):  # type: ignore[no-untyped-def]
             return stub_cls(), object()
 
         registry.register_builder("reset-source", _build)

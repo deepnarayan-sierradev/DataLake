@@ -29,23 +29,22 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
 
 import pytest
 
 from connector_runtime.adapters.sage.products.x3.x3_query_engine import (
-    X3_PAGE_SIZE,
-    X3QueryBuildError,
-    X3QueryEngine,
     _LOWER_BOUND_PLACEHOLDER,
     _UPPER_BOUND_PLACEHOLDER,
     X3_ODATA_DISCRIMINANT,
+    X3_PAGE_SIZE,
+    X3QueryBuildError,
+    X3QueryEngine,
 )
 from connector_runtime.interfaces.connector_interface import (
     FieldContract,
     FieldDescriptor,
 )
-from contracts.entity_configuration_contract import FieldMode, LoadType
+from contracts.entity_configuration_contract import LoadType
 
 _ENDPOINT = "BPCUSTOMER"
 _SOURCE_ID = "sage"
@@ -56,7 +55,9 @@ _WATERMARK_FIELD = "MODDAT_0"
 
 
 def _make_field_contract(field_names: list[str] | None = None) -> FieldContract:
-    names = field_names if field_names is not None else ["BPCNUM_0", "BPCNAM_0", "MODDAT_0", "CRY_0"]
+    names = (
+        field_names if field_names is not None else ["BPCNUM_0", "BPCNAM_0", "MODDAT_0", "CRY_0"]
+    )
     descriptors = tuple(
         FieldDescriptor(name=n, data_type="string", is_nullable=True, is_queryable=True)
         for n in names
@@ -379,12 +380,16 @@ class TestBindParameters:
     def test_bind_invalid_lower_bound_raises(self) -> None:
         body = self._build_incremental_body()
         with pytest.raises(X3QueryBuildError, match="lower_bound"):
-            X3QueryEngine.bind_parameters(body, {"lower_bound": "'; DROP TABLE --", "upper_bound": _UPPER})
+            X3QueryEngine.bind_parameters(
+                body, {"lower_bound": "'; DROP TABLE --", "upper_bound": _UPPER}
+            )
 
     def test_bind_invalid_upper_bound_raises(self) -> None:
         body = self._build_incremental_body()
         with pytest.raises(X3QueryBuildError, match="upper_bound"):
-            X3QueryEngine.bind_parameters(body, {"lower_bound": _LOWER, "upper_bound": "not-a-date"})
+            X3QueryEngine.bind_parameters(
+                body, {"lower_bound": _LOWER, "upper_bound": "not-a-date"}
+            )
 
     def test_bind_empty_parameters_full_load_no_change(self) -> None:
         engine = _make_engine()

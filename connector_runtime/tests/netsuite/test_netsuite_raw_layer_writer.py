@@ -30,19 +30,19 @@ from connector_runtime.interfaces.connector_interface import ExtractionRecord
 
 _REGION = "us-east-1"
 _BUCKET = "test-raw-bucket"
-_PREFIX = "raw"
 _SOURCE_ID = "netsuite"
 _ENTITY_ID = "netsuite-customer"
 _RUN_ID = "run-20260612-120000000000-ab12cd34"
 _SCHEMA_FP = "a" * 64
 _DATE = "2026-06-12"
+_TENANT_CODE = "demo"
 
 
 def _make_writer() -> NetSuiteRawLayerWriter:
     return NetSuiteRawLayerWriter(
         s3_bucket=_BUCKET,
-        s3_prefix=_PREFIX,
         region_name=_REGION,
+        tenant_code=_TENANT_CODE,
     )
 
 
@@ -74,7 +74,8 @@ class TestPartitionPath:
             extraction_date=_DATE,
         )
         expected_prefix = (
-            f"{_PREFIX}/netsuite/{_ENTITY_ID}/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
+            f"{_TENANT_CODE}/netsuite/{_ENTITY_ID}"
+            f"/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
         )
         assert data_key == expected_prefix
 
@@ -92,7 +93,7 @@ class TestPartitionPath:
         )
         s3 = boto3.client("s3", region_name=_REGION)
         metadata_key = (
-            f"{_PREFIX}/netsuite/{_ENTITY_ID}"
+            f"{_TENANT_CODE}/netsuite/{_ENTITY_ID}"
             f"/extraction_date={_DATE}/run_id={_RUN_ID}/metadata.json"
         )
         body = s3.get_object(Bucket=_BUCKET, Key=metadata_key)["Body"].read()
@@ -121,7 +122,8 @@ class TestParquetOutput:
         )
         s3 = boto3.client("s3", region_name=_REGION)
         data_key = (
-            f"{_PREFIX}/netsuite/{_ENTITY_ID}/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
+            f"{_TENANT_CODE}/netsuite/{_ENTITY_ID}"
+            f"/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
         )
         parquet_bytes = s3.get_object(Bucket=_BUCKET, Key=data_key)["Body"].read()
         table = pq.read_table(BytesIO(parquet_bytes))
@@ -148,7 +150,8 @@ class TestParquetOutput:
         )
         s3 = boto3.client("s3", region_name=_REGION)
         data_key = (
-            f"{_PREFIX}/netsuite/{_ENTITY_ID}/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
+            f"{_TENANT_CODE}/netsuite/{_ENTITY_ID}"
+            f"/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
         )
         parquet_bytes = s3.get_object(Bucket=_BUCKET, Key=data_key)["Body"].read()
         table = pq.read_table(BytesIO(parquet_bytes))
@@ -202,4 +205,4 @@ class TestInputValidation:
 
     def test_empty_bucket_raises(self) -> None:
         with pytest.raises(ValueError, match="s3_bucket"):
-            NetSuiteRawLayerWriter(s3_bucket="", s3_prefix="raw", region_name=_REGION)
+            NetSuiteRawLayerWriter(s3_bucket="", region_name=_REGION, tenant_code=_TENANT_CODE)

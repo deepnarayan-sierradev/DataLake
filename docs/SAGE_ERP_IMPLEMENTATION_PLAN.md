@@ -69,7 +69,7 @@ event (`sage_rate_limit_exceeded`) so CloudWatch dashboards and alerting can sur
 The retry sleep itself is intentionally left to Step Functions (platform convention).
 
 #### GAP-S3 — No Terraform placeholder for Sage Secrets Manager secret (FIXED ✅)
-**Risk (OWASP A07):** There was no Terraform resource creating `{env}/sources/sage/intacct/credentials`
+**Risk (OWASP A07):** There was no Terraform resource creating `edl/sources/sage/intacct/credentials`
 even as a placeholder. Operators had to remember to create it manually before the first run.
 A missing secret causes a runtime `SageCredentialError` that is only caught when the Lambda
 actually executes, with no pre-deployment validation.  
@@ -319,7 +319,7 @@ as flat string keys.
 ### Phase 6 — Remaining Gaps (Recommended Next Sprint)
 
 **Priority 1 — Blockers / High Risk:**
-1. ~~**GAP-S3** — Terraform Secrets Manager placeholder for `{env}/sources/sage/intacct/credentials`~~
+1. ~~**GAP-S3** — Terraform Secrets Manager placeholder for `edl/sources/sage/intacct/credentials`~~
    RESOLVED: the Terraform resource exists (`infrastructure/modules/secrets/main.tf`). The only
    remaining step is populating the secret's actual credential *value* via
    `aws secretsmanager put-secret-value` (Terraform only creates an empty shell) — see §4.
@@ -356,7 +356,7 @@ as flat string keys.
 #    infrastructure/modules/secrets/main.tf — GAP-S3 is fixed), but only as an
 #    empty shell. Populating the actual credential value remains a manual step.
 AWS_PROFILE=dev aws secretsmanager put-secret-value \
-  --secret-id dev/sources/sage/intacct/credentials \
+  --secret-id edl/sources/sage/intacct/credentials \
   --secret-string '{
     "base_url":      "https://api.intacct.com/ia/api/v1",
     "token_url":     "https://api.intacct.com/ia/api/v1/auth/token",
@@ -389,7 +389,7 @@ AWS_PROFILE=dev python scripts/run_sage_connector_local.py \
 AWS_PROFILE=dev python scripts/trigger_extraction.py \
   --source-id sage --entity-id sage-intacct-customer \
   --environment dev --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct \
   --param object_path=accounts-receivable/customer
 
@@ -397,7 +397,7 @@ AWS_PROFILE=dev python scripts/trigger_extraction.py \
 AWS_PROFILE=dev python scripts/trigger_extraction.py \
   --source-id sage --entity-id sage-intacct-vendor \
   --environment dev --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct \
   --param object_path=accounts-payable/vendor
 ```
@@ -458,6 +458,6 @@ confirmed in practice by the X3 addition, which touched none of these.
 **Consequence:** The S3 raw path includes `{sage_product}` as the second segment
 (`sage/{product_name}/{entity_id}/`) to prevent cross-product collisions:
 ```
-s3://dev-edl-raw-layer/sage/intacct/sage-intacct-customer/extraction_date=.../
-s3://dev-edl-raw-layer/sage/x3/sage-x3-customer/extraction_date=.../
+s3://edl-raw-087972550871/sage/intacct/sage-intacct-customer/extraction_date=.../
+s3://edl-raw-087972550871/sage/x3/sage-x3-customer/extraction_date=.../
 ```

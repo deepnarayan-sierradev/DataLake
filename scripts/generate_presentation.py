@@ -389,7 +389,7 @@ def s06_extraction(prs):
          sz=Pt(12.5), color=TEXT, hdg="Reliability & Security", hc=ORANGE)
 
     _box(s, CX, Inches(5.3), Inches(10.1), Inches(0.56), fill=RGBColor(0xF0,0xF4,0xF8))
-    _t(s, "S3 path:  s3://dev-edl-raw-layer/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/part-NNNNN.parquet",
+    _t(s, "S3 path:  s3://edl-raw-087972550871/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/part-NNNNN.parquet",
        CX+Inches(0.15), Inches(5.36), Inches(9.8), Inches(0.48),
        sz=Pt(11), color=DEEP_BLUE, font=FM)
 
@@ -476,7 +476,7 @@ def s08_entity_res(prs):
     _blt(s, ["Blocking + fuzzy name matching — configurable per entity type",
              "Survivorship: preferred source per field (Salesforce → is_active; Sage → credit_limit)",
              "Entity types: company  ·  person  ·  contract  —  extensible via config",
-             "Output → s3://dev-edl-analytics-layer/canonical/{entity_type}/golden_date={date}/"],
+             "Output → s3://edl-analytics-087972550871/canonical/{entity_type}/golden_date={date}/"],
          CX, BY+Inches(4.15), Inches(10.1), Inches(1.2),
          sz=Pt(12), color=TEXT)
 
@@ -503,18 +503,18 @@ def s09_analytics(prs):
        sz=Pt(13), bold=True, color=DEEP_BLUE, font=FH)
     queries = [
         ("-- All companies", MUTED),
-        ("SELECT * FROM dev_edl_analytics.company", TEXT),
+        ("SELECT * FROM edl_analytics.company", TEXT),
         ("  WHERE analytics_date='2026-07-02';", TEXT),
         ("", TEXT),
         ("-- Active contracts only", MUTED),
-        ("SELECT COUNT(*) FROM dev_edl_analytics.contract", TEXT),
+        ("SELECT COUNT(*) FROM edl_analytics.contract", TEXT),
         ("  WHERE analytics_date='2026-07-02'", TEXT),
         ("  AND is_deleted = false;", TEXT),
         ("", TEXT),
         ("-- Cross-entity join", MUTED),
         ("SELECT c.account_name, COUNT(k.contract_id)", TEXT),
-        ("FROM dev_edl_analytics.company c", TEXT),
-        ("JOIN dev_edl_analytics.contract k", TEXT),
+        ("FROM edl_analytics.company c", TEXT),
+        ("JOIN edl_analytics.contract k", TEXT),
         ("  ON c.account_id = k.tenant_id", TEXT),
         ("GROUP BY c.account_name;", TEXT),
     ]
@@ -682,10 +682,10 @@ def s13_live(prs):
         _t(s, h, x+Inches(0.07), ht+Inches(0.06), w-Inches(0.1), Inches(0.28),
            sz=Pt(11), bold=True, color=WHITE, font=FH)
 
-    runs = [("MySQL — Contracts",     "Incremental (SCD1)", "35,971",  "dev_edl_analytics.contract",        "✅"),
-            ("Salesforce Account",    "Full load",          "34",       "dev_edl_analytics.company",          "✅"),
-            ("Salesforce Contact",    "Incremental",        "49",       "dev_edl_analytics.person",           "✅"),
-            ("Sage Intacct Customer", "Incremental",        "Live",     "dev_edl_analytics.company (merged)", "✅"),
+    runs = [("MySQL — Contracts",     "Incremental (SCD1)", "35,971",  "edl_analytics.contract",        "✅"),
+            ("Salesforce Account",    "Full load",          "34",       "edl_analytics.company",          "✅"),
+            ("Salesforce Contact",    "Incremental",        "49",       "edl_analytics.person",           "✅"),
+            ("Sage Intacct Customer", "Incremental",        "Live",     "edl_analytics.company (merged)", "✅"),
             ("Sage Intacct Vendor",   "Incremental",        "Live",     "Curated layer",                      "✅"),]
     for ri, (rv, bg) in enumerate(zip(runs, [WHITE, LIGHT_BG]*10)):
         rt = BY + Inches(2.48) + ri * Inches(0.44)

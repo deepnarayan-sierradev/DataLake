@@ -13,7 +13,7 @@ Security requirements enforced here (OWASP A07, A09):
   - Proactive refresh window (default 5 min) prevents mid-run token expiry.
 
 AWS resource used:
-  - Secrets Manager secret: {environment}/sources/salesforce/credentials
+  - Secrets Manager secret: edl/sources/salesforce/credentials
     Expected JSON keys: instance_url, client_id, client_secret
 
 Token endpoint:
@@ -46,8 +46,9 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
+# OWASP A03: these are URL/Secrets-Manager paths, not credential values.
 _TOKEN_URL_PATH: Final[str] = "/services/oauth2/token"  # noqa: S105
-_SECRET_PATH_TEMPLATE: Final[str] = "{environment}/sources/salesforce/credentials"  # noqa: S105
+_SECRET_PATH: Final[str] = "edl/sources/salesforce/credentials"  # noqa: S105
 
 # Refresh the token this many seconds before it actually expires to avoid
 # mid-extraction expiry on long-running Bulk API jobs.
@@ -91,7 +92,7 @@ class SalesforceAuthClient:
         self._environment = environment
         self._region = region_name
         self._credentials_client = SecretsManagerCredentialClient(
-            secret_id=_SECRET_PATH_TEMPLATE.format(environment=environment),
+            secret_id=_SECRET_PATH,
             region_name=region_name,
             required_keys=_REQUIRED_CREDENTIAL_KEYS,
             source_label="Salesforce",

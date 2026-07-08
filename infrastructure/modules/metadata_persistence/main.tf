@@ -23,7 +23,7 @@ locals {
 # ---------------------------------------------------------------------------
 
 resource "aws_dynamodb_table" "watermark_repository" {
-  name         = "${var.environment}-edl-watermark-repository"
+  name         = "EdlWatermarkRepository"
   billing_mode = "PAY_PER_REQUEST" # Auto-scales; no capacity planning for control plane data
 
   hash_key  = "source_id"
@@ -77,7 +77,7 @@ resource "aws_dynamodb_table" "watermark_repository" {
   }
 
   tags = merge(local.common_tags, {
-    Name    = "${var.environment}-edl-watermark-repository"
+    Name    = "EdlWatermarkRepository"
     Purpose = "watermark-state"
   })
 }
@@ -89,7 +89,7 @@ resource "aws_dynamodb_table" "watermark_repository" {
 # ---------------------------------------------------------------------------
 
 resource "aws_dynamodb_table" "run_audit_log" {
-  name         = "${var.environment}-edl-run-audit-log"
+  name         = "EdlRunAuditLog"
   billing_mode = "PAY_PER_REQUEST"
 
   hash_key  = "run_id"
@@ -146,7 +146,7 @@ resource "aws_dynamodb_table" "run_audit_log" {
   }
 
   tags = merge(local.common_tags, {
-    Name    = "${var.environment}-edl-run-audit-log"
+    Name    = "EdlRunAuditLog"
     Purpose = "pipeline-audit-trail"
   })
 }
@@ -158,7 +158,7 @@ resource "aws_dynamodb_table" "run_audit_log" {
 # ---------------------------------------------------------------------------
 
 resource "aws_dynamodb_table" "entity_extraction_config" {
-  name         = "${var.environment}-edl-entity-extraction-config"
+  name         = "EdlEntityExtractionConfig"
   billing_mode = "PAY_PER_REQUEST"
 
   hash_key  = "source_id"
@@ -192,7 +192,7 @@ resource "aws_dynamodb_table" "entity_extraction_config" {
   }
 
   tags = merge(local.common_tags, {
-    Name    = "${var.environment}-edl-entity-extraction-config"
+    Name    = "EdlEntityExtractionConfig"
     Purpose = "entity-extraction-config"
   })
 }
@@ -211,7 +211,7 @@ resource "aws_dynamodb_table" "entity_extraction_config" {
 # ---------------------------------------------------------------------------
 
 resource "aws_dynamodb_table" "entity_type_registry" {
-  name         = "${var.environment}-edl-entity-type-registry"
+  name         = "EdlEntityTypeRegistry"
   billing_mode = "PAY_PER_REQUEST"
 
   hash_key  = "tenant_code"
@@ -243,7 +243,7 @@ resource "aws_dynamodb_table" "entity_type_registry" {
   }
 
   tags = merge(local.common_tags, {
-    Name    = "${var.environment}-edl-entity-type-registry"
+    Name    = "EdlEntityTypeRegistry"
     Purpose = "entity-type-registry"
   })
 }
@@ -254,7 +254,7 @@ resource "aws_dynamodb_table" "entity_type_registry" {
 # ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "extraction_failure_dlq" {
-  name = "${var.environment}-edl-extraction-failure-dlq"
+  name = "EdlExtractionFailureDlq"
 
   # Message retention: 14 days (maximum) — gives operations team time to investigate
   message_retention_seconds = 1209600
@@ -266,7 +266,7 @@ resource "aws_sqs_queue" "extraction_failure_dlq" {
   visibility_timeout_seconds = 30
 
   tags = merge(local.common_tags, {
-    Name    = "${var.environment}-edl-extraction-failure-dlq"
+    Name    = "EdlExtractionFailureDlq"
     Purpose = "pipeline-failure-replay"
   })
 }
@@ -283,19 +283,26 @@ data "aws_iam_policy_document" "dlq_policy" {
     resources = [aws_sqs_queue.extraction_failure_dlq.arn]
   }
 
-  statement {
-    sid    = "AllowReplayOperatorReceive"
-    effect = "Allow"
-    principals {
-      type        = "AWS"
-      identifiers = var.replay_operator_role_arns
+  # SQS rejects a statement with an empty principal list ("No principals were
+  # found"), so this statement is omitted entirely when no replay operator
+  # roles are configured (e.g. dev, where replay_operator_role_arns defaults
+  # to []) rather than emitting principals = [].
+  dynamic "statement" {
+    for_each = length(var.replay_operator_role_arns) > 0 ? [1] : []
+    content {
+      sid    = "AllowReplayOperatorReceive"
+      effect = "Allow"
+      principals {
+        type        = "AWS"
+        identifiers = var.replay_operator_role_arns
+      }
+      actions = [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+      ]
+      resources = [aws_sqs_queue.extraction_failure_dlq.arn]
     }
-    actions = [
-      "sqs:ReceiveMessage",
-      "sqs:DeleteMessage",
-      "sqs:GetQueueAttributes",
-    ]
-    resources = [aws_sqs_queue.extraction_failure_dlq.arn]
   }
 
   # Deny non-TLS access
@@ -327,7 +334,7 @@ resource "aws_sqs_queue_policy" "extraction_failure_dlq" {
 # ---------------------------------------------------------------------------
 
 resource "aws_dynamodb_table" "source_onboarding_registry" {
-  name         = "${var.environment}-source-onboarding-registry"
+  name         = "EdlSourceOnboardingRegistry"
   billing_mode = "PAY_PER_REQUEST"
 
   hash_key = "source_id"

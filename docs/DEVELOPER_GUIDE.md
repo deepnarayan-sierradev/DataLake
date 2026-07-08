@@ -53,10 +53,13 @@ DynamoDB config record (see §11).
 **Multi-tenancy:** the platform is multi-tenant-aware, not strictly single-tenant. Every entity
 config, watermark, schema snapshot, and entity-type lookup carries a `tenant_code` (default:
 `demo`, from `contracts/identifier_policy.DEFAULT_TENANT_CODE`). Isolation is **not yet uniform**:
-S3 curated/schema-snapshot keys and the `entity-type-registry` DynamoDB table are genuinely
-isolated (bucket prefix / partition key); `entity-extraction-config` and `watermark-repository`
-are only isolated by an application-level guard today, and the raw layer isn't tenant-prefixed at
-all yet. See `docs/PRODUCTION_INCIDENT_RUNBOOK.md`'s "How tenant isolation actually works today"
+S3 keys for every layer (raw, curated, golden/canonical, analytics, schema-snapshots) and the
+`entity-type-registry` DynamoDB table are genuinely isolated (bucket prefix / partition key); as
+of the `ARCH-1` fix (2026-07-08), `watermark-repository`'s DynamoDB key is also genuinely
+tenant-scoped (`tenant_scoped_key()` on the partition key, not just a read-time check).
+`entity-extraction-config` remains isolated only by an application-level guard
+(`_enforce_tenant_match`, `ARCH-12`) — none of this is backed by an IAM-enforced boundary yet
+(`SEC-2`). See `docs/PRODUCTION_INCIDENT_RUNBOOK.md`'s "How tenant isolation actually works today"
 section and run `tests/test_tenant_isolation.py` before touching any repository class. A new
 Cognito-authenticated SaaS control-plane API (`connector_runtime/api/`) exists for self-service
 tenant provisioning and pipeline triggering — it's code-complete but not yet verified against a
@@ -75,7 +78,7 @@ live AWS deployment (see §2 and `connector_runtime/CLAUDE.md`).
 | `entity_resolution/` | Cross-source entity matching; writes golden records to analytics layer. `entity_type_registry.py` now has a DynamoDB-backed `EntityTypeRegistryClient` (tenant-scoped) alongside the original hardcoded fallback dicts. `publishing_shared.py` holds logic shared between the golden/canonical record publishers. |
 | `analytics_publisher/` | Publishes partitioned analytics Parquet; registers Glue partitions; emits an end-to-end pipeline SLA metric |
 | `schema_management/` | Schema snapshot capture and drift detection (tenant-prefixed S3 keys) |
-| `watermark_management/` | Incremental extraction watermark read/write (tenant-checked on read) |
+| `watermark_management/` | Incremental extraction watermark read/write (tenant-scoped DynamoDB key via `tenant_scoped_key()`, `ARCH-1`) |
 | `orchestration/` | Step Functions and EventBridge wiring. `pipeline_trigger/` (SQS FIFO → Step Functions, rate-limited) and `dlq_processor/` (DLQ → audit + alert + optional replay) are new dedicated Lambdas here, not just Terraform glue. |
 | `governance/` | Lineage records, data classification, retention enforcement |
 | `observability/` | Structured logging and CloudWatch metrics emission |
@@ -175,86 +178,88 @@ Run these to confirm all dev resources exist before doing any work:
 
 ```bash
 export AWS_PROFILE=dev
-aws s3 ls | grep dev-edl
+aws s3 ls | grep edl-
 ```
 
 Expected output:
 
 ```
-dev-edl-analytics-layer
-dev-edl-curated-layer
-dev-edl-raw-layer
-dev-edl-s3-access-logs
-dev-edl-schema-snapshots
-dev-edl-terraform-state
+edl-analytics-087972550871
+edl-curated-087972550871
+edl-raw-087972550871
+edl-access-logs-087972550871
+edl-schema-snapshots-087972550871
+edl-terraform-state-087972550871
 ```
 
 ### DynamoDB Tables
 
 ```bash
-aws dynamodb list-tables --region us-east-1 | grep dev-
+aws dynamodb list-tables --region us-east-1 | grep Edl
 ```
 
 Expected (see Known Gotcha #3 — whether these are actually Terraform-managed in this account is
 currently unverified; don't assume either way):
 
 ```
-dev-edl-entity-extraction-config
-dev-edl-run-audit-log
-dev-edl-watermark-repository
-dev-edl-entity-type-registry
+EdlEntityExtractionConfig
+EdlRunAuditLog
+EdlWatermarkRepository
+EdlEntityTypeRegistry
 ```
 
-> If you see the same names *without* the `-edl-` infix (e.g. `dev-entity-extraction-config`),
-> that's the older naming form referenced in some docs — prefer the `-edl-` form shown above,
-> which matches the actual Terraform `name` attribute.
+> Resource names no longer carry an environment prefix — since each of dev/staging/prod now lives
+> in its own separate AWS account, the env prefix was redundant and has been dropped. The `Edl`
+> workload token is now applied consistently in PascalCase (previously an inconsistent lowercase
+> infix present on some resources but not others). The environment is still tracked via an
+> `Environment` tag on every resource, not via the resource name.
 
 ### Secrets Manager
 
 ```bash
-aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name' | grep dev/sources
+aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name' | grep edl/sources
 ```
 
 Expected:
 
 ```
-dev/sources/salesforce/credentials
-dev/sources/netsuite/credentials
-dev/sources/mysql-rds/credentials
-dev/sources/sage/intacct/credentials
-dev/sources/sage/x3/credentials
+edl/sources/salesforce/credentials
+edl/sources/netsuite/credentials
+edl/sources/mysql-rds/credentials
+edl/sources/sage/intacct/credentials
+edl/sources/sage/x3/credentials
 ```
 
 ### Lambda Functions
 
 ```bash
-aws lambda list-functions --region us-east-1 --query 'Functions[?starts_with(FunctionName, `dev-`)].FunctionName'
+aws lambda list-functions --region us-east-1 --query 'Functions[?starts_with(FunctionName, `Edl`)].FunctionName'
 ```
 
 Expected:
 
 ```
-dev-analytics-layer-publisher
-dev-entity-resolution-pipeline
-dev-extraction-pipeline
-dev-transformation-pipeline
-dev-edl-control-plane
-dev-edl-credential-expiry-notifier
-dev-edl-pipeline-trigger
-dev-edl-dlq-processor
+EdlAnalyticsLayerPublisher
+EdlEntityResolutionPipeline
+EdlExtractionPipeline
+EdlTransformationPipeline
+EdlControlPlane
+EdlCredentialExpiryNotifier
+EdlPipelineTrigger
+EdlDlqProcessor
 ```
 
 ### Step Functions
 
 ```bash
-aws stepfunctions list-state-machines --region us-east-1 --query 'stateMachines[?starts_with(name, `dev-`)].name'
+aws stepfunctions list-state-machines --region us-east-1 --query 'stateMachines[?starts_with(name, `Edl`)].name'
 ```
 
 Expected — there is only one state machine (a previous version of this doc listed a second,
 `dev-data-pipeline`, that doesn't exist in `infrastructure/modules/orchestration/main.tf`):
 
 ```
-dev-extraction-pipeline
+EdlExtractionPipeline
 ```
 
 ---
@@ -321,7 +326,7 @@ make banned-names                      # rejects helper/util/common/manager iden
 
 ## 8. Running Pipelines
 
-> **Important:** The `dev-edl-raw-layer` S3 bucket policy only allows writes from the Lambda execution role (`dev-extraction-runtime-role`). Local scripts can run with `--dry-run` for schema/connectivity checks, but full extraction must go through Step Functions.
+> **Important:** The `edl-raw-087972550871` S3 bucket policy only allows writes from the Lambda execution role (`EdlExtractionRuntimeRole`). Local scripts can run with `--dry-run` for schema/connectivity checks, but full extraction must go through Step Functions.
 
 ### Dry-run connectors (schema + connectivity check, no S3 write)
 
@@ -355,7 +360,7 @@ python scripts/trigger_extraction.py \
   --entity-id mysql-rds-contracts \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param table_name=Contracts
 
 # Salesforce — Account (full load)
@@ -364,7 +369,7 @@ python scripts/trigger_extraction.py \
   --entity-id salesforce-account \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param object_name=Account
 
 # Salesforce — Contact (incremental)
@@ -373,7 +378,7 @@ python scripts/trigger_extraction.py \
   --entity-id salesforce-contact \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param object_name=Contact
 
 # Sage Intacct — Customer (incremental)
@@ -382,7 +387,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-intacct-customer \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct --param object_path=accounts-receivable/customer
 
 # Sage Intacct — Vendor (incremental)
@@ -391,7 +396,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-intacct-vendor \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct --param object_path=accounts-payable/vendor
 
 # Sage Intacct — AR Invoice (incremental)
@@ -400,7 +405,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-intacct-arinvoice \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct --param object_path=accounts-receivable/invoice
 
 # Sage Intacct — AP Bill (incremental)
@@ -409,7 +414,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-intacct-apbill \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct --param object_path=accounts-payable/bill
 
 # Sage X3 — Customer (incremental)
@@ -418,7 +423,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-x3-customer \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=x3 --param object_path=BPCUSTOMER
 
 # Sage X3 — Supplier (incremental)
@@ -427,7 +432,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-x3-supplier \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=x3 --param object_path=BPSUPPLIER
 ```
 
@@ -435,22 +440,22 @@ python scripts/trigger_extraction.py \
 
 ```sql
 -- Latest companies
-SELECT * FROM dev_edl_analytics.company WHERE analytics_date='2026-06-29';
+SELECT * FROM edl_analytics.company WHERE analytics_date='2026-06-29';
 
 -- Latest persons
-SELECT * FROM dev_edl_analytics.person WHERE analytics_date='2026-06-29';
+SELECT * FROM edl_analytics.person WHERE analytics_date='2026-06-29';
 
 -- Latest contracts
-SELECT COUNT(*) FROM dev_edl_analytics.contract   WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.contract   WHERE analytics_date='2026-06-29';
 
 -- Latest suppliers (Sage Intacct vendors + Sage X3 suppliers merged)
-SELECT COUNT(*) FROM dev_edl_analytics.supplier   WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.supplier   WHERE analytics_date='2026-06-29';
 
 -- Latest AR invoices
-SELECT COUNT(*) FROM dev_edl_analytics.ar_invoice  WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.ar_invoice  WHERE analytics_date='2026-06-29';
 
 -- Latest AP bills
-SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.ap_bill     WHERE analytics_date='2026-06-29';
 ```
 
 ---
@@ -507,27 +512,27 @@ The single zip `dist/extraction-pipeline.zip` serves all Lambda functions (diffe
 make lambda-package
 
 # Upload to S3 (note the SHA-256 hash printed — save it for Terraform var)
-ARTIFACTS_BUCKET=dev-edl-terraform-state make lambda-upload
+ARTIFACTS_BUCKET=edl-terraform-state-087972550871 make lambda-upload
 
 # After any code change, update deployed Lambdas immediately
 AWS_PROFILE=dev aws lambda update-function-code \
-  --function-name dev-extraction-pipeline \
-  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --function-name EdlExtractionPipeline \
+  --s3-bucket edl-terraform-state-087972550871 --s3-key lambda/extraction-pipeline.zip \
   --region us-east-1
 
 AWS_PROFILE=dev aws lambda update-function-code \
-  --function-name dev-transformation-pipeline \
-  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --function-name EdlTransformationPipeline \
+  --s3-bucket edl-terraform-state-087972550871 --s3-key lambda/extraction-pipeline.zip \
   --region us-east-1
 
 AWS_PROFILE=dev aws lambda update-function-code \
-  --function-name dev-entity-resolution-pipeline \
-  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --function-name EdlEntityResolutionPipeline \
+  --s3-bucket edl-terraform-state-087972550871 --s3-key lambda/extraction-pipeline.zip \
   --region us-east-1
 
 AWS_PROFILE=dev aws lambda update-function-code \
-  --function-name dev-analytics-layer-publisher \
-  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --function-name EdlAnalyticsLayerPublisher \
+  --s3-bucket edl-terraform-state-087972550871 --s3-key lambda/extraction-pipeline.zip \
   --region us-east-1
 ```
 
@@ -535,14 +540,14 @@ AWS_PROFILE=dev aws lambda update-function-code \
 
 | Lambda | Handler |
 |---|---|
-| `dev-extraction-pipeline` | `connector_runtime.extraction_pipeline_handler.lambda_handler` |
-| `dev-transformation-pipeline` | `transformation.transformation_pipeline_handler.lambda_handler` |
-| `dev-entity-resolution-pipeline` | `entity_resolution.entity_resolution_pipeline_handler.lambda_handler` |
-| `dev-analytics-layer-publisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` |
-| `dev-edl-control-plane` | `connector_runtime.api.control_plane_handler.lambda_handler` |
-| `dev-edl-credential-expiry-notifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` |
-| `dev-edl-pipeline-trigger` | `orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler` |
-| `dev-edl-dlq-processor` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` |
+| `EdlExtractionPipeline` | `connector_runtime.extraction_pipeline_handler.lambda_handler` |
+| `EdlTransformationPipeline` | `transformation.transformation_pipeline_handler.lambda_handler` |
+| `EdlEntityResolutionPipeline` | `entity_resolution.entity_resolution_pipeline_handler.lambda_handler` |
+| `EdlAnalyticsLayerPublisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` |
+| `EdlControlPlane` | `connector_runtime.api.control_plane_handler.lambda_handler` |
+| `EdlCredentialExpiryNotifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` |
+| `EdlPipelineTrigger` | `orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler` |
+| `EdlDlqProcessor` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` |
 
 All eight share the same deployment zip (see §10 above) — a code change to any handler requires
 rebuilding and re-uploading once, then an `update-function-code` call per affected function.
@@ -573,42 +578,43 @@ Configs are defined in `config/` — edit them there and re-seed, never directly
 EventBridge Scheduler (cron)
     │
     ▼
-SQS FIFO queue ──► dev-edl-pipeline-trigger Lambda (rate-limited) ──► Step Functions (dev-extraction-pipeline)
+SQS FIFO queue ──► EdlPipelineTrigger Lambda (rate-limited) ──► Step Functions (EdlExtractionPipeline)
     │  (the control-plane API's pipeline-trigger route enqueues here too — same path, not a
     │   parallel one)
     │
-    ├─ Step 1: dev-extraction-pipeline Lambda
+    ├─ Step 1: EdlExtractionPipeline Lambda
     │       Reads DynamoDB config (tenant_code-scoped) → fetches from source API
-    │       Writes Parquet to: s3://dev-edl-raw-layer/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/
-    │         (raw layer is NOT tenant-prefixed yet — see §1 Multi-tenancy note)
-    │       Updates watermark in DynamoDB (tenant-checked)
+    │       Writes Parquet to: s3://edl-raw-087972550871/{tenant_code}/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/
+    │         ({source} is one hyphenated segment: salesforce, netsuite, mysql-rds, sage-intacct, sage-x3)
+    │       Updates watermark in DynamoDB (tenant-scoped key, `ARCH-1`)
     │       If approaching the Lambda timeout mid-run: commits a partial watermark, emits a
     │       checkpoint audit record, and the state machine exits cleanly via the
     │       `ExtractionCheckpointed` terminal state instead of failing. Automatic resume from a
     │       checkpoint is NOT yet implemented — needs a manual re-trigger.
     │       On unrecoverable failure: message lands on the extraction-failure DLQ →
-    │       dev-edl-dlq-processor Lambda (audit record + SNS alert + optional auto-replay)
+    │       EdlDlqProcessor Lambda (audit record + SNS alert + optional auto-replay)
     │
-    ├─ Step 2: dev-transformation-pipeline Lambda
+    ├─ Step 2: EdlTransformationPipeline Lambda
     │       Reads raw Parquet → applies field mapping JSON
     │       Quality checks → PII masking (now actually wired up — see governance module)
     │       SCD Type 1 merge: loads previous curated state, merges delta by
     │       primary_key_field → writes FULL current-state Parquet to curated
     │       (full-load entities: writes delta only, no merge)
-    │       Writes to: s3://dev-edl-curated-layer/{tenant_code}/curated/{domain}/{entity_id}/
-    │       Registers Glue table
+    │       Writes to: s3://edl-curated-087972550871/{tenant_code}/curated/{domain}/{entity_id}/
+    │       Registers Glue table (tenant-scoped table name `{tenant_code}_{entity_id}_{domain}_curated`,
+    │         `ARCH-19`) and the run's `curated_date` partition
     │
-    ├─ Step 3: dev-entity-resolution-pipeline Lambda
+    ├─ Step 3: EdlEntityResolutionPipeline Lambda
     │       Loads latest curated data from ALL sources per entity type — streamed via DuckDB
     │       rather than fully materialized into memory
     │       Resolves entity type via EntityTypeRegistryClient (DynamoDB, tenant-scoped), falling
     │       back to hardcoded seed dicts if no registry record exists
     │       Runs matching (Jaro-Winkler + Jaccard)
-    │       Writes golden records to: s3://dev-edl-analytics-layer/canonical/{entity_type}/
+    │       Writes golden records to: s3://edl-analytics-087972550871/{tenant_code}/canonical/{entity_type}/
     │
-    └─ Step 4: dev-analytics-layer-publisher Lambda
+    └─ Step 4: EdlAnalyticsLayerPublisher Lambda
             Writes partitioned analytics Parquet
-            Path: s3://dev-edl-analytics-layer/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet
+            Path: s3://edl-analytics-087972550871/{tenant_code}/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet
             Registers Glue partition → queryable in Athena
             Emits an end-to-end pipeline SLA metric (run start → analytics publish latency)
 ```
@@ -637,7 +643,7 @@ SQS FIFO queue ──► dev-edl-pipeline-trigger Lambda (rate-limited) ──�
 
 3. **DynamoDB tables — unresolved doc/infra contradiction, verify before applying.** This doc previously said these tables are "NOT Terraform-managed... Terraform uses `data \"aws_dynamodb_table\"` lookups." That's contradicted by the actual code: `infrastructure/modules/metadata_persistence/main.tf` defines real `aws_dynamodb_table` *resource* blocks (with `prevent_destroy`) for `watermark_repository`, `run_audit_log`, `entity_extraction_config`, and `entity_type_registry` — and this predates the current round of changes (confirmed via `git log` on that file), so it's a pre-existing mismatch, not something newly broken. **Before running `terraform apply` in any environment**, run `terraform state list | grep dynamodb` to check whether these are already tracked in state. If they exist in AWS but aren't in state, `apply` will fail with "already exists"; if you're setting up a fresh environment, they may need to be created via Terraform directly rather than by hand as this doc used to instruct.
 
-4. **Raw layer bucket rejects IAM user writes** — `dev-edl-raw-layer` policy allows writes only from `dev-extraction-runtime-role` (Lambda). Local scripts must use `--dry-run`. Full runs go through Step Functions.
+4. **Raw layer bucket rejects IAM user writes** — `edl-raw-087972550871` policy allows writes only from `EdlExtractionRuntimeRole` (Lambda). Local scripts must use `--dry-run`. Full runs go through Step Functions.
 
 5. **Entity config `s3://` prefix required** — `target_raw_s3_prefix` and `schema_snapshot_s3_prefix` in entity configs must start with `s3://`. Bare paths fail Pydantic validation at runtime.
 
@@ -659,7 +665,7 @@ SQS FIFO queue ──► dev-edl-pipeline-trigger Lambda (rate-limited) ──�
 
 14. **Sage Intacct incremental watermark field is `auditInfo.modifiedAt`** — dot-notation key returned flat in query responses. Set `watermark_field` to this exact string in the entity config.
 
-15. **Sage uses per-product secret paths** — `{env}/sources/sage/intacct/credentials` and `{env}/sources/sage/x3/credentials` are separate Secrets Manager secrets. Intacct requires `token_url`, `client_id`, `client_secret`, `base_url`, `company_id`. X3 requires the same plus `folder` (the X3 company folder, e.g. `"SEED"`).
+15. **Sage uses per-product secret paths** — `edl/sources/sage/intacct/credentials` and `edl/sources/sage/x3/credentials` are separate Secrets Manager secrets. Intacct requires `token_url`, `client_id`, `client_secret`, `base_url`, `company_id`. X3 requires the same plus `folder` (the X3 company folder, e.g. `"SEED"`).
 
 16. **Sage X3 OData discriminant** — the X3 query engine embeds `"_x3_odata": true` in `query_text` JSON. `SageConnector.execute_extraction()` dispatches on this key to the OData GET path. Do not set this key manually in entity configs.
 

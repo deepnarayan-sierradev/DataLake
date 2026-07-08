@@ -31,93 +31,125 @@ from orchestration.pipeline_trigger.pipeline_trigger_handler import (
 
 class TestTriggerMessageValidation:
     def test_valid_message_parses(self) -> None:
-        msg = TriggerMessage.model_validate({
-            "source_id": "salesforce",
-            "entity_id": "salesforce-account",
-            "environment": "dev",
-            "connector_params": {"object_name": "Account"},
-        })
+        msg = TriggerMessage.model_validate(
+            {
+                "source_id": "salesforce",
+                "entity_id": "salesforce-account",
+                "environment": "dev",
+                "connector_params": {"object_name": "Account"},
+                "tenant_code": "demo",
+            }
+        )
         assert msg.source_id == "salesforce"
-        assert msg.tenant_code == "demo"   # default
-        assert msg.is_replay is False       # default
-
-    def test_tenant_code_default_is_demo(self) -> None:
-        msg = TriggerMessage.model_validate({
-            "source_id": "salesforce",
-            "entity_id": "salesforce-account",
-            "environment": "dev",
-        })
         assert msg.tenant_code == "demo"
+        assert msg.is_replay is False  # default
+
+    def test_missing_tenant_code_is_rejected(self) -> None:
+        """ARCH-17: tenant_code has no fail-open default — a message that
+        omits it must be rejected, not silently run as the demo tenant."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="tenant_code"):
+            TriggerMessage.model_validate(
+                {
+                    "source_id": "salesforce",
+                    "entity_id": "salesforce-account",
+                    "environment": "dev",
+                }
+            )
 
     def test_custom_tenant_code(self) -> None:
-        msg = TriggerMessage.model_validate({
-            "source_id": "salesforce",
-            "entity_id": "salesforce-account",
-            "environment": "dev",
-            "tenant_code": "acme-corp",
-        })
+        msg = TriggerMessage.model_validate(
+            {
+                "source_id": "salesforce",
+                "entity_id": "salesforce-account",
+                "environment": "dev",
+                "tenant_code": "acme-corp",
+            }
+        )
         assert msg.tenant_code == "acme-corp"
 
     def test_invalid_environment_raises(self) -> None:
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
-            TriggerMessage.model_validate({
-                "source_id": "salesforce",
-                "entity_id": "salesforce-account",
-                "environment": "PRODUCTION",  # invalid
-            })
+            TriggerMessage.model_validate(
+                {
+                    "source_id": "salesforce",
+                    "entity_id": "salesforce-account",
+                    "environment": "PRODUCTION",  # invalid
+                }
+            )
 
     def test_invalid_source_id_raises(self) -> None:
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
-            TriggerMessage.model_validate({
-                "source_id": "InvalidID!",
-                "entity_id": "salesforce-account",
-                "environment": "dev",
-            })
+            TriggerMessage.model_validate(
+                {
+                    "source_id": "InvalidID!",
+                    "entity_id": "salesforce-account",
+                    "environment": "dev",
+                }
+            )
 
     def test_invalid_tenant_code_raises(self) -> None:
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
-            TriggerMessage.model_validate({
-                "source_id": "salesforce",
-                "entity_id": "salesforce-account",
-                "environment": "dev",
-                "tenant_code": "UPPER_CASE",  # invalid
-            })
+            TriggerMessage.model_validate(
+                {
+                    "source_id": "salesforce",
+                    "entity_id": "salesforce-account",
+                    "environment": "dev",
+                    "tenant_code": "UPPER_CASE",  # invalid
+                }
+            )
 
     def test_extra_fields_forbidden(self) -> None:
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
-            TriggerMessage.model_validate({
-                "source_id": "salesforce",
-                "entity_id": "salesforce-account",
-                "environment": "dev",
-                "unknown_field": "should_fail",
-            })
+            TriggerMessage.model_validate(
+                {
+                    "source_id": "salesforce",
+                    "entity_id": "salesforce-account",
+                    "environment": "dev",
+                    "unknown_field": "should_fail",
+                }
+            )
 
     def test_missing_source_id_raises(self) -> None:
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
-            TriggerMessage.model_validate({
-                "entity_id": "salesforce-account",
-                "environment": "dev",
-            })
+            TriggerMessage.model_validate(
+                {
+                    "entity_id": "salesforce-account",
+                    "environment": "dev",
+                }
+            )
 
     def test_staging_environment_valid(self) -> None:
-        msg = TriggerMessage.model_validate({
-            "source_id": "netsuite",
-            "entity_id": "netsuite-customer",
-            "environment": "staging",
-        })
+        msg = TriggerMessage.model_validate(
+            {
+                "source_id": "netsuite",
+                "entity_id": "netsuite-customer",
+                "environment": "staging",
+                "tenant_code": "demo",
+            }
+        )
         assert msg.environment == "staging"
 
     def test_prod_environment_valid(self) -> None:
-        msg = TriggerMessage.model_validate({
-            "source_id": "netsuite",
-            "entity_id": "netsuite-customer",
-            "environment": "prod",
-        })
+        msg = TriggerMessage.model_validate(
+            {
+                "source_id": "netsuite",
+                "entity_id": "netsuite-customer",
+                "environment": "prod",
+                "tenant_code": "demo",
+            }
+        )
         assert msg.environment == "prod"
 
 
@@ -145,7 +177,9 @@ class TestProcessRecord:
 
     def test_starts_step_functions_execution(self) -> None:
         mock_sfn = MagicMock()
-        mock_sfn.start_execution.return_value = {"executionArn": "arn:aws:states:us-east-1:123:execution:sm:exec-001"}
+        mock_sfn.start_execution.return_value = {
+            "executionArn": "arn:aws:states:us-east-1:123:execution:sm:exec-001"
+        }
 
         with patch("orchestration.pipeline_trigger.pipeline_trigger_handler._sfn_client", mock_sfn):
             _process_record(self._make_sqs_record(self._valid_body()), "arn:sfn:test")
@@ -176,6 +210,15 @@ class TestProcessRecord:
     def test_invalid_source_id_raises_value_error(self) -> None:
         body = self._valid_body()
         body["source_id"] = "INVALID_ID!"
+        with pytest.raises(ValueError, match="failed validation"):
+            _process_record(self._make_sqs_record(body), "arn:sfn:test")
+
+    def test_missing_tenant_code_raises_value_error(self) -> None:
+        """ARCH-17: a record whose body omits tenant_code must be rejected by
+        _process_record (via TriggerMessage validation), never defaulted to
+        "demo" and started as a real Step Functions execution."""
+        body = self._valid_body()
+        del body["tenant_code"]
         with pytest.raises(ValueError, match="failed validation"):
             _process_record(self._make_sqs_record(body), "arn:sfn:test")
 
@@ -226,8 +269,12 @@ class TestProcessRecord:
 
     def test_no_records_in_event_is_noop(self) -> None:
         mock_sfn = MagicMock()
-        with patch("orchestration.pipeline_trigger.pipeline_trigger_handler._sfn_client", mock_sfn), \
-             patch.dict("os.environ", {"STATE_MACHINE_ARN": "arn:sfn:test", "AWS_REGION": "us-east-1"}):
+        with (
+            patch("orchestration.pipeline_trigger.pipeline_trigger_handler._sfn_client", mock_sfn),
+            patch.dict(
+                "os.environ", {"STATE_MACHINE_ARN": "arn:sfn:test", "AWS_REGION": "us-east-1"}
+            ),
+        ):
             lambda_handler({"Records": []}, None)
         mock_sfn.start_execution.assert_not_called()
 
@@ -237,8 +284,12 @@ class TestProcessRecord:
 
         event = {"Records": [{"messageId": "m1", "body": json.dumps(self._valid_body())}]}
 
-        with patch("orchestration.pipeline_trigger.pipeline_trigger_handler._sfn_client", mock_sfn), \
-             patch.dict("os.environ", {"STATE_MACHINE_ARN": "arn:sfn:test", "AWS_REGION": "us-east-1"}):
+        with (
+            patch("orchestration.pipeline_trigger.pipeline_trigger_handler._sfn_client", mock_sfn),
+            patch.dict(
+                "os.environ", {"STATE_MACHINE_ARN": "arn:sfn:test", "AWS_REGION": "us-east-1"}
+            ),
+        ):
             lambda_handler(event, None)
 
         mock_sfn.start_execution.assert_called_once()
@@ -258,10 +309,13 @@ class TestBatchSizeContract:
         """Handler must reject events with more than 1 SQS record (batch_size contract)."""
         import json
         from unittest.mock import patch
+
         record = {"messageId": "m1", "body": json.dumps(self._valid_body())}
         event = {"Records": [record, record]}  # 2 records — contract violation
 
-        with patch.dict("os.environ", {"STATE_MACHINE_ARN": "arn:sfn:test", "AWS_REGION": "us-east-1"}):
+        with patch.dict(
+            "os.environ", {"STATE_MACHINE_ARN": "arn:sfn:test", "AWS_REGION": "us-east-1"}
+        ):
             with pytest.raises(ValueError, match="batch_size must be 1"):
                 lambda_handler(event, None)
 
@@ -269,12 +323,17 @@ class TestBatchSizeContract:
         """Handler must accept events with exactly 1 SQS record."""
         import json
         from unittest.mock import MagicMock, patch
+
         mock_sfn = MagicMock()
         mock_sfn.start_execution.return_value = {"executionArn": "arn:fake"}
         record = {"messageId": "m1", "body": json.dumps(self._valid_body())}
         event = {"Records": [record]}
 
-        with patch("orchestration.pipeline_trigger.pipeline_trigger_handler._sfn_client", mock_sfn), \
-             patch.dict("os.environ", {"STATE_MACHINE_ARN": "arn:sfn:test", "AWS_REGION": "us-east-1"}):
+        with (
+            patch("orchestration.pipeline_trigger.pipeline_trigger_handler._sfn_client", mock_sfn),
+            patch.dict(
+                "os.environ", {"STATE_MACHINE_ARN": "arn:sfn:test", "AWS_REGION": "us-east-1"}
+            ),
+        ):
             lambda_handler(event, None)  # Must not raise
         mock_sfn.start_execution.assert_called_once()

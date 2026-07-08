@@ -33,13 +33,16 @@ class TestSalesforceConnectorParams:
         with pytest.raises(ValidationError):
             SalesforceConnectorParams.model_validate({"object_name": "Account", "extra": "bad"})
 
-    @pytest.mark.parametrize("bad_name", [
-        "1BadObject",       # starts with digit
-        "has space",        # space
-        "has-hyphen",       # hyphen
-        "",                 # empty
-        "a" * 81,           # too long
-    ])
+    @pytest.mark.parametrize(
+        "bad_name",
+        [
+            "1BadObject",  # starts with digit
+            "has space",  # space
+            "has-hyphen",  # hyphen
+            "",  # empty
+            "a" * 81,  # too long
+        ],
+    )
     def test_invalid_object_name_raises(self, bad_name: str) -> None:
         with pytest.raises(ValidationError):
             SalesforceConnectorParams.model_validate({"object_name": bad_name})
@@ -60,15 +63,20 @@ class TestMySqlRdsConnectorParams:
 
     def test_extra_key_raises(self) -> None:
         with pytest.raises(ValidationError):
-            MySqlRdsConnectorParams.model_validate({"table_name": "orders", "injection": "DROP TABLE"})
+            MySqlRdsConnectorParams.model_validate(
+                {"table_name": "orders", "injection": "DROP TABLE"}
+            )
 
-    @pytest.mark.parametrize("bad_name", [
-        "1bad",             # starts with digit
-        "has-hyphen",       # hyphen not allowed
-        "has space",        # space
-        "",                 # empty
-        "a" * 65,           # too long
-    ])
+    @pytest.mark.parametrize(
+        "bad_name",
+        [
+            "1bad",  # starts with digit
+            "has-hyphen",  # hyphen not allowed
+            "has space",  # space
+            "",  # empty
+            "a" * 65,  # too long
+        ],
+    )
     def test_invalid_table_name_raises(self, bad_name: str) -> None:
         with pytest.raises(ValidationError):
             MySqlRdsConnectorParams.model_validate({"table_name": bad_name})
@@ -100,9 +108,15 @@ class TestNetSuiteConnectorParams:
         with pytest.raises(ValidationError):
             NetSuiteConnectorParams.model_validate({"record_type": "customer", "bad_key": "value"})
 
-    @pytest.mark.parametrize("bad_name", [
-        "1bad", "has-hyphen", "has space", "",
-    ])
+    @pytest.mark.parametrize(
+        "bad_name",
+        [
+            "1bad",
+            "has-hyphen",
+            "has space",
+            "",
+        ],
+    )
     def test_invalid_record_type_raises(self, bad_name: str) -> None:
         with pytest.raises(ValidationError):
             NetSuiteConnectorParams.model_validate({"record_type": bad_name})
@@ -110,18 +124,22 @@ class TestNetSuiteConnectorParams:
 
 class TestSageConnectorParams:
     def test_valid_intacct_params(self) -> None:
-        p = SageConnectorParams.model_validate({
-            "sage_product": "intacct",
-            "object_path": "accounts-receivable/customer",
-        })
+        p = SageConnectorParams.model_validate(
+            {
+                "sage_product": "intacct",
+                "object_path": "accounts-receivable/customer",
+            }
+        )
         assert p.sage_product == "intacct"
         assert p.object_path == "accounts-receivable/customer"
 
     def test_valid_x3_params(self) -> None:
-        p = SageConnectorParams.model_validate({
-            "sage_product": "x3",
-            "object_path": "BPCUSTOMER",
-        })
+        p = SageConnectorParams.model_validate(
+            {
+                "sage_product": "x3",
+                "object_path": "BPCUSTOMER",
+            }
+        )
         assert p.sage_product == "x3"
 
     def test_missing_sage_product_raises(self) -> None:
@@ -134,28 +152,37 @@ class TestSageConnectorParams:
 
     def test_extra_key_raises(self) -> None:
         with pytest.raises(ValidationError):
-            SageConnectorParams.model_validate({
-                "sage_product": "intacct",
-                "object_path": "foo/bar",
-                "injection": "../../../etc/passwd",
-            })
+            SageConnectorParams.model_validate(
+                {
+                    "sage_product": "intacct",
+                    "object_path": "foo/bar",
+                    "injection": "../../../etc/passwd",
+                }
+            )
 
-    @pytest.mark.parametrize("bad_path", [
-        "../etc/passwd",    # path traversal
-        "/absolute/path",   # leading slash
-        "has space",        # space
-        "",                 # empty
-    ])
+    @pytest.mark.parametrize(
+        "bad_path",
+        [
+            "../etc/passwd",  # path traversal
+            "/absolute/path",  # leading slash
+            "has space",  # space
+            "",  # empty
+        ],
+    )
     def test_unsafe_object_path_raises(self, bad_path: str) -> None:
         with pytest.raises(ValidationError):
-            SageConnectorParams.model_validate({
-                "sage_product": "intacct",
-                "object_path": bad_path,
-            })
+            SageConnectorParams.model_validate(
+                {
+                    "sage_product": "intacct",
+                    "object_path": bad_path,
+                }
+            )
 
     def test_sage_product_uppercase_raises(self) -> None:
         with pytest.raises(ValidationError):
-            SageConnectorParams.model_validate({
-                "sage_product": "Intacct",  # uppercase not allowed
-                "object_path": "some/path",
-            })
+            SageConnectorParams.model_validate(
+                {
+                    "sage_product": "Intacct",  # uppercase not allowed
+                    "object_path": "some/path",
+                }
+            )

@@ -87,7 +87,10 @@ class TestCuratedLayerWriter:
     def test_tenant_code_prefixes_curated_path(self):
         """S3 prefix must start with tenant_code/ (§1.1)."""
         result = self.writer.write(
-            self._sample_records(), "customer", "salesforce-account", _RUN_ID,
+            self._sample_records(),
+            "customer",
+            "salesforce-account",
+            _RUN_ID,
             tenant_code="acme-corp",
         )
         assert result.s3_prefix.startswith("acme-corp/curated/")

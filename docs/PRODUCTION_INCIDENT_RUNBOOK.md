@@ -4,9 +4,9 @@
 **Purpose:** Quick response guide for common incidents  
 **Last updated:** 2026-07-07
 
-> **Lambda functions (prod):** `prod-extraction-pipeline` · `prod-transformation-pipeline` · `prod-entity-resolution-pipeline` · `prod-analytics-publisher`  
-> **Key buckets:** `prod-edl-raw-layer` · `prod-edl-curated-layer` · `prod-edl-analytics-layer` · `prod-edl-schema-snapshots`  
-> For dev equivalents replace `prod-` with `dev-`. See [PLATFORM_STATUS.md](PLATFORM_STATUS.md) for all resource names.
+> **Lambda functions:** `EdlExtractionPipeline` · `EdlTransformationPipeline` · `EdlEntityResolutionPipeline` · `EdlAnalyticsLayerPublisher`  
+> **Key buckets (prod):** `edl-raw-<PROD_ACCOUNT_ID>` · `edl-curated-<PROD_ACCOUNT_ID>` · `edl-analytics-<PROD_ACCOUNT_ID>` · `edl-schema-snapshots-<PROD_ACCOUNT_ID>`  
+> Resource names no longer carry an environment prefix — dev/staging/prod each live in their own AWS account, so the same PascalCase name (e.g. `EdlExtractionPipeline`) resolves in every account; only S3 bucket names differ per environment, ending in that account's ID instead of an env prefix. See [PLATFORM_STATUS.md](PLATFORM_STATUS.md) for all resource names.
 
 ---
 
@@ -50,7 +50,7 @@ aws stepfunctions describe-execution \
 
 # Examine DynamoDB config to understand what entity failed
 aws dynamodb get-item \
-  --table-name prod-edl-entity-extraction-config \
+  --table-name EdlEntityExtractionConfig \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 ```
 
@@ -60,7 +60,7 @@ aws dynamodb get-item \
 ```bash
 # Verify Lambda can reach Secrets Manager
 aws secretsmanager get-secret-value \
-  --secret-id prod/sources/salesforce/credentials \
+  --secret-id edl/sources/salesforce/credentials \
   --query 'SecretString' | grep instance_url
 
 # Verify Lambda can reach source API
@@ -71,12 +71,12 @@ curl -I https://YOUR_SALESFORCE_INSTANCE.salesforce.com/services/oauth2/token
 ```bash
 # Salesforce OAuth token expiry
 aws secretsmanager get-secret-value \
-  --secret-id prod/sources/salesforce/credentials \
+  --secret-id edl/sources/salesforce/credentials \
   --query 'SecretString' | jq .client_id
 
 # Has credential been rotated recently?
 aws secretsmanager describe-secret \
-  --secret-id prod/sources/salesforce/credentials \
+  --secret-id edl/sources/salesforce/credentials \
   --query 'RotationRules'
 ```
 
@@ -101,13 +101,13 @@ aws stepfunctions start-execution \
 ```bash
 # Immediately rotate the credential
 aws secretsmanager rotate-secret \
-  --secret-id prod/sources/salesforce/credentials \
+  --secret-id edl/sources/salesforce/credentials \
   --rotation-lambda-arn <ROTATION_LAMBDA_ARN> \
   --rotation-rules AutomaticallyAfterDays=90
 
 # Manually update new OAuth token
 aws secretsmanager put-secret-value \
-  --secret-id prod/sources/salesforce/credentials \
+  --secret-id edl/sources/salesforce/credentials \
   --secret-string '{"instance_url":"...","client_id":"NEW_ID","client_secret":"NEW_SECRET"}'
 
 # Trigger re-run
@@ -143,7 +143,7 @@ If missing: Add rule via Terraform or AWS console
 
 ```bash
 # Get the quality report from S3
-aws s3 cp s3://prod-edl-analytics/quality_reports/salesforce-account/2026-06-17.json - | jq '.blocking_violations'
+aws s3 cp s3://edl-analytics-<PROD_ACCOUNT_ID>/quality_reports/salesforce-account/2026-06-17.json - | jq '.blocking_violations'
 
 # Count failed records
 jq '.summary.total_records_failed' < 2026-06-17.json
@@ -162,7 +162,7 @@ SELECT
   COUNT(*) as violation_count,
   account_name,
   NULL as account_name_is_null
-FROM `dev-edl-raw-layer`.`salesforce_account`
+FROM `edl-raw-087972550871`.`salesforce_account`
 WHERE account_name IS NULL
   AND partition_date = '2026-06-17'
 GROUP BY account_name
@@ -172,7 +172,7 @@ LIMIT 10;
 SELECT 
   email,
   COUNT(*) as count
-FROM `dev-edl-raw-layer`.`salesforce_contact`
+FROM `edl-raw-087972550871`.`salesforce_contact`
 WHERE email NOT LIKE '%@%.%'
   AND partition_date = '2026-06-17'
 GROUP BY email
@@ -209,7 +209,7 @@ Timeline: Update policy, re-run transformation
 
 ```bash
 # Download current policy
-aws s3 cp s3://prod-edl-schema-snapshots/quality_policies/salesforce-account.json ./
+aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/quality_policies/salesforce-account.json ./
 
 # Edit policy file: change blocking violation to WARNING or update regex pattern
 # Example: change email pattern from strict to permissive
@@ -219,7 +219,7 @@ aws s3 cp s3://prod-edl-schema-snapshots/quality_policies/salesforce-account.jso
 python -m json.tool salesforce-account.json
 
 # Upload updated policy
-aws s3 cp salesforce-account.json s3://prod-edl-schema-snapshots/quality_policies/
+aws s3 cp salesforce-account.json s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/quality_policies/
 
 # Trigger transformation re-run with new policy
 aws lambda invoke \
@@ -247,7 +247,7 @@ aws lambda invoke \
 
 ```bash
 # Get the drift report from S3
-aws s3 cp s3://prod-edl-schema-snapshots/drift_reports/salesforce-account/2026-06-17.json - | jq '.'
+aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/drift_reports/salesforce-account/2026-06-17.json - | jq '.'
 
 # Example output:
 # {
@@ -275,7 +275,7 @@ aws s3 cp s3://prod-edl-schema-snapshots/drift_reports/salesforce-account/2026-0
 # Example for MySQL:
 aws rds-data execute-statement \
   --resource-arn "arn:aws:rds:us-east-1:ACCOUNT_ID:db:prod-rds-instance" \
-  --secret-arn "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:prod/sources/mysql-rds/credentials" \
+  --secret-arn "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:edl/sources/mysql-rds/credentials" \
   --sql "DESCRIBE prod_schema.orders"
 ```
 
@@ -297,18 +297,18 @@ aws rds-data execute-statement \
 
 ```bash
 # Update schema snapshot to reflect new schema
-aws s3 cp s3://prod-edl-schema-snapshots/schemas/salesforce-account/latest.json ./schema-latest.json
+aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/schemas/salesforce-account/latest.json ./schema-latest.json
 
 # Update field mapping to exclude removed field
-aws s3 cp s3://prod-edl-schema-snapshots/field_mappings/salesforce-account/v1.json ./mapping-v1.json
+aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/field_mappings/salesforce-account/v1.json ./mapping-v1.json
 # Edit: remove any reference to LegacyAccountId__c
 # Save as v2.json
 
-aws s3 cp ./mapping-v2.json s3://prod-edl-schema-snapshots/field_mappings/salesforce-account/v2.json
+aws s3 cp ./mapping-v2.json s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/field_mappings/salesforce-account/v2.json
 
 # Update entity config to reference new mapping version
 aws dynamodb update-item \
-  --table-name prod-edl-entity-extraction-config \
+  --table-name EdlEntityExtractionConfig \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}' \
   --attribute-updates '{"field_mapping_version":{"Value":{"S":"v2"},"Action":"PUT"}}'
 
@@ -338,7 +338,7 @@ aws lambda invoke \
 ```bash
 # Get latest extraction run for the entity
 aws dynamodb query \
-  --table-name prod-edl-watermark-repository \
+  --table-name EdlWatermarkRepository \
   --key-condition-expression "source_id = :source AND entity_id = :entity" \
   --expression-attribute-values '{":source":{"S":"salesforce"},":entity":{"S":"salesforce-account"}}' \
   --sort-order Descending \
@@ -386,7 +386,7 @@ aws logs tail /aws/lambda/extraction --since 30m --follow
 ```bash
 # Check raw data write throughput
 aws s3api list-objects-v2 \
-  --bucket prod-edl-raw-layer \
+  --bucket edl-raw-<PROD_ACCOUNT_ID> \
   --prefix salesforce/salesforce-account/extraction_date=2026-06-17 \
   --query 'Contents | length'
 
@@ -480,7 +480,7 @@ aws logs tail /aws/lambda/extraction --since 1m --follow --filter-pattern "run-2
 ```bash
 # Check if replay completed successfully
 aws dynamodb query \
-  --table-name prod-edl-run-audit-log \
+  --table-name EdlRunAuditLog \
   --key-condition-expression "run_id = :run_id" \
   --expression-attribute-values '{":run_id":{"S":"run-20260617-020045678-xyz"}}' \
   | jq '.Items[] | {stage: .stage, status: .status}'
@@ -560,7 +560,7 @@ If entity exceeds 10M records/day, Lambda becomes impractical. Migrate to ECS:
 # Add ECS task definition for this entity
 # Edit extraction config in DynamoDB:
 aws dynamodb update-item \
-  --table-name prod-edl-entity-extraction-config \
+  --table-name EdlEntityExtractionConfig \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}' \
   --attribute-updates '{"compute_type":{"Value":{"S":"ECS_FARGATE"},"Action":"PUT"}}'
 
@@ -625,7 +625,8 @@ they are not uniform:
 | Layer | Mechanism | Enforcement point |
 |---|---|---|
 | S3 (raw, curated, schema snapshots, analytics, entity-config-if-S3-backend) | Key is always prefixed `{tenant_code}/...` | Genuinely enforceable via an S3 bucket-policy condition on the key prefix (not yet turned on in IAM — tracked as `SEC-2` follow-up) |
-| DynamoDB: `entity-extraction-config`, `watermark-repository` | Table is keyed on `(source_id, entity_id)` — **not** tenant-partitioned | Application-level guard only: `ConfigurationRepositoryClient._enforce_tenant_match`, `WatermarkRepository.get_watermark`'s tenant check |
+| DynamoDB: `watermark-repository` | Table is keyed on `(source_id, entity_id)`, but the `source_id` key attribute value is `tenant_scoped_key(tenant_code, source_id)` (`"{tenant_code}#{source_id}"`) as of the `ARCH-1` fix (2026-07-08) | Genuinely key-level isolation — a different tenant's `get_item`/`put_item` targets a different key entirely, not a post-read comparison. Not yet IAM-enforced (`SEC-2`), but a real code regression here means the *key* changed, not just a missing check |
+| DynamoDB: `entity-extraction-config` | Table is keyed on `(source_id, entity_id)` — **not** tenant-partitioned | Application-level guard only: `ConfigurationRepositoryClient._enforce_tenant_match` (`ARCH-12`, tracked deferred follow-up) |
 | DynamoDB: `entity-type-registry` | Table is keyed on `(tenant_code, sk)` — genuinely tenant-partitioned | DynamoDB key structure itself |
 | Control-plane API (`connector_runtime/api/control_plane_handler.py`) | Every tenant-scoped route cross-checks the path's `{tenant_code}` against the authenticated Cognito claim | `_authorize_path_tenant` — fails closed (401) if claims are absent, 403 if mismatched, and a run lookup for another tenant's `run_id` returns 404 (never 403), so the API never confirms a foreign run's existence |
 | Secrets Manager | **Not tenant-scoped today** — credentials are provisioned per source-connector, not per tenant | None — this is a known gap, not yet applicable until multiple tenants share one source-connector type with different credentials |
@@ -639,24 +640,25 @@ known, tested gap before assuming a live incident is novel.
 1. **Identify the tenant_code(s) involved.** Every structured log line, DynamoDB item, and S3 key
    under the mechanisms above carries `tenant_code`. Pull the specific `run_id` or record from the
    alert/report and read its `tenant_code` field directly — do not infer it from context.
-2. **Determine which layer leaked.** Cross-reference against the table above. A leak in a
-   DynamoDB-keyed-by-`(source_id, entity_id)` table (config, watermark) is an application-code
-   regression in the guard, not an IAM failure — IAM was never enforcing it. A leak in S3 or the
-   `entity-type-registry` table means either an IAM policy gap or a bug that skipped the key-prefix
-   step entirely — treat this as more severe, since the isolation mechanism itself failed, not just
-   an application-level check on top of it.
+2. **Determine which layer leaked.** Cross-reference against the table above. A leak in
+   `entity-extraction-config` is an application-code regression in `_enforce_tenant_match`, not an
+   IAM failure — IAM was never enforcing it. A leak in S3, `watermark-repository`, or the
+   `entity-type-registry` table means the key/prefix isolation mechanism itself failed (a code
+   regression that changed how the key is built, not a missing check on top of an already-shared
+   key) — treat this as more severe than a config-table leak, since there's no secondary guard
+   behind it.
 3. **Scope the affected record set:**
 
 ```bash
 # Find every run for a suspect tenant in the audit log (Scan — no tenant-code GSI yet)
 aws dynamodb scan \
-  --table-name prod-edl-run-audit-log \
+  --table-name EdlRunAuditLog \
   --filter-expression "tenant_code = :tc" \
   --expression-attribute-values '{":tc":{"S":"<SUSPECT_TENANT_CODE>"}}'
 
 # Find every S3 object under a tenant's prefix (any bucket)
-aws s3 ls s3://prod-edl-curated-layer/<SUSPECT_TENANT_CODE>/ --recursive
-aws s3 ls s3://prod-edl-raw-layer/<SUSPECT_TENANT_CODE>/ --recursive
+aws s3 ls s3://edl-curated-<PROD_ACCOUNT_ID>/<SUSPECT_TENANT_CODE>/ --recursive
+aws s3 ls s3://edl-raw-<PROD_ACCOUNT_ID>/<SUSPECT_TENANT_CODE>/ --recursive
 ```
 
 ### Step 2: Contain (10 min)
@@ -664,14 +666,15 @@ aws s3 ls s3://prod-edl-raw-layer/<SUSPECT_TENANT_CODE>/ --recursive
 - If the leak is at the **control-plane API**: revoke the offending Cognito refresh token / disable
   the user pool app client temporarily if the auth check itself is compromised (not just a single
   bad request).
-- If the leak is in **application-level DynamoDB guards** (config or watermark tables): the
-  underlying data was never IAM-isolated, so containment means fixing and redeploying the guard
-  code immediately (`connector_runtime/configuration_repository/configuration_repository.py` or
-  `watermark_management/watermark_repository/watermark_repository.py`), not just an access-policy
-  change.
-- If the leak is at the **S3 or entity-type-registry layer**: this is the mechanism the platform
-  advertises as genuinely enforced — treat as a security incident requiring immediate IAM policy
-  review (`infrastructure/modules/iam/main.tf`) in addition to the code fix.
+- If the leak is in the **`entity-extraction-config` application-level guard**: the underlying data
+  was never IAM-isolated, so containment means fixing and redeploying the guard code immediately
+  (`connector_runtime/configuration_repository/configuration_repository.py`), not just an
+  access-policy change.
+- If the leak is at the **S3, watermark-repository, or entity-type-registry layer**: these are the
+  mechanisms the platform advertises as genuinely key/prefix-enforced — a leak here means the key
+  construction itself regressed (`watermark_management/watermark_repository/watermark_repository.py`
+  for watermarks). Treat as a security incident requiring immediate IAM policy review
+  (`infrastructure/modules/iam/main.tf`) in addition to the code fix.
 
 ### Step 3: Confirm the Fix (10 min)
 
@@ -694,19 +697,23 @@ verification.
 - [ ] Add a regression test to `tests/test_tenant_isolation.py` covering the exact failure mode
 - [ ] Re-run the full isolation test suite plus `terraform plan` for the affected IAM module before
       the next deploy
-- [ ] If the leak was in a table listed above as "application-level guard only" (not yet
-      IAM-enforced), escalate the underlying `SEC-2` table-partitioning work — an application bug is
-      the second line of defense, not the first, and there currently is no first line for those two
-      tables
+- [ ] If the leak was in `entity-extraction-config` (the one table still on an application-level
+      guard, not key-level isolation), escalate the underlying `ARCH-12`/`SEC-2` partitioning work —
+      an application bug is the second line of defense, not the first, and there currently is no
+      first line for that table
 
 ### Detection gap
 
 There is no dedicated CloudWatch alarm today that would catch a cross-tenant read as it happens —
 detection currently relies on this runbook being invoked after a report (customer complaint, code
 review finding an unguarded call site, or a failing `tests/test_tenant_isolation.py` run in CI).
-Adding a real-time detection mechanism (e.g., a metric filter on `watermark_tenant_mismatch` /
-`curated_prefix_*_rejected` structured log events, which already fire when the application-level
-guards catch a mismatch) is tracked as follow-up observability work, not yet implemented.
+Adding a real-time detection mechanism (e.g., a metric filter on the `curated_prefix_*_rejected`
+structured log events, which already fire when `find_latest_curated_prefix`'s path-traversal guard
+rejects an unsafe prefix, or on `ConfigurationRepositoryClient`'s `_enforce_tenant_match` rejection
+path for `entity-extraction-config`) is tracked as follow-up observability work, not yet
+implemented. Note `watermark-repository` no longer has an equivalent mismatch log event to filter
+on — as of the `ARCH-1` fix, a cross-tenant watermark read simply misses the key entirely (a normal
+"no prior watermark" `get_item` miss), which is indistinguishable in logs from a genuine first run.
 
 ---
 
@@ -754,43 +761,43 @@ Quick reference for tools and AWS services used during incident investigation an
 
 | Service | Console path | Key view for incidents |
 |---|---|---|
-| **Step Functions** | Console → Step Functions → State Machines → `{env}-extraction-orchestration-workflow` | Execution history; failed executions; input/output per stage |
-| **Lambda** | Console → Lambda → Functions → `{env}-extraction-*` | Invocation errors; CloudWatch log link; concurrency |
-| **CloudWatch Logs** | Console → CloudWatch → Log Groups → `/edl/{env}/*` | Structured JSON log events; filter by `run_id` |
+| **Step Functions** | Console → Step Functions → State Machines → `EdlExtractionPipeline` | Execution history; failed executions; input/output per stage |
+| **Lambda** | Console → Lambda → Functions → `EdlExtraction*` | Invocation errors; CloudWatch log link; concurrency |
+| **CloudWatch Logs** | Console → CloudWatch → Log Groups → `/edl/*` | Structured JSON log events; filter by `run_id` |
 | **CloudWatch Alarms** | Console → CloudWatch → Alarms | Active alarms; threshold; recent datapoints |
 | **X-Ray** | Console → X-Ray → Traces | Service map; latency; fault trace for specific `run_id` |
-| **DynamoDB** | Console → DynamoDB → Tables → `{env}-edl-watermark-repository` | Current watermark; version; last run ID |
-| **DynamoDB** | Console → DynamoDB → Tables → `{env}-edl-run-audit-log` | Stage-by-stage audit record per run |
-| **SQS (DLQ)** | Console → SQS → `{env}-extraction-dlq` | Message count; message body (contains `run_id`, `source_id`, `entity_id`, `failed_stage`) |
-| **S3** | Console → S3 → `{env}-schema-snapshots` | Latest schema snapshot; drift report |
-| **Secrets Manager** | Console → Secrets Manager → `{env}/sources/{source}/credentials` | Last rotation date; version status |
+| **DynamoDB** | Console → DynamoDB → Tables → `EdlWatermarkRepository` | Current watermark; version; last run ID |
+| **DynamoDB** | Console → DynamoDB → Tables → `EdlRunAuditLog` | Stage-by-stage audit record per run |
+| **SQS (DLQ)** | Console → SQS → `EdlExtractionFailureDlq` | Message count; message body (contains `run_id`, `source_id`, `entity_id`, `failed_stage`) |
+| **S3** | Console → S3 → `edl-schema-snapshots-<PROD_ACCOUNT_ID>` | Latest schema snapshot; drift report |
+| **Secrets Manager** | Console → Secrets Manager → `edl/sources/{source}/credentials` | Last rotation date; version status |
 
 ### CLI Quick Commands for Incident Investigation
 
 ```bash
 # Check current watermark for a source/entity
 aws dynamodb get-item \
-  --table-name prod-edl-watermark-repository \
+  --table-name EdlWatermarkRepository \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
 # Read DLQ messages (peek without deleting)
 aws sqs receive-message \
-  --queue-url https://sqs.us-east-1.amazonaws.com/ACCOUNT/prod-extraction-dlq \
+  --queue-url https://sqs.us-east-1.amazonaws.com/ACCOUNT/EdlExtractionFailureDlq \
   --max-number-of-messages 10 \
   --visibility-timeout 0
 
 # Get most recent Step Functions execution status
 aws stepfunctions list-executions \
-  --state-machine-arn arn:aws:states:us-east-1:ACCOUNT:stateMachine:prod-extraction-orchestration-workflow \
+  --state-machine-arn arn:aws:states:us-east-1:ACCOUNT:stateMachine:EdlExtractionPipeline \
   --status-filter FAILED \
   --max-results 5
 
 # Check latest schema snapshot
-aws s3 cp s3://prod-edl-schema-snapshots/salesforce/salesforce-account/latest.json -
+aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/salesforce/salesforce-account/latest.json -
 
 # Check CloudWatch alarm state
 aws cloudwatch describe-alarms \
-  --alarm-names prod-extraction-failures prod-schema-drift-breaking prod-watermark-lag
+  --alarm-names EdlExtractionFailures EdlSchemaDriftBreaking EdlWatermarkLag
 
 # Trigger manual replay
 python scripts/trigger_extraction.py \
@@ -816,9 +823,9 @@ python scripts/trigger_extraction.py \
 
 | Layer | Tool | Location |
 |---|---|---|
-| Structured logs | structlog → CloudWatch Logs | Log group: `/edl/{env}/{service}` |
+| Structured logs | structlog → CloudWatch Logs | Log group: `/edl/{service}` |
 | Custom metrics | CloudWatch (namespace: `EnterpriseDatalake`) | 6 canonical metrics per run |
 | Alarms | CloudWatch Alarms → SNS → Email/PagerDuty | 4 platform alarms |
 | Distributed traces | AWS X-Ray | Service map; trace by `run_id` annotation |
-| DLQ | SQS `{env}-extraction-dlq` | KMS-encrypted; 14-day message retention |
+| DLQ | SQS `EdlExtractionFailureDlq` | KMS-encrypted; 14-day message retention |
 

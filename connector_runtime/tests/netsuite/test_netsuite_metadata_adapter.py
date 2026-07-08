@@ -72,7 +72,7 @@ _STANDARD_RESPONSE: dict = {
 }
 
 
-def _make_auth(token: str = "tok") -> MagicMock:  # noqa: S107
+def _make_auth(token: str = "tok") -> MagicMock:
     auth = MagicMock()
     auth.account_id = _ACCOUNT_ID
     auth.get_auth_headers.return_value = {"Authorization": f"OAuth realm={token}"}

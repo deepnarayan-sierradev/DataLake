@@ -44,9 +44,10 @@ if "AWS_PROFILE" not in os.environ:
 if "AWS_DEFAULT_REGION" not in os.environ:
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
-# Register connector by importing its module (triggers @register decorator)
+# Register connector by importing its module (triggers @register decorator).
+# These imports must come after the sys.path manipulation above (this script
+# runs standalone, not as an installed package), hence noqa: E402 throughout.
 import connector_runtime.adapters.mysql_rds.mysql_rds_connector  # noqa: E402, F401
-
 from connector_runtime.adapters.mysql_rds.mysql_rds_connector import MySqlRdsConnector  # noqa: E402
 from connector_runtime.adapters.mysql_rds.mysql_rds_credentials_client import (  # noqa: E402
     MySqlRdsCredentialsClient,
@@ -63,6 +64,7 @@ from contracts.entity_configuration_contract import (  # noqa: E402
     FieldMode,
     LoadType,
 )
+from contracts.identifier_policy import DEFAULT_TENANT_CODE  # noqa: E402
 from observability.structured_logger import get_platform_logger  # noqa: E402
 from watermark_management.watermark_repository.watermark_repository import (  # noqa: E402
     WatermarkRepository,
@@ -72,8 +74,7 @@ _logger = get_platform_logger(__name__)
 
 _ENVIRONMENT = "dev"
 _REGION = "us-east-1"
-_RAW_S3_BUCKET = "dev-edl-raw-layer"
-_RAW_S3_PREFIX = "raw"
+_RAW_S3_BUCKET = "edl-raw-087972550871"
 
 # Map entity_id → MySQL table name (matches DynamoDB entity configs)
 _ENTITY_TABLE_MAP: dict[str, str] = {
@@ -85,6 +86,7 @@ _ENTITY_TABLE_MAP: dict[str, str] = {
 # Step 1 + 2: Connection test
 # ---------------------------------------------------------------------------
 
+
 def test_connection(region: str, environment: str) -> bool:
     """Fetch credentials from Secrets Manager and open a test connection."""
     import pymysql
@@ -93,7 +95,10 @@ def test_connection(region: str, environment: str) -> bool:
     print("\n[1/4] Fetching credentials from Secrets Manager ...")
     creds_client = MySqlRdsCredentialsClient(environment=environment, region_name=region)
     params = creds_client.get_connection_parameters()
-    print(f"      host={params.host}  port={params.port}  db={params.database}  user={params.username}")
+    print(
+        f"      host={params.host}  port={params.port}  "
+        f"db={params.database}  user={params.username}"
+    )
 
     print("[2/4] Opening MySQL connection (SSL enforced) ...")
     try:
@@ -152,6 +157,7 @@ def discover_schema(connector: MySqlRdsConnector, entity_id: str) -> FieldContra
 # Step 4: Extraction + S3 write
 # ---------------------------------------------------------------------------
 
+
 def run_extraction(
     connector: MySqlRdsConnector,
     entity_id: str,
@@ -161,8 +167,8 @@ def run_extraction(
     watermark_upper: str,
     dry_run: bool,
     raw_s3_bucket: str,
-    raw_s3_prefix: str,
     region: str,
+    tenant_code: str,
     limit: int | None = None,
 ) -> None:
     """Build query, execute extraction, and stream Parquet to S3 (or peek 5 rows if dry-run)."""
@@ -197,6 +203,7 @@ def run_extraction(
         # that would transfer MBs of mediumtext data before yielding anything.
         import pymysql
         import pymysql.cursors
+
         from connector_runtime.adapters.mysql_rds.mysql_rds_credentials_client import (
             MySqlRdsCredentialsClient,
         )
@@ -207,16 +214,20 @@ def run_extraction(
             region_name=region,
         ).get_connection_parameters()
         # Build column list excluding the heavy mediumtext column for display
-        display_cols = [
-            f"`{fd.name}`"
-            for fd in field_contract.fields
-            if fd.name != "DSRequest"
-        ]
-        sample_sql = f"SELECT {', '.join(display_cols)} FROM `{connector._table_name}` LIMIT 5"
+        display_cols = [f"`{fd.name}`" for fd in field_contract.fields if fd.name != "DSRequest"]
+        # OWASP A03: display_cols come from field_contract.fields (schema
+        # introspection) and connector._table_name is internal connector
+        # state derived from validated entity config, not raw user/request
+        # input, so string-based construction here is not an injection risk.
+        sample_sql = f"SELECT {', '.join(display_cols)} FROM `{connector._table_name}` LIMIT 5"  # noqa: S608
         conn = pymysql.connect(
-            host=creds.host, port=creds.port, user=creds.username,
-            password=creds.password, database=creds.database,
-            ssl_disabled=False, connect_timeout=10,
+            host=creds.host,
+            port=creds.port,
+            user=creds.username,
+            password=creds.password,
+            database=creds.database,
+            ssl_disabled=False,
+            connect_timeout=10,
             cursorclass=pymysql.cursors.DictCursor,
         )
         with conn.cursor() as cur:
@@ -233,8 +244,8 @@ def run_extraction(
     print("      Streaming records to S3 in batches ...")
     writer = MySqlRdsRawLayerWriter(
         s3_bucket=raw_s3_bucket,
-        s3_prefix=raw_s3_prefix,
         region_name=region,
+        tenant_code=tenant_code,
     )
     record_iter = connector.execute_extraction(query_contract=query_contract, run_id=run_id)
     partition_prefix, total_count = writer.write_partition_streaming(
@@ -257,6 +268,7 @@ def run_extraction(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -282,7 +294,7 @@ def main() -> None:
     parser.add_argument("--region", default=_REGION)
     parser.add_argument("--environment", default=_ENVIRONMENT)
     parser.add_argument("--raw-s3-bucket", default=_RAW_S3_BUCKET)
-    parser.add_argument("--raw-s3-prefix", default=_RAW_S3_PREFIX)
+    parser.add_argument("--tenant-code", default=DEFAULT_TENANT_CODE)
     parser.add_argument(
         "--limit",
         type=int,
@@ -296,15 +308,17 @@ def main() -> None:
     table_name: str = _ENTITY_TABLE_MAP[entity_id]
     region: str = args.region
     environment: str = args.environment
+    tenant_code: str = args.tenant_code
 
     print("=" * 60)
     print("  MySQL RDS Connector — Local Test Runner")
     print("=" * 60)
     print(f"  Entity    : {entity_id}")
     print(f"  Table     : {table_name}")
+    print(f"  Tenant    : {tenant_code}")
     print(f"  Env       : {environment}")
     print(f"  Region    : {region}")
-    print(f"  S3 bucket : {args.raw_s3_bucket}/{args.raw_s3_prefix}")
+    print(f"  S3 bucket : {args.raw_s3_bucket}")
     print(f"  Dry run   : {args.dry_run}")
     row_limit_label = str(args.limit) if args.limit else "none (full table)"
     print(f"  Row limit : {row_limit_label}")
@@ -316,7 +330,9 @@ def main() -> None:
 
     # ── Load entity config from DynamoDB ─────────────────────────────────────
     config_client = ConfigurationRepositoryClient(environment=environment, region_name=region)
-    config = config_client.load_config(source_id="mysql-rds", entity_id=entity_id)
+    config = config_client.load_config(
+        source_id="mysql-rds", entity_id=entity_id, tenant_code=tenant_code
+    )
 
     if args.window_days is not None:
         config = config.model_copy(update={"extraction_window_days": args.window_days})
@@ -342,7 +358,9 @@ def main() -> None:
 
     if config.load_type == LoadType.INCREMENTAL:
         watermark_repo = WatermarkRepository(environment=environment, region_name=region)
-        record = watermark_repo.get_watermark(source_id="mysql-rds", entity_id=entity_id)
+        record = watermark_repo.get_watermark(
+            source_id="mysql-rds", entity_id=entity_id, tenant_code=tenant_code
+        )
         if record is not None:
             watermark_lower = record.last_successful_watermark.strftime("%Y-%m-%dT%H:%M:%SZ")
             print(f"  Watermark lower : {watermark_lower}")
@@ -361,8 +379,8 @@ def main() -> None:
         watermark_upper=watermark_upper,
         dry_run=args.dry_run,
         raw_s3_bucket=args.raw_s3_bucket,
-        raw_s3_prefix=args.raw_s3_prefix,
         region=region,
+        tenant_code=tenant_code,
         limit=args.limit,
     )
 

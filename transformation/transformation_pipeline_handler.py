@@ -13,6 +13,7 @@ Step Functions input schema (Parameters block in RunTransformation state):
     "entity_id":       str   — stable entity identifier (e.g. "mysql-rds-contracts")
     "environment":     str   — "dev" | "staging" | "prod"
     "run_id":          str   — run_id produced by the extraction stage
+    "tenant_code":     str   — tenant identity for this run (ARCH-4: required, fails closed)
     "raw_s3_prefix":   str   — S3 prefix where raw Parquet files were written
     "mapping_version": str   — "latest" or explicit version tag (e.g. "v1")
   }
@@ -56,6 +57,7 @@ from connector_runtime.configuration_repository.configuration_repository import 
     ConfigurationValidationError,
 )
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
 from observability.lambda_utils import (
     check_lambda_timeout,
     configure_xray,
@@ -73,15 +75,13 @@ from transformation.transformation_pipeline import TransformationContext, Transf
 _logger = get_platform_logger(__name__)
 
 _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
-    {"source_id", "entity_id", "environment", "run_id", "raw_s3_prefix"}
+    {"source_id", "entity_id", "environment", "run_id", "raw_s3_prefix", "tenant_code"}
 )
 _KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
 
 # mapping_version must be "latest" or a safe version tag like "v1", "v2-beta"
 # Rejects path traversal characters and excessively long strings (OWASP A03).
-_MAPPING_VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[a-z][a-z0-9\-_\.]{0,31}$"
-)
+_MAPPING_VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-_\.]{0,31}$")
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -116,8 +116,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     run_id: str = event["run_id"]
     raw_s3_prefix: str = event["raw_s3_prefix"]
     mapping_version: str = str(event.get("mapping_version") or "latest")
-    # Tenant code for S3 path isolation (§1.1). Default "demo" for backward compat.
-    tenant_code: str = str(event.get("tenant_code") or "demo")
+    # Tenant code for S3 path isolation (§1.1 / ARCH-4). Required — a missing
+    # or malformed tenant_code must fail closed rather than silently run as
+    # another tenant (OWASP A03).
+    tenant_code: str = str(event["tenant_code"])
 
     # Instrument AWS SDK calls with X-Ray subsegments (§5.5).
     configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id, run_id=run_id)
@@ -209,6 +211,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 s3=boto3.client("s3", region_name=region_name),
                 curated_s3_bucket=curated_s3_bucket,
                 primary_key_field=entity_config.primary_key_field,
+                tenant_code=tenant_code,
                 soft_delete_field=entity_config.soft_delete_field,
                 region_name=region_name,
             )
@@ -331,11 +334,16 @@ def _validate_event(event: dict[str, Any]) -> None:
             f"entity_id={entity_id!r} does not conform to the stable identifier format."
         )
     if not _STABLE_ID_PATTERN.match(run_id):
-        raise ValueError(
-            f"run_id={run_id!r} does not conform to the stable identifier format."
-        )
+        raise ValueError(f"run_id={run_id!r} does not conform to the stable identifier format.")
     if environment not in _KNOWN_ENVIRONMENTS:
         raise ValueError(
             f"environment={environment!r} is not a known deployment environment. "
             f"Expected one of {sorted(_KNOWN_ENVIRONMENTS)}."
         )
+
+    # tenant_code is required (ARCH-4) and must always be well-formed
+    # (OWASP A03 / SEC-5) — a missing or malformed tenant_code must fail
+    # closed rather than silently default to another tenant's identity.
+    tenant_code = str(event["tenant_code"])
+    if not _TENANT_CODE_PATTERN.match(tenant_code):
+        raise ValueError(f"tenant_code={tenant_code!r} does not conform to the tenant code format.")

@@ -34,6 +34,7 @@ from connector_runtime.adapters.salesforce.salesforce_bulk_query_job_controller 
 from connector_runtime.adapters.salesforce.salesforce_metadata_discovery_client import (
     SalesforceMetadataDiscoveryClient,
 )
+from connector_runtime.adapters.salesforce.salesforce_params import SalesforceConnectorParams
 from connector_runtime.interfaces.connector_interface import (
     ConnectorCapabilities,
     ConnectorInterface,
@@ -250,6 +251,7 @@ def _build_salesforce(
     region_name: str,
     connector_params: dict[str, str],
     raw_s3_bucket: str,
+    tenant_code: str,
 ) -> tuple[ConnectorInterface, Any]:
     """
     Factory used by the extraction pipeline Lambda to construct a fully-wired
@@ -276,14 +278,11 @@ def _build_salesforce(
     )
     writer = SalesforceRawLayerWriter(
         s3_bucket=raw_s3_bucket,
-        s3_prefix="salesforce",
         region_name=region_name,
+        tenant_code=tenant_code,
     )
     return connector, writer
 
 
 connector_registry.register_builder(_SOURCE_ID, _build_salesforce)
-
-from connector_runtime.adapters.salesforce.salesforce_params import SalesforceConnectorParams
-
 connector_registry.register_params_model(_SOURCE_ID, SalesforceConnectorParams)

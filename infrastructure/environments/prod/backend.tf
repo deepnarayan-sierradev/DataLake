@@ -8,14 +8,21 @@ terraform {
   }
 }
 
+# Bucket name embeds the prod account ID rather than the literal word "prod":
+# S3 bucket names are unique across all of AWS, not just this account, so
+# environment-as-account-ID is what actually guarantees no collision with
+# dev/staging — the word "prod" would not.
+# PROD_ACCOUNT_ID is a placeholder — replace with the real 12-digit AWS
+# account ID once the prod account exists and this bucket is bootstrapped
+# (prod is not provisioned yet — see docs/PLATFORM_STATUS.md).
 terraform {
   backend "s3" {
-    bucket         = "prod-edl-terraform-state"
+    bucket         = "edl-terraform-state-PROD_ACCOUNT_ID"
     key            = "environments/prod/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    kms_key_id     = "alias/prod-terraform-state"
-    dynamodb_table = "prod-edl-terraform-state-lock"
+    kms_key_id     = "alias/EdlTerraformState"
+    dynamodb_table = "EdlTerraformStateLock"
   }
 }
 

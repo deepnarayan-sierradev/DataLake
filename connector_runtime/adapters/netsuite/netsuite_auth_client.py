@@ -6,7 +6,7 @@ Implements OAuth 1.0a HMAC-SHA256 request signing for NetSuite's REST APIs
 
 Credential storage:
   - Credentials are retrieved exclusively from AWS Secrets Manager.
-  - Secret path: {environment}/sources/netsuite/credentials
+  - Secret path: edl/sources/netsuite/credentials
   - Expected JSON keys: account_id, consumer_key, consumer_secret,
     token_id, token_secret
 
@@ -44,7 +44,8 @@ from connector_runtime.interfaces.connector_interface import (
     ExtractionErrorClassification,
 )
 
-_SECRET_PATH_TEMPLATE: Final[str] = "{environment}/sources/netsuite/credentials"  # noqa: S105
+# OWASP A03: this is a Secrets Manager path, not a credential value.
+_SECRET_PATH: Final[str] = "edl/sources/netsuite/credentials"  # noqa: S105
 _OAUTH_VERSION: Final[str] = "1.0"
 _SIGNATURE_METHOD: Final[str] = "HMAC-SHA256"
 
@@ -88,7 +89,7 @@ class NetSuiteAuthClient:
         self._environment = environment
         self._region = region_name
         self._credentials_client = SecretsManagerCredentialClient(
-            secret_id=_SECRET_PATH_TEMPLATE.format(environment=environment),
+            secret_id=_SECRET_PATH,
             region_name=region_name,
             required_keys=_REQUIRED_CREDENTIAL_KEYS,
             source_label="NetSuite",

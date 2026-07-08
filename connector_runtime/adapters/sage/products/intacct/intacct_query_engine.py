@@ -87,8 +87,9 @@ _UPPER_BOUND_PLACEHOLDER: Final[str] = "__SAGE_UPPER_BOUND__"
 
 
 # SageQueryBuildError is defined in common/sage_errors.py and re-exported here
-# so existing imports from this module keep working.
-from connector_runtime.adapters.sage.common.sage_errors import SageQueryBuildError
+# so existing imports from this module keep working. Intentionally placed
+# after the module constants above rather than at top of file.
+from connector_runtime.adapters.sage.common.sage_errors import SageQueryBuildError  # noqa: E402
 
 
 class IntacctQueryEngine:
@@ -158,9 +159,7 @@ class IntacctQueryEngine:
             SageQueryBuildError: on validation failure.
         """
         if load_type == LoadType.INCREMENTAL and not watermark_field:
-            raise SageQueryBuildError(
-                "watermark_field is required for INCREMENTAL load type."
-            )
+            raise SageQueryBuildError("watermark_field is required for INCREMENTAL load type.")
 
         # Validate and collect field names from the FieldContract.
         field_names: list[str] = []
@@ -268,11 +267,12 @@ class IntacctQueryEngine:
 
         # Deep copy the query body and replace placeholder strings in filters.
         import copy  # local import to keep module-level imports lean
+
         bound = copy.deepcopy(query_body)
 
         filters: list[dict[str, Any]] = bound.get("filters", [])
         for filter_clause in filters:
-            for operator, condition in filter_clause.items():
+            for _operator, condition in filter_clause.items():
                 for field_name, value in condition.items():
                     if value == _LOWER_BOUND_PLACEHOLDER and lower is not None:
                         condition[field_name] = lower

@@ -18,6 +18,7 @@ Step Functions input schema (Parameters block in RunEntityResolution state):
     "entity_id":         str  — entity_id from the triggering extraction run
     "environment":       str  — "dev" | "staging" | "prod"
     "run_id":            str  — run_id produced by the extraction stage
+    "tenant_code":       str  — tenant identity for this run (ARCH-4: required, fails closed)
     "curated_s3_prefix": str  — S3 prefix where curated Parquet was written
   }
 
@@ -60,8 +61,8 @@ from typing import Any, Final
 import boto3
 import structlog
 
-from contracts.identifier_policy import DEFAULT_TENANT_CODE, TENANT_CODE_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from contracts.identifier_policy import TENANT_CODE_PATTERN
 from entity_resolution.canonical_record_publisher.canonical_record_publisher import (
     GoldenRecordPublicationError,
     GoldenRecordPublisher,
@@ -89,7 +90,7 @@ _logger = get_platform_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
-    {"source_id", "entity_id", "environment", "run_id", "curated_s3_prefix"}
+    {"source_id", "entity_id", "environment", "run_id", "curated_s3_prefix", "tenant_code"}
 )
 _KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
 # Matches curated S3 prefixes produced by the transformation stage.
@@ -135,7 +136,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     environment: str = event["environment"]
     run_id: str = event["run_id"]
     curated_s3_prefix: str = event["curated_s3_prefix"]
-    tenant_code: str = str(event.get("tenant_code") or DEFAULT_TENANT_CODE)
+    tenant_code: str = str(event["tenant_code"])
 
     _stage_start_ms = time.monotonic() * 1000
 
@@ -241,6 +242,7 @@ def _run_entity_resolution(
         curated_s3_prefix=curated_s3_prefix,
         pk_field=pk_field,
         contributing_sources=contributing_sources,
+        tenant_code=tenant_code,
     )
 
     if not all_curated_records:
@@ -281,8 +283,9 @@ def _run_entity_resolution(
         curated_records=all_curated_records,
         entity_type=entity_type,
         match_run_id=run_id,
-        id_field="_record_id",    # unified cross-source identifier
+        id_field="_record_id",  # unified cross-source identifier
         source_field="_source_id",
+        tenant_code=tenant_code,
     )
 
     _logger.info(
@@ -325,13 +328,13 @@ def _run_entity_resolution(
         _logger.warning("entity_resolution_metrics_emission_failed", error=str(_exc))
 
     return {
-        "canonical_prefix":           result.analytics_s3_prefix,
-        "entity_type":                result.entity_type,
+        "canonical_prefix": result.analytics_s3_prefix,
+        "entity_type": result.entity_type,
         "input_curated_record_count": result.input_curated_record_count,
-        "golden_record_count":        result.golden_record_count,
-        "cluster_count":              result.cluster_count,
-        "golden_date":                result.golden_date,
-        "published_at":               result.published_at,
+        "golden_record_count": result.golden_record_count,
+        "cluster_count": result.cluster_count,
+        "golden_date": result.golden_date,
+        "published_at": result.published_at,
     }
 
 
@@ -350,6 +353,7 @@ def _load_all_contributing_records(
     curated_s3_prefix: str,
     pk_field: str,
     contributing_sources: list[tuple[str, str]],
+    tenant_code: str,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """
     Load and tag curated records from every source contributing to an entity type.
@@ -390,7 +394,7 @@ def _load_all_contributing_records(
         else:
             # Other source — find the latest curated partition in the bucket.
             prefix = find_latest_curated_prefix(
-                s3, curated_s3_bucket, contrib_domain, contrib_entity_id
+                s3, curated_s3_bucket, contrib_domain, contrib_entity_id, tenant_code
             )
             if prefix is None:
                 _logger.info(
@@ -409,9 +413,7 @@ def _load_all_contributing_records(
         # work. For each source we tag then immediately extend the combined
         # pool — the per-source list is released after extend() so only one
         # source's untagged data is in memory at a time during loading.
-        source_records = load_curated_records_duckdb(
-            s3, curated_s3_bucket, prefix, region_name
-        )
+        source_records = load_curated_records_duckdb(s3, curated_s3_bucket, prefix, region_name)
         _logger.info(
             "entity_resolution_source_loaded",
             contrib_source_id=contrib_source_id,
@@ -466,20 +468,16 @@ def _validate_event(event: dict[str, Any]) -> None:
     environment = str(event["environment"])
     if environment not in _KNOWN_ENVIRONMENTS:
         raise ValueError(
-            f"Unknown environment={environment!r}. "
-            f"Expected one of {sorted(_KNOWN_ENVIRONMENTS)}."
+            f"Unknown environment={environment!r}. Expected one of {sorted(_KNOWN_ENVIRONMENTS)}."
         )
 
     curated_prefix = str(event["curated_s3_prefix"])
     if not _SAFE_S3_PREFIX_PATTERN.match(curated_prefix.rstrip("/")):
-        raise ValueError(
-            f"curated_s3_prefix={curated_prefix!r} contains disallowed characters."
-        )
+        raise ValueError(f"curated_s3_prefix={curated_prefix!r} contains disallowed characters.")
 
-    # tenant_code is optional (defaults to DEFAULT_TENANT_CODE) but must be
-    # well-formed when present (OWASP A03 / SEC-5).
-    tenant_code = event.get("tenant_code")
-    if tenant_code is not None and not TENANT_CODE_PATTERN.match(str(tenant_code)):
-        raise ValueError(
-            f"tenant_code={tenant_code!r} does not conform to the tenant code format."
-        )
+    # tenant_code is required (ARCH-4) and must always be well-formed
+    # (OWASP A03 / SEC-5) — a missing or malformed tenant_code must fail
+    # closed rather than silently default to another tenant's identity.
+    tenant_code = str(event["tenant_code"])
+    if not TENANT_CODE_PATTERN.match(tenant_code):
+        raise ValueError(f"tenant_code={tenant_code!r} does not conform to the tenant code format.")

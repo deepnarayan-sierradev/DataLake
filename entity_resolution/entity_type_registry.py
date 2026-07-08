@@ -37,16 +37,16 @@ _logger = get_platform_logger(__name__)
 # ---------------------------------------------------------------------------
 
 ENTITY_ID_TO_TYPE: Final[dict[str, str]] = {
-    "salesforce-account":     "company",
-    "netsuite-customer":      "company",       # ready for NetSuite onboarding
-    "sage-intacct-customer":  "company",       # Sage Intacct AR customer
-    "sage-x3-customer":       "company",       # Sage X3 business partner (customer)
-    "salesforce-contact":     "person",
-    "mysql-rds-contracts":    "contract",
-    "sage-intacct-vendor":    "supplier",      # Sage Intacct AP vendor
-    "sage-x3-supplier":       "supplier",      # Sage X3 business partner (supplier)
-    "sage-intacct-arinvoice": "ar_invoice",    # Sage Intacct AR invoice
-    "sage-intacct-apbill":    "ap_bill",       # Sage Intacct AP bill
+    "salesforce-account": "company",
+    "netsuite-customer": "company",  # ready for NetSuite onboarding
+    "sage-intacct-customer": "company",  # Sage Intacct AR customer
+    "sage-x3-customer": "company",  # Sage X3 business partner (customer)
+    "salesforce-contact": "person",
+    "mysql-rds-contracts": "contract",
+    "sage-intacct-vendor": "supplier",  # Sage Intacct AP vendor
+    "sage-x3-supplier": "supplier",  # Sage X3 business partner (supplier)
+    "sage-intacct-arinvoice": "ar_invoice",  # Sage Intacct AR invoice
+    "sage-intacct-apbill": "ap_bill",  # Sage Intacct AP bill
 }
 
 # ---------------------------------------------------------------------------
@@ -54,14 +54,14 @@ ENTITY_ID_TO_TYPE: Final[dict[str, str]] = {
 # ---------------------------------------------------------------------------
 
 ENTITY_TYPE_PK_FIELD: Final[dict[str, str]] = {
-    "company":    "account_id",   # Salesforce Account, NetSuite Customer,
-                                  #   Sage Intacct Customer, Sage X3 Customer —
-                                  #   each maps its native ID to account_id.
-    "person":     "contact_id",
-    "contract":   "contract_id",
-    "supplier":   "vendor_id",    # Sage Intacct Vendor, Sage X3 Supplier
-    "ar_invoice": "invoice_id",   # Sage Intacct AR Invoice
-    "ap_bill":    "bill_id",      # Sage Intacct AP Bill
+    "company": "account_id",  # Salesforce Account, NetSuite Customer,
+    #   Sage Intacct Customer, Sage X3 Customer —
+    #   each maps its native ID to account_id.
+    "person": "contact_id",
+    "contract": "contract_id",
+    "supplier": "vendor_id",  # Sage Intacct Vendor, Sage X3 Supplier
+    "ar_invoice": "invoice_id",  # Sage Intacct AR Invoice
+    "ap_bill": "bill_id",  # Sage Intacct AP Bill
 }
 
 # ---------------------------------------------------------------------------
@@ -73,9 +73,9 @@ ENTITY_TYPE_PK_FIELD: Final[dict[str, str]] = {
 ENTITY_TYPE_SOURCES: Final[dict[str, list[tuple[str, str]]]] = {
     "company": [
         ("salesforce", "salesforce-account"),
-        ("netsuite",   "netsuite-customer"),      # skipped gracefully when absent
-        ("sage",       "sage-intacct-customer"),  # skipped gracefully when absent
-        ("sage",       "sage-x3-customer"),       # skipped gracefully when absent
+        ("netsuite", "netsuite-customer"),  # skipped gracefully when absent
+        ("sage", "sage-intacct-customer"),  # skipped gracefully when absent
+        ("sage", "sage-x3-customer"),  # skipped gracefully when absent
     ],
     "person": [
         ("salesforce", "salesforce-contact"),
@@ -84,7 +84,7 @@ ENTITY_TYPE_SOURCES: Final[dict[str, list[tuple[str, str]]]] = {
         ("mysql-rds", "mysql-rds-contracts"),
     ],
     "supplier": [
-        ("sage", "sage-intacct-vendor"),    # Intacct preferred for contact richness
+        ("sage", "sage-intacct-vendor"),  # Intacct preferred for contact richness
         ("sage", "sage-x3-supplier"),
     ],
     "ar_invoice": [
@@ -100,7 +100,7 @@ ENTITY_TYPE_SOURCES: Final[dict[str, list[tuple[str, str]]]] = {
 # EntityTypeRegistryClient — DynamoDB-backed, tenant-scoped (ARCH-2)
 # ---------------------------------------------------------------------------
 
-_TABLE_TEMPLATE: Final[str] = "{environment}-edl-entity-type-registry"
+_TABLE_NAME: Final[str] = "EdlEntityTypeRegistry"
 
 
 @dataclass(frozen=True)
@@ -132,14 +132,10 @@ class EntityTypeRegistryClient:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("ENTITY_TYPE_REGISTRY_TABLE") or _TABLE_TEMPLATE.format(
-            environment=environment
-        )
+        table_name = os.environ.get("ENTITY_TYPE_REGISTRY_TABLE") or _TABLE_NAME
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
-    def get_entity_type(
-        self, entity_id: str, tenant_code: str = DEFAULT_TENANT_CODE
-    ) -> str | None:
+    def get_entity_type(self, entity_id: str, tenant_code: str = DEFAULT_TENANT_CODE) -> str | None:
         """Return the entity_type for entity_id, or None if unknown to this tenant."""
         tenant_code = validate_tenant_code(tenant_code)
         item = self._get_item(tenant_code, f"entity_id#{entity_id}")
@@ -147,9 +143,7 @@ class EntityTypeRegistryClient:
             return str(item["entity_type"])
         return ENTITY_ID_TO_TYPE.get(entity_id)
 
-    def get_pk_field(
-        self, entity_type: str, tenant_code: str = DEFAULT_TENANT_CODE
-    ) -> str | None:
+    def get_pk_field(self, entity_type: str, tenant_code: str = DEFAULT_TENANT_CODE) -> str | None:
         """Return the canonical primary-key field name for entity_type."""
         tenant_code = validate_tenant_code(tenant_code)
         item = self._get_item(tenant_code, f"entity_type#{entity_type}")

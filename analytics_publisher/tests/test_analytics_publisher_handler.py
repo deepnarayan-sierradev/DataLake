@@ -33,13 +33,19 @@ _BASE_EVENT: dict[str, Any] = {
     "environment": "dev",
     "run_id": "run-ap-test-001",
     "canonical_prefix": "entity-resolution/company/golden_date=2026-01-01/",
-    "curated_s3_prefix": "curated/salesforce/salesforce-account/curated_date=2026-01-01/run_id=run-1/",
+    "curated_s3_prefix": (
+        "curated/salesforce/salesforce-account/curated_date=2026-01-01/run_id=run-1/"
+    ),
+    "tenant_code": "demo",
 }
 
 
 class TestValidateEventTenantCode:
-    def test_missing_tenant_code_is_allowed(self) -> None:
-        _validate_event(dict(_BASE_EVENT))
+    def test_missing_tenant_code_raises(self) -> None:
+        """ARCH-4: tenant_code must fail closed, not silently default."""
+        event = {k: v for k, v in _BASE_EVENT.items() if k != "tenant_code"}
+        with pytest.raises(ValueError, match="tenant_code"):
+            _validate_event(event)
 
     def test_valid_tenant_code_is_allowed(self) -> None:
         _validate_event({**_BASE_EVENT, "tenant_code": "acme-corp"})
@@ -195,13 +201,14 @@ class _FakeEntityTypeRegistry:
 class _FakeGlueExceptions:
     # Named to match the real boto3 Glue client's exceptions.AlreadyExistsException
     # for duck-typed except-clause compatibility with the handler under test.
-    class AlreadyExistsException(Exception):  # noqa: N818
+    class AlreadyExistsException(Exception):  # noqa: N818 -- mirrors boto3's exception name
         pass
 
 
 class _FakeGlueClient:
     exceptions = _FakeGlueExceptions
 
+    # DatabaseName/Name mirror the real boto3 Glue client's get_table() kwargs.
     def get_table(self, DatabaseName: str, Name: str) -> dict[str, Any]:  # noqa: N803
         return {"Table": {"StorageDescriptor": {"Columns": [], "Location": "s3://x/"}}}
 
@@ -310,3 +317,87 @@ class TestPerf3SchemaReuse:
         # _record_id/_source_id are internal ER fields and must be stripped
         # before the schema reaches Glue registration.
         assert column_names == {"golden_id", "name"}
+
+
+class TestTenantIsolation:
+    """
+    ARCH-1 regression: two tenants publishing the same entity_type on the
+    same day must not overwrite each other's analytics output. Before the
+    fix, `analytics_prefix` was `analytics/{entity_type}/analytics_date=.../`
+    with no tenant_code segment at all — a guaranteed same-key collision with
+    no run_id in the path to disambiguate.
+    """
+
+    def test_two_tenants_same_entity_type_produce_distinct_prefixes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_values = {
+            "AWS_REGION": "us-east-1",
+            "ANALYTICS_S3_BUCKET": "analytics-bucket",
+            "GLUE_CATALOG_DATABASE": "edl_analytics",
+        }
+        monkeypatch.setattr(handler_module, "require_env", lambda name: env_values[name])
+        monkeypatch.setattr(handler_module, "EntityTypeRegistryClient", _FakeEntityTypeRegistry)
+        monkeypatch.setattr(handler_module, "CloudWatchMetricsEmitter", _FakeMetricsEmitter)
+
+        golden_records = [
+            {"golden_id": "g1", "name": "Acme", "_record_id": "sf:1", "_source_id": "salesforce"},
+        ]
+        monkeypatch.setattr(
+            handler_module,
+            "_load_parquet_records",
+            lambda s3, bucket, prefix: golden_records,
+        )
+        monkeypatch.setattr(
+            handler_module,
+            "DataCatalogRegistrationClient",
+            lambda region_name: _FakeCatalogClient(region_name, []),
+        )
+
+        fake_glue = _FakeGlueClient()
+        with mock_aws():
+            s3_client = boto3.client("s3", region_name="us-east-1")
+            s3_client.create_bucket(Bucket="analytics-bucket")
+            monkeypatch.setattr(
+                handler_module.boto3,
+                "client",
+                lambda service_name, region_name=None: (
+                    s3_client if service_name == "s3" else fake_glue
+                ),
+            )
+
+            result_a = handler_module._run_analytics_publication(
+                source_id="salesforce",
+                entity_id="salesforce-account",
+                environment="dev",
+                run_id="run-a",
+                canonical_prefix="entity-resolution/company/golden_date=2026-01-01/",
+                tenant_code="acme-corp",
+                run_started_at=None,
+                stage_start_ms=0.0,
+            )
+            result_b = handler_module._run_analytics_publication(
+                source_id="salesforce",
+                entity_id="salesforce-account",
+                environment="dev",
+                run_id="run-b",
+                canonical_prefix="entity-resolution/company/golden_date=2026-01-01/",
+                tenant_code="globex-eu",
+                run_started_at=None,
+                stage_start_ms=0.0,
+            )
+
+            # Distinct prefixes — the bug would have both write to the same key.
+            assert result_a["analytics_s3_prefix"] != result_b["analytics_s3_prefix"]
+            assert result_a["analytics_s3_prefix"].startswith("acme-corp/")
+            assert result_b["analytics_s3_prefix"].startswith("globex-eu/")
+
+            # Both objects genuinely exist independently — neither write
+            # overwrote the other.
+            key_a = result_a["analytics_s3_prefix"] + "data.parquet"
+            key_b = result_b["analytics_s3_prefix"] + "data.parquet"
+            assert s3_client.get_object(Bucket="analytics-bucket", Key=key_a)["Body"].read()
+            assert s3_client.get_object(Bucket="analytics-bucket", Key=key_b)["Body"].read()
+
+            # Distinct Glue tables too (tenant_code folded into the table name).
+            assert result_a["glue_table"] != result_b["glue_table"]

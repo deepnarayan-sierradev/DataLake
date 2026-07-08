@@ -193,7 +193,7 @@ slides:
         - "S3 Object Lock on raw layer — immutable audit trail"
         - "IAM least-privilege scoped to exact S3 prefixes"
         - "Run audit log entry written to DynamoDB per run"
-    code_block: "S3 path:  s3://dev-edl-raw-layer/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/part-NNNNN.parquet"
+    code_block: "S3 path:  s3://edl-raw-087972550871/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/part-NNNNN.parquet"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
   # ── Slide 7 — Transformation (two-column bullets + code block) ───────────
@@ -252,7 +252,7 @@ slides:
       - "Blocking + fuzzy name matching — configurable per entity type"
       - "Survivorship: preferred source per field (Salesforce → is_active; Sage → credit_limit)"
       - "Entity types: company  ·  person  ·  contract  —  extensible via config"
-      - "Output → s3://dev-edl-analytics-layer/canonical/{entity_type}/golden_date={date}/"
+      - "Output → s3://edl-analytics-087972550871/canonical/{entity_type}/golden_date={date}/"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
   # ── Slide 9 — Analytics Publisher (split) ────────────────────────────────
@@ -265,7 +265,7 @@ slides:
       items:
         - "Reads golden records from analytics layer (canonical/ prefix)"
         - "Writes partitioned Parquet: analytics_date=YYYY-MM-DD"
-        - "Registers Glue Data Catalog table (dev_edl_analytics)"
+        - "Registers Glue Data Catalog table (edl_analytics)"
         - "Adds Hive partition for the run's analytics_date"
         - "Grants Lake Formation permissions to analytics users"
         - "CloudWatch metrics: record count, partition, latency"
@@ -275,18 +275,18 @@ slides:
       background: "#F5F8FF"
       code: |
         -- All companies
-        SELECT * FROM dev_edl_analytics.company
+        SELECT * FROM edl_analytics.company
           WHERE analytics_date='2026-07-02';
 
         -- Active contracts only
-        SELECT COUNT(*) FROM dev_edl_analytics.contract
+        SELECT COUNT(*) FROM edl_analytics.contract
           WHERE analytics_date='2026-07-02'
           AND is_deleted = false;
 
         -- Cross-entity join
         SELECT c.account_name, COUNT(k.contract_id)
-        FROM dev_edl_analytics.company c
-        JOIN dev_edl_analytics.contract k
+        FROM edl_analytics.company c
+        JOIN edl_analytics.contract k
           ON c.account_id = k.tenant_id
         GROUP BY c.account_name;
     footer_strip: "Live today (dev):  34 companies  ·  49 persons  ·  35,971 contracts  — queryable via Athena right now"
@@ -409,13 +409,13 @@ slides:
       headers: ["Entity", "Load type", "Records", "Athena table", "Status"]
       widths:  [2.65, 1.75, 1.5, 2.8, 0.68]
       rows:
-        - ["MySQL — Contracts",     "Incremental (SCD1)", "35,971", "dev_edl_analytics.contract",         "✅"]
-        - ["Salesforce Account",    "Full load",          "34",     "dev_edl_analytics.company",           "✅"]
-        - ["Salesforce Contact",    "Incremental",        "49",     "dev_edl_analytics.person",            "✅"]
-        - ["Sage Intacct Customer", "Incremental",        "Live",   "dev_edl_analytics.company (merged)",  "✅"]
+        - ["MySQL — Contracts",     "Incremental (SCD1)", "35,971", "edl_analytics.contract",         "✅"]
+        - ["Salesforce Account",    "Full load",          "34",     "edl_analytics.company",           "✅"]
+        - ["Salesforce Contact",    "Incremental",        "49",     "edl_analytics.person",            "✅"]
+        - ["Sage Intacct Customer", "Incremental",        "Live",   "edl_analytics.company (merged)",  "✅"]
         - ["Sage Intacct Vendor",   "Incremental",        "Live",   "Curated layer",                       "✅"]
-        - ["NetSuite — Customer",   "Incremental (SCD1)", "Built",  "dev_edl_analytics.company (ready)",   "🔲"]
-    note: "Athena workgroup: dev-edl-analytics  ·  Database: dev_edl_analytics  ·  Account: 087972550871 / us-east-1"
+        - ["NetSuite — Customer",   "Incremental (SCD1)", "Built",  "edl_analytics.company (ready)",   "🔲"]
+    note: "Athena workgroup: EdlAnalytics  ·  Database: edl_analytics  ·  Account: 087972550871 / us-east-1"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
   # ── Slide 14 — Business Outcomes & ROI (table) ───────────────────────────

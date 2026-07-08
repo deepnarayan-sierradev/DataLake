@@ -98,10 +98,13 @@ class TestS3ParquetWriterSinglePut:
 
     def test_write_with_explicit_schema(self, writer, s3_client) -> None:
         import pyarrow as pa
-        schema = pa.schema([
-            pa.field("id", pa.string()),
-            pa.field("value", pa.int64()),
-        ])
+
+        schema = pa.schema(
+            [
+                pa.field("id", pa.string()),
+                pa.field("value", pa.int64()),
+            ]
+        )
         records = [{"id": "a", "value": 1}, {"id": "b", "value": 2}]
         count = writer.write(
             records_iter=iter(records),
@@ -221,7 +224,7 @@ class TestS3ParquetWriterMultipart:
         mock_s3.upload_part.return_value = {"ETag": '"etag-001"'}
         mock_s3.complete_multipart_upload.return_value = {}
 
-        # Produce data that exceeds 8MB threshold: 60K records × ~200 byte values
+        # Produce data that exceeds 8MB threshold: 60K records x ~200 byte values
         large_records = [{"id": str(i), "blob": "x" * 200} for i in range(60_000)]
 
         writer = S3ParquetWriter(mock_s3)
@@ -236,9 +239,7 @@ class TestS3ParquetWriterMultipart:
         # The important invariant is that all records were written.
         assert count == 60_000
         # At least one write method was called
-        assert (
-            mock_s3.put_object.called or mock_s3.create_multipart_upload.called
-        )
+        assert mock_s3.put_object.called or mock_s3.create_multipart_upload.called
 
 
 # ---------------------------------------------------------------------------

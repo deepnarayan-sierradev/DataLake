@@ -12,9 +12,11 @@ from moto import mock_aws
 from transformation.serving_store_loader import ServingStoreError, ServingStoreLoader
 
 _REGION = "us-east-1"
-_SECRET_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-db-creds"  # noqa: S105
+_SECRET_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-db-creds"
 _DB_NAME = "analytics_db"
 _TABLE_NAME = "salesforce_account"
+_TENANT_CODE = "acme-corp"
+_OTHER_TENANT_CODE = "globex-eu"
 
 
 def _make_creds():
@@ -44,12 +46,22 @@ class TestServingStoreLoaderSecretRetrieval:
     def test_invalid_table_name_raises(self):
         loader = ServingStoreLoader(_SECRET_ARN, _DB_NAME, _REGION)
         with pytest.raises(ValueError, match="Invalid table name"):
-            loader.load(_make_records(), "INVALID TABLE NAME", ("account_id",))
+            loader.load(_make_records(), "INVALID TABLE NAME", ("account_id",), _TENANT_CODE)
 
     def test_empty_records_raises(self):
         loader = ServingStoreLoader(_SECRET_ARN, _DB_NAME, _REGION)
         with pytest.raises(ServingStoreError):
-            loader.load([], _TABLE_NAME, ("account_id",))
+            loader.load([], _TABLE_NAME, ("account_id",), _TENANT_CODE)
+
+    def test_missing_tenant_code_raises(self):
+        loader = ServingStoreLoader(_SECRET_ARN, _DB_NAME, _REGION)
+        with pytest.raises(ValueError, match="tenant_code"):
+            loader.load(_make_records(), _TABLE_NAME, ("account_id",), "")
+
+    def test_invalid_tenant_code_raises(self):
+        loader = ServingStoreLoader(_SECRET_ARN, _DB_NAME, _REGION)
+        with pytest.raises(ValueError, match="tenant_code"):
+            loader.load(_make_records(), _TABLE_NAME, ("account_id",), "Not_Valid!")
 
     def test_successful_load_with_mocked_connection(self):
         mock_conn = MagicMock()
@@ -62,11 +74,31 @@ class TestServingStoreLoaderSecretRetrieval:
         loader = ServingStoreLoader(_SECRET_ARN, _DB_NAME, _REGION)
 
         with patch("transformation.serving_store_loader.pymysql.connect", return_value=mock_conn):
-            result = loader.load(_make_records(), _TABLE_NAME, ("account_id",))
+            result = loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         assert result.records_loaded == 2
-        assert result.table_name == _TABLE_NAME
+        assert result.table_name == f"acme_corp_{_TABLE_NAME}"
         mock_conn.commit.assert_called_once()
+
+    def test_two_tenants_produce_distinct_table_names(self):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.rowcount = 2
+        mock_conn.cursor.return_value = mock_cursor
+
+        loader = ServingStoreLoader(_SECRET_ARN, _DB_NAME, _REGION)
+
+        with patch("transformation.serving_store_loader.pymysql.connect", return_value=mock_conn):
+            result_a = loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
+            result_b = loader.load(
+                _make_records(), _TABLE_NAME, ("account_id",), _OTHER_TENANT_CODE
+            )
+
+        assert result_a.table_name != result_b.table_name
+        assert result_a.table_name == f"acme_corp_{_TABLE_NAME}"
+        assert result_b.table_name == f"globex_eu_{_TABLE_NAME}"
 
     def test_connection_error_raises_serving_store_error(self):
         loader = ServingStoreLoader(_SECRET_ARN, _DB_NAME, _REGION)
@@ -75,7 +107,7 @@ class TestServingStoreLoaderSecretRetrieval:
             side_effect=Exception("Connection refused"),
         ):
             with pytest.raises(ServingStoreError):
-                loader.load(_make_records(), _TABLE_NAME, ("account_id",))
+                loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
     def test_missing_secret_raises_serving_store_error(self):
         loader = ServingStoreLoader(
@@ -84,7 +116,7 @@ class TestServingStoreLoaderSecretRetrieval:
             _REGION,
         )
         with pytest.raises(ServingStoreError, match="Failed to retrieve database credentials"):
-            loader.load(_make_records(), _TABLE_NAME, ("account_id",))
+            loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
 
 class TestMysqlTypeInference:

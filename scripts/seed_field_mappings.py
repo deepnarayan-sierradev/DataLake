@@ -11,7 +11,8 @@ Usage:
     python scripts/seed_field_mappings.py --environment dev --region us-east-1 --dry-run
 
     # Publish a single source/entity only:
-    python scripts/seed_field_mappings.py --environment dev --source-id salesforce --entity-id salesforce-account
+    python scripts/seed_field_mappings.py \
+        --environment dev --source-id salesforce --entity-id salesforce-account
 
 Prerequisite:
     AWS credentials configured (AWS_PROFILE, AWS_DEFAULT_REGION, or instance role).
@@ -37,8 +38,19 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _MAPPINGS_DIR = _REPO_ROOT / "config" / "field_mappings"
 
 
-def _bucket_name(environment: str) -> str:
-    return f"{environment}-edl-curated-layer"
+def _account_id(region: str) -> str:
+    """Resolve the AWS account ID of the caller's credentials.
+
+    Bucket names are suffixed with the account ID rather than the
+    environment name — S3 bucket names are unique across all of AWS, and
+    each environment is already a separate AWS account, so the account ID
+    is what actually guarantees no collision with dev/staging/prod.
+    """
+    return boto3.client("sts", region_name=region).get_caller_identity()["Account"]
+
+
+def _bucket_name(region: str) -> str:
+    return f"edl-curated-{_account_id(region)}"
 
 
 def _collect_mapping_files(
@@ -76,6 +88,7 @@ def _resolve_latest_version(versions: list[str]) -> str:
     Versions must follow the pattern v{integer}.
     Falls back to lexicographic sort if parsing fails.
     """
+
     def _version_key(v: str) -> int:
         try:
             return int(v.lstrip("v"))
@@ -92,7 +105,7 @@ def seed(
     entity_id: str | None = None,
     dry_run: bool = False,
 ) -> None:
-    bucket = _bucket_name(environment)
+    bucket = _bucket_name(region)
     mapping_files = _collect_mapping_files(source_id, entity_id)
 
     if not mapping_files:
@@ -109,7 +122,8 @@ def seed(
         groups: dict[tuple[str, str], list[str]] = {}
         for src, ent, ver, path in mapping_files:
             groups.setdefault((src, ent), []).append(ver)
-            print(f"  s3://{bucket}/field-mappings/{src}/{ent}/{ver}.json  ← {path.relative_to(_REPO_ROOT)}")
+            rel_path = path.relative_to(_REPO_ROOT)
+            print(f"  s3://{bucket}/field-mappings/{src}/{ent}/{ver}.json  ← {rel_path}")
         print()
         for (src, ent), versions in groups.items():
             latest = _resolve_latest_version(versions)
@@ -165,11 +179,12 @@ def seed(
     print(f"\n{total} rule set(s) published successfully.")
     print("\nNext step: run the transformation pipeline or test with:")
     print(
-        "  python -c \""
-        "from transformation.field_mapping.field_mapping_registry import FieldMappingRegistryClient; "
+        '  python -c "'
+        "from transformation.field_mapping.field_mapping_registry import "
+        "FieldMappingRegistryClient; "
         f"c = FieldMappingRegistryClient('{bucket}', '{region}'); "
         "rs = c.load_rule_set('salesforce', 'salesforce-account'); "
-        "print(rs)\""
+        'print(rs)"'
     )
 
 
@@ -187,7 +202,9 @@ def main() -> None:
     parser.add_argument(
         "--entity-id",
         default=None,
-        help="Publish only mappings for this entity (e.g. salesforce-account). Omit to publish all.",
+        help=(
+            "Publish only mappings for this entity (e.g. salesforce-account). Omit to publish all."
+        ),
     )
     parser.add_argument(
         "--dry-run",

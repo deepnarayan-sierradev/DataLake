@@ -7,7 +7,8 @@ Coverage:
   - invalidate_cache() forces re-sampling on next call
   - Live sample uses GET {base_url}/{endpoint}?$top=1
   - OData @-prefixed metadata keys skipped during schema inference
-  - Type inference: bool→"boolean", int→"integer", float→"decimal", ISO-8601→"date", str→"string", None→"string"
+  - Type inference: bool→"boolean", int→"integer", float→"decimal",
+    ISO-8601→"date", str→"string", None→"string"
   - Empty live response for KNOWN endpoint → static fallback schema used
   - Empty live response for KNOWN endpoint → logs sage_x3_metadata_fallback_static
   - Empty live response for UNKNOWN endpoint → SageMetadataDeterministicError
@@ -25,7 +26,7 @@ Coverage:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -39,8 +40,8 @@ from connector_runtime.adapters.sage.products.intacct.intacct_metadata_client im
     SageMetadataTransientError,
 )
 from connector_runtime.adapters.sage.products.x3.x3_metadata_client import (
-    X3MetadataClient,
     _X3_STATIC_SCHEMAS,
+    X3MetadataClient,
 )
 from contracts.entity_configuration_contract import FieldMode
 
@@ -62,14 +63,17 @@ _SAMPLE_BPCUSTOMER_RECORD = {
     "ENAFLG_0": 1,
     "CREDAT_0": "2024-01-15T00:00:00Z",
     "MODDAT_0": "2026-06-01T00:00:00Z",
-    "@odata.etag": "W/\"12345\"",  # must be skipped
+    "@odata.etag": 'W/"12345"',  # must be skipped
 }
 
 
 def _make_auth() -> MagicMock:
     auth = MagicMock()
     auth.base_url = _BASE_URL
-    auth.build_auth_headers.return_value = {"Authorization": "Bearer test-token", "Accept": "application/json"}
+    auth.build_auth_headers.return_value = {
+        "Authorization": "Bearer test-token",
+        "Accept": "application/json",
+    }
     return auth
 
 
@@ -194,8 +198,6 @@ class TestLiveSampling:
         )
 
         call_kwargs = client._http.get.call_args
-        # Verify $top=1 was in the params
-        params = call_kwargs[1].get("params") or call_kwargs[0][2] if len(call_kwargs[0]) > 2 else {}
         # The URL or params should contain $top=1
         url_or_params_str = str(call_kwargs)
         assert "$top" in url_or_params_str or "top" in url_or_params_str.lower()

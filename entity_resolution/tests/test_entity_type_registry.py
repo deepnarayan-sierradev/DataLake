@@ -25,7 +25,7 @@ from entity_resolution.entity_type_registry import (
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_TABLE = f"{_ENV}-edl-entity-type-registry"
+_TABLE = "EdlEntityTypeRegistry"
 
 
 def _create_table() -> None:

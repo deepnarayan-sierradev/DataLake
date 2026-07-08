@@ -131,7 +131,7 @@ _CHECKPOINT_TIME_CHECK_INTERVAL_RECORDS: Final[int] = 1_000
 _CHECKPOINT_MIN_REMAINING_MS: Final[int] = 90_000
 
 
-class LambdaTimeoutWarning(Exception):  # noqa: N818 — name mandated by PERF-5's spec
+class LambdaTimeoutWarning(Exception):  # noqa: N818 -- deliberately "Warning", not "Error": see below
     """
     Raised when EXTRACTION stops early via a checkpoint (PERF-5) — either
     EntityExtractionConfig.max_records_per_lambda_run was reached, or Lambda
@@ -399,12 +399,21 @@ class ExtractionWorkflow:
             )
 
         # Guard: check circuit breaker before incurring any AWS costs.
-        if self._retry_policy is not None and self._retry_policy.is_circuit_open(source_id):
+        # entity_id must be passed here to match the key record_success()/
+        # record_failure() write under below — omitting it (as this call
+        # previously did) means the guard reads a key nothing ever
+        # increments, and the circuit can never open no matter how many
+        # real failures occur.
+        if self._retry_policy is not None and self._retry_policy.is_circuit_open(
+            source_id, entity_id, tenant_code=self._coordinator.tenant_code
+        ):
+            failure_count = self._retry_policy.consecutive_failures(
+                source_id, entity_id, tenant_code=self._coordinator.tenant_code
+            )
             raise CircuitOpenError(
-                f"Circuit breaker is open for source_id={source_id!r}: "
-                f"{self._retry_policy.consecutive_failures(source_id)} consecutive "
-                f"failures meet or exceed the threshold of "
-                f"{self._retry_policy.circuit_open_threshold}."
+                f"Circuit breaker is open for source_id={source_id!r} "
+                f"entity_id={entity_id!r}: {failure_count} consecutive failures meet or "
+                f"exceed the threshold of {self._retry_policy.circuit_open_threshold}."
             )
 
         current_stage = PipelineStage.CONFIGURATION_LOAD
@@ -567,7 +576,9 @@ class ExtractionWorkflow:
                 )
 
             if self._retry_policy is not None:
-                self._retry_policy.record_success(source_id, entity_id)
+                self._retry_policy.record_success(
+                    source_id, entity_id, tenant_code=self._coordinator.tenant_code
+                )
 
             _logger.info(
                 "extraction_run_completed",
@@ -592,7 +603,7 @@ class ExtractionWorkflow:
                 completed_at=completed_at.isoformat(),
             )
 
-        except (CircuitOpenError, LambdaTimeoutWarning):
+        except CircuitOpenError, LambdaTimeoutWarning:
             # LambdaTimeoutWarning (PERF-5) is a non-fatal checkpoint: the
             # partial watermark advance and checkpoint audit record were
             # already committed in _commit_checkpoint_and_raise(). Like
@@ -601,7 +612,9 @@ class ExtractionWorkflow:
             raise
         except Exception as exc:
             if self._retry_policy is not None:
-                self._retry_policy.record_failure(source_id, entity_id)
+                self._retry_policy.record_failure(
+                    source_id, entity_id, tenant_code=self._coordinator.tenant_code
+                )
             self._handle_stage_failure(
                 exc=exc,
                 failed_stage=current_stage,
@@ -960,9 +973,7 @@ class ExtractionWorkflow:
         """
         if checkpoint_info.last_source_timestamp is not None:
             try:
-                partial_upper_bound = datetime.fromisoformat(
-                    checkpoint_info.last_source_timestamp
-                )
+                partial_upper_bound = datetime.fromisoformat(checkpoint_info.last_source_timestamp)
                 if partial_upper_bound.tzinfo is None:
                     partial_upper_bound = partial_upper_bound.replace(tzinfo=UTC)
             except ValueError:

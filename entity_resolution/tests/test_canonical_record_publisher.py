@@ -95,6 +95,7 @@ class TestGoldenRecordPublisher:
             match_run_id=_MATCH_RUN_ID,
             id_field="record_id",
             source_field="source_id",
+            tenant_code="demo",
         )
         assert result.input_curated_record_count == 3
         assert result.golden_record_count == 2  # alice cluster + bob cluster
@@ -109,6 +110,7 @@ class TestGoldenRecordPublisher:
             match_run_id=_MATCH_RUN_ID,
             id_field="record_id",
             source_field="source_id",
+            tenant_code="demo",
         )
         s3 = boto3.client("s3", region_name=_REGION)
         obj = s3.get_object(
@@ -125,6 +127,7 @@ class TestGoldenRecordPublisher:
             match_run_id=_MATCH_RUN_ID,
             id_field="record_id",
             source_field="source_id",
+            tenant_code="demo",
         )
         s3 = boto3.client("s3", region_name=_REGION)
         obj = s3.get_object(
@@ -144,6 +147,7 @@ class TestGoldenRecordPublisher:
             match_run_id=_MATCH_RUN_ID,
             id_field="record_id",
             source_field="source_id",
+            tenant_code="demo",
         )
         s3 = boto3.client("s3", region_name=_REGION)
         obj = s3.get_object(Bucket=_ANALYTICS_BUCKET, Key=result.decisions_s3_key)
@@ -164,6 +168,7 @@ class TestGoldenRecordPublisher:
             match_run_id="run-1",
             id_field="record_id",
             source_field="source_id",
+            tenant_code="demo",
         )
         r2 = publisher.publish(
             curated_records=self._sample_records(),
@@ -171,6 +176,7 @@ class TestGoldenRecordPublisher:
             match_run_id="run-2",
             id_field="record_id",
             source_field="source_id",
+            tenant_code="demo",
         )
         # golden_ids should be the same across runs (deterministic from cluster members)
         s3 = boto3.client("s3", region_name=_REGION)
@@ -195,7 +201,64 @@ class TestGoldenRecordPublisher:
     def test_empty_records_raises(self):
         publisher = _make_publisher()
         with pytest.raises(GoldenRecordPublicationError):
-            publisher.publish([], "customer", _MATCH_RUN_ID, "record_id", "source_id")
+            publisher.publish([], "customer", _MATCH_RUN_ID, "record_id", "source_id", "demo")
+
+
+@mock_aws
+class TestTenantIsolation:
+    """
+    ARCH-1 regression: two tenants publishing golden records for the same
+    entity_type must not collide. Before the fix, `publish()` had no
+    tenant_code parameter at all, and both the analytics output prefix and
+    the match-decisions audit key were `canonical/{entity_type}/...` with no
+    tenant dimension — a guaranteed same-key collision.
+    """
+
+    def setup_method(self, method=None):
+        boto3.client("s3", region_name=_REGION).create_bucket(Bucket=_ANALYTICS_BUCKET)
+
+    def test_two_tenants_same_entity_type_produce_distinct_prefixes(self):
+        publisher = _make_publisher()
+        records = [
+            {
+                "record_id": "sf-001",
+                "source_id": "salesforce",
+                "email": "alice@example.com",
+                "name": "Alice",
+            },
+        ]
+
+        result_a = publisher.publish(
+            curated_records=records,
+            entity_type="customer",
+            match_run_id="run-a",
+            id_field="record_id",
+            source_field="source_id",
+            tenant_code="acme-corp",
+        )
+        result_b = publisher.publish(
+            curated_records=records,
+            entity_type="customer",
+            match_run_id="run-b",
+            id_field="record_id",
+            source_field="source_id",
+            tenant_code="globex-eu",
+        )
+
+        assert result_a.analytics_s3_prefix != result_b.analytics_s3_prefix
+        assert result_a.analytics_s3_prefix.startswith("acme-corp/")
+        assert result_b.analytics_s3_prefix.startswith("globex-eu/")
+        assert result_a.decisions_s3_key != result_b.decisions_s3_key
+        assert result_a.decisions_s3_key.startswith("acme-corp/")
+        assert result_b.decisions_s3_key.startswith("globex-eu/")
+
+        # Both golden-record objects genuinely exist independently — neither
+        # publish overwrote the other.
+        s3 = boto3.client("s3", region_name=_REGION)
+        key_a = result_a.analytics_s3_prefix + "golden.parquet"
+        key_b = result_b.analytics_s3_prefix + "golden.parquet"
+        assert s3.get_object(Bucket=_ANALYTICS_BUCKET, Key=key_a)["Body"].read()
+        assert s3.get_object(Bucket=_ANALYTICS_BUCKET, Key=key_b)["Body"].read()
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +295,7 @@ class TestPublisherWithLineageEmission:
             match_run_id="lineage-run-001",
             id_field="record_id",
             source_field="source_id",
+            tenant_code="demo",
         )
         assert result.golden_record_count == 1
 
@@ -261,5 +325,6 @@ class TestPublisherWithLineageEmission:
             match_run_id="lineage-fail-run",
             id_field="record_id",
             source_field="source_id",
+            tenant_code="demo",
         )
         assert result.golden_record_count == 1

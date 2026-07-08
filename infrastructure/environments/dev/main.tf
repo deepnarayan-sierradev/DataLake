@@ -101,7 +101,7 @@ module "storage" {
 
   storage_kms_key_arn = module.kms_storage.key_arn
   extraction_runtime_role_arns = [
-    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.environment}-extraction-runtime-role",
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/EdlExtractionRuntimeRole",
   ]
 
   raw_object_lock_retention_days        = 30 # Shorter for dev
@@ -135,6 +135,7 @@ module "secrets" {
   environment = local.environment
 
   secrets_kms_key_arn          = module.kms_secrets.key_arn
+  logs_kms_key_arn             = module.kms_logs.key_arn
   extraction_runtime_role_arns = [module.iam.extraction_runtime_role_arn]
   secret_recovery_window_days  = 7 # Shorter for dev
 
@@ -157,15 +158,15 @@ module "iam" {
   source      = "../../modules/iam"
   environment = local.environment
 
-  raw_layer_bucket_arn        = module.storage.raw_layer_bucket_arn
-  curated_layer_bucket_arn    = module.storage.curated_layer_bucket_arn
-  analytics_layer_bucket_arn  = module.storage.analytics_layer_bucket_arn
-  schema_snapshots_bucket_arn = module.storage.schema_snapshots_bucket_arn
-  watermark_table_arn         = module.metadata_persistence.watermark_repository_table_arn
-  run_audit_log_table_arn     = module.metadata_persistence.run_audit_log_table_arn
-  entity_config_table_arn     = module.metadata_persistence.entity_extraction_config_table_arn
+  raw_layer_bucket_arn           = module.storage.raw_layer_bucket_arn
+  curated_layer_bucket_arn       = module.storage.curated_layer_bucket_arn
+  analytics_layer_bucket_arn     = module.storage.analytics_layer_bucket_arn
+  schema_snapshots_bucket_arn    = module.storage.schema_snapshots_bucket_arn
+  watermark_table_arn            = module.metadata_persistence.watermark_repository_table_arn
+  run_audit_log_table_arn        = module.metadata_persistence.run_audit_log_table_arn
+  entity_config_table_arn        = module.metadata_persistence.entity_extraction_config_table_arn
   entity_type_registry_table_arn = module.metadata_persistence.entity_type_registry_table_arn
-  dlq_arn                     = module.metadata_persistence.extraction_failure_dlq_arn
+  dlq_arn                        = module.metadata_persistence.extraction_failure_dlq_arn
 
   kms_key_arns_for_extraction = [
     module.kms_storage.key_arn,
@@ -176,6 +177,7 @@ module "iam" {
     module.kms_storage.key_arn,
     module.kms_database.key_arn,
   ]
+  kms_key_arns_for_credential_expiry_notifier = [module.kms_logs.key_arn]
 
   github_org                  = var.github_org
   github_repo                 = var.github_repo
@@ -201,10 +203,10 @@ module "observability" {
   extraction_failure_dlq_name = module.metadata_persistence.extraction_failure_dlq_name
 
   # Lambda alarms — names resolved from Lambda module outputs
-  extraction_lambda_name          = "${local.environment}-extraction-pipeline"
-  transformation_lambda_name      = "${local.environment}-transformation-pipeline"
-  entity_resolution_lambda_name   = "${local.environment}-entity-resolution-pipeline"
-  analytics_publisher_lambda_name = "${local.environment}-analytics-layer-publisher"
+  extraction_lambda_name          = "EdlExtractionPipeline"
+  transformation_lambda_name      = "EdlTransformationPipeline"
+  entity_resolution_lambda_name   = "EdlEntityResolutionPipeline"
+  analytics_publisher_lambda_name = "EdlAnalyticsLayerPublisher"
 
   tags = local.common_tags
 }
@@ -242,8 +244,12 @@ module "lambda_pipeline" {
   memory_size_mb           = 1024
   timeout_seconds          = 900 # Max Lambda timeout; most entities complete in < 120s
   # Reserved concurrency cap: prevents this function from consuming the full account pool.
-  # Value 400 per improvement plan §1.6 (burst-buffer reserved concurrency table).
-  reserved_concurrent_executions = 400
+  # Improvement plan §1.6 (burst-buffer reserved concurrency table) specifies 400, but the
+  # dev account's Lambda concurrency quota is the AWS default (1000) and AWS requires at
+  # least 100 unreserved — the full §1.6 table (400+300+200+100+50=1050) doesn't fit in dev.
+  # Halved proportionally across all 5 reserved-concurrency Lambdas to fit comfortably;
+  # request a quota increase (or apply the full §1.6 values) if dev throughput needs it.
+  reserved_concurrent_executions = 200
 
   tags = local.common_tags
 
@@ -279,8 +285,9 @@ module "transformation_lambda" {
   log_retention_days       = 30
   memory_size_mb           = 2048 # Increased for DuckDB in-process merge (§3.1)
   timeout_seconds          = 900
-  # Reserved concurrency: 300 per improvement plan §1.6.
-  reserved_concurrent_executions = 300
+  # Reserved concurrency: 300 per improvement plan §1.6, halved for dev's account quota
+  # (see lambda_pipeline module block above for the full explanation).
+  reserved_concurrent_executions = 150
 
   tags = local.common_tags
 
@@ -318,8 +325,9 @@ module "entity_resolution_lambda" {
   log_retention_days       = 30
   memory_size_mb           = 1024
   timeout_seconds          = 900
-  # Reserved concurrency: 200 per improvement plan §1.6.
-  reserved_concurrent_executions = 200
+  # Reserved concurrency: 200 per improvement plan §1.6, halved for dev's account quota
+  # (see lambda_pipeline module block above for the full explanation).
+  reserved_concurrent_executions = 100
 
   tags = local.common_tags
 
@@ -347,8 +355,9 @@ module "analytics_publisher_lambda" {
   log_retention_days       = 30
   memory_size_mb           = 512
   timeout_seconds          = 300
-  # Reserved concurrency: 100 per improvement plan §1.6.
-  reserved_concurrent_executions = 100
+  # Reserved concurrency: 100 per improvement plan §1.6, halved for dev's account quota
+  # (see lambda_pipeline module block above for the full explanation).
+  reserved_concurrent_executions = 50
 
   tags = local.common_tags
 
@@ -377,8 +386,9 @@ module "orchestration" {
   lambda_package_s3_key      = var.lambda_package_s3_key
   lambda_package_source_hash = var.lambda_package_source_hash
 
-  pipeline_trigger_role_arn             = module.iam.pipeline_trigger_role_arn
-  pipeline_trigger_reserved_concurrency = 50
+  pipeline_trigger_role_arn = module.iam.pipeline_trigger_role_arn
+  # Halved for dev's account quota (see lambda_pipeline module block above).
+  pipeline_trigger_reserved_concurrency = 25
 
   # DLQ processor Lambda
   dlq_processor_role_arn     = module.iam.dlq_processor_role_arn

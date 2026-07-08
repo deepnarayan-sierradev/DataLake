@@ -131,7 +131,9 @@ class FieldMappingApplicator:
         record: dict[str, Any],
         rule: FieldMappingRule,
     ) -> _DroppedField | _MappingFailure | Any:
-        missing = [f for f in rule.source_fields if f not in record or record[f] is None or record[f] == ""]
+        missing = [
+            f for f in rule.source_fields if f not in record or record[f] is None or record[f] == ""
+        ]
 
         if missing:
             if rule.missing_field_behavior == MissingFieldBehavior.RAISE_ERROR:
@@ -144,8 +146,13 @@ class FieldMappingApplicator:
             if rule.missing_field_behavior == MissingFieldBehavior.USE_DEFAULT:
                 # For CAST rules, apply the type cast to the default value so the
                 # column type is consistent across all records (e.g. "0" → 0.0).
-                if rule.transformation == MappingTransformation.CAST and rule.default_value is not None:
-                    return _cast_value(rule.default_value, rule.transformation_params.get("type", "string"))
+                if (
+                    rule.transformation == MappingTransformation.CAST
+                    and rule.default_value is not None
+                ):
+                    return _cast_value(
+                        rule.default_value, rule.transformation_params.get("type", "string")
+                    )
                 return rule.default_value
             return _DROPPED_FIELD  # DROP_FIELD
 
@@ -198,11 +205,11 @@ def _transform_mask(record: dict[str, Any], rule: FieldMappingRule) -> Any:
 _TRANSFORMATION_DISPATCH: Final[
     dict[MappingTransformation, Callable[[dict[str, Any], FieldMappingRule], Any]]
 ] = {
-    MappingTransformation.RENAME:      _transform_rename,
-    MappingTransformation.CONCAT:      _transform_concat,
+    MappingTransformation.RENAME: _transform_rename,
+    MappingTransformation.CONCAT: _transform_concat,
     MappingTransformation.DATE_FORMAT: _transform_date_format,
-    MappingTransformation.CAST:        _transform_cast,
-    MappingTransformation.MASK:        _transform_mask,
+    MappingTransformation.CAST: _transform_cast,
+    MappingTransformation.MASK: _transform_mask,
 }
 
 

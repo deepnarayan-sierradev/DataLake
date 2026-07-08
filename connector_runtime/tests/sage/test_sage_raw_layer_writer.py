@@ -3,8 +3,9 @@ Tests for SageRawLayerWriter.
 
 Coverage:
   - Constructor validates empty s3_bucket and empty sage_product
-  - Partition path matches platform spec: {prefix}/sage/{product}/{entity}/
-    extraction_date={date}/run_id={run_id}/data.parquet
+  - Partition path matches production wiring (RAW-1): a single hyphenated
+    "sage-{product}" source segment, no s3_prefix — {tenant_code}/
+    sage-{product}/{entity}/extraction_date={date}/run_id={run_id}/data.parquet
   - product_name embedded in partition path (avoids cross-product collisions)
   - Parquet file written to correct S3 key
   - Metadata JSON sidecar written alongside data.parquet with required fields
@@ -20,14 +21,14 @@ Coverage:
   - write_partition_streaming: returns (partition_prefix, total_record_count)
   - write_partition_streaming: empty iterator → SageRawLayerWriterError
   - Snappy compression used
-  - No prefix → path starts directly with sage/
+  - Path starts directly with the tenant_code + sage-{product} segment
 """
 
 from __future__ import annotations
 
 import json
 from io import BytesIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import boto3
 import pyarrow.parquet as pq
@@ -43,29 +44,27 @@ from connector_runtime.interfaces.connector_interface import ExtractionRecord
 
 _REGION = "us-east-1"
 _BUCKET = "test-raw-bucket"
-_PREFIX = "raw"
 _SOURCE_ID = "sage"
 _ENTITY_ID = "sage-intacct-customer"
 _PRODUCT = "intacct"
 _RUN_ID = "run-20260701-120000000000-ab12cd34"
 _SCHEMA_FP = "a" * 64
 _DATE = "2026-07-01"
+_TENANT_CODE = "demo"
 
 
-def _make_writer(prefix: str = _PREFIX) -> SageRawLayerWriter:
+def _make_writer() -> SageRawLayerWriter:
     return SageRawLayerWriter(
         s3_bucket=_BUCKET,
-        s3_prefix=prefix,
         sage_product=_PRODUCT,
         region_name=_REGION,
+        tenant_code=_TENANT_CODE,
     )
 
 
 def _make_records(n: int = 3) -> list[ExtractionRecord]:
     return [
-        ExtractionRecord(
-            payload={"key": str(i), "id": f"C{i:03d}", "name": f"Corp {i}"}
-        )
+        ExtractionRecord(payload={"key": str(i), "id": f"C{i:03d}", "name": f"Corp {i}"})
         for i in range(n)
     ]
 
@@ -85,18 +84,18 @@ class TestConstructorValidation:
         with pytest.raises(ValueError, match="s3_bucket"):
             SageRawLayerWriter(
                 s3_bucket="",
-                s3_prefix=_PREFIX,
                 sage_product=_PRODUCT,
                 region_name=_REGION,
+                tenant_code=_TENANT_CODE,
             )
 
     def test_empty_sage_product_raises(self) -> None:
         with pytest.raises(ValueError, match="sage_product"):
             SageRawLayerWriter(
                 s3_bucket=_BUCKET,
-                s3_prefix=_PREFIX,
                 sage_product="",
                 region_name=_REGION,
+                tenant_code=_TENANT_CODE,
             )
 
 
@@ -107,7 +106,9 @@ class TestConstructorValidation:
 
 class TestPartitionPath:
     @mock_aws
-    def test_partition_path_matches_spec(self) -> None:
+    def test_partition_path_matches_production_wiring(self) -> None:
+        """RAW-1: production wiring (sage_connector._build_sage) passes no s3_prefix —
+        the source segment is the single hyphenated "sage-{product}" string."""
         _create_bucket()
         writer = _make_writer()
         data_key = writer.write_partition(
@@ -119,7 +120,7 @@ class TestPartitionPath:
             extraction_date=_DATE,
         )
         expected = (
-            f"{_PREFIX}/sage/{_PRODUCT}/{_ENTITY_ID}"
+            f"{_TENANT_CODE}/sage-{_PRODUCT}/{_ENTITY_ID}"
             f"/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
         )
         assert data_key == expected
@@ -129,9 +130,9 @@ class TestPartitionPath:
         _create_bucket()
         writer = SageRawLayerWriter(
             s3_bucket=_BUCKET,
-            s3_prefix=_PREFIX,
             sage_product="x3",
             region_name=_REGION,
+            tenant_code=_TENANT_CODE,
         )
         data_key = writer.write_partition(
             records=_make_records(),
@@ -141,12 +142,13 @@ class TestPartitionPath:
             schema_fingerprint=_SCHEMA_FP,
             extraction_date=_DATE,
         )
-        assert "/sage/x3/" in data_key
+        assert "/sage-x3/" in data_key
+        assert "/sage/x3/" not in data_key
 
     @mock_aws
-    def test_empty_prefix_path_starts_with_sage(self) -> None:
+    def test_data_key_starts_with_tenant_and_single_source_segment(self) -> None:
         _create_bucket()
-        writer = _make_writer(prefix="")
+        writer = _make_writer()
         data_key = writer.write_partition(
             records=_make_records(),
             source_id=_SOURCE_ID,
@@ -155,7 +157,7 @@ class TestPartitionPath:
             schema_fingerprint=_SCHEMA_FP,
             extraction_date=_DATE,
         )
-        assert data_key.startswith(f"sage/{_PRODUCT}/{_ENTITY_ID}/")
+        assert data_key.startswith(f"{_TENANT_CODE}/sage-{_PRODUCT}/{_ENTITY_ID}/")
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +257,7 @@ class TestWritePartition:
         )
         s3 = boto3.client("s3", region_name=_REGION)
         metadata_key = (
-            f"{_PREFIX}/sage/{_PRODUCT}/{_ENTITY_ID}"
+            f"{_TENANT_CODE}/sage-{_PRODUCT}/{_ENTITY_ID}"
             f"/extraction_date={_DATE}/run_id={_RUN_ID}/metadata.json"
         )
         body = s3.get_object(Bucket=_BUCKET, Key=metadata_key)["Body"].read()
@@ -374,6 +376,7 @@ class TestRecordsToParquet:
         parquet_bytes = _records_to_parquet(records)
         table = pq.read_table(BytesIO(parquet_bytes))
         import pyarrow as pa
+
         for field in table.schema:
             assert field.type == pa.large_utf8(), f"Expected large_utf8 for {field.name}"
 
@@ -398,7 +401,7 @@ class TestWritePartitionStreaming:
             extraction_date=_DATE,
         )
         assert total == 5
-        assert f"sage/{_PRODUCT}/{_ENTITY_ID}" in prefix
+        assert f"sage-{_PRODUCT}/{_ENTITY_ID}" in prefix
 
     @mock_aws
     def test_streaming_multiple_chunks(self) -> None:
@@ -454,7 +457,7 @@ class TestWritePartitionStreaming:
     def test_streaming_metadata_sidecar_written(self) -> None:
         _create_bucket()
         writer = _make_writer()
-        prefix, total = writer.write_partition_streaming(
+        prefix, _total = writer.write_partition_streaming(
             record_iter=iter(_make_records(4)),
             source_id=_SOURCE_ID,
             entity_id=_ENTITY_ID,

@@ -19,15 +19,7 @@ Security (OWASP A03):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final
-
-if TYPE_CHECKING:
-    from connector_runtime.adapters.sage.protocols.sage_auth_protocol import SageAuthProtocol
-    from connector_runtime.adapters.sage.protocols.sage_metadata_protocol import (
-        SageMetadataProtocol,
-    )
-    from connector_runtime.adapters.sage.protocols.sage_query_protocol import SageQueryProtocol
-
+from typing import Final
 
 # ---------------------------------------------------------------------------
 # Whitelist of accepted sage_product values in connector_params.
@@ -154,7 +146,9 @@ def _register_all() -> None:
 
     # ── Future products ───────────────────────────────────────────────────────
     # Example (when ready):
-    # from connector_runtime.adapters.sage.products.accounting.accounting_auth import AccountingAuthClient
+    # from connector_runtime.adapters.sage.products.accounting.accounting_auth import (
+    #     AccountingAuthClient,
+    # )
     # ...
     # _register_product("accounting", SageProductStrategies(...))
 

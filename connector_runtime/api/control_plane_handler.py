@@ -42,13 +42,13 @@ Security (OWASP A01, A03, A09):
 Required Lambda environment variables:
   AWS_REGION                  — injected by the Lambda runtime
   PLATFORM_ENVIRONMENT         — deployment environment (dev/staging/prod)
-  PIPELINE_TRIGGER_QUEUE_URL   — URL of the {env}-edl-pipeline-trigger.fifo queue
+  PIPELINE_TRIGGER_QUEUE_URL   — URL of the EdlPipelineTrigger.fifo queue
   ENTITY_CONFIG_TABLE          — optional override; defaults to
-                                  {environment}-edl-entity-extraction-config
+                                  EdlEntityExtractionConfig
   ENTITY_TYPE_REGISTRY_TABLE   — optional override; defaults to
-                                  {environment}-edl-entity-type-registry
+                                  EdlEntityTypeRegistry
   AUDIT_LOG_TABLE              — optional override; defaults to
-                                  {environment}-edl-run-audit-log
+                                  EdlRunAuditLog
 """
 
 from __future__ import annotations
@@ -90,8 +90,8 @@ _logger = get_platform_logger(__name__)
 # genuinely needs to page through more than this many runs).
 _MAX_RUNS_LISTED: Final[int] = 50
 
-_ENTITY_TYPE_REGISTRY_TABLE_TEMPLATE: Final[str] = "{environment}-edl-entity-type-registry"
-_AUDIT_LOG_TABLE_TEMPLATE: Final[str] = "{environment}-edl-run-audit-log"
+_ENTITY_TYPE_REGISTRY_TABLE_NAME: Final[str] = "EdlEntityTypeRegistry"
+_AUDIT_LOG_TABLE_NAME: Final[str] = "EdlRunAuditLog"
 
 
 # ---------------------------------------------------------------------------
@@ -109,17 +109,13 @@ def _environment() -> str:
 
 def _entity_type_registry_table() -> Any:
     dynamodb = boto3.resource("dynamodb", region_name=_region())
-    table_name = os.environ.get(
-        "ENTITY_TYPE_REGISTRY_TABLE"
-    ) or _ENTITY_TYPE_REGISTRY_TABLE_TEMPLATE.format(environment=_environment())
+    table_name = os.environ.get("ENTITY_TYPE_REGISTRY_TABLE") or _ENTITY_TYPE_REGISTRY_TABLE_NAME
     return dynamodb.Table(table_name)
 
 
 def _run_audit_log_table() -> Any:
     dynamodb = boto3.resource("dynamodb", region_name=_region())
-    table_name = os.environ.get("AUDIT_LOG_TABLE") or _AUDIT_LOG_TABLE_TEMPLATE.format(
-        environment=_environment()
-    )
+    table_name = os.environ.get("AUDIT_LOG_TABLE") or _AUDIT_LOG_TABLE_NAME
     return dynamodb.Table(table_name)
 
 
@@ -384,7 +380,10 @@ def _handle_trigger_pipeline(event: dict[str, Any], path_tenant_code: str) -> di
             # FIFO queue: MessageGroupId matches the convention documented in
             # infrastructure/modules/orchestration/main.tf. ContentBasedDeduplication
             # is enabled on the queue, so no explicit MessageDeduplicationId is needed.
-            MessageGroupId=f"{request.source_id}--{request.entity_id}",
+            # tenant_code is included (ARCH-1) so two tenants triggering the same
+            # source/entity don't share a FIFO message group — without it, one
+            # tenant's burst of triggers would head-of-line-block another tenant's.
+            MessageGroupId=f"{tenant_code}--{request.source_id}--{request.entity_id}",
         )
     except ClientError as exc:
         _logger.error(
@@ -485,10 +484,12 @@ def _handle_list_runs(event: dict[str, Any], path_tenant_code: str) -> dict[str,
 
     Implemented as a full table Scan with a FilterExpression on tenant_code:
     the run-audit-log table's only GSI today is `source-entity-time-index`
-    (hash key source_entity_key), which is not tenant-scoped — see
-    infrastructure/modules/metadata_persistence/main.tf. A tenant-code GSI
-    would make this an efficient Query at scale and is tracked as follow-up
-    infra work, not built speculatively here.
+    (hash key source_entity_key, tenant-scoped as
+    `{tenant_code}#{source_id}#{entity_id}` — see
+    infrastructure/modules/metadata_persistence/main.tf), which serves
+    per-entity lookups, not tenant-wide listing. A tenant-code GSI would make
+    this an efficient Query at scale and is tracked as follow-up infra work,
+    not built speculatively here.
     """
     tenant_code = _authorize_path_tenant(event, path_tenant_code)
 

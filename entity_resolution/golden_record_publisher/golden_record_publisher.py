@@ -12,7 +12,7 @@ Published records include:
   <canonical_fields>      — merged field values from survivorship
 
 Partition scheme:
-  s3://analytics/canonical/{entity_type}/golden_date={YYYY-MM-DD}/run_id={run_id}/
+  s3://analytics/{tenant_code}/canonical/{entity_type}/golden_date={YYYY-MM-DD}/run_id={run_id}/
 
 Security (OWASP A09):
   - Match statistics emitted without PII field values.
@@ -27,6 +27,7 @@ from typing import Any
 
 import boto3
 
+from contracts.identifier_policy import validate_tenant_code
 from entity_resolution.matching_engine.match_rule_engine import (
     MatchRuleEngine,
     MatchRuleSet,
@@ -101,6 +102,7 @@ class GoldenRecordPublisher:
         match_run_id: str,
         id_field: str,
         source_field: str,
+        tenant_code: str,
         golden_date: date | None = None,
     ) -> GoldenRecordPublicationResult:
         """
@@ -112,6 +114,9 @@ class GoldenRecordPublisher:
             match_run_id:    Unique run ID for this matching run.
             id_field:        Field containing the source record identifier.
             source_field:    Field containing the source_id.
+            tenant_code:     Tenant identity for this run — prefixes the analytics
+                             S3 output path (ARCH-1) so two tenants publishing the
+                             same entity_type never share a partition.
             golden_date:     Partition date; defaults to today UTC.
 
         Returns:
@@ -119,6 +124,8 @@ class GoldenRecordPublisher:
         """
         if not curated_records:
             raise GoldenRecordPublicationError("Cannot publish from zero curated records")
+
+        tenant_code = validate_tenant_code(tenant_code)
 
         partition_date = golden_date or datetime.now(UTC).date()
 
@@ -155,7 +162,7 @@ class GoldenRecordPublisher:
 
         # Step 3: Write golden records to analytics layer
         prefix = (
-            f"canonical/{entity_type}"
+            f"{tenant_code}/canonical/{entity_type}"
             f"/golden_date={partition_date.isoformat()}"
             f"/run_id={match_run_id}/"
         )
@@ -172,7 +179,7 @@ class GoldenRecordPublisher:
 
         # Step 4: Write match decision audit trail (no PII values)
         decisions_key = (
-            f"canonical/{entity_type}/match-decisions/{match_run_id}/decisions.json"
+            f"{tenant_code}/canonical/{entity_type}/match-decisions/{match_run_id}/decisions.json"
         )
         self._s3.put_object(
             Bucket=self._analytics_s3_bucket,

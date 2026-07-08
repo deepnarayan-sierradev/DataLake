@@ -291,7 +291,7 @@ class TestClusteringWithBlocking:
             {"id": "1", "email": "x@domain-a.com"},
             {"id": "2", "email": "x@domain-b.com"},
         ]
-        clusters, decisions = engine.cluster(records, "id")
+        clusters, _decisions = engine.cluster(records, "id")
         # Different domains → different blocks → no cross-block decisions → 2 clusters
         assert len(clusters) == 2
 
@@ -303,12 +303,16 @@ class TestProbabilisticNullField:
         rule = ProbabilisticMatchRule(
             rule_id="name-prob",
             fields=(
-                ProbabilisticMatchField(field_name="name", weight=0.6, similarity_kind="jaro_winkler"),
+                ProbabilisticMatchField(
+                    field_name="name", weight=0.6, similarity_kind="jaro_winkler"
+                ),
                 ProbabilisticMatchField(field_name="phone", weight=0.4, similarity_kind="exact"),
             ),
             match_threshold=0.5,
         )
-        engine = MatchRuleEngine(MatchRuleSet(entity_type="x", rule_set_version="v1", rules=(rule,)))
+        engine = MatchRuleEngine(
+            MatchRuleSet(entity_type="x", rule_set_version="v1", rules=(rule,))
+        )
         # phone is absent on both records → field skipped, score based on name only
         decisions = engine.compare(
             {"id": "1", "name": "Alice Smith"},
@@ -356,7 +360,9 @@ class TestFieldSimilarityHelpers:
             ),
             match_threshold=0.8,
         )
-        engine = MatchRuleEngine(MatchRuleSet(entity_type="x", rule_set_version="v1", rules=(rule,)))
+        engine = MatchRuleEngine(
+            MatchRuleSet(entity_type="x", rule_set_version="v1", rules=(rule,))
+        )
         decisions = engine.compare(
             {"id": "1", "name": "Alice", "country": "US"},
             {"id": "2", "name": "Alice", "country": "US"},
@@ -379,10 +385,12 @@ class TestFieldSimilarityHelpers:
             ),
             match_threshold=0.7,
         )
-        engine = MatchRuleEngine(MatchRuleSet(entity_type="x", rule_set_version="v1", rules=(rule,)))
+        engine = MatchRuleEngine(
+            MatchRuleSet(entity_type="x", rule_set_version="v1", rules=(rule,))
+        )
         decisions = engine.compare(
             {"id": "1", "name": "Alice", "country": "US"},
-            {"id": "2", "name": "Zork",  "country": "US"},
+            {"id": "2", "name": "Zork", "country": "US"},
             "id",
         )
         # name has sim=0 (not appended), country has sim=1.0 (appended)

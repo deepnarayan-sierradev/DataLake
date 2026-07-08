@@ -59,11 +59,13 @@ class TestRootHandlerManagement:
 
     def test_calling_twice_does_not_duplicate_stdout_handler(self) -> None:
         import sys
+
         configure_platform_logging(log_level="INFO", render_as_json=True)
         configure_platform_logging(log_level="INFO", render_as_json=True)
         root = logging.getLogger()
         stdout_handlers = [
-            h for h in root.handlers
+            h
+            for h in root.handlers
             if isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is sys.stdout
         ]
         # Should be at most 1 stdout StreamHandler after idempotent reconfiguration

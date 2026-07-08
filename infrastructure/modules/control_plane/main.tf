@@ -18,7 +18,7 @@ locals {
     Module      = "control-plane"
   })
 
-  control_plane_lambda_name = "${var.environment}-edl-control-plane"
+  control_plane_lambda_name = "EdlControlPlane"
 
   # Route table for the control-plane HTTP API. Each entry maps a stable
   # for_each key to an API Gateway v2 route_key ("METHOD /path"), matching
@@ -43,7 +43,7 @@ locals {
 # ---------------------------------------------------------------------------
 
 resource "aws_cognito_user_pool" "control_plane" {
-  name = "${var.environment}-edl-control-plane-users"
+  name = "EdlControlPlaneUsers"
 
   password_policy {
     minimum_length    = var.cognito_password_minimum_length
@@ -69,12 +69,12 @@ resource "aws_cognito_user_pool" "control_plane" {
   auto_verified_attributes = ["email"]
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-edl-control-plane-users"
+    Name = "EdlControlPlaneUsers"
   })
 }
 
 resource "aws_cognito_user_pool_client" "control_plane" {
-  name         = "${var.environment}-edl-control-plane-client"
+  name         = "EdlControlPlaneClient"
   user_pool_id = aws_cognito_user_pool.control_plane.id
 
   generate_secret = false
@@ -111,12 +111,12 @@ resource "aws_cognito_user_pool_client" "control_plane" {
 # ---------------------------------------------------------------------------
 
 resource "aws_apigatewayv2_api" "control_plane" {
-  name          = "${var.environment}-edl-control-plane-api"
+  name          = "EdlControlPlaneApi"
   protocol_type = "HTTP"
   description   = "Multi-tenant control-plane API: tenant provisioning, entity registration, pipeline triggering, run status."
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-edl-control-plane-api"
+    Name = "EdlControlPlaneApi"
   })
 }
 
@@ -124,7 +124,7 @@ resource "aws_apigatewayv2_authorizer" "cognito" {
   api_id           = aws_apigatewayv2_api.control_plane.id
   authorizer_type  = "JWT"
   identity_sources = ["$request.header.Authorization"]
-  name             = "${var.environment}-edl-control-plane-cognito-authorizer"
+  name             = "EdlControlPlaneCognitoAuthorizer"
 
   jwt_configuration {
     audience = [aws_cognito_user_pool_client.control_plane.id]
@@ -151,12 +151,12 @@ resource "aws_apigatewayv2_route" "routes" {
 }
 
 resource "aws_cloudwatch_log_group" "api_gw_access_logs" {
-  name              = "/edl/${var.environment}/control-plane-api-gw-access-logs"
+  name              = "/edl/control-plane-api-gw-access-logs"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.kms_key_arn
 
   tags = merge(local.common_tags, {
-    Name = "/edl/${var.environment}/control-plane-api-gw-access-logs"
+    Name = "/edl/control-plane-api-gw-access-logs"
   })
 }
 
@@ -168,20 +168,20 @@ resource "aws_apigatewayv2_stage" "default" {
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.api_gw_access_logs.arn
     format = jsonencode({
-      requestId         = "$context.requestId"
-      ip                = "$context.identity.sourceIp"
-      requestTime       = "$context.requestTime"
-      httpMethod        = "$context.httpMethod"
-      routeKey          = "$context.routeKey"
-      status            = "$context.status"
-      protocol          = "$context.protocol"
-      responseLength    = "$context.responseLength"
-      integrationError  = "$context.integrationErrorMessage"
+      requestId        = "$context.requestId"
+      ip               = "$context.identity.sourceIp"
+      requestTime      = "$context.requestTime"
+      httpMethod       = "$context.httpMethod"
+      routeKey         = "$context.routeKey"
+      status           = "$context.status"
+      protocol         = "$context.protocol"
+      responseLength   = "$context.responseLength"
+      integrationError = "$context.integrationErrorMessage"
     })
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-edl-control-plane-api-default-stage"
+    Name = "EdlControlPlaneApiDefaultStage"
   })
 }
 

@@ -29,7 +29,6 @@ from connector_runtime.interfaces.connector_interface import ExtractionRecord
 
 _REGION = "us-east-1"
 _BUCKET = "test-sf-streaming-bucket"
-_PREFIX = "raw"
 _SOURCE_ID = "salesforce"
 _ENTITY_ID = "salesforce-account"
 _RUN_ID = "run-20260612-120000000000-ab12cd34"
@@ -40,8 +39,8 @@ _DATE = "2026-06-12"
 def _make_writer() -> SalesforceRawLayerWriter:
     return SalesforceRawLayerWriter(
         s3_bucket=_BUCKET,
-        s3_prefix=_PREFIX,
         region_name=_REGION,
+        tenant_code="demo",
     )
 
 

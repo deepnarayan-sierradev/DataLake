@@ -35,6 +35,7 @@ locals {
       "environment.$"         = "$.environment"
       "run_id.$"              = "$.extraction.run_id"
       "analytics_s3_prefix.$" = "$.analytics.analytics_s3_prefix"
+      "tenant_code.$"         = "$.tenant_code"
     }
     ResultPath = "$.serving"
     Retry = [
@@ -61,22 +62,22 @@ locals {
   )
 
   # Step Functions state machine name
-  state_machine_name = "${var.environment}-extraction-pipeline"
+  state_machine_name = "EdlExtractionPipeline"
 
   # EventBridge Scheduler schedule group name
-  schedule_group_name = "${var.environment}-extraction-schedules"
+  schedule_group_name = "EdlExtractionSchedules"
 
   # CloudWatch log group for Step Functions execution history
-  sfn_log_group_name = "/edl/${var.environment}/step-functions/extraction-pipeline"
+  sfn_log_group_name = "/edl/step-functions/extraction-pipeline"
 
   # SQS FIFO pipeline trigger queue name
-  pipeline_trigger_queue_name = "${var.environment}-edl-pipeline-trigger.fifo"
+  pipeline_trigger_queue_name = "EdlPipelineTrigger.fifo"
 
   # Pipeline trigger Lambda name
-  pipeline_trigger_lambda_name = "${var.environment}-edl-pipeline-trigger"
+  pipeline_trigger_lambda_name = "EdlPipelineTrigger"
 
   # DLQ processor Lambda name
-  dlq_processor_lambda_name = "${var.environment}-edl-dlq-processor"
+  dlq_processor_lambda_name = "EdlDlqProcessor"
 }
 
 # ---------------------------------------------------------------------------
@@ -100,7 +101,7 @@ resource "aws_cloudwatch_log_group" "sfn_execution" {
 # delivery service to write execution history to the log group above.
 # This avoids granting logs:PutResourcePolicy to the SFN role (OWASP A01).
 resource "aws_cloudwatch_log_resource_policy" "sfn_log_delivery" {
-  policy_name = "${local.state_machine_name}-log-delivery"
+  policy_name = "${local.state_machine_name}LogDelivery"
   policy_document = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -364,7 +365,7 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
           # §5.7 / OBS-4: end-to-end pipeline SLA metric — extraction's
           # started_at is still addressable here even though it is not part
           # of any intermediate stage's own output.
-          "run_started_at.$"    = "$.extraction.started_at"
+          "run_started_at.$" = "$.extraction.started_at"
         }
         ResultPath = "$.analytics"
         Retry = [
@@ -464,7 +465,7 @@ resource "aws_scheduler_schedule_group" "extraction_schedules" {
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "sfn_execution_failures" {
-  alarm_name          = "${var.environment}-edl-pipeline-execution-failures"
+  alarm_name          = "EdlPipelineExecutionFailures"
   alarm_description   = "One or more extraction pipeline Step Functions executions have failed. Check DLQ and CloudWatch Logs."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
@@ -484,7 +485,7 @@ resource "aws_cloudwatch_metric_alarm" "sfn_execution_failures" {
   ok_actions    = var.alert_topic_arn != "" ? [var.alert_topic_arn] : []
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-edl-pipeline-execution-failures"
+    Name = "EdlPipelineExecutionFailures"
   })
 }
 
@@ -496,7 +497,7 @@ resource "aws_cloudwatch_metric_alarm" "sfn_execution_failures" {
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "sfn_executions_throttled" {
-  alarm_name          = "${var.environment}-edl-pipeline-executions-throttled"
+  alarm_name          = "EdlPipelineExecutionsThrottled"
   alarm_description   = "Step Functions executions are being throttled. Increase concurrency limits."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
@@ -515,7 +516,7 @@ resource "aws_cloudwatch_metric_alarm" "sfn_executions_throttled" {
   alarm_actions = var.alert_topic_arn != "" ? [var.alert_topic_arn] : []
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-edl-pipeline-executions-throttled"
+    Name = "EdlPipelineExecutionsThrottled"
   })
 }
 
@@ -559,13 +560,13 @@ resource "aws_sqs_queue" "pipeline_trigger" {
 }
 
 resource "aws_sqs_queue" "pipeline_trigger_dlq" {
-  name                      = "${var.environment}-edl-pipeline-trigger-dlq.fifo"
+  name                      = "EdlPipelineTriggerDlq.fifo"
   fifo_queue                = true
   message_retention_seconds = 1209600 # 14 days
   kms_master_key_id         = var.kms_key_arn
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-edl-pipeline-trigger-dlq.fifo"
+    Name = "EdlPipelineTriggerDlq.fifo"
   })
 }
 
@@ -638,7 +639,7 @@ resource "aws_lambda_event_source_mapping" "pipeline_trigger_sqs" {
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "pipeline_trigger_dlq_depth" {
-  alarm_name          = "${var.environment}-edl-pipeline-trigger-dlq-messages"
+  alarm_name          = "EdlPipelineTriggerDlqMessages"
   alarm_description   = "Pipeline trigger DLQ contains messages. Trigger Lambda is failing to start Step Functions executions."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
@@ -657,7 +658,7 @@ resource "aws_cloudwatch_metric_alarm" "pipeline_trigger_dlq_depth" {
   alarm_actions = var.alert_topic_arn != "" ? [var.alert_topic_arn] : []
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-edl-pipeline-trigger-dlq-messages"
+    Name = "EdlPipelineTriggerDlqMessages"
   })
 }
 

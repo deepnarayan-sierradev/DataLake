@@ -4,8 +4,8 @@ NetSuite raw layer writer.
 Writes batches of ExtractionRecord to the S3 raw layer as Parquet files,
 following the platform raw layer partition scheme for NetSuite.
 
-Partition scheme (from spec §4.1):
-    s3://{bucket}/{prefix}/netsuite/{entity_id}/
+Partition scheme:
+    s3://{bucket}/{tenant_code}/netsuite/{entity_id}/
         extraction_date={YYYY-MM-DD}/
         run_id={run_id}/
             data.parquet
@@ -52,8 +52,8 @@ class NetSuiteRawLayerWriter(RawLayerWriter):
 
         writer = NetSuiteRawLayerWriter(
             s3_bucket="prod-raw-layer",
-            s3_prefix="raw",
             region_name="us-east-1",
+            tenant_code="demo",
         )
         data_key = writer.write_partition(
             records=records,
@@ -68,10 +68,10 @@ class NetSuiteRawLayerWriter(RawLayerWriter):
     error_cls = NetSuiteRawLayerWriterError
     log_prefix = "netsuite"
 
-    def __init__(self, s3_bucket: str, s3_prefix: str, region_name: str) -> None:
+    def __init__(self, s3_bucket: str, region_name: str, tenant_code: str) -> None:
         super().__init__(
             s3_bucket=s3_bucket,
-            s3_prefix=s3_prefix,
             path_segments=[_SOURCE_NAME],
             region_name=region_name,
+            tenant_code=tenant_code,
         )

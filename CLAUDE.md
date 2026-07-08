@@ -37,6 +37,10 @@ activation doesn't reliably persist across separate tool calls in an agent sessi
 .venv/bin/bandit -r . --exclude .venv,tests,dist -c pyproject.toml
 ```
 
+`ruff`'s `[tool.ruff] extend-exclude` in `pyproject.toml` now excludes `pptx/`,
+`scripts/generate_presentation.py`, and `scripts/_gen_html.py` (fixed 2026-07-08) — `ruff check .`
+above already respects that config, so it still matches CI exactly without any extra flags.
+
 **Never run bare `mypy .`** — whole-repo invocation fails for reasons unrelated to your change: a
 `dist/lambda-build/typing_extensions.py` shadow conflict and a `scripts/generate_presentation.py`
 vs. `pptx/generate_presentation.py` module-name collision. Always scope it to the files/packages
@@ -44,6 +48,15 @@ you touched, e.g. `.venv/bin/mypy connector_runtime/foo.py connector_runtime/tes
 Per-package invocation (`mypy -p some_package`) also surfaces pre-existing, out-of-scope
 `no-untyped-def`/`no-untyped-call` warnings in test fixtures across the whole suite (untyped
 `monkeypatch`/fixture params) — treat those as known debt, not something to fix incidentally.
+As of 2026-07-08, `.github/workflows/ci.yml`'s `typecheck` job was itself fixed to stop running
+bare `mypy .` (which crashed on the same duplicate-module collision) and now runs the exact scoped
+form: `mypy -p connector_runtime -p transformation -p entity_resolution -p analytics_publisher
+-p orchestration -p observability -p watermark_management -p schema_management -p contracts
+-p governance`. Once unblocked, that command surfaces **75 pre-existing type errors across 16
+files** (confirmed via `git show HEAD:<file> | .venv/bin/mypy -` on the affected files — pre-existing,
+not introduced by the 2026-07-08 pass) — tracked as follow-up remediation debt (`architecture/GAP_ANALYSIS_FINDINGS.md`,
+`OBS-6`), not something to fix incidentally per the untyped-test-fixture warning above. The CI
+type-check job will report red on this debt until it's separately remediated.
 
 For Terraform: `cd infrastructure/environments/<env> && terraform init -backend=false &&
 terraform validate`. Only `dev` is guaranteed clean — `staging`/`prod` have pre-existing,
@@ -58,20 +71,26 @@ just assert it.
 
 - **Banned identifiers**: `helper`, `util`, `common`, `manager` (and `Helper`/`Util`/`Common`/
   `Manager` classes) are rejected by `make banned-names` — name things by domain concept instead
-  (see `PROHIBITED_IDENTIFIERS` in `contracts/identifier_policy.py`).
+  (see `PROHIBITED_IDENTIFIERS` in `contracts/identifier_policy.py`). This is now also enforced in
+  CI, not just locally — a dedicated `banned-names` job (`.github/workflows/ci.yml`) runs
+  `make banned-names` on every PR.
 - **ID/tenant validation lives in exactly one place**: `contracts/identifier_policy.py`
   (`STABLE_ID_PATTERN`, `TENANT_CODE_PATTERN`, `DEFAULT_TENANT_CODE = "demo"`,
   `tenant_scoped_key()`). Never re-derive these regexes elsewhere.
 - **`tenant_code` is always prefixed**, including the default tenant (`"demo"`) — no
   special-casing. Established in every repository class (`ConfigurationRepositoryClient`,
   `WatermarkRepository`, `SchemaSnapshotRepository`, `EntityTypeRegistryClient`).
-- **Not everything `tenant_code` touches is IAM-enforced yet**: S3 prefixes and the
-  `entity-type-registry` table are genuinely isolated (bucket prefix / partition key);
-  `entity-extraction-config` and `watermark-repository` DynamoDB tables are only isolated by an
-  application-level guard today (`SEC-2`, tracked follow-up — see the findings doc). Run
-  `tests/test_tenant_isolation.py` before touching any repository class — it's the single
-  regression test covering every isolation mechanism, and the one place a Secrets-Manager
-  isolation gap is deliberately tracked via a skipped placeholder rather than a fake pass.
+- **Not everything `tenant_code` touches is IAM-enforced yet**: S3 prefixes, the
+  `entity-type-registry` table, and (as of the `ARCH-1` fix, 2026-07-08) `watermark-repository`
+  are genuinely isolated at the key/prefix level (`tenant_scoped_key()` on the DynamoDB partition
+  key, or an S3 prefix an IAM bucket-policy condition could enforce). `entity-extraction-config`
+  is still only isolated by an application-level guard (`_enforce_tenant_match`) — see `ARCH-12`
+  in the findings doc, deliberately deferred (manifests as a 409-on-onboarding-conflict, not a
+  data leak, since the guard fails closed on read). Neither of these is IAM-enforced yet
+  regardless (`SEC-2`, tracked follow-up). Run `tests/test_tenant_isolation.py` before touching
+  any repository class — it's the single regression test covering every isolation mechanism, and
+  the one place a Secrets-Manager isolation gap is deliberately tracked via a skipped placeholder
+  rather than a fake pass.
 - **`extra="forbid"`** is used specifically on config/params/API-boundary Pydantic models
   (`EntityExtractionConfig`, the `*_params.py` connector models, `connector_runtime/api/models.py`)
   — not universal; don't assume every model has it.

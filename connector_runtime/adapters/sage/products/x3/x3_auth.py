@@ -6,7 +6,7 @@ grant for REST API authentication.  The 'folder' credential scopes the
 token to a specific X3 company folder (e.g. "SEED", "PROD").  All API paths
 are prefixed with the folder: {base_url}/api/{folder}/{endpoint}.
 
-Required secret keys (stored at {env}/sources/sage/x3/credentials):
+Required secret keys (stored at edl/sources/sage/x3/credentials):
     base_url      — X3 REST API base URL, excluding the /api/{folder} suffix
                     (e.g. "https://x3.company.com")
     token_url     — OAuth 2.0 token endpoint
@@ -108,7 +108,7 @@ class X3AuthClient:
         # Token state — populated lazily on first get_access_token() call.
         self._access_token: str | None = None
         self._token_expires_at: float = 0.0  # UNIX epoch seconds
-        self._base_url: str | None = None    # "{server_base}/api/{folder}"
+        self._base_url: str | None = None  # "{server_base}/api/{folder}"
         self._folder: str | None = None
 
     # ── SageAuthProtocol interface ─────────────────────────────────────────────
@@ -122,9 +122,7 @@ class X3AuthClient:
         Populated after the first successful get_access_token() call.
         """
         if self._base_url is None:
-            raise RuntimeError(
-                "base_url is not available until get_access_token() succeeds."
-            )
+            raise RuntimeError("base_url is not available until get_access_token() succeeds.")
         return self._base_url
 
     @property
@@ -134,9 +132,7 @@ class X3AuthClient:
         Populated after the first successful get_access_token() call.
         """
         if self._folder is None:
-            raise RuntimeError(
-                "folder is not available until get_access_token() succeeds."
-            )
+            raise RuntimeError("folder is not available until get_access_token() succeeds.")
         return self._folder
 
     def get_access_token(self) -> str:
@@ -220,19 +216,14 @@ class X3AuthClient:
             )
         except SageAuthenticationError as exc:
             raise X3AuthError(
-                "X3 token endpoint rejected the client credentials: "
-                f"{type(exc).__name__}"
+                f"X3 token endpoint rejected the client credentials: {type(exc).__name__}"
             ) from None
         except SageHttpError as exc:
-            raise X3AuthError(
-                f"X3 token request failed: {type(exc).__name__}"
-            ) from None
+            raise X3AuthError(f"X3 token request failed: {type(exc).__name__}") from None
 
         access_token = response_body.get("access_token")
         if not access_token:
-            raise X3AuthError(
-                "X3 token endpoint returned a response with no access_token field."
-            )
+            raise X3AuthError("X3 token endpoint returned a response with no access_token field.")
 
         expires_in = int(response_body.get("expires_in", _DEFAULT_TOKEN_TTL_SECONDS))
         self._access_token = access_token

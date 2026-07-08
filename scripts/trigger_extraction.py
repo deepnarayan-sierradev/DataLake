@@ -9,7 +9,7 @@ Usage:
         --environment dev \\
         --region us-east-1 \\
         --state-machine-arn \
-            arn:aws:states:us-east-1:123456789012:stateMachine:dev-extraction-pipeline
+            arn:aws:states:us-east-1:123456789012:stateMachine:EdlExtractionPipeline
 
 If --state-machine-arn is omitted the script reads it from Terraform output:
     cd infrastructure/environments/dev && terraform output -raw state_machine_arn

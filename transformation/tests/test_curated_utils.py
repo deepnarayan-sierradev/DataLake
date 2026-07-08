@@ -39,6 +39,7 @@ from transformation.curated_utils import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _parquet_bytes(records: list[dict[str, Any]]) -> bytes:
     buf = io.BytesIO()
     pq.write_table(pa.Table.from_pylist(records), buf)
@@ -48,9 +49,9 @@ def _parquet_bytes(records: list[dict[str, Any]]) -> bytes:
 def _mock_s3_empty() -> MagicMock:
     """S3 mock with no objects."""
     s3 = MagicMock()
-    s3.get_paginator.return_value.paginate.return_value = iter([
-        {"CommonPrefixes": [], "Contents": []}
-    ])
+    s3.get_paginator.return_value.paginate.return_value = iter(
+        [{"CommonPrefixes": [], "Contents": []}]
+    )
     return s3
 
 
@@ -65,20 +66,19 @@ def _mock_s3_with_prefix(
     s3 = MagicMock()
     parquet = _parquet_bytes(records)
 
-    def _paginate(Bucket, Prefix, **kwargs):  # noqa: N803
+    def _paginate(Bucket, Prefix, **kwargs):  # noqa: N803 -- kwarg names mirror the real boto3 S3 API
         delimiter = kwargs.get("Delimiter")
         if delimiter == "/" and "curated_date=" not in Prefix:
-            return iter([{"CommonPrefixes": [
-                {"Prefix": f"curated/{domain}/{entity_id}/curated_date={date}/"}
-            ], "Contents": []}])
+            date_prefix = f"curated/{domain}/{entity_id}/curated_date={date}/"
+            return iter([{"CommonPrefixes": [{"Prefix": date_prefix}], "Contents": []}])
         elif delimiter == "/" and "curated_date=" in Prefix:
-            return iter([{"CommonPrefixes": [
-                {"Prefix": f"curated/{domain}/{entity_id}/curated_date={date}/run_id={run_id}/"}
-            ], "Contents": []}])
+            run_prefix = f"curated/{domain}/{entity_id}/curated_date={date}/run_id={run_id}/"
+            return iter([{"CommonPrefixes": [{"Prefix": run_prefix}], "Contents": []}])
         else:
-            return iter([{"Contents": [
-                {"Key": f"curated/{domain}/{entity_id}/curated_date={date}/run_id={run_id}/data.parquet"}
-            ], "CommonPrefixes": []}])
+            data_key = (
+                f"curated/{domain}/{entity_id}/curated_date={date}/run_id={run_id}/data.parquet"
+            )
+            return iter([{"Contents": [{"Key": data_key}], "CommonPrefixes": []}])
 
     s3.get_paginator.return_value.paginate.side_effect = _paginate
     s3.get_object.return_value = {"Body": MagicMock(read=lambda: parquet)}
@@ -88,6 +88,7 @@ def _mock_s3_with_prefix(
 # ---------------------------------------------------------------------------
 # source_id_to_domain
 # ---------------------------------------------------------------------------
+
 
 class TestSourceIdToDomain:
     def test_hyphen_converted_to_underscore(self):
@@ -103,6 +104,7 @@ class TestSourceIdToDomain:
 # ---------------------------------------------------------------------------
 # SAFE_S3_PREFIX_PATTERN
 # ---------------------------------------------------------------------------
+
 
 class TestSafePrefixPattern:
     def test_valid_curated_prefix_matches(self):
@@ -124,15 +126,20 @@ class TestSafePrefixPattern:
 # find_latest_curated_prefix
 # ---------------------------------------------------------------------------
 
+
 class TestFindLatestCuratedPrefix:
     def test_returns_none_when_no_partitions(self):
         s3 = _mock_s3_empty()
-        result = find_latest_curated_prefix(s3, "bucket", "salesforce", "salesforce-contact")
+        result = find_latest_curated_prefix(
+            s3, "bucket", "salesforce", "salesforce-contact", "demo"
+        )
         assert result is None
 
     def test_returns_prefix_with_trailing_slash(self):
         s3 = _mock_s3_with_prefix("salesforce", "salesforce-contact", "2026-07-02", "run-001", [])
-        result = find_latest_curated_prefix(s3, "bucket", "salesforce", "salesforce-contact")
+        result = find_latest_curated_prefix(
+            s3, "bucket", "salesforce", "salesforce-contact", "demo"
+        )
         assert result is not None
         assert result.endswith("/")
 
@@ -140,44 +147,58 @@ class TestFindLatestCuratedPrefix:
         """When multiple dates exist, the latest ISO date wins."""
         s3 = MagicMock()
 
-        def _paginate(Bucket, Prefix, **kwargs):  # noqa: N803
+        def _paginate(Bucket, Prefix, **kwargs):  # noqa: N803 -- kwarg names mirror the real boto3 S3 API
             delimiter = kwargs.get("Delimiter")
             if delimiter == "/" and "curated_date=" not in Prefix:
-                return iter([{"CommonPrefixes": [
-                    {"Prefix": "curated/sf/sf-contact/curated_date=2026-06-01/"},
-                    {"Prefix": "curated/sf/sf-contact/curated_date=2026-07-02/"},
-                    {"Prefix": "curated/sf/sf-contact/curated_date=2026-06-30/"},
-                ], "Contents": []}])
+                return iter(
+                    [
+                        {
+                            "CommonPrefixes": [
+                                {"Prefix": "curated/sf/sf-contact/curated_date=2026-06-01/"},
+                                {"Prefix": "curated/sf/sf-contact/curated_date=2026-07-02/"},
+                                {"Prefix": "curated/sf/sf-contact/curated_date=2026-06-30/"},
+                            ],
+                            "Contents": [],
+                        }
+                    ]
+                )
             elif delimiter == "/" and "curated_date=2026-07-02" in Prefix:
-                return iter([{"CommonPrefixes": [
-                    {"Prefix": "curated/sf/sf-contact/curated_date=2026-07-02/run_id=run-002/"}
-                ], "Contents": []}])
+                run_prefix = "curated/sf/sf-contact/curated_date=2026-07-02/run_id=run-002/"
+                return iter([{"CommonPrefixes": [{"Prefix": run_prefix}], "Contents": []}])
             return iter([{"CommonPrefixes": [], "Contents": []}])
 
         s3.get_paginator.return_value.paginate.side_effect = _paginate
-        result = find_latest_curated_prefix(s3, "bucket", "sf", "sf-contact")
+        result = find_latest_curated_prefix(s3, "bucket", "sf", "sf-contact", "demo")
         assert result == "curated/sf/sf-contact/curated_date=2026-07-02/run_id=run-002/"
 
     def test_returns_none_when_no_run_id_subfolders(self):
         """Date partition exists but has no run_id sub-prefixes."""
         s3 = MagicMock()
 
-        def _paginate(Bucket, Prefix, **kwargs):  # noqa: N803
+        def _paginate(Bucket, Prefix, **kwargs):  # noqa: N803 -- kwarg names mirror the real boto3 S3 API
             delimiter = kwargs.get("Delimiter")
             if delimiter == "/" and "curated_date=" not in Prefix:
-                return iter([{"CommonPrefixes": [
-                    {"Prefix": "curated/sf/sf-c/curated_date=2026-07-02/"}
-                ], "Contents": []}])
+                return iter(
+                    [
+                        {
+                            "CommonPrefixes": [
+                                {"Prefix": "curated/sf/sf-c/curated_date=2026-07-02/"}
+                            ],
+                            "Contents": [],
+                        }
+                    ]
+                )
             return iter([{"CommonPrefixes": [], "Contents": []}])
 
         s3.get_paginator.return_value.paginate.side_effect = _paginate
-        result = find_latest_curated_prefix(s3, "bucket", "sf", "sf-c")
+        result = find_latest_curated_prefix(s3, "bucket", "sf", "sf-c", "demo")
         assert result is None
 
 
 # ---------------------------------------------------------------------------
 # load_curated_records
 # ---------------------------------------------------------------------------
+
 
 class TestLoadCuratedRecords:
     def test_path_traversal_rejected(self):
@@ -205,9 +226,9 @@ class TestLoadCuratedRecords:
 
     def test_empty_partition_returns_empty_list(self):
         s3 = MagicMock()
-        s3.get_paginator.return_value.paginate.return_value = iter([
-            {"Contents": [], "CommonPrefixes": []}
-        ])
+        s3.get_paginator.return_value.paginate.return_value = iter(
+            [{"Contents": [], "CommonPrefixes": []}]
+        )
         result = load_curated_records(s3, "bucket", "curated/sf/sf-c/curated_date=2026-07-02/")
         assert result == []
 
@@ -215,6 +236,7 @@ class TestLoadCuratedRecords:
 # ---------------------------------------------------------------------------
 # load_curated_records_duckdb (PERF-3)
 # ---------------------------------------------------------------------------
+
 
 class TestLoadCuratedRecordsDuckdb:
     """
@@ -236,9 +258,7 @@ class TestLoadCuratedRecordsDuckdb:
 
     def test_disallowed_characters_rejected(self):
         with pytest.raises(ValueError, match="disallowed"):
-            load_curated_records_duckdb(
-                MagicMock(), "bucket", "valid/path;rm -rf /", "us-east-1"
-            )
+            load_curated_records_duckdb(MagicMock(), "bucket", "valid/path;rm -rf /", "us-east-1")
 
     def test_duckdb_unavailable_falls_back_to_python_load(self, monkeypatch):
         """A None entry in sys.modules makes `import duckdb` raise ImportError."""
@@ -317,14 +337,17 @@ class TestFindLatestCuratedPrefixSecurity:
     def _make_s3_mock_with_prefix(self, date_prefix, run_prefix):
         """Mock S3 paginator returning custom prefixes."""
         from unittest.mock import MagicMock
+
         mock_s3 = MagicMock()
         pages_date = [{"CommonPrefixes": [{"Prefix": date_prefix}]}]
         pages_run = [{"CommonPrefixes": [{"Prefix": run_prefix}]}]
         paginator = MagicMock()
         call_count = [0]
+
         def paginate(**kwargs):
             call_count[0] += 1
             return iter(pages_date if call_count[0] == 1 else pages_run)
+
         paginator.paginate.side_effect = paginate
         mock_s3.get_paginator.return_value = paginator
         return mock_s3
@@ -332,31 +355,34 @@ class TestFindLatestCuratedPrefixSecurity:
     def test_path_traversal_in_run_prefix_returns_none(self) -> None:
         """A run prefix containing '..' must be rejected (CWE-22)."""
         from transformation.curated_utils import find_latest_curated_prefix
+
         mock_s3 = self._make_s3_mock_with_prefix(
             date_prefix="curated/sf/sf-account/curated_date=2026-07-07/",
             run_prefix="curated/sf/sf-account/curated_date=2026-07-07/run_id=../../evil/",
         )
-        result = find_latest_curated_prefix(mock_s3, "bucket", "sf", "sf-account")
+        result = find_latest_curated_prefix(mock_s3, "bucket", "sf", "sf-account", "demo")
         # Must return None — the unsafe prefix is rejected
         assert result is None
 
     def test_leading_slash_in_run_prefix_returns_none(self) -> None:
         """A run prefix starting with '/' must be rejected."""
         from transformation.curated_utils import find_latest_curated_prefix
+
         mock_s3 = self._make_s3_mock_with_prefix(
             date_prefix="curated/sf/sf-account/curated_date=2026-07-07/",
             run_prefix="/curated/sf/sf-account/curated_date=2026-07-07/run_id=run-001/",
         )
-        result = find_latest_curated_prefix(mock_s3, "bucket", "sf", "sf-account")
+        result = find_latest_curated_prefix(mock_s3, "bucket", "sf", "sf-account", "demo")
         assert result is None
 
     def test_safe_prefix_returned_normally(self) -> None:
         """A normal safe run prefix must be returned unchanged."""
         from transformation.curated_utils import find_latest_curated_prefix
+
         safe_run_prefix = "curated/sf/sf-account/curated_date=2026-07-07/run_id=run-20260707-001/"
         mock_s3 = self._make_s3_mock_with_prefix(
             date_prefix="curated/sf/sf-account/curated_date=2026-07-07/",
             run_prefix=safe_run_prefix,
         )
-        result = find_latest_curated_prefix(mock_s3, "bucket", "sf", "sf-account")
+        result = find_latest_curated_prefix(mock_s3, "bucket", "sf", "sf-account", "demo")
         assert result == safe_run_prefix

@@ -3,7 +3,9 @@ Tests for SalesforceRawLayerWriter — Phase 3 §3.5.
 
 Covers:
   - Happy path: records written to correct S3 partition path
-  - Partition path structure matches spec: salesforce/{entity_id}/extraction_date=.../run_id=...
+  - Partition path structure matches production wiring (RAW-1): a single
+    "salesforce" source segment, no s3_prefix — {tenant_code}/salesforce/
+    {entity_id}/extraction_date=.../run_id=...
   - Parquet file readable; payload fields preserved exactly (no transformation)
   - Metadata JSON written alongside data file with correct fields
   - Empty record batch raises SalesforceRawLayerWriterError
@@ -31,19 +33,19 @@ from connector_runtime.interfaces.connector_interface import ExtractionRecord
 
 _REGION = "us-east-1"
 _BUCKET = "test-raw-layer"
-_PREFIX = "raw"
 _SOURCE_ID = "salesforce"
 _ENTITY_ID = "salesforce-account"
 _RUN_ID = "run-20260612-120000000000-ab12cd34"
 _SCHEMA_FP = "a" * 64
 _DATE = "2026-06-12"
+_TENANT_CODE = "demo"
 
 
 def _make_writer() -> SalesforceRawLayerWriter:
     return SalesforceRawLayerWriter(
         s3_bucket=_BUCKET,
-        s3_prefix=_PREFIX,
         region_name=_REGION,
+        tenant_code=_TENANT_CODE,
     )
 
 
@@ -64,14 +66,18 @@ def _create_bucket() -> None:
 
 class TestPartitionPath:
     @mock_aws
-    def test_data_key_follows_spec_partition_scheme(self) -> None:
-        """Spec §3.5: s3://raw/salesforce/{entity_id}/extraction_date=.../run_id=..../data.parquet"""
+    def test_data_key_follows_production_partition_scheme(self) -> None:
+        """
+        RAW-1: production wiring (salesforce_connector._build_salesforce) passes
+        no s3_prefix — the writer's own ["salesforce"] path_segments is the only
+        source segment, so the key must NOT contain a doubled "salesforce/salesforce".
+        """
         _create_bucket()
         writer = _make_writer()
         records = _make_records({"Id": "001", "Name": "Acme"})
         key = writer.write_partition(records, _SOURCE_ID, _ENTITY_ID, _RUN_ID, _SCHEMA_FP, _DATE)
         expected = (
-            f"{_PREFIX}/{_SOURCE_ID}/{_ENTITY_ID}/extraction_date={_DATE}"
+            f"{_TENANT_CODE}/{_SOURCE_ID}/{_ENTITY_ID}/extraction_date={_DATE}"
             f"/run_id={_RUN_ID}/data.parquet"
         )
         assert key == expected
@@ -91,12 +97,15 @@ class TestPartitionPath:
         assert k1 != k2
 
     @mock_aws
-    def test_prefix_empty_string_produces_valid_path(self) -> None:
+    def test_no_source_prefix_parameter_exists(self) -> None:
+        """RAW-1: the writer no longer accepts an s3_prefix constructor arg at all."""
         _create_bucket()
-        writer = SalesforceRawLayerWriter(s3_bucket=_BUCKET, s3_prefix="", region_name=_REGION)
+        writer = SalesforceRawLayerWriter(
+            s3_bucket=_BUCKET, region_name=_REGION, tenant_code=_TENANT_CODE
+        )
         records = _make_records({"Id": "001"})
         key = writer.write_partition(records, _SOURCE_ID, _ENTITY_ID, _RUN_ID, _SCHEMA_FP, _DATE)
-        assert key.startswith(f"{_SOURCE_ID}/{_ENTITY_ID}/")
+        assert key.startswith(f"{_TENANT_CODE}/{_SOURCE_ID}/{_ENTITY_ID}/")
 
 
 # ---------------------------------------------------------------------------
@@ -233,4 +242,4 @@ class TestInputValidation:
 
     def test_empty_bucket_raises_at_construction(self) -> None:
         with pytest.raises(ValueError, match="s3_bucket"):
-            SalesforceRawLayerWriter(s3_bucket="", s3_prefix=_PREFIX, region_name=_REGION)
+            SalesforceRawLayerWriter(s3_bucket="", region_name=_REGION, tenant_code=_TENANT_CODE)

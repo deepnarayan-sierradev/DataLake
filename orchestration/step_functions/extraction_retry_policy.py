@@ -81,13 +81,15 @@ class ExtractionRetryPolicy:
 
     Thread-safety: the circuit breaker state dict is protected by an internal
     threading.Lock, making this class safe for use from multiple threads.
-    Circuit breaker keys are scoped to (source_id, entity_id) so that failures
-    for one entity do not block extraction of other entities from the same source.
+    Circuit breaker keys are scoped to (tenant_code, source_id, entity_id) so
+    that failures for one entity do not block extraction of other entities
+    from the same source, and one tenant's failures never open the circuit
+    for another tenant sharing a connector type (ARCH-1).
 
     Distributed circuit breaker:
     When PLATFORM_ENVIRONMENT and AWS_REGION environment variables are present
     (i.e. running inside Lambda), the circuit breaker state is persisted to the
-    existing {env}-edl-run-audit-log DynamoDB table using a sentinel run_id
+    existing EdlRunAuditLog DynamoDB table using a sentinel run_id
     ("__circuit_breaker__").  This ensures that all Lambda containers see the
     same failure count — a container that opens the circuit will block other
     containers from starting new extractions for the same source.
@@ -183,24 +185,28 @@ class ExtractionRetryPolicy:
             self._base_delay * (self._backoff_multiplier ** (attempt - 1)),
             self._max_delay,
         )
-        # S311 suppressed: this is a non-cryptographic use of random for jitter.
+        # Non-cryptographic use of random for retry-delay jitter.
         jitter = raw_delay * self._jitter_fraction * random.uniform(-1.0, 1.0)  # noqa: S311
         return max(0.0, raw_delay + jitter)
 
     # ── Circuit breaker ─────────────────────────────────────────────────────
 
     @staticmethod
-    def _circuit_key(source_id: str, entity_id: str = "") -> str:
+    def _circuit_key(source_id: str, entity_id: str = "", tenant_code: str = "demo") -> str:
         """Return the dict key for circuit breaker state.
 
-        Scoping to (source_id, entity_id) prevents a failing entity from
-        blocking extraction of healthy entities from the same source.
+        Scoping to (tenant_code, source_id, entity_id) prevents a failing
+        entity from blocking extraction of healthy entities from the same
+        source, and (ARCH-1) prevents one tenant's failures from opening the
+        circuit for another tenant sharing a connector type.
         """
-        return f"{source_id}:{entity_id}"
+        return f"{tenant_code}:{source_id}:{entity_id}"
 
-    def record_failure(self, source_id: str, entity_id: str = "") -> None:
-        """Increment the consecutive failure counter for source_id:entity_id."""
-        key = self._circuit_key(source_id, entity_id)
+    def record_failure(
+        self, source_id: str, entity_id: str = "", tenant_code: str = "demo"
+    ) -> None:
+        """Increment the consecutive failure counter for tenant_code:source_id:entity_id."""
+        key = self._circuit_key(source_id, entity_id, tenant_code)
         count = self._ddb_increment(key)
         if count is None:
             # DynamoDB unavailable — fall back to in-process atomic increment.
@@ -220,16 +226,20 @@ class ExtractionRetryPolicy:
             circuit_open=count >= self._circuit_open_threshold,
         )
 
-    def record_success(self, source_id: str, entity_id: str = "") -> None:
-        """Reset the consecutive failure counter for source_id:entity_id on success."""
-        key = self._circuit_key(source_id, entity_id)
+    def record_success(
+        self, source_id: str, entity_id: str = "", tenant_code: str = "demo"
+    ) -> None:
+        """Reset the consecutive failure counter for tenant_code:source_id:entity_id on success."""
+        key = self._circuit_key(source_id, entity_id, tenant_code)
         self._ddb_reset(key)  # best-effort; never propagates errors
         with self._lock:
             self._consecutive_failures[key] = 0
 
-    def is_circuit_open(self, source_id: str, entity_id: str = "") -> bool:
-        """True when consecutive failures for source_id:entity_id meet or exceed the threshold."""
-        key = self._circuit_key(source_id, entity_id)
+    def is_circuit_open(
+        self, source_id: str, entity_id: str = "", tenant_code: str = "demo"
+    ) -> bool:
+        """True when failures for tenant_code:source_id:entity_id meet/exceed the threshold."""
+        key = self._circuit_key(source_id, entity_id, tenant_code)
         count = self._ddb_get_count(key)
         if count is not None:
             with self._lock:
@@ -239,17 +249,19 @@ class ExtractionRetryPolicy:
         with self._lock:
             return self._consecutive_failures.get(key, 0) >= self._circuit_open_threshold
 
-    def reset_circuit(self, source_id: str, entity_id: str = "") -> None:
-        """Manually reset the circuit breaker state for source_id:entity_id."""
-        key = self._circuit_key(source_id, entity_id)
+    def reset_circuit(self, source_id: str, entity_id: str = "", tenant_code: str = "demo") -> None:
+        """Manually reset the circuit breaker state for tenant_code:source_id:entity_id."""
+        key = self._circuit_key(source_id, entity_id, tenant_code)
         self._ddb_reset(key)  # best-effort
         with self._lock:
             self._consecutive_failures[key] = 0
         _logger.info("circuit_breaker_reset", source_id=source_id, entity_id=entity_id)
 
-    def consecutive_failures(self, source_id: str, entity_id: str = "") -> int:
-        """Return the current consecutive failure count for source_id:entity_id."""
-        key = self._circuit_key(source_id, entity_id)
+    def consecutive_failures(
+        self, source_id: str, entity_id: str = "", tenant_code: str = "demo"
+    ) -> int:
+        """Return the current consecutive failure count for tenant_code:source_id:entity_id."""
+        key = self._circuit_key(source_id, entity_id, tenant_code)
         count = self._ddb_get_count(key)
         if count is not None:
             return count
@@ -283,12 +295,8 @@ class ExtractionRetryPolicy:
             env = os.environ.get("PLATFORM_ENVIRONMENT", "")
             if not region or not env:
                 return None  # local/test environment — in-process only
-            table_name = (
-                os.environ.get("AUDIT_LOG_TABLE") or f"{env}-edl-run-audit-log"
-            )
-            self._ddb_table = boto3.resource(
-                "dynamodb", region_name=region
-            ).Table(table_name)
+            table_name = os.environ.get("AUDIT_LOG_TABLE") or "EdlRunAuditLog"
+            self._ddb_table = boto3.resource("dynamodb", region_name=region).Table(table_name)
             _logger.info(
                 "circuit_breaker_ddb_backend_enabled",
                 table=table_name,
@@ -316,8 +324,8 @@ class ExtractionRetryPolicy:
                 ),
                 ExpressionAttributeValues={
                     ":zero": Decimal("0"),
-                    ":one":  Decimal("1"),
-                    ":now":  datetime.now(UTC).isoformat(),
+                    ":one": Decimal("1"),
+                    ":now": datetime.now(UTC).isoformat(),
                 },
                 ReturnValues="UPDATED_NEW",
             )
@@ -340,7 +348,7 @@ class ExtractionRetryPolicy:
                 UpdateExpression="SET consecutive_failures = :zero, updated_at = :now",
                 ExpressionAttributeValues={
                     ":zero": Decimal("0"),
-                    ":now":  datetime.now(UTC).isoformat(),
+                    ":now": datetime.now(UTC).isoformat(),
                 },
             )
         except Exception:

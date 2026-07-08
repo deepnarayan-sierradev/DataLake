@@ -29,8 +29,9 @@ prompt. This file is the reference if you're doing it by hand or reviewing someo
 
 ## Credentials and tenancy
 
-One Secrets Manager path per source: `{environment}/sources/{source_id}/credentials` (see
-README's Connector Credentials table). **Not tenant-scoped today** — every tenant using a given
+One Secrets Manager path per source: `edl/sources/{source_id}/credentials` (see README's
+Connector Credentials table — not environment-prefixed, since each environment is its own AWS
+account already). **Not tenant-scoped today** — every tenant using a given
 source-connector type shares one credential set. This is a known, documented gap, not a bug —
 `tests/test_tenant_isolation.py` tracks it via a skipped placeholder test rather than a fake pass.
 Don't add tenant-scoping to credentials speculatively without checking that test first.

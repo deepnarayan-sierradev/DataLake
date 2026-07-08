@@ -25,22 +25,21 @@ Coverage:
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import requests_mock as requests_mock_lib
 
 from connector_runtime.adapters.sage.common.sage_credential_manager import SageCredentialError
 from connector_runtime.adapters.sage.common.sage_http_client import (
-    SageAuthenticationError,
     SageHttpClient,
 )
 from connector_runtime.adapters.sage.products.x3.x3_auth import (
+    _DEFAULT_TOKEN_TTL_SECONDS,
+    _PROACTIVE_REFRESH_SECONDS,
     X3AuthClient,
     X3AuthError,
     X3CredentialError,
-    _DEFAULT_TOKEN_TTL_SECONDS,
-    _PROACTIVE_REFRESH_SECONDS,
 )
 
 _TOKEN_URL = "https://x3.company.com/auth/token"
@@ -79,9 +78,7 @@ def _make_auth(creds: dict[str, str] | None = None) -> X3AuthClient:
 
 
 class TestTokenAcquisition:
-    def test_get_access_token_returns_token(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_get_access_token_returns_token(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         token = auth.get_access_token()
@@ -96,9 +93,7 @@ class TestTokenAcquisition:
         auth.get_access_token()
         assert requests_mock.call_count == 1
 
-    def test_expires_in_from_response(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_expires_in_from_response(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json={**_TOKEN_RESPONSE, "expires_in": 7200})
         auth = _make_auth()
         auth.get_access_token()
@@ -127,9 +122,7 @@ class TestTokenAcquisition:
         auth.get_access_token()
         assert requests_mock.call_count == 2
 
-    def test_invalidate_token_forces_refresh(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_invalidate_token_forces_refresh(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         auth.get_access_token()
@@ -167,9 +160,7 @@ class TestBaseUrlAndFolder:
         auth.get_access_token()
         assert auth.base_url == _EXPECTED_BASE_URL
 
-    def test_base_url_strips_trailing_slash(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_base_url_strips_trailing_slash(self, requests_mock: requests_mock_lib.Mocker) -> None:
         creds = {**_VALID_CREDS, "base_url": f"{_SERVER_BASE_URL}/"}
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth(creds)
@@ -197,25 +188,19 @@ class TestBaseUrlAndFolder:
 
 
 class TestBuildAuthHeaders:
-    def test_headers_contain_bearer_token(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_headers_contain_bearer_token(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         headers = auth.build_auth_headers()
         assert headers["Authorization"] == "Bearer eyJx3.bearer.token"
 
-    def test_headers_contain_content_type(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_headers_contain_content_type(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         headers = auth.build_auth_headers()
         assert headers["Content-Type"] == "application/json"
 
-    def test_headers_contain_accept(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_headers_contain_accept(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         headers = auth.build_auth_headers()
@@ -293,9 +278,7 @@ class TestSecurityTokenNotLeaked:
 
     def test_client_secret_not_in_exception_message(self) -> None:
         mock_cred_mgr = MagicMock()
-        mock_cred_mgr.get_credentials.side_effect = SageCredentialError(
-            "credentials not found"
-        )
+        mock_cred_mgr.get_credentials.side_effect = SageCredentialError("credentials not found")
         auth = X3AuthClient(
             credential_manager=mock_cred_mgr,
             http_client=SageHttpClient(),

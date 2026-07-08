@@ -21,7 +21,6 @@ from connector_runtime.interfaces.connector_interface import ExtractionRecord
 
 _REGION = "us-east-1"
 _BUCKET = "test-mysql-streaming"
-_PREFIX = "raw"
 _SOURCE_ID = "mysql-rds"
 _ENTITY_ID = "mysql-rds-orders"
 _RUN_ID = "run-20260612-120000000000-ab12cd34"
@@ -30,7 +29,7 @@ _DATE = "2026-06-12"
 
 
 def _make_writer() -> MySqlRdsRawLayerWriter:
-    return MySqlRdsRawLayerWriter(s3_bucket=_BUCKET, s3_prefix=_PREFIX, region_name=_REGION)
+    return MySqlRdsRawLayerWriter(s3_bucket=_BUCKET, region_name=_REGION, tenant_code="demo")
 
 
 def _records(n: int) -> list[ExtractionRecord]:

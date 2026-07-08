@@ -77,6 +77,11 @@ _RESULT_PAGE_SIZE: Final[int] = 50_000
 # Salesforce allocates DailyBulkV2QueryFileStorageMB and DailyBulkApiBatches.
 _MIN_BULK_QUERY_JOBS_REMAINING: Final[int] = 5
 
+# Fallback timeout (seconds) for _request_with_401_retry() when a caller does
+# not supply one explicitly (OWASP A05: never make an unbounded HTTP request).
+# Every current call site passes its own timeout; this is defense-in-depth.
+_DEFAULT_REQUEST_TIMEOUT_S: Final[float] = 30.0
+
 
 class BulkJobState(StrEnum):
     """Salesforce Bulk API 2.0 job state values."""
@@ -211,6 +216,9 @@ class SalesforceBulkQueryJobController:
         token = self._auth.get_access_token()
         headers: dict[str, str] = dict(kwargs.pop("headers", {}))
         headers["Authorization"] = f"Bearer {token}"
+        # timeout is always enforced via kwargs.setdefault() above the call, but
+        # ruff/bandit cannot statically see through **kwargs to confirm it.
+        kwargs.setdefault("timeout", _DEFAULT_REQUEST_TIMEOUT_S)
 
         response = requests.request(method, url, headers=headers, **kwargs)  # noqa: S113
         if response.status_code == 401:
@@ -337,8 +345,8 @@ class SalesforceBulkQueryJobController:
             if status in (BulkJobState.FAILED, BulkJobState.ABORTED):
                 raise BulkJobFailedError(f"Bulk job {job_id!r} terminated with state={status!r}.")
 
-            # Exponential backoff with full jitter
-            jitter = random.uniform(0, _POLL_JITTER_MAX_S)  # noqa: S311 — jitter, not crypto
+            # Exponential backoff with full jitter — non-cryptographic use only.
+            jitter = random.uniform(0, _POLL_JITTER_MAX_S)  # noqa: S311
             time.sleep(min(delay + jitter, _POLL_MAX_DELAY_S))
             delay = min(delay * _POLL_BACKOFF_FACTOR, _POLL_MAX_DELAY_S)
 

@@ -108,20 +108,76 @@ _COMPANY_SURVIVORSHIP = {
     ],
     "default_strategy": "first_non_null",
     "attribute_rules": [
-        {"canonical_field": "full_name", "strategy": "source_priority", "source_priority": ["netsuite", "salesforce"]},
-        {"canonical_field": "email_address", "strategy": "source_priority", "source_priority": ["netsuite", "salesforce"]},
-        {"canonical_field": "annual_revenue", "strategy": "most_recent", "timestamp_field": "last_modified_date"},
-        {"canonical_field": "credit_limit", "strategy": "source_priority", "source_priority": ["netsuite", "salesforce"]},
-        {"canonical_field": "outstanding_balance", "strategy": "source_priority", "source_priority": ["netsuite", "salesforce"]},
-        {"canonical_field": "currency_code", "strategy": "source_priority", "source_priority": ["netsuite", "salesforce"]},
-        {"canonical_field": "billing_country", "strategy": "source_priority", "source_priority": ["netsuite", "salesforce"]},
-        {"canonical_field": "billing_state", "strategy": "source_priority", "source_priority": ["netsuite", "salesforce"]},
-        {"canonical_field": "industry", "strategy": "source_priority", "source_priority": ["salesforce", "netsuite"]},
-        {"canonical_field": "is_active", "strategy": "source_priority", "source_priority": ["netsuite", "salesforce"]},
-        {"canonical_field": "phone_number", "strategy": "source_priority", "source_priority": ["netsuite", "salesforce"]},
-        {"canonical_field": "employee_count", "strategy": "source_priority", "source_priority": ["salesforce", "netsuite"]},
-        {"canonical_field": "created_date", "strategy": "most_recent", "timestamp_field": "created_date"},
-        {"canonical_field": "last_modified_date", "strategy": "most_recent", "timestamp_field": "last_modified_date"},
+        {
+            "canonical_field": "full_name",
+            "strategy": "source_priority",
+            "source_priority": ["netsuite", "salesforce"],
+        },
+        {
+            "canonical_field": "email_address",
+            "strategy": "source_priority",
+            "source_priority": ["netsuite", "salesforce"],
+        },
+        {
+            "canonical_field": "annual_revenue",
+            "strategy": "most_recent",
+            "timestamp_field": "last_modified_date",
+        },
+        {
+            "canonical_field": "credit_limit",
+            "strategy": "source_priority",
+            "source_priority": ["netsuite", "salesforce"],
+        },
+        {
+            "canonical_field": "outstanding_balance",
+            "strategy": "source_priority",
+            "source_priority": ["netsuite", "salesforce"],
+        },
+        {
+            "canonical_field": "currency_code",
+            "strategy": "source_priority",
+            "source_priority": ["netsuite", "salesforce"],
+        },
+        {
+            "canonical_field": "billing_country",
+            "strategy": "source_priority",
+            "source_priority": ["netsuite", "salesforce"],
+        },
+        {
+            "canonical_field": "billing_state",
+            "strategy": "source_priority",
+            "source_priority": ["netsuite", "salesforce"],
+        },
+        {
+            "canonical_field": "industry",
+            "strategy": "source_priority",
+            "source_priority": ["salesforce", "netsuite"],
+        },
+        {
+            "canonical_field": "is_active",
+            "strategy": "source_priority",
+            "source_priority": ["netsuite", "salesforce"],
+        },
+        {
+            "canonical_field": "phone_number",
+            "strategy": "source_priority",
+            "source_priority": ["netsuite", "salesforce"],
+        },
+        {
+            "canonical_field": "employee_count",
+            "strategy": "source_priority",
+            "source_priority": ["salesforce", "netsuite"],
+        },
+        {
+            "canonical_field": "created_date",
+            "strategy": "most_recent",
+            "timestamp_field": "created_date",
+        },
+        {
+            "canonical_field": "last_modified_date",
+            "strategy": "most_recent",
+            "timestamp_field": "last_modified_date",
+        },
     ],
 }
 
@@ -156,18 +212,66 @@ _PERSON_SURVIVORSHIP = {
     ],
     "default_strategy": "first_non_null",
     "attribute_rules": [
-        {"canonical_field": "full_name", "strategy": "source_priority", "source_priority": ["salesforce"]},
-        {"canonical_field": "email_address", "strategy": "most_recent", "timestamp_field": "last_modified_date"},
-        {"canonical_field": "first_name", "strategy": "source_priority", "source_priority": ["salesforce"]},
-        {"canonical_field": "last_name", "strategy": "source_priority", "source_priority": ["salesforce"]},
-        {"canonical_field": "phone_number", "strategy": "most_recent", "timestamp_field": "last_modified_date"},
-        {"canonical_field": "job_title", "strategy": "most_recent", "timestamp_field": "last_modified_date"},
-        {"canonical_field": "department", "strategy": "source_priority", "source_priority": ["salesforce"]},
-        {"canonical_field": "account_id", "strategy": "source_priority", "source_priority": ["salesforce"]},
-        {"canonical_field": "mailing_country", "strategy": "source_priority", "source_priority": ["salesforce"]},
-        {"canonical_field": "is_active", "strategy": "source_priority", "source_priority": ["salesforce"]},
-        {"canonical_field": "created_date", "strategy": "most_recent", "timestamp_field": "created_date"},
-        {"canonical_field": "last_modified_date", "strategy": "most_recent", "timestamp_field": "last_modified_date"},
+        {
+            "canonical_field": "full_name",
+            "strategy": "source_priority",
+            "source_priority": ["salesforce"],
+        },
+        {
+            "canonical_field": "email_address",
+            "strategy": "most_recent",
+            "timestamp_field": "last_modified_date",
+        },
+        {
+            "canonical_field": "first_name",
+            "strategy": "source_priority",
+            "source_priority": ["salesforce"],
+        },
+        {
+            "canonical_field": "last_name",
+            "strategy": "source_priority",
+            "source_priority": ["salesforce"],
+        },
+        {
+            "canonical_field": "phone_number",
+            "strategy": "most_recent",
+            "timestamp_field": "last_modified_date",
+        },
+        {
+            "canonical_field": "job_title",
+            "strategy": "most_recent",
+            "timestamp_field": "last_modified_date",
+        },
+        {
+            "canonical_field": "department",
+            "strategy": "source_priority",
+            "source_priority": ["salesforce"],
+        },
+        {
+            "canonical_field": "account_id",
+            "strategy": "source_priority",
+            "source_priority": ["salesforce"],
+        },
+        {
+            "canonical_field": "mailing_country",
+            "strategy": "source_priority",
+            "source_priority": ["salesforce"],
+        },
+        {
+            "canonical_field": "is_active",
+            "strategy": "source_priority",
+            "source_priority": ["salesforce"],
+        },
+        {
+            "canonical_field": "created_date",
+            "strategy": "most_recent",
+            "timestamp_field": "created_date",
+        },
+        {
+            "canonical_field": "last_modified_date",
+            "strategy": "most_recent",
+            "timestamp_field": "last_modified_date",
+        },
     ],
 }
 
@@ -180,13 +284,21 @@ _PERSON_SURVIVORSHIP = {
 def _seed_company(client) -> None:
     _put(client, "entity-resolution/company/match_rules_v1.json", _COMPANY_MATCH_RULES)
     _put(client, "entity-resolution/company/survivorship_v1.json", _COMPANY_SURVIVORSHIP)
-    _put(client, "entity-resolution/company/latest.json", {"match_rules_version": "v1", "survivorship_version": "v1"})
+    _put(
+        client,
+        "entity-resolution/company/latest.json",
+        {"match_rules_version": "v1", "survivorship_version": "v1"},
+    )
 
 
 def _seed_person(client) -> None:
     _put(client, "entity-resolution/person/match_rules_v1.json", _PERSON_MATCH_RULES)
     _put(client, "entity-resolution/person/survivorship_v1.json", _PERSON_SURVIVORSHIP)
-    _put(client, "entity-resolution/person/latest.json", {"match_rules_version": "v1", "survivorship_version": "v1"})
+    _put(
+        client,
+        "entity-resolution/person/latest.json",
+        {"match_rules_version": "v1", "survivorship_version": "v1"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +334,9 @@ def test_load_company_probabilistic_rule(s3_client):
     registry = ResolutionConfigRegistry(s3_bucket=_BUCKET, region_name=_REGION)
     config = registry.load("company")
 
-    prob_rule = next(r for r in config.match_rule_set.rules if isinstance(r, ProbabilisticMatchRule))
+    prob_rule = next(
+        r for r in config.match_rule_set.rules if isinstance(r, ProbabilisticMatchRule)
+    )
     assert prob_rule.rule_id == "name-country-fuzzy"
     assert prob_rule.match_threshold == pytest.approx(0.85)
     assert len(prob_rule.fields) == 2
@@ -289,7 +403,11 @@ def test_latest_pointer_resolves_version(s3_client):
     """When latest.json exists it should be used to resolve version."""
     _put(s3_client, "entity-resolution/company/match_rules_v1.json", _COMPANY_MATCH_RULES)
     _put(s3_client, "entity-resolution/company/survivorship_v1.json", _COMPANY_SURVIVORSHIP)
-    _put(s3_client, "entity-resolution/company/latest.json", {"match_rules_version": "v1", "survivorship_version": "v1"})
+    _put(
+        s3_client,
+        "entity-resolution/company/latest.json",
+        {"match_rules_version": "v1", "survivorship_version": "v1"},
+    )
 
     registry = ResolutionConfigRegistry(s3_bucket=_BUCKET, region_name=_REGION)
     config = registry.load("company")  # "latest" → "v1" via pointer
@@ -392,7 +510,11 @@ def test_parse_error_when_attribute_rule_field_not_in_output_fields(s3_client):
         "default_strategy": "first_non_null",
         "attribute_rules": [
             # This field is not in output_fields — should raise
-            {"canonical_field": "email_address", "strategy": "source_priority", "source_priority": ["netsuite"]},
+            {
+                "canonical_field": "email_address",
+                "strategy": "source_priority",
+                "source_priority": ["netsuite"],
+            },
         ],
     }
     _put(s3_client, "entity-resolution/company/match_rules_v1.json", _COMPANY_MATCH_RULES)
@@ -434,7 +556,9 @@ def test_publish_writes_three_s3_objects(s3_client):
     # Verify all three objects exist in S3
     keys_in_bucket = {
         obj["Key"]
-        for obj in s3_client.list_objects_v2(Bucket=_BUCKET, Prefix="entity-resolution/company/")["Contents"]
+        for obj in s3_client.list_objects_v2(Bucket=_BUCKET, Prefix="entity-resolution/company/")[
+            "Contents"
+        ]
     }
     assert mr_key in keys_in_bucket
     assert sv_key in keys_in_bucket
@@ -449,7 +573,9 @@ def test_publish_latest_pointer_contains_version(s3_client):
         survivorship_raw=_COMPANY_SURVIVORSHIP,
     )
 
-    pointer_body = s3_client.get_object(Bucket=_BUCKET, Key="entity-resolution/company/latest.json")["Body"].read()
+    pointer_body = s3_client.get_object(
+        Bucket=_BUCKET, Key="entity-resolution/company/latest.json"
+    )["Body"].read()
     pointer = json.loads(pointer_body)
     assert pointer["match_rules_version"] == "v1"
     assert pointer["survivorship_version"] == "v1"

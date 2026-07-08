@@ -103,6 +103,4 @@ def emit_golden_record_lineage(
             region_name=region_name,
         ).emit(record)
     except Exception as exc:
-        logging.getLogger(__name__).warning(
-            "golden_record_lineage_emission_failed error=%s", exc
-        )
+        logging.getLogger(__name__).warning("golden_record_lineage_emission_failed error=%s", exc)

@@ -35,7 +35,7 @@ _ENTITY = "salesforce-account"
 _ENV = "dev"
 _REGION = "us-east-1"
 _RAW_BUCKET = "dev-raw-layer"
-_SNAPSHOT_BUCKET = "dev-edl-schema-snapshots"
+_SNAPSHOT_BUCKET = "edl-schema-snapshots-087972550871"
 
 _VALID_EVENT: dict[str, object] = {
     "source_id": _SOURCE,
@@ -43,6 +43,7 @@ _VALID_EVENT: dict[str, object] = {
     "environment": _ENV,
     "connector_params": {"object_name": "Account"},
     "is_replay": False,
+    "tenant_code": "demo",
 }
 
 _ENV_VARS = {
@@ -261,6 +262,17 @@ class TestEventValidation:
             patch.dict("os.environ", _ENV_VARS),
             pytest.raises(ValueError, match="connector_params"),
         ):
+            lambda_handler(event, None)
+
+    def test_missing_tenant_code_raises(self) -> None:
+        """ARCH-4: tenant_code must fail closed, not silently default."""
+        event = {k: v for k, v in _VALID_EVENT.items() if k != "tenant_code"}
+        with patch.dict("os.environ", _ENV_VARS), pytest.raises(ValueError, match="tenant_code"):
+            lambda_handler(event, None)
+
+    def test_invalid_tenant_code_raises(self) -> None:
+        event = {**_VALID_EVENT, "tenant_code": "BAD_CODE"}
+        with patch.dict("os.environ", _ENV_VARS), pytest.raises(ValueError, match="tenant_code"):
             lambda_handler(event, None)
 
 

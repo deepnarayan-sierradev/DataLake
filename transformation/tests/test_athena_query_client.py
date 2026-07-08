@@ -15,9 +15,9 @@ from transformation.athena_query_client import (
     AthenaQueryResult,
 )
 
-WORKGROUP = "dev-edl-analytics"
+WORKGROUP = "EdlAnalytics"
 REGION = "us-east-1"
-DATABASE = "dev_edl_analytics"
+DATABASE = "edl_analytics"
 
 
 @pytest.fixture()
@@ -98,6 +98,7 @@ class TestAthenaErrorPaths:
     def _aws_mock(self):  # type: ignore[no-untyped-def]
         with mock_aws():
             import boto3
+
             boto3.client("athena", region_name=REGION).create_work_group(
                 Name=WORKGROUP,
                 Configuration={
@@ -219,9 +220,8 @@ class TestDatabaseValidation:
     @pytest.mark.parametrize(
         "database",
         [
-            "dev_edl_analytics",
-            "staging_edl_curated",
-            "prod_edl_analytics",
+            "edl_analytics",
+            "edl_curated",
             "a1b2c3",
         ],
     )

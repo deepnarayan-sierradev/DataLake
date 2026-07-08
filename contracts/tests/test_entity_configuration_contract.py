@@ -245,7 +245,6 @@ class TestEntityExtractionConfigMergeFields:
         assert config.primary_key_field == "Id"
 
 
-
 class TestTenantCodeField:
     def _base(self) -> dict[str, object]:
         return {
@@ -297,7 +296,7 @@ class TestTenantCodeField:
     def test_config_is_frozen(self) -> None:
         """tenant_code must be immutable after construction."""
         config = EntityExtractionConfig(**{**self._base(), "tenant_code": "demo"})
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="frozen"):
             config.tenant_code = "changed"  # type: ignore[misc]
 
 

@@ -30,22 +30,21 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
 
 import pytest
 
 from connector_runtime.adapters.sage.products.intacct.intacct_query_engine import (
+    _LOWER_BOUND_PLACEHOLDER,
+    _UPPER_BOUND_PLACEHOLDER,
     PAGE_SIZE,
     IntacctQueryEngine,
     SageQueryBuildError,
-    _LOWER_BOUND_PLACEHOLDER,
-    _UPPER_BOUND_PLACEHOLDER,
 )
 from connector_runtime.interfaces.connector_interface import (
     FieldContract,
     FieldDescriptor,
 )
-from contracts.entity_configuration_contract import FieldMode, LoadType
+from contracts.entity_configuration_contract import LoadType
 
 _OBJECT_PATH = "accounts-receivable/customer"
 _SOURCE_ID = "sage"
@@ -214,7 +213,7 @@ class TestIncrementalLoad:
             watermark_upper=_UPPER,
             extraction_window_days=30,
         )
-        body = json.loads(contract.query_text)
+        json.loads(contract.query_text)  # must be well-formed JSON
         # Actual watermark values must NOT be in the query_text — only placeholders.
         assert _LOWER not in contract.query_text
         assert _UPPER not in contract.query_text
@@ -299,7 +298,8 @@ class TestFieldNameValidation:
 
     def test_custom_nsp_field_names_accepted(self) -> None:
         engine = _make_engine()
-        # Custom field names with double-colon prefix (IntacctQueryEngine validates uppercase after ::)
+        # Custom field names with double-colon prefix (IntacctQueryEngine
+        # validates uppercase after ::).
         descriptors = tuple(
             FieldDescriptor(name=n, data_type="string", is_nullable=True, is_queryable=True)
             for n in ["key", "id", "nsp::CUSTOM_FIELD"]
@@ -418,12 +418,16 @@ class TestBindParameters:
 
     def test_bind_substitutes_lower_bound(self) -> None:
         body = self._make_body_with_placeholders()
-        result = IntacctQueryEngine.bind_parameters(body, {"lower_bound": _LOWER, "upper_bound": _UPPER})
+        result = IntacctQueryEngine.bind_parameters(
+            body, {"lower_bound": _LOWER, "upper_bound": _UPPER}
+        )
         assert result["filters"][0]["$gte"]["auditInfo.modifiedAt"] == _LOWER
 
     def test_bind_substitutes_upper_bound(self) -> None:
         body = self._make_body_with_placeholders()
-        result = IntacctQueryEngine.bind_parameters(body, {"lower_bound": _LOWER, "upper_bound": _UPPER})
+        result = IntacctQueryEngine.bind_parameters(
+            body, {"lower_bound": _LOWER, "upper_bound": _UPPER}
+        )
         assert result["filters"][1]["$lt"]["auditInfo.modifiedAt"] == _UPPER
 
     def test_bind_does_not_mutate_original(self) -> None:

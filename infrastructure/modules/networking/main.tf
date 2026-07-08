@@ -29,7 +29,7 @@ resource "aws_vpc" "this" {
   enable_dns_support   = true
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-data-lake-vpc"
+    Name = "EdlVpc"
   })
 }
 
@@ -41,7 +41,7 @@ resource "aws_internet_gateway" "this" {
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-data-lake-igw"
+    Name = "EdlInternetGateway"
   })
 }
 
@@ -59,7 +59,7 @@ resource "aws_subnet" "private" {
   map_public_ip_on_launch = false # Never assign public IPs in private subnets
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-data-lake-private-${var.availability_zones[count.index]}"
+    Name = "EdlPrivateSubnet-${var.availability_zones[count.index]}"
     Tier = "private"
   })
 }
@@ -73,7 +73,7 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = false # NAT GW EIPs are explicit; no auto-assignment
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-data-lake-public-${var.availability_zones[count.index]}"
+    Name = "EdlPublicSubnet-${var.availability_zones[count.index]}"
     Tier = "public"
   })
 }
@@ -88,7 +88,7 @@ resource "aws_eip" "nat" {
   domain = "vpc"
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-data-lake-nat-eip-${count.index + 1}"
+    Name = "EdlNatEip${count.index + 1}"
   })
 
   depends_on = [aws_internet_gateway.this]
@@ -101,7 +101,7 @@ resource "aws_nat_gateway" "this" {
   subnet_id     = aws_subnet.public[count.index].id
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-data-lake-nat-gw-${count.index + 1}"
+    Name = "EdlNatGateway${count.index + 1}"
   })
 
   depends_on = [aws_internet_gateway.this]
@@ -121,7 +121,7 @@ resource "aws_route_table" "public" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-data-lake-public-rt"
+    Name = "EdlPublicRouteTable"
   })
 }
 
@@ -142,7 +142,7 @@ resource "aws_route_table" "private" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-data-lake-private-rt-${count.index + 1}"
+    Name = "EdlPrivateRouteTable${count.index + 1}"
   })
 }
 
@@ -159,7 +159,7 @@ resource "aws_route_table_association" "private" {
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
-  name              = "/aws/vpc/flowlogs/${var.environment}-data-lake"
+  name              = "/aws/vpc/flowlogs/edl"
   retention_in_days = var.flow_log_retention_days
   kms_key_id        = var.flow_logs_kms_key_arn
 
@@ -178,7 +178,7 @@ data "aws_iam_policy_document" "vpc_flow_logs_assume_role" {
 }
 
 resource "aws_iam_role" "vpc_flow_logs" {
-  name               = "${var.environment}-vpc-flow-logs-delivery-role"
+  name               = "EdlVpcFlowLogsDeliveryRole"
   assume_role_policy = data.aws_iam_policy_document.vpc_flow_logs_assume_role.json
 
   tags = local.common_tags
@@ -202,7 +202,7 @@ data "aws_iam_policy_document" "vpc_flow_logs_delivery" {
 }
 
 resource "aws_iam_role_policy" "vpc_flow_logs_delivery" {
-  name   = "vpc-flow-logs-delivery-policy"
+  name   = "EdlVpcFlowLogsDeliveryPolicy"
   role   = aws_iam_role.vpc_flow_logs.id
   policy = data.aws_iam_policy_document.vpc_flow_logs_delivery.json
 }
@@ -214,7 +214,7 @@ resource "aws_flow_log" "this" {
   vpc_id          = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-data-lake-vpc-flow-log"
+    Name = "EdlVpcFlowLog"
   })
 }
 
@@ -224,7 +224,7 @@ resource "aws_flow_log" "this" {
 # ---------------------------------------------------------------------------
 
 resource "aws_security_group" "vpc_endpoints" {
-  name        = "${var.environment}-vpc-endpoint-sg"
+  name        = "EdlVpcEndpointSg"
   description = "Allow HTTPS inbound from VPC CIDR for interface VPC endpoints"
   vpc_id      = aws_vpc.this.id
 
@@ -249,7 +249,7 @@ resource "aws_security_group" "vpc_endpoints" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-vpc-endpoint-sg"
+    Name = "EdlVpcEndpointSg"
   })
 }
 
@@ -262,13 +262,13 @@ resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.this.id
   service_name      = "com.amazonaws.${data.aws_region.current.name}.s3"
   vpc_endpoint_type = "Gateway"
-  route_table_ids   = concat(
+  route_table_ids = concat(
     aws_route_table.private[*].id,
     [aws_route_table.public.id]
   )
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-s3-gateway-endpoint"
+    Name = "EdlS3GatewayEndpoint"
   })
 }
 
@@ -279,7 +279,7 @@ resource "aws_vpc_endpoint" "dynamodb" {
   route_table_ids   = aws_route_table.private[*].id
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-dynamodb-gateway-endpoint"
+    Name = "EdlDynamodbGatewayEndpoint"
   })
 }
 
@@ -290,9 +290,9 @@ resource "aws_vpc_endpoint" "dynamodb" {
 locals {
   interface_endpoints = {
     secretsmanager = {
-      service      = "com.amazonaws.${data.aws_region.current.name}.secretsmanager"
-      enabled      = var.enable_secrets_manager_endpoint
-      private_dns  = true
+      service     = "com.amazonaws.${data.aws_region.current.name}.secretsmanager"
+      enabled     = var.enable_secrets_manager_endpoint
+      private_dns = true
     }
     logs = {
       service     = "com.amazonaws.${data.aws_region.current.name}.logs"
@@ -337,6 +337,6 @@ resource "aws_vpc_endpoint" "interface" {
   private_dns_enabled = each.value.private_dns
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-${each.key}-interface-endpoint"
+    Name = "Edl${title(each.key)}InterfaceEndpoint"
   })
 }

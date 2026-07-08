@@ -25,9 +25,9 @@ from connector_runtime.api.control_plane_handler import lambda_handler
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_ENTITY_CONFIG_TABLE = f"{_ENV}-edl-entity-extraction-config"
-_ENTITY_TYPE_REGISTRY_TABLE = f"{_ENV}-edl-entity-type-registry"
-_AUDIT_LOG_TABLE = f"{_ENV}-edl-run-audit-log"
+_ENTITY_CONFIG_TABLE = "EdlEntityExtractionConfig"
+_ENTITY_TYPE_REGISTRY_TABLE = "EdlEntityTypeRegistry"
+_AUDIT_LOG_TABLE = "EdlRunAuditLog"
 
 
 # ---------------------------------------------------------------------------
@@ -269,9 +269,7 @@ class TestEntityRegistration:
 
         with patch.dict(os.environ, _BASE_ENV_VARS):
             response = lambda_handler(
-                _event(
-                    "POST", "/tenants/demo/entities", tenant_claim="demo", body=mismatched_body
-                ),
+                _event("POST", "/tenants/demo/entities", tenant_claim="demo", body=mismatched_body),
                 None,
             )
 
@@ -329,7 +327,7 @@ class TestTriggerPipeline:
     def test_trigger_enqueues_correct_message_shape(self) -> None:
         sqs = boto3.client("sqs", region_name=_REGION)
         queue = sqs.create_queue(
-            QueueName=f"{_ENV}-edl-pipeline-trigger.fifo",
+            QueueName="EdlPipelineTrigger.fifo",
             Attributes={"FifoQueue": "true", "ContentBasedDeduplication": "true"},
         )
         queue_url = queue["QueueUrl"]
@@ -367,7 +365,7 @@ class TestTriggerPipeline:
     def test_trigger_invalid_source_id_returns_400(self) -> None:
         sqs = boto3.client("sqs", region_name=_REGION)
         queue = sqs.create_queue(
-            QueueName=f"{_ENV}-edl-pipeline-trigger.fifo",
+            QueueName="EdlPipelineTrigger.fifo",
             Attributes={"FifoQueue": "true", "ContentBasedDeduplication": "true"},
         )
         env_vars = {**_BASE_ENV_VARS, "PIPELINE_TRIGGER_QUEUE_URL": queue["QueueUrl"]}
@@ -389,7 +387,7 @@ class TestTriggerPipeline:
     def test_trigger_tenant_mismatch_returns_403(self) -> None:
         sqs = boto3.client("sqs", region_name=_REGION)
         queue = sqs.create_queue(
-            QueueName=f"{_ENV}-edl-pipeline-trigger.fifo",
+            QueueName="EdlPipelineTrigger.fifo",
             Attributes={"FifoQueue": "true", "ContentBasedDeduplication": "true"},
         )
         env_vars = {**_BASE_ENV_VARS, "PIPELINE_TRIGGER_QUEUE_URL": queue["QueueUrl"]}
@@ -578,9 +576,12 @@ class TestRoutingAndErrors:
     @mock_aws
     def test_error_response_never_leaks_raw_exception_text(self) -> None:
         """Unexpected failures must return a generic message, never the raw exception string."""
-        with patch.dict(os.environ, _BASE_ENV_VARS), patch(
-            "connector_runtime.api.control_plane_handler._entity_type_registry_table",
-            side_effect=RuntimeError("super secret internal detail"),
+        with (
+            patch.dict(os.environ, _BASE_ENV_VARS),
+            patch(
+                "connector_runtime.api.control_plane_handler._entity_type_registry_table",
+                side_effect=RuntimeError("super secret internal detail"),
+            ),
         ):
             response = lambda_handler(
                 _event("POST", "/tenants", body={"tenant_code": "acme-corp"}), None

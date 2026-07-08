@@ -16,7 +16,7 @@ connector_params schema (supplied in Step Functions execution input):
     }
 
 Credentials are NOT in connector_params.  They live in Secrets Manager at:
-    {environment}/sources/sage/{sage_product}/credentials
+    edl/sources/sage/{sage_product}/credentials
 
 Design principles enforced:
     1. No hardcoded field lists — fields discovered at runtime via metadata strategy.
@@ -82,6 +82,7 @@ from connector_runtime.adapters.sage.products.x3.x3_query_engine import (
     X3QueryBuildError,
     X3QueryEngine,
 )
+from connector_runtime.adapters.sage.sage_params import SageConnectorParams
 from connector_runtime.interfaces.connector_interface import (
     ConnectorCapabilities,
     ConnectorInterface,
@@ -111,13 +112,14 @@ _INTACCT_REQUIRED_KEYS: Final[frozenset[str]] = frozenset(
 # Extend this when new products are added.
 _PRODUCT_REQUIRED_CREDENTIAL_KEYS: Final[dict[str, frozenset[str]]] = {
     "intacct": _INTACCT_REQUIRED_KEYS,
-    "x3": frozenset(
-        {"base_url", "token_url", "client_id", "client_secret", "folder"}
-    ),
+    "x3": frozenset({"base_url", "token_url", "client_id", "client_secret", "folder"}),
 }
 
 # Intacct query service endpoint path (relative to base_url).
 _INTACCT_QUERY_PATH: Final[str] = "/services/v1/query"
+
+# One exception type, or a tuple of exception types, for an isinstance() check.
+type _ExceptionTypesT = type[Exception] | tuple[type[Exception], ...]
 
 
 @connector_registry.register(_SOURCE_ID)
@@ -285,38 +287,49 @@ class SageConnector(ConnectorInterface):
         TRANSIENT_* errors are retry-eligible (Step Functions retries).
         DETERMINISTIC_* errors trigger immediate fail-fast with DLQ routing.
         """
-        # ── Credential / auth failures — deterministic ─────────────────────
-        if isinstance(exc, (IntacctCredentialError, X3CredentialError, SageCredentialError)):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
-        if isinstance(exc, (IntacctAuthError, X3AuthError)):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
-        if isinstance(exc, SageAuthenticationError):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
-
-        # ── Configuration / query failures — deterministic ─────────────────
-        if isinstance(exc, SageObjectNotFoundError):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_OBJECT
-        if isinstance(exc, (SageQueryBuildError, X3QueryBuildError)):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
-        if isinstance(exc, SageMetadataDeterministicError):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_OBJECT
-        if isinstance(exc, SageMetadataTransientError):
-            return ExtractionErrorClassification.TRANSIENT_NETWORK
-        if isinstance(exc, SageMetadataError):
-            # Generic base — unknown subtype; route to UNKNOWN for DLQ + manual review.
-            return ExtractionErrorClassification.UNKNOWN
-        if isinstance(exc, SageInvalidRequestError):
-            return ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
-
-        # ── Transient infrastructure failures — retry eligible ─────────────
-        if isinstance(exc, SageRateLimitError):
-            return ExtractionErrorClassification.TRANSIENT_THROTTLE
-        if isinstance(exc, SageServiceUnavailableError):
-            return ExtractionErrorClassification.TRANSIENT_NETWORK
-        if isinstance(exc, SageTimeoutError):
-            return ExtractionErrorClassification.TRANSIENT_TIMEOUT
-        if isinstance(exc, SageNetworkError):
-            return ExtractionErrorClassification.TRANSIENT_NETWORK
+        # Ordered (exception types, classification) rules — first isinstance match wins.
+        # Order matters: SageMetadataDeterministicError/TransientError are subclasses of
+        # SageMetadataError, so they must be checked before the generic base class.
+        rules: tuple[tuple[_ExceptionTypesT, ExtractionErrorClassification], ...] = (
+            # ── Credential / auth failures — deterministic ─────────────────
+            (
+                (IntacctCredentialError, X3CredentialError, SageCredentialError),
+                ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS,
+            ),
+            (
+                (IntacctAuthError, X3AuthError),
+                ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS,
+            ),
+            (
+                SageAuthenticationError,
+                ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS,
+            ),
+            # ── Configuration / query failures — deterministic ─────────────────
+            (SageObjectNotFoundError, ExtractionErrorClassification.DETERMINISTIC_INVALID_OBJECT),
+            (
+                (SageQueryBuildError, X3QueryBuildError),
+                ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION,
+            ),
+            (
+                SageMetadataDeterministicError,
+                ExtractionErrorClassification.DETERMINISTIC_INVALID_OBJECT,
+            ),
+            (SageMetadataTransientError, ExtractionErrorClassification.TRANSIENT_NETWORK),
+            # Generic metadata base — unknown subtype; route to UNKNOWN for DLQ + manual review.
+            (SageMetadataError, ExtractionErrorClassification.UNKNOWN),
+            (
+                SageInvalidRequestError,
+                ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION,
+            ),
+            # ── Transient infrastructure failures — retry eligible ─────────────
+            (SageRateLimitError, ExtractionErrorClassification.TRANSIENT_THROTTLE),
+            (SageServiceUnavailableError, ExtractionErrorClassification.TRANSIENT_NETWORK),
+            (SageTimeoutError, ExtractionErrorClassification.TRANSIENT_TIMEOUT),
+            (SageNetworkError, ExtractionErrorClassification.TRANSIENT_NETWORK),
+        )
+        for exception_types, classification in rules:
+            if isinstance(exc, exception_types):
+                return classification
 
         return ExtractionErrorClassification.UNKNOWN
 
@@ -372,10 +385,7 @@ class SageConnector(ConnectorInterface):
             for row in results:
                 record_count += 1
                 rec = ExtractionRecord(payload=row)
-                if (
-                    query_contract.watermark_field
-                    and query_contract.watermark_field in row
-                ):
+                if query_contract.watermark_field and query_contract.watermark_field in row:
                     rec.source_timestamp = str(row[query_contract.watermark_field])
                 yield rec
 
@@ -437,9 +447,7 @@ class SageConnector(ConnectorInterface):
 
         # Bind watermark parameter placeholders (ISO-8601 validation enforced).
         if query_contract.query_parameters:
-            query_body = X3QueryEngine.bind_parameters(
-                query_body, query_contract.query_parameters
-            )
+            query_body = X3QueryEngine.bind_parameters(query_body, query_contract.query_parameters)
 
         endpoint: str = query_body["endpoint"]
         select_str: str = query_body["select"]
@@ -461,29 +469,14 @@ class SageConnector(ConnectorInterface):
         next_link: str | None = None  # Cursor URL from @odata.nextLink
 
         while True:
-            if next_link:
-                # Follow the full nextLink URL — server provides all params.
-                page_response = self._fetch_page(
-                    query_url=next_link,
-                    query_body=None,  # GET request — body is None
-                    run_id=run_id,
-                    entity_id=query_contract.entity_id,
-                    page_start=skip,
-                    http_method="GET",
-                )
-            else:
-                page_params = dict(odata_params)
-                if skip > 0:
-                    page_params["$skip"] = str(skip)
-                page_response = self._fetch_page(
-                    query_url=base_endpoint_url,
-                    query_body=None,
-                    run_id=run_id,
-                    entity_id=query_contract.entity_id,
-                    page_start=skip,
-                    http_method="GET",
-                    params=page_params,
-                )
+            page_response = self._fetch_x3_page(
+                query_contract=query_contract,
+                base_endpoint_url=base_endpoint_url,
+                odata_params=odata_params,
+                next_link=next_link,
+                skip=skip,
+                run_id=run_id,
+            )
 
             records: list[dict[str, Any]] = page_response.get("value", [])
             next_link = page_response.get("@odata.nextLink")
@@ -491,10 +484,7 @@ class SageConnector(ConnectorInterface):
             for row in records:
                 record_count += 1
                 rec = ExtractionRecord(payload=row)
-                if (
-                    query_contract.watermark_field
-                    and query_contract.watermark_field in row
-                ):
+                if query_contract.watermark_field and query_contract.watermark_field in row:
                     rec.source_timestamp = str(row[query_contract.watermark_field])
                 yield rec
 
@@ -508,19 +498,11 @@ class SageConnector(ConnectorInterface):
                 total_so_far=record_count,
             )
 
-            if not records:
-                # Empty page — extraction complete regardless of pagination mode.
+            is_done, skip = self._advance_x3_pagination(
+                records=records, next_link=next_link, skip=skip
+            )
+            if is_done:
                 break
-            if next_link:
-                # Server has more pages — follow nextLink on the next iteration.
-                # Do NOT break on partial page here: the last nextLink page may
-                # legitimately contain fewer than X3_PAGE_SIZE records.
-                skip = 0  # skip is irrelevant when following nextLink
-            else:
-                if len(records) < X3_PAGE_SIZE:
-                    # Partial page with no nextLink — last page of skip pagination.
-                    break
-                skip += X3_PAGE_SIZE
 
         _logger.info(
             "sage_extraction_completed",
@@ -530,6 +512,66 @@ class SageConnector(ConnectorInterface):
             sage_product=self._sage_product,
             record_count=record_count,
         )
+
+    def _fetch_x3_page(
+        self,
+        query_contract: QueryContract,
+        base_endpoint_url: str,
+        odata_params: dict[str, str],
+        next_link: str | None,
+        skip: int,
+        run_id: str,
+    ) -> dict[str, Any]:
+        """
+        Fetch a single Sage X3 OData page, following ``next_link`` when present
+        or falling back to ``$skip`` offset pagination otherwise.
+        """
+        if next_link:
+            # Follow the full nextLink URL — server provides all params.
+            return self._fetch_page(
+                query_url=next_link,
+                query_body=None,  # GET request — body is None
+                run_id=run_id,
+                entity_id=query_contract.entity_id,
+                page_start=skip,
+                http_method="GET",
+            )
+
+        page_params = dict(odata_params)
+        if skip > 0:
+            page_params["$skip"] = str(skip)
+        return self._fetch_page(
+            query_url=base_endpoint_url,
+            query_body=None,
+            run_id=run_id,
+            entity_id=query_contract.entity_id,
+            page_start=skip,
+            http_method="GET",
+            params=page_params,
+        )
+
+    @staticmethod
+    def _advance_x3_pagination(
+        records: list[dict[str, Any]], next_link: str | None, skip: int
+    ) -> tuple[bool, int]:
+        """
+        Decide whether X3 OData pagination is complete and compute the next
+        ``skip`` offset.
+
+        Returns (is_done, next_skip).
+        """
+        if not records:
+            # Empty page — extraction complete regardless of pagination mode.
+            return True, skip
+        if next_link:
+            # Server has more pages — follow nextLink on the next iteration.
+            # Do NOT stop on a partial page here: the last nextLink page may
+            # legitimately contain fewer than X3_PAGE_SIZE records.
+            return False, 0  # skip is irrelevant when following nextLink
+        if len(records) < X3_PAGE_SIZE:
+            # Partial page with no nextLink — last page of skip pagination.
+            return True, skip
+        return False, skip + X3_PAGE_SIZE
 
     def _fetch_page(
         self,
@@ -598,6 +640,7 @@ def _build_sage(
     region_name: str,
     connector_params: dict[str, str],
     raw_s3_bucket: str,
+    tenant_code: str,
 ) -> tuple[SageConnector, SageRawLayerWriter]:
     """
     Factory function registered with ConnectorRegistry for source_id="sage".
@@ -612,6 +655,8 @@ def _build_sage(
         connector_params: Step Functions input dict — must contain sage_product
                           and object_path.
         raw_s3_bucket:    Name of the raw layer S3 bucket.
+        tenant_code:      Tenant identity for this run — threaded into the raw
+                          layer writer's S3 partition path (ARCH-1).
 
     Returns:
         Tuple of (SageConnector, SageRawLayerWriter).
@@ -645,15 +690,12 @@ def _build_sage(
     )
     writer = SageRawLayerWriter(
         s3_bucket=raw_s3_bucket,
-        s3_prefix="sage",
         sage_product=sage_product,
         region_name=region_name,
+        tenant_code=tenant_code,
     )
     return connector, writer
 
 
 connector_registry.register_builder(_SOURCE_ID, _build_sage)
-
-from connector_runtime.adapters.sage.sage_params import SageConnectorParams
-
 connector_registry.register_params_model(_SOURCE_ID, SageConnectorParams)

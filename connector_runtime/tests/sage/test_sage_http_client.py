@@ -58,9 +58,7 @@ def _make_client(timeout: int = 45) -> SageHttpClient:
 
 
 class TestGetMethod:
-    def test_get_success_returns_parsed_json(
-        self, requests_mock: requests_mock_lib.Mocker
-    ) -> None:
+    def test_get_success_returns_parsed_json(self, requests_mock: requests_mock_lib.Mocker) -> None:
         payload = {"ia::result": {"object": "customer", "fields": []}}
         requests_mock.get(_GET_URL, json=payload)
         client = _make_client()
@@ -213,6 +211,7 @@ class TestPostMethod:
         body = {"object": "customer", "fields": ["key"]}
         client.post(_POST_URL, headers=_AUTH_HEADERS, json_body=body)
         import json
+
         sent = json.loads(requests_mock.last_request.text)
         assert sent == body
 
@@ -232,7 +231,11 @@ class TestPostFormMethod:
         result = client.post_form(
             _TOKEN_URL,
             headers={"Accept": "application/json"},
-            form_data={"grant_type": "client_credentials", "client_id": "cid", "client_secret": "s"},
+            form_data={
+                "grant_type": "client_credentials",
+                "client_id": "cid",
+                "client_secret": "s",
+            },
         )
         assert result["access_token"] == "eyJ..."
 

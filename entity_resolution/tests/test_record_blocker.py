@@ -134,9 +134,7 @@ class TestNameFirst3Blocking:
             {"id": "3", "name": "Bob Green"},
         ]
         blocks = blocker.partition(records)
-        alice_block = next(
-            b for b in blocks if any(r["name"].startswith("Alice") for r in b)
-        )
+        alice_block = next(b for b in blocks if any(r["name"].startswith("Alice") for r in b))
         assert len(alice_block) == 2
 
     def test_short_name_uses_full_alpha(self) -> None:
@@ -169,9 +167,7 @@ class TestRecordIdPrefixBlocking:
             {"id": "3", "record_id": "ZZZZXXX0-999"},
         ]
         blocks = blocker.partition(records)
-        abc_block = next(
-            b for b in blocks if any(r["record_id"].startswith("ABCDEFGH") for r in b)
-        )
+        abc_block = next(b for b in blocks if any(r["record_id"].startswith("ABCDEFGH") for r in b))
         assert len(abc_block) == 2
 
     def test_short_id_uses_full_value(self) -> None:

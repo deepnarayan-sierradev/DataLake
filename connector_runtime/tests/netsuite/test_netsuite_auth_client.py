@@ -24,7 +24,7 @@ from connector_runtime.adapters.netsuite.netsuite_auth_client import (
 
 _ENVIRONMENT = "dev"
 _REGION = "us-east-1"
-_SECRET_NAME = f"{_ENVIRONMENT}/sources/netsuite/credentials"
+_SECRET_NAME = "edl/sources/netsuite/credentials"
 
 _VALID_SECRET: dict[str, str] = {
     "account_id": "1234567",

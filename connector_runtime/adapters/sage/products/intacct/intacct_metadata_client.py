@@ -61,7 +61,9 @@ _NON_QUERYABLE_ATTRIBUTES: Final[frozenset[str]] = frozenset({"writeOnly", "depr
 
 # These shared exception types are defined in common/sage_errors.py and
 # re-exported here so existing imports from this module keep working.
-from connector_runtime.adapters.sage.common.sage_errors import (  # noqa: F401
+# Intentionally placed after the module constants above, not at top of file,
+# since it is a re-export rather than a dependency of this module.
+from connector_runtime.adapters.sage.common.sage_errors import (  # noqa: E402
     SageMetadataDeterministicError,
     SageMetadataError,
     SageMetadataTransientError,
@@ -229,17 +231,14 @@ class IntacctMetadataClient:
             ) from None
         except SageHttpError as exc:
             raise SageMetadataTransientError(
-                f"Models endpoint request failed for {self._object_path!r}: "
-                f"{type(exc).__name__}"
+                f"Models endpoint request failed for {self._object_path!r}: {type(exc).__name__}"
             ) from None
 
         parsed = self._parse_models_response(response_body)
         self._cached_fields = parsed
         return parsed
 
-    def _parse_models_response(
-        self, body: dict[str, Any]
-    ) -> list[IntacctFieldSchema]:
+    def _parse_models_response(self, body: dict[str, Any]) -> list[IntacctFieldSchema]:
         """
         Parse the Intacct Models API response into IntacctFieldSchema objects.
 
@@ -287,7 +286,9 @@ class IntacctMetadataClient:
             # A field is non-queryable if writeOnly or deprecated.
             is_write_only = bool(field_def.get("writeOnly", False))
             is_deprecated = bool(field_def.get("deprecated", False))
-            is_queryable = field_def.get("queryable", True) and not is_write_only and not is_deprecated
+            is_queryable = (
+                field_def.get("queryable", True) and not is_write_only and not is_deprecated
+            )
 
             schemas.append(
                 IntacctFieldSchema(

@@ -12,12 +12,12 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  common_tags   = merge(var.tags, {
+  common_tags = merge(var.tags, {
     Environment = var.environment
     ManagedBy   = "terraform"
     Module      = "transformation_lambda"
   })
-  function_name = "${var.environment}-transformation-pipeline"
+  function_name = "EdlTransformationPipeline"
 }
 
 # ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ data "aws_vpc" "selected" {
 }
 
 resource "aws_security_group" "transformation_lambda" {
-  name        = "${local.function_name}-sg"
+  name        = "${local.function_name}Sg"
   description = "Security group for the transformation pipeline Lambda. HTTPS egress to AWS service endpoints only."
   vpc_id      = data.aws_vpc.selected.id
 
@@ -68,7 +68,7 @@ resource "aws_security_group" "transformation_lambda" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${local.function_name}-sg"
+    Name = "${local.function_name}Sg"
   })
 
   lifecycle {
@@ -118,12 +118,12 @@ resource "aws_lambda_function" "transformation_pipeline" {
 
   environment {
     variables = {
-      PLATFORM_ENVIRONMENT      = var.environment
-      RAW_S3_BUCKET             = var.raw_s3_bucket_name
-      CURATED_S3_BUCKET         = var.curated_s3_bucket_name
-      FIELD_MAPPING_S3_BUCKET   = var.field_mapping_s3_bucket_name
-      GOVERNANCE_S3_BUCKET      = var.governance_s3_bucket_name
-      GLUE_CATALOG_DATABASE     = var.glue_catalog_database
+      PLATFORM_ENVIRONMENT    = var.environment
+      RAW_S3_BUCKET           = var.raw_s3_bucket_name
+      CURATED_S3_BUCKET       = var.curated_s3_bucket_name
+      FIELD_MAPPING_S3_BUCKET = var.field_mapping_s3_bucket_name
+      GOVERNANCE_S3_BUCKET    = var.governance_s3_bucket_name
+      GLUE_CATALOG_DATABASE   = var.glue_catalog_database
     }
   }
 
@@ -164,5 +164,5 @@ resource "aws_lambda_permission" "allow_step_functions" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.transformation_pipeline.function_name
   principal     = "states.amazonaws.com"
-  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.environment}-extraction-pipeline"
+  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:EdlExtractionPipeline"
 }

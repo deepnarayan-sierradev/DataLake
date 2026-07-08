@@ -20,10 +20,12 @@ Usage
     python scripts/migrate_tables_to_edl.py --environment dev --region us-east-1 --execute
 
     # Skip audit log (recommended — audit log is historical only, not operationally required):
-    python scripts/migrate_tables_to_edl.py --environment dev --region us-east-1 --execute --skip-audit-log
+    python scripts/migrate_tables_to_edl.py \
+        --environment dev --region us-east-1 --execute --skip-audit-log
 
     # Migrate a single table:
-    python scripts/migrate_tables_to_edl.py --environment dev --region us-east-1 --execute --table watermark
+    python scripts/migrate_tables_to_edl.py \
+        --environment dev --region us-east-1 --execute --table watermark
 
 Prerequisites
 -------------
@@ -47,15 +49,15 @@ from botocore.exceptions import ClientError
 # ---------------------------------------------------------------------------
 
 _LABEL_ENTITY_CONFIG = "entity-extraction-config"
-_LABEL_WATERMARK     = "watermark-repository"
-_LABEL_AUDIT_LOG     = "run-audit-log"
+_LABEL_WATERMARK = "watermark-repository"
+_LABEL_AUDIT_LOG = "run-audit-log"
 
 
 @dataclass(frozen=True)
 class TableMigration:
     label: str
-    source: str          # legacy table name
-    destination: str     # new edl table name
+    source: str  # legacy table name
+    destination: str  # new edl table name
 
 
 def _build_migrations(environment: str) -> list[TableMigration]:
@@ -81,6 +83,7 @@ def _build_migrations(environment: str) -> list[TableMigration]:
 # ---------------------------------------------------------------------------
 # DynamoDB helpers
 # ---------------------------------------------------------------------------
+
 
 def _scan_all(table) -> Iterator[dict]:
     """
@@ -115,6 +118,7 @@ def _verify_table_exists(ddb, table_name: str) -> bool:
 # Migration logic
 # ---------------------------------------------------------------------------
 
+
 def _migrate_table(
     ddb,
     migration: TableMigration,
@@ -127,7 +131,7 @@ def _migrate_table(
     Returns (source_count, written_count).
     When execute=False (dry run) written_count is always 0.
     """
-    src_table  = ddb.Table(migration.source)
+    src_table = ddb.Table(migration.source)
     dest_table = ddb.Table(migration.destination)
 
     print(f"\n  [{migration.label}]")
@@ -143,7 +147,7 @@ def _migrate_table(
         return 0, 0
 
     src_count = 0
-    written   = 0
+    written = 0
 
     if not execute:
         # Dry run: count only, write nothing.
@@ -194,40 +198,47 @@ def _migrate_table(
 
 _TABLE_CLI_TO_LABEL: dict[str, str] = {
     "entity-config": _LABEL_ENTITY_CONFIG,
-    "watermark":     _LABEL_WATERMARK,
-    "audit-log":     _LABEL_AUDIT_LOG,
+    "watermark": _LABEL_WATERMARK,
+    "audit-log": _LABEL_AUDIT_LOG,
 }
 
 
-def main() -> int:
+def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Migrate DynamoDB data from legacy to edl-prefixed tables.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"],
-                        help="Target environment.")
-    parser.add_argument("--region", required=True,
-                        help="AWS region (e.g. us-east-1).")
-    parser.add_argument("--execute", action="store_true", default=False,
-                        help="Actually write data. Without this flag the script is a dry run.")
-    parser.add_argument("--skip-audit-log", action="store_true", default=False,
-                        help="Skip the run-audit-log table (historical data only).")
-    parser.add_argument("--table", choices=list(_TABLE_CLI_TO_LABEL.keys()),
-                        default=None,
-                        help="Migrate a single named table instead of all three.")
-    parser.add_argument("--profile", default=None,
-                        help="AWS profile name (optional).")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--environment",
+        required=True,
+        choices=["dev", "staging", "prod"],
+        help="Target environment.",
+    )
+    parser.add_argument("--region", required=True, help="AWS region (e.g. us-east-1).")
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        default=False,
+        help="Actually write data. Without this flag the script is a dry run.",
+    )
+    parser.add_argument(
+        "--skip-audit-log",
+        action="store_true",
+        default=False,
+        help="Skip the run-audit-log table (historical data only).",
+    )
+    parser.add_argument(
+        "--table",
+        choices=list(_TABLE_CLI_TO_LABEL.keys()),
+        default=None,
+        help="Migrate a single named table instead of all three.",
+    )
+    parser.add_argument("--profile", default=None, help="AWS profile name (optional).")
+    return parser
 
-    # Guard: --table audit-log + --skip-audit-log is contradictory.
-    if args.table == "audit-log" and args.skip_audit_log:
-        print("ERROR: --table audit-log and --skip-audit-log are mutually exclusive.", file=sys.stderr)
-        return 2
 
-    session = boto3.Session(profile_name=args.profile, region_name=args.region)
-    ddb = session.resource("dynamodb")  # region inherited from session
-
+def _select_migrations(args: argparse.Namespace) -> list[TableMigration]:
     migrations = _build_migrations(args.environment)
 
     if args.table:
@@ -237,280 +248,75 @@ def main() -> int:
     if args.skip_audit_log:
         migrations = [m for m in migrations if m.label != _LABEL_AUDIT_LOG]
 
-    mode = "LIVE MIGRATION" if args.execute else "DRY RUN (no data written)"
-    print(f"\n{'='*60}")
-    print(f"  DynamoDB EDL Table Migration — {args.environment.upper()}")
-    print(f"  Mode   : {mode}")
-    print(f"  Region : {args.region}")
-    print(f"  Tables : {len(migrations)} selected")
-    print(f"{'='*60}")
+    return migrations
 
-    if args.execute and args.environment == "prod":
-        confirm = input(
-            "\n  ⚠  You are about to write to PRODUCTION tables.\n"
-            "  Type 'yes-migrate-prod' to confirm: "
-        )
-        if confirm.strip() != "yes-migrate-prod":
-            print("  Aborted.")
-            return 1
 
-    total_src     = 0
+def _confirm_prod_migration() -> bool:
+    """Prompt for an explicit confirmation string before writing to prod. True = proceed."""
+    confirm = input(
+        "\n  ⚠  You are about to write to PRODUCTION tables.\n"
+        "  Type 'yes-migrate-prod' to confirm: "
+    )
+    return confirm.strip() == "yes-migrate-prod"
+
+
+def _run_migrations(
+    ddb, migrations: list[TableMigration], execute: bool
+) -> tuple[int, int, list[str]]:
+    total_src = 0
     total_written = 0
     errors: list[str] = []
 
     for migration in migrations:
         try:
-            src, written = _migrate_table(ddb, migration, execute=args.execute)
-            total_src     += src
-            total_written += written
-        except Exception as exc:
-            errors.append(f"{migration.label}: {exc}")
-            print(f"    ✗  ERROR: {exc}")
-
-    print(f"\n{'='*60}")
-    print("  Summary")
-    print(f"{'='*60}")
-    print(f"  Source records scanned : {total_src}")
-    print(f"  Records written        : {total_written}")
-    if errors:
-        print(f"  Errors                 : {len(errors)}")
-        for err in errors:
-            print(f"    - {err}")
-        return 1
-
-    if not args.execute:
-        print("\n  This was a DRY RUN. Re-run with --execute to perform the migration.")
-
-    print()
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-
-
-# ---------------------------------------------------------------------------
-# Table pair definitions
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class TableMigration:
-    label: str
-    source: str          # legacy table name
-    destination: str     # new edl table name
-
-def _build_migrations(environment: str) -> list[TableMigration]:
-    return [
-        TableMigration(
-            label="entity-extraction-config",
-            source=f"{environment}-entity-extraction-config",
-            destination=f"{environment}-edl-entity-extraction-config",
-        ),
-        TableMigration(
-            label="watermark-repository",
-            source=f"{environment}-watermark-repository",
-            destination=f"{environment}-edl-watermark-repository",
-        ),
-        TableMigration(
-            label="run-audit-log",
-            source=f"{environment}-run-audit-log",
-            destination=f"{environment}-edl-run-audit-log",
-        ),
-    ]
-
-# ---------------------------------------------------------------------------
-# DynamoDB helpers
-# ---------------------------------------------------------------------------
-
-def _scan_all(table) -> Iterator[dict]:
-    """Full table scan using pagination — yields one item at a time."""
-    kwargs: dict = {}
-    while True:
-        response = table.scan(**kwargs)
-        for item in response.get("Items", []):
-            yield item
-        last_key = response.get("LastEvaluatedKey")
-        if not last_key:
-            break
-        kwargs["ExclusiveStartKey"] = last_key
-
-
-def _count_items(table) -> int:
-    """Exact item count via scan (use only for migration validation, not production)."""
-    return sum(1 for _ in _scan_all(table))
-
-
-def _batch_write(dest_table, items: list[dict]) -> None:
-    """Write a batch of up to 25 items using DynamoDB batch_writer."""
-    with dest_table.batch_writer() as batch:
-        for item in items:
-            batch.put_item(Item=item)
-
-
-def _verify_table_exists(ddb, table_name: str) -> bool:
-    try:
-        ddb.Table(table_name).load()
-        return True
-    except ClientError as exc:
-        if exc.response["Error"]["Code"] == "ResourceNotFoundException":
-            return False
-        raise
-
-# ---------------------------------------------------------------------------
-# Migration logic
-# ---------------------------------------------------------------------------
-
-def _migrate_table(
-    ddb,
-    migration: TableMigration,
-    execute: bool,
-) -> tuple[int, int]:
-    """
-    Migrate all items from source to destination table.
-
-    Returns (source_count, written_count).
-    When execute=False (dry run) written_count is always 0.
-    """
-    src_table  = ddb.Table(migration.source)
-    dest_table = ddb.Table(migration.destination)
-
-    print(f"\n  [{migration.label}]")
-    print(f"    source      : {migration.source}")
-    print(f"    destination : {migration.destination}")
-
-    if not _verify_table_exists(ddb, migration.source):
-        print("    ⚠  Source table does not exist — skipping.")
-        return 0, 0
-
-    if not _verify_table_exists(ddb, migration.destination):
-        print("    ✗  Destination table does not exist — run `terraform apply` first.")
-        return 0, 0
-
-    # Count source records
-    print("    Scanning source table …", end=" ", flush=True)
-    items = list(_scan_all(src_table))
-    src_count = len(items)
-    print(f"{src_count} item(s) found.")
-
-    if src_count == 0:
-        print("    Nothing to migrate.")
-        return 0, 0
-
-    if not execute:
-        print(f"    DRY RUN — would write {src_count} item(s) to destination.")
-        return src_count, 0
-
-    # Write in batches of 25 (DynamoDB batch_writer hard limit)
-    print(f"    Writing {src_count} item(s) to destination …", end=" ", flush=True)
-    BATCH = 25
-    written = 0
-    for i in range(0, src_count, BATCH):
-        chunk = items[i : i + BATCH]
-        _batch_write(dest_table, chunk)
-        written += len(chunk)
-    print("done.")
-
-    # Validate — re-count destination
-    print("    Validating destination count …", end=" ", flush=True)
-    dest_count = _count_items(dest_table)
-    print(f"{dest_count} item(s) present.")
-
-    if dest_count < src_count:
-        print(
-            f"    ✗  COUNT MISMATCH: source={src_count}, destination={dest_count}. "
-            "Re-run the migration to fill in any missing items."
-        )
-    else:
-        print("    ✓  Validation passed.")
-
-    return src_count, written
-
-
-# ---------------------------------------------------------------------------
-# Entrypoint
-# ---------------------------------------------------------------------------
-
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Migrate DynamoDB data from legacy to edl-prefixed tables.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
-    )
-    parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"],
-                        help="Target environment.")
-    parser.add_argument("--region", required=True,
-                        help="AWS region (e.g. us-east-1).")
-    parser.add_argument("--execute", action="store_true", default=False,
-                        help="Actually write data. Without this flag the script is a dry run.")
-    parser.add_argument("--skip-audit-log", action="store_true", default=False,
-                        help="Skip the run-audit-log table (historical data only).")
-    parser.add_argument("--table", choices=["entity-config", "watermark", "audit-log"],
-                        default=None,
-                        help="Migrate a single named table instead of all three.")
-    parser.add_argument("--profile", default=None,
-                        help="AWS profile name (optional).")
-    args = parser.parse_args()
-
-    session = boto3.Session(
-        profile_name=args.profile,
-        region_name=args.region,
-    )
-    ddb = session.resource("dynamodb", region_name=args.region)
-
-    all_migrations = _build_migrations(args.environment)
-
-    # Filter by --table if requested
-    label_map = {
-        "entity-config": "entity-extraction-config",
-        "watermark":     "watermark-repository",
-        "audit-log":     "run-audit-log",
-    }
-    if args.table:
-        all_migrations = [m for m in all_migrations if m.label == label_map[args.table]]
-
-    # Filter out audit log if --skip-audit-log
-    if args.skip_audit_log:
-        all_migrations = [m for m in all_migrations if m.label != "run-audit-log"]
-
-    mode = "LIVE MIGRATION" if args.execute else "DRY RUN (no data written)"
-    print(f"\n{'='*60}")
-    print(f"  DynamoDB EDL Table Migration — {args.environment.upper()}")
-    print(f"  Mode   : {mode}")
-    print(f"  Region : {args.region}")
-    print(f"  Tables : {len(all_migrations)} selected")
-    print(f"{'='*60}")
-
-    if args.execute and args.environment == "prod":
-        confirm = input(
-            "\n  ⚠  You are about to write to PRODUCTION tables.\n"
-            "  Type 'yes-migrate-prod' to confirm: "
-        )
-        if confirm.strip() != "yes-migrate-prod":
-            print("  Aborted.")
-            return 1
-
-    total_src = 0
-    total_written = 0
-    errors: list[str] = []
-
-    for migration in all_migrations:
-        try:
-            src, written = _migrate_table(ddb, migration, execute=args.execute)
+            src, written = _migrate_table(ddb, migration, execute=execute)
             total_src += src
             total_written += written
         except Exception as exc:
             errors.append(f"{migration.label}: {exc}")
             print(f"    ✗  ERROR: {exc}")
 
-    print(f"\n{'='*60}")
+    return total_src, total_written, errors
+
+
+def main() -> int:
+    args = _build_arg_parser().parse_args()
+
+    # Guard: --table audit-log + --skip-audit-log is contradictory.
+    if args.table == "audit-log" and args.skip_audit_log:
+        print(
+            "ERROR: --table audit-log and --skip-audit-log are mutually exclusive.", file=sys.stderr
+        )
+        return 2
+
+    session = boto3.Session(profile_name=args.profile, region_name=args.region)
+    ddb = session.resource("dynamodb")  # region inherited from session
+
+    migrations = _select_migrations(args)
+
+    mode = "LIVE MIGRATION" if args.execute else "DRY RUN (no data written)"
+    print(f"\n{'=' * 60}")
+    print(f"  DynamoDB EDL Table Migration — {args.environment.upper()}")
+    print(f"  Mode   : {mode}")
+    print(f"  Region : {args.region}")
+    print(f"  Tables : {len(migrations)} selected")
+    print(f"{'=' * 60}")
+
+    if args.execute and args.environment == "prod" and not _confirm_prod_migration():
+        print("  Aborted.")
+        return 1
+
+    total_src, total_written, errors = _run_migrations(ddb, migrations, args.execute)
+
+    print(f"\n{'=' * 60}")
     print("  Summary")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Source records scanned : {total_src}")
     print(f"  Records written        : {total_written}")
     if errors:
         print(f"  Errors                 : {len(errors)}")
-        for e in errors:
-            print(f"    - {e}")
+        for err in errors:
+            print(f"    - {err}")
         return 1
 
     if not args.execute:

@@ -63,7 +63,7 @@ def _make_params() -> MySqlConnectionParameters:
         host="mydb.cluster.rds.amazonaws.com",
         port=3306,
         username="extraction_user",
-        password="s3cr3t",  # noqa: S106
+        password="s3cr3t",
         database="production",
     )
 
@@ -317,7 +317,7 @@ class TestConnectionPooling:
             host="other-db.cluster.rds.amazonaws.com",
             port=3306,
             username="extraction_user",
-            password="s3cr3t",  # noqa: S106
+            password="s3cr3t",
             database="production",
         )
         with patch(
@@ -484,7 +484,7 @@ class TestGeneratorCleanup:
             "._open_connection",
             return_value=mock_conn,
         ):
-            with pytest.raises(Exception):  # noqa: B017
+            with pytest.raises(Exception, match="deadlock detected"):
                 list(connector.execute_extraction(qc, run_id="run-gc-02"))
 
         mock_conn.close.assert_called_once()

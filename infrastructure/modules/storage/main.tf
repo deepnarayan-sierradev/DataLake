@@ -24,11 +24,11 @@ locals {
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "access_logs" {
-  bucket = "${var.environment}-${var.project_name}-s3-access-logs"
+  bucket = "${var.project_name}-access-logs-${data.aws_caller_identity.current.account_id}"
 
   tags = merge(local.common_tags, {
-    Name       = "${var.environment}-${var.project_name}-s3-access-logs"
-    DataLayer  = "access-logs"
+    Name      = "${var.project_name}-access-logs-${data.aws_caller_identity.current.account_id}"
+    DataLayer = "access-logs"
   })
 }
 
@@ -78,11 +78,11 @@ resource "aws_s3_bucket_policy" "access_logs" {
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "raw_layer" {
-  bucket              = "${var.environment}-${var.project_name}-raw-layer"
+  bucket              = "${var.project_name}-raw-${data.aws_caller_identity.current.account_id}"
   object_lock_enabled = true # Must be set at creation time — cannot be added later
 
   tags = merge(local.common_tags, {
-    Name      = "${var.environment}-${var.project_name}-raw-layer"
+    Name      = "${var.project_name}-raw-${data.aws_caller_identity.current.account_id}"
     DataLayer = "raw"
   })
 
@@ -163,9 +163,9 @@ resource "aws_s3_bucket_policy" "raw_layer" {
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "curated_layer" {
-  bucket = "${var.environment}-${var.project_name}-curated-layer"
+  bucket = "${var.project_name}-curated-${data.aws_caller_identity.current.account_id}"
   tags = merge(local.common_tags, {
-    Name      = "${var.environment}-${var.project_name}-curated-layer"
+    Name      = "${var.project_name}-curated-${data.aws_caller_identity.current.account_id}"
     DataLayer = "curated"
   })
 }
@@ -228,9 +228,9 @@ resource "aws_s3_bucket_policy" "curated_layer" {
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "analytics_layer" {
-  bucket = "${var.environment}-${var.project_name}-analytics-layer"
+  bucket = "${var.project_name}-analytics-${data.aws_caller_identity.current.account_id}"
   tags = merge(local.common_tags, {
-    Name      = "${var.environment}-${var.project_name}-analytics-layer"
+    Name      = "${var.project_name}-analytics-${data.aws_caller_identity.current.account_id}"
     DataLayer = "analytics"
   })
 }
@@ -275,9 +275,9 @@ resource "aws_s3_bucket_policy" "analytics_layer" {
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "schema_snapshots" {
-  bucket = "${var.environment}-${var.project_name}-schema-snapshots"
+  bucket = "${var.project_name}-schema-snapshots-${data.aws_caller_identity.current.account_id}"
   tags = merge(local.common_tags, {
-    Name      = "${var.environment}-${var.project_name}-schema-snapshots"
+    Name      = "${var.project_name}-schema-snapshots-${data.aws_caller_identity.current.account_id}"
     DataLayer = "schema-metadata"
   })
 }
@@ -337,9 +337,9 @@ data "aws_iam_policy_document" "enforce_tls" {
   for_each = local._tls_buckets
 
   statement {
-    sid     = "DenyNonTLSRequests"
-    effect  = "Deny"
-    actions = ["s3:*"]
+    sid       = "DenyNonTLSRequests"
+    effect    = "Deny"
+    actions   = ["s3:*"]
     resources = [each.value, "${each.value}/*"]
     principals {
       type        = "*"
@@ -353,9 +353,9 @@ data "aws_iam_policy_document" "enforce_tls" {
   }
 
   statement {
-    sid     = "DenyOutdatedTLS"
-    effect  = "Deny"
-    actions = ["s3:*"]
+    sid       = "DenyOutdatedTLS"
+    effect    = "Deny"
+    actions   = ["s3:*"]
     resources = [each.value, "${each.value}/*"]
     principals {
       type        = "*"
@@ -387,7 +387,7 @@ data "aws_iam_policy_document" "raw_layer_policy" {
     condition {
       test     = "StringNotLike"
       variable = "aws:PrincipalArn"
-      values   = concat(
+      values = concat(
         var.extraction_runtime_role_arns,
         ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"],
       )

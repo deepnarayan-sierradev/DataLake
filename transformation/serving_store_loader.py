@@ -15,6 +15,15 @@ Security (OWASP A05, A07):
   - Table name validated against safe-identifier regex before use.
   - Credentials never appear in logs or exceptions.
   - Connection closed in finally block to prevent resource leaks.
+
+Security (OWASP A01):
+  - The physical MySQL table name is prefixed with a validated `tenant_code`
+    (matching the Glue registration convention in
+    analytics_publisher_handler.py — hyphens normalised to underscores)
+    before any DDL/DML runs. Without this, two tenants loading the same
+    logical `table_name` into the shared serving-store database would
+    REPLACE INTO the same physical table, silently overwriting each other's
+    rows.
 """
 
 from __future__ import annotations
@@ -29,6 +38,7 @@ import boto3
 import pymysql
 import pymysql.cursors
 
+from contracts.identifier_policy import validate_tenant_code
 from governance.lineage_record import LineageEmitter, build_serving_store_lineage
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
@@ -87,6 +97,7 @@ class ServingStoreLoader:
         records: list[dict[str, Any]],
         table_name: str,
         primary_keys: tuple[str, ...],
+        tenant_code: str,
         run_id: str | None = None,
         analytics_s3_bucket: str | None = None,
         analytics_s3_prefix: str | None = None,
@@ -96,24 +107,37 @@ class ServingStoreLoader:
 
         Args:
             records:              List of canonical records (all with consistent schema).
-            table_name:           Target MySQL table name.
+            table_name:           Target MySQL table name (unscoped, logical name).
             primary_keys:         Fields that form the primary key for REPLACE INTO logic.
+            tenant_code:          Validated tenant code slug (contracts/identifier_policy.py).
+                                  Required — the physical table name is prefixed with it
+                                  (hyphens normalised to underscores) so two tenants never
+                                  share the same physical MySQL table (OWASP A01).
             run_id:               Pipeline run ID; required for lineage emission.
             analytics_s3_bucket:  Source analytics S3 bucket; required for lineage emission.
             analytics_s3_prefix:  Source analytics S3 prefix; required for lineage emission.
 
         Returns:
-            ServingStoreLoadResult.
+            ServingStoreLoadResult. `table_name` on the result is the tenant-scoped
+            physical table name that was actually written.
 
         Raises:
             ServingStoreError on connection, DDL, or DML failure.
-            ValueError on invalid table_name.
+            ValueError on invalid tenant_code or the resulting scoped table_name.
         """
-        if not _SAFE_TABLE_PATTERN.match(table_name):
-            raise ValueError(f"Invalid table name: {table_name!r}")
+        # OWASP A01: validate tenant_code and fold it into the physical table name
+        # *before* any DDL/DML is built — an unscoped or malformed tenant_code here
+        # would let one tenant's REPLACE INTO silently overwrite another tenant's
+        # rows in the same shared MySQL serving-store database.
+        validate_tenant_code(tenant_code)
+        scoped_table_name = f"{tenant_code.replace('-', '_')}_{table_name}"
+
+        if not _SAFE_TABLE_PATTERN.match(scoped_table_name):
+            raise ValueError(f"Invalid table name: {scoped_table_name!r}")
         if not records:
             raise ServingStoreError("Cannot load zero records")
 
+        table_name = scoped_table_name
         started_at = datetime.now(UTC).isoformat()
         credentials = self._retrieve_credentials()
         try:
@@ -152,12 +176,7 @@ class ServingStoreLoader:
             )
 
         # Emit lineage record if governance context was provided
-        if (
-            self._governance_s3_bucket
-            and run_id
-            and analytics_s3_bucket
-            and analytics_s3_prefix
-        ):
+        if self._governance_s3_bucket and run_id and analytics_s3_bucket and analytics_s3_prefix:
             try:
                 lineage_record = build_serving_store_lineage(
                     run_id=run_id,
@@ -250,6 +269,9 @@ class ServingStoreLoader:
         """REPLACE INTO table for each record; returns count of loaded rows."""
         col_list = ", ".join(f"`{c}`" for c in columns)
         placeholders = ", ".join(["%s"] * len(columns))
+        # OWASP A03: table_name and columns are validated by load()/_ensure_table()
+        # against _SAFE_TABLE_PATTERN/_SAFE_COLUMN_PATTERN before reaching here;
+        # record values are bound as %s parameters, never interpolated.
         sql = f"REPLACE INTO `{table_name}` ({col_list}) VALUES ({placeholders})"  # noqa: S608
 
         with connection.cursor() as cur:

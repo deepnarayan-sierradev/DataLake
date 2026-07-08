@@ -39,6 +39,7 @@ _STABLE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}
 # A short note like "ok" is not a meaningful audit record; require a real rationale.
 _WAIVER_MIN_NOTES_LEN: Final[int] = 20
 
+
 class OnboardingGate(StrEnum):
     SOURCE_REGISTRATION = "source_registration"
     CREDENTIAL_REGISTRATION = "credential_registration"

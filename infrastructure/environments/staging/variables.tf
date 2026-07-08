@@ -50,7 +50,7 @@ variable "cicd_deployment_policy_arns" {
 variable "lambda_package_s3_bucket" {
   type        = string
   description = "S3 bucket that holds the extraction pipeline Lambda deployment zip."
-  default     = "staging-edl-terraform-state"
+  default     = "edl-terraform-state-STAGING_ACCOUNT_ID" # placeholder — staging not provisioned yet
 }
 
 variable "lambda_package_s3_key" {

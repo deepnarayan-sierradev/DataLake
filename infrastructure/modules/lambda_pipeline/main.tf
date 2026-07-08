@@ -12,12 +12,12 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  common_tags     = merge(var.tags, {
+  common_tags = merge(var.tags, {
     Environment = var.environment
     ManagedBy   = "terraform"
     Module      = "lambda_pipeline"
   })
-  function_name = "${var.environment}-extraction-pipeline"
+  function_name = "EdlExtractionPipeline"
 }
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ data "aws_vpc" "selected" {
 }
 
 resource "aws_security_group" "lambda_pipeline" {
-  name        = "${local.function_name}-sg"
+  name        = "${local.function_name}Sg"
   description = "Security group for the extraction pipeline Lambda. Egress to AWS APIs and external sources only."
   vpc_id      = data.aws_vpc.selected.id
 
@@ -75,7 +75,7 @@ resource "aws_security_group" "lambda_pipeline" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${local.function_name}-sg"
+    Name = "${local.function_name}Sg"
   })
 
   lifecycle {
@@ -106,15 +106,15 @@ resource "aws_lambda_function" "extraction_pipeline" {
   function_name = local.function_name
   description   = "Extraction pipeline handler invoked by Step Functions. Runs one entity extraction end-to-end."
 
-  s3_bucket         = var.lambda_package_s3_bucket
-  s3_key            = var.lambda_package_s3_key
-  source_code_hash  = var.lambda_package_source_hash
+  s3_bucket        = var.lambda_package_s3_bucket
+  s3_key           = var.lambda_package_s3_key
+  source_code_hash = var.lambda_package_source_hash
 
-  runtime       = "python3.13"
-  handler       = "connector_runtime.extraction_pipeline_handler.lambda_handler"
-  role          = var.execution_role_arn
-  memory_size   = var.memory_size_mb
-  timeout       = var.timeout_seconds
+  runtime     = "python3.13"
+  handler     = "connector_runtime.extraction_pipeline_handler.lambda_handler"
+  role        = var.execution_role_arn
+  memory_size = var.memory_size_mb
+  timeout     = var.timeout_seconds
 
   reserved_concurrent_executions = var.reserved_concurrent_executions
 
@@ -122,12 +122,12 @@ resource "aws_lambda_function" "extraction_pipeline" {
 
   environment {
     variables = {
-      PLATFORM_ENVIRONMENT          = var.environment
-      RAW_S3_BUCKET                 = var.raw_s3_bucket_name
-      SCHEMA_SNAPSHOT_S3_BUCKET     = var.schema_snapshot_s3_bucket_name
-      ENTITY_CONFIG_TABLE           = var.entity_config_table_name
-      WATERMARK_TABLE               = var.watermark_table_name
-      AUDIT_LOG_TABLE               = var.audit_log_table_name
+      PLATFORM_ENVIRONMENT      = var.environment
+      RAW_S3_BUCKET             = var.raw_s3_bucket_name
+      SCHEMA_SNAPSHOT_S3_BUCKET = var.schema_snapshot_s3_bucket_name
+      ENTITY_CONFIG_TABLE       = var.entity_config_table_name
+      WATERMARK_TABLE           = var.watermark_table_name
+      AUDIT_LOG_TABLE           = var.audit_log_table_name
     }
   }
 
@@ -168,5 +168,5 @@ resource "aws_lambda_permission" "allow_step_functions" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.extraction_pipeline.function_name
   principal     = "states.amazonaws.com"
-  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.environment}-extraction-pipeline"
+  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:EdlExtractionPipeline"
 }

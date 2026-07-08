@@ -28,7 +28,7 @@ _ENTITY_ID = "salesforce-account"
 _INSTANCE_URL = "https://myorg.my.salesforce.com"
 
 
-def _make_auth(token: str = "tok") -> MagicMock:  # noqa: S107
+def _make_auth(token: str = "tok") -> MagicMock:
     auth = MagicMock()
     auth.get_access_token.return_value = token
     auth.instance_url = _INSTANCE_URL
