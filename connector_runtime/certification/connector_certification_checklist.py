@@ -184,7 +184,7 @@ def _check_required_methods_implemented(
         source = ""
         try:
             source = inspect.getsource(method)
-        except OSError, TypeError:
+        except (OSError, TypeError):
             pass
 
         is_stub = "raise NotImplementedError" in source and connector_class.__name__ not in source
@@ -209,7 +209,7 @@ def _check_no_os_environ_access(connector_class: type[Any]) -> CertificationChec
             source = inspect.getsource(method)
             if "os.environ" in source or "os.getenv" in source:
                 violations.append(method_name)
-        except OSError, TypeError:
+        except (OSError, TypeError):
             pass
 
     passed = len(violations) == 0

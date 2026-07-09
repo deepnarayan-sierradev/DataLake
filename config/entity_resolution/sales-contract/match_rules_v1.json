@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "Match rules for the sales_contract entity type.",
+    "Current source: salesforce (Contract object) only.",
+    "",
+    "Deliberately kept separate from the 'contract' entity type (mysql-rds",
+    "Contracts table) — the two systems share no common key, so merging them",
+    "would require a fuzzy name/account match that risks silently combining",
+    "unrelated records. Revisit if a real shared identifier is established.",
+    "",
+    "Single source with a stable system-assigned primary key (sales_contract_id)",
+    "— deterministic exact matching on that key is sufficient."
+  ],
+  "entity_type": "sales-contract",
+  "rule_set_version": "v1",
+
+  "blocking": {
+    "key_type": "record_id_prefix",
+    "source_field": "sales_contract_id",
+    "max_block_size": 500
+  },
+
+  "rules": [
+    {
+      "_comment": "Rule 1 — Deterministic: identical sales_contract_id = same contract.",
+      "rule_id": "sales-contract-id-exact",
+      "strategy": "deterministic",
+      "fields": [
+        { "field_name": "sales_contract_id", "normalise": false }
+      ]
+    }
+  ]
+}

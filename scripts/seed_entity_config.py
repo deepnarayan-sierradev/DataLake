@@ -13,10 +13,14 @@ Prerequisite:
     The DynamoDB table must already exist (provisioned by Terraform metadata_persistence module).
 
 Records seeded:
-    salesforce / salesforce-account         (full load, all fields)
+    salesforce / salesforce-account         (incremental, watermark on SystemModstamp)
     salesforce / salesforce-contact         (incremental, watermark on SystemModstamp)
-    netsuite   / netsuite-customer          (incremental, watermark on lastModifiedDate)
-    mysql-rds  / mysql-rds-contracts        (full load, table: Contracts)
+    salesforce / salesforce-opportunity     (incremental, watermark on SystemModstamp)
+    salesforce / salesforce-contract        (incremental, watermark on SystemModstamp)
+    netsuite   / netsuite-customer          (incremental, watermark on lastModifiedDate, disabled)
+    mysql-rds  / mysql-rds-contracts        (incremental, watermark on ModifiedOn, table: Contracts)
+    mysql-rds  / mysql-rds-contractterms    (incremental, watermark on ModifiedOn, table:
+                                             ContractTerms)
     sage       / sage-intacct-customer      (incremental, watermark on auditInfo.modifiedAt)
     sage       / sage-intacct-vendor        (incremental, watermark on auditInfo.modifiedAt)
     sage       / sage-intacct-arinvoice     (incremental, watermark on auditInfo.modifiedAt)
@@ -31,6 +35,14 @@ import argparse
 import sys
 
 import boto3
+
+# extraction_window_days is capped at 365 (contracts/entity_configuration_contract.py)
+# and only ever applies to FULL loads and to an entity's steady-state incremental
+# runs where a watermark already exists. An entity's first-ever incremental run
+# (no watermark yet) always backfills from epoch regardless of this value —
+# see WatermarkRepository.compute_extraction_window(). Keep this small; it is
+# not a backfill-window knob.
+_INCREMENTAL_EXTRACTION_WINDOW_DAYS = 1
 
 
 def _table_name() -> str:
@@ -80,7 +92,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "tenant_code": tenant_code,
             "load_type": "incremental",
             "watermark_field": "SystemModstamp",
-            "extraction_window_days": 1,
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
             "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],
@@ -103,7 +115,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             # if deactivated before deletion).  soft_delete_field is None because
             # there is no deletion flag in the extracted data — a future enhancement
             # will add IsDeleted=true ALL ROWS SOQL support to track hard-deletes.
-            "primary_key_field": "Id",
+            "primary_key_field": "account_id",
             "soft_delete_field": None,
             "active": True,
         },
@@ -113,7 +125,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "config_version": "1.0.0",
             "load_type": "incremental",
             "watermark_field": "SystemModstamp",
-            "extraction_window_days": 1,
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
             "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],
@@ -133,10 +145,70 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             # Salesforce Contact uses hard-delete (records disappear from API),
             # so soft_delete_field is None — deletions tracked via full-load
             # when the entity is eventually switched to full load for that need.
-            "primary_key_field": "Id",
+            "primary_key_field": "contact_id",
             "soft_delete_field": None,
             "active": True,
             "tenant_code": tenant_code,
+        },
+        {
+            "source_id": "salesforce",
+            "entity_id": "salesforce-opportunity",
+            "config_version": "1.0.0",
+            "tenant_code": tenant_code,
+            "load_type": "incremental",
+            "watermark_field": "SystemModstamp",
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
+            "watermark_overlap_hours": 1,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": ["IsDeleted"],
+            "target_raw_s3_prefix": _raw_prefix(
+                account_id, "salesforce", "salesforce-opportunity", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "salesforce", "salesforce-opportunity", tenant_code
+            ),
+            "output_format": "parquet",
+            "connector_params": {"object_name": "Opportunity"},
+            "schedule_cron": "cron(20 2 * * ? *)",
+            "schedule_enabled": True,
+            "schedule_timezone": "UTC",
+            # SCD Type 1 merge: curated layer always holds full current state.
+            # Salesforce Opportunity uses hard-delete (records disappear from
+            # the API), so soft_delete_field is None — same rationale as Contact.
+            "primary_key_field": "opportunity_id",
+            "soft_delete_field": None,
+            "active": True,
+        },
+        {
+            "source_id": "salesforce",
+            "entity_id": "salesforce-contract",
+            "config_version": "1.0.0",
+            "tenant_code": tenant_code,
+            "load_type": "incremental",
+            "watermark_field": "SystemModstamp",
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
+            "watermark_overlap_hours": 1,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": ["IsDeleted"],
+            "target_raw_s3_prefix": _raw_prefix(
+                account_id, "salesforce", "salesforce-contract", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "salesforce", "salesforce-contract", tenant_code
+            ),
+            "output_format": "parquet",
+            "connector_params": {"object_name": "Contract"},
+            "schedule_cron": "cron(25 2 * * ? *)",
+            "schedule_enabled": True,
+            "schedule_timezone": "UTC",
+            # SCD Type 1 merge: curated layer always holds full current state.
+            # Salesforce Contract uses hard-delete (records disappear from
+            # the API), so soft_delete_field is None — same rationale as Contact.
+            "primary_key_field": "sales_contract_id",
+            "soft_delete_field": None,
+            "active": True,
         },
         {
             "source_id": "netsuite",
@@ -144,7 +216,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "config_version": "1.0.0",
             "load_type": "incremental",
             "watermark_field": "lastModifiedDate",
-            "extraction_window_days": 1,
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
             "watermark_overlap_hours": 2,
             "field_mode": "all",
             "include_fields": [],
@@ -172,7 +244,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "config_version": "1.1.0",
             "load_type": "incremental",
             "watermark_field": "ModifiedOn",
-            "extraction_window_days": 1,
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
             "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],
@@ -194,7 +266,37 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             # the curated layer and analytics with is_deleted=True as a tombstone,
             # never physically removed.  BI queries filter WHERE is_deleted = false
             # to see only active contracts.  This preserves the full audit trail.
-            "primary_key_field": "Id",
+            "primary_key_field": "contract_id",
+            "soft_delete_field": None,
+            "active": True,
+            "tenant_code": tenant_code,
+        },
+        {
+            "source_id": "mysql-rds",
+            "entity_id": "mysql-rds-contractterms",
+            "config_version": "1.0.0",
+            "load_type": "incremental",
+            "watermark_field": "ModifiedOn",
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
+            "watermark_overlap_hours": 1,
+            "field_mode": "all",
+            "include_fields": [],
+            "exclude_fields": [],
+            "target_raw_s3_prefix": _raw_prefix(
+                account_id, "mysql-rds", "mysql-rds-contractterms", tenant_code
+            ),
+            "schema_snapshot_s3_prefix": _snapshot_prefix(
+                account_id, "mysql-rds", "mysql-rds-contractterms", tenant_code
+            ),
+            "output_format": "parquet",
+            "connector_params": {"table_name": "ContractTerms"},
+            "schedule_cron": "cron(35 2 * * ? *)",
+            "schedule_enabled": True,
+            "schedule_timezone": "UTC",
+            # Same SCD Type 1 / tombstone convention as mysql-rds-contracts —
+            # assumed ModifiedOn/Id column names; adjust if ContractTerms uses
+            # different watermark/primary-key columns than Contracts.
+            "primary_key_field": "contract_term_id",
             "soft_delete_field": None,
             "active": True,
             "tenant_code": tenant_code,
@@ -206,7 +308,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "config_version": "1.0.0",
             "load_type": "incremental",
             "watermark_field": "auditInfo.modifiedAt",
-            "extraction_window_days": 1,
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
             "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],
@@ -234,7 +336,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "config_version": "1.0.0",
             "load_type": "incremental",
             "watermark_field": "auditInfo.modifiedAt",
-            "extraction_window_days": 1,
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
             "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],
@@ -262,7 +364,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "config_version": "1.0.0",
             "load_type": "incremental",
             "watermark_field": "auditInfo.modifiedAt",
-            "extraction_window_days": 1,
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
             "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],
@@ -290,7 +392,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "config_version": "1.0.0",
             "load_type": "incremental",
             "watermark_field": "auditInfo.modifiedAt",
-            "extraction_window_days": 1,
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
             "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],
@@ -316,7 +418,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "config_version": "1.0.0",
             "load_type": "incremental",
             "watermark_field": "MODDAT_0",
-            "extraction_window_days": 1,
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
             "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],
@@ -341,7 +443,7 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "config_version": "1.0.0",
             "load_type": "incremental",
             "watermark_field": "MODDAT_0",
-            "extraction_window_days": 1,
+            "extraction_window_days": _INCREMENTAL_EXTRACTION_WINDOW_DAYS,
             "watermark_overlap_hours": 1,
             "field_mode": "all",
             "include_fields": [],

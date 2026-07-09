@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "Match rules for the contract_term entity type.",
+    "Current source: mysql-rds (ContractTerms table) only.",
+    "",
+    "Single source with a stable system-assigned primary key (contract_term_id)",
+    "— deterministic exact matching on that key is sufficient."
+  ],
+  "entity_type": "contract-term",
+  "rule_set_version": "v1",
+
+  "blocking": {
+    "key_type": "record_id_prefix",
+    "source_field": "contract_term_id",
+    "max_block_size": 500
+  },
+
+  "rules": [
+    {
+      "_comment": "Rule 1 — Deterministic: identical contract_term_id = same contract term.",
+      "rule_id": "contract-term-id-exact",
+      "strategy": "deterministic",
+      "fields": [
+        { "field_name": "contract_term_id", "normalise": false }
+      ]
+    }
+  ]
+}

@@ -32,3 +32,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "analytics_reader_principals" {
+  description = "IAM principal ARNs granted explicit Lake Formation SELECT+DESCRIBE (table wildcard) on the curated and analytics databases — required because IAM_ALLOWED_PRINCIPALS doesn't satisfy Athena's GetUnfilteredTableMetadata path. Covers all tenants automatically (shared databases, tenant-scoped by table name)."
+  type        = list(string)
+  default     = []
+}

@@ -2,10 +2,27 @@
 
 **For:** Project manager, platform engineering lead, operations  
 **Purpose:** Verify all systems are ready before production activation  
-**Last updated:** 2026-06-29
+**Last updated:** 2026-07-09
 
-> **Environment status:** Dev ✅ complete | Staging 🔲 in progress | Production 🔲 pending  
-> Items marked ✅ are already verified in the dev environment. Use this checklist when promoting to **staging** then **prod** — check off each item per environment before proceeding.
+> **Environment status (per `docs/PLATFORM_STATUS.md` and
+> `architecture/GAP_ANALYSIS_FINDINGS.md`'s Phase 7 table):**
+> **Dev** — infrastructure deployed (277 resources: all 8 Lambdas, Step Functions, the
+> control-plane API, DynamoDB, S3, SQS/EventBridge). Salesforce and MySQL RDS credentials are
+> populated, and the pipeline has run end-to-end — verified with real data (34 Salesforce
+> accounts, 36,023 MySQL contract rows) queryable in Athena. Sage Intacct, Sage X3, and NetSuite
+> credentials are still unpopulated, and the three newest entities (opportunity, contract,
+> contract-term) aren't seeded yet. The control-plane API's live JWT-claims behavior has not
+> been independently confirmed. Deployed infrastructure and one verified pipeline run for two of
+> five sources is not the same as full go-live readiness; don't read "Dev" as "done."
+> **Staging** — not provisioned. No AWS account or credentials exist yet; `terraform validate` is
+> clean, which only means the Terraform *would* apply cleanly, not that anything is running.
+> **Production** — not provisioned. Requires staging sign-off first per this repo's promotion
+> policy.
+>
+> Nothing in the body of this checklist is pre-checked — every box below reflects what is
+> actually verified as of this update, which for nearly every item is "not yet." Use this
+> checklist when promoting to **staging**, then **prod** — check off each item per environment as
+> it is genuinely completed, not in advance of the work.
 
 ---
 
@@ -110,7 +127,9 @@
 ---
 
 ### Entity Configuration (DynamoDB)
-- [ ] Configuration table populated with 5 initial entities
+- [ ] Configuration table populated with all planned entities (11 listed below — this list has
+      grown past the original "5 initial entities" plan as Sage Intacct/X3 were onboarded; keep
+      this count in sync with `scripts/seed_entity_config.py` rather than a fixed number)
   - [ ] `salesforce-account` (incremental, SystemModstamp watermark, 1 day window)
   - [ ] `salesforce-contact` (incremental, SystemModstamp watermark, 1 day window)
   - [ ] `salesforce-opportunity` (incremental, CloseDate watermark, 1 day window)
@@ -133,12 +152,17 @@
 ---
 
 ### Field Mapping Configuration (S3)
-- [ ] Field mapping JSON files created for each source/entity pair (5 files total)
+- [ ] Field mapping JSON files created for **every** source/entity pair in the entity
+      configuration list above, not just the original 5 — check `config/field_mappings/` directly
+      for the current set rather than trusting a fixed count here, since it has grown to include
+      Sage Intacct/X3, Salesforce Opportunity/Contract, and MySQL RDS contract-terms mappings that
+      post-date this checklist's last full rewrite
   - [ ] Salesforce Account mapping: source fields → canonical names (e.g., `Account_Name__c` → `account_name`)
   - [ ] Salesforce Contact mapping: source fields → canonical names
   - [ ] Salesforce Opportunity mapping: source fields → canonical names
   - [ ] NetSuite Customer mapping: source fields → canonical names
   - [ ] MySQL Orders mapping: source fields → canonical names
+  - [ ] Sage Intacct / Sage X3 mappings (customer, supplier, and any other onboarded entities)
 - [ ] All mapping files stored in S3: `s3://prod-schema-snapshots/field_mappings/`
 - [ ] Each mapping file versioned (v1.json)
 - [ ] All transformation Lambda has read permission to mapping bucket
@@ -167,9 +191,13 @@
 ---
 
 ### Entity Resolution Configuration (S3)
-- [ ] Resolution config files created for planned entity types:
-  - [ ] `config/entity_resolution/company/company_resolution_v1.json` (matches Salesforce Account + NetSuite Customer)
-  - [ ] `config/entity_resolution/person/person_resolution_v1.json` (normalizes Salesforce Contact)
+- [ ] Resolution config files created for planned entity types. The real convention (verify against
+      `config/entity_resolution/` directly, this list drifts) is **one folder per entity type**,
+      each holding `match_rules_v1.json`, `survivorship_v1.json`, and a `latest.json` pointer — not
+      the single `{type}_resolution_v1.json` file this item previously described. As of this
+      update the folders present are: `company`, `person`, `supplier`, `ar_invoice`, `ap_bill`,
+      `contract`, `contract-term`, `opportunity`, `sales-contract` — considerably more than the
+      original "company + person" plan
 - [ ] Each config includes:
   - [ ] Matching rules (deterministic: exact field match; probabilistic: Levenshtein distance > 0.95)
   - [ ] Survivorship policy (which source wins for which field)
@@ -434,24 +462,38 @@ Verify that all required technologies are correctly configured before go-live.
 - [ ] **EventBridge Scheduler** — All 12 entity schedules created; correct cron expressions; correct state machine ARN
 - [ ] **Step Functions** — State machine deployed in `prod`; `Standard Workflow` type confirmed; IAM execution role attached
 - [ ] **Lambda** — All 5 pipeline stage functions deployed; correct memory (512 MB default) and timeout (15 min) settings; VPC config attached
-- [ ] **ECS Fargate** — Task definition registered; cluster created; capacity provider set; correct IAM task role
+- [ ] ~~**ECS Fargate**~~ — **Not part of the current architecture.** No `aws_ecs_*` Terraform
+      resource exists anywhere in `infrastructure/`, and there is no code path that routes a run to
+      ECS instead of Lambda. Remove this item from the gate rather than checking it off — it was
+      carried over from an earlier design note. If a future entity genuinely outgrows Lambda, that
+      is new platform work, not a pre-go-live checklist item
 - [ ] **S3 buckets** — All 5 buckets created (`raw`, `curated`, `analytics`, `schema-snapshots`, `governance`); Object Lock confirmed on raw; SSE-KMS on all; TLS-only bucket policy applied
-- [ ] **DynamoDB tables** — All 5 tables created (`entity_extraction_config`, `watermark_repository`, `run_audit_log`, `entity_type_registry`, `source_onboarding_registry`); PITR enabled; KMS encryption confirmed; GSI names match code expectations
+- [ ] **DynamoDB tables** — All 5 tables created (`entity_extraction_config`, `watermark_repository`, `run_audit_log`, `entity_type_registry`, `source_onboarding_registry`); PITR enabled; KMS encryption confirmed; GSI names match code expectations. **Known scaling gap (`PERF-7`, `PERF-10`):** `entity_extraction_config` has no GSI at all and tenant-scoped listing (`list_configs_for_tenant`, the control-plane API's list-runs route) is implemented as a full table `Scan` with a filter — correct today, but cost/latency scale with total table size, not the calling tenant's slice. `watermark_repository`'s only GSI is hash-keyed on `environment` (a 3-value domain), so every watermark row in an environment lands in one GSI partition. Fine at today's scale; do not represent this row as "scales with tenant count" without the follow-up work tracked under those IDs
 - [ ] **Secrets Manager** — 5 secrets created (`salesforce`, `netsuite`, `mysql-rds`, `sage/intacct`, `sage/x3`); initial values set; daily credential-expiry-check Lambda (`credential_expiry_notifier`) scheduled — automatic rotation not yet wired (`rotation_lambda_arn` unset everywhere)
 - [ ] **Glue Data Catalog** — Database `{env}_curated` created; IAM permissions allow `glue:CreateTable` and `glue:UpdateTable` from transformation role
 - [ ] **Athena** — Workgroup `{env}-analytics` created; output bucket set; per-query cost limit configured
 - [ ] **SQS (DLQ)** — Queue `{env}-extraction-dlq` created; KMS encrypted; 14-day retention; DLQ URL accessible from extraction Lambda
-- [ ] **CloudWatch** — Log groups for all 5 services created; custom namespace `EnterpriseDatalake` emitting metrics; 4 alarms active; SNS topic subscribed
+- [ ] **CloudWatch** — Log groups for all 5 services created; custom namespace `EnterpriseDatalake` emitting metrics; 17 alarms active (`infrastructure/modules/observability/main.tf` + 3 more in `orchestration/main.tf` — not the "4" figure some older docs still cite); SNS topic (`platform_alerts`) subscribed
 - [ ] **KMS** — Customer-managed CMK created; annual rotation enabled; all resource SSE configurations pointing to correct key ARN
 - [ ] **IAM roles** — All 5 service roles + 1 OIDC CI/CD role deployed; no wildcard permissions; `aws:SourceAccount` condition on all service trust policies
 - [ ] **VPC** — Private subnets in 3 AZs; no internet gateway; 5 VPC Endpoints configured (S3-gateway, DynamoDB-gateway, SecretsManager-interface, CloudWatch-interface, Step Functions-interface)
 
 ### Python and Infrastructure
 
-- [ ] **Python 3.14.x** — Correct version in Lambda runtime / ECS image; `pyproject.toml` version pin matches
+- [ ] **Python 3.13.x** — Correct version in Lambda runtime; `pyproject.toml`'s
+      `requires-python = ">=3.13,<3.14"` matches all 8 Lambda `runtime = "python3.13"` settings.
+      (Python 3.14 was the original target but was rolled back — no `pyarrow` wheel exists for 3.14
+      yet, a hard dependency for this platform's Parquet I/O; don't reintroduce a 3.14 pin.)
 - [ ] **Pydantic v2** — Dependency installed; no Pydantic v1 compatibility shims
 - [ ] **Terraform state** — Remote state bucket and DynamoDB lock table exist in `prod`; Terraform apply completed with no errors
-- [ ] **GitHub Actions** — All 8 CI gate stages pass on `main` branch (lint, typecheck, test, security-sast, dependency-scan, iac-security-scan, terraform-validate, secret-scan); deploy workflow triggered and succeeded
+- [ ] **GitHub Actions** — All 9 CI gate jobs pass on `main` branch (`lint`, `banned-names`,
+      `typecheck`, `test`, `security-sast`, `dependency-scan`, `iac-security-scan`,
+      `terraform-validate`, `secret-scan`); deploy workflow triggered and succeeded. **This item is
+      not currently true and should not be checked off:** per root `CLAUDE.md`, the `typecheck`
+      job — once fixed to stop crashing on a module-name collision — surfaces **75 pre-existing
+      type errors across 16 files** (tracked as `OBS-6` remediation debt) and reports red until
+      that debt is separately paid down. Confirm `typecheck` is actually green before treating this
+      row as done, don't assume it from the other 8 jobs passing
 - [ ] **pre-commit hooks** — Installed in repository; baseline updated
 
 ### Source System Connectivity

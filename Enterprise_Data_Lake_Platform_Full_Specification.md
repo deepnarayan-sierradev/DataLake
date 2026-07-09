@@ -1,24 +1,39 @@
 # Enterprise Data Lake Extraction Platform
 ## Comprehensive Requirements & GitHub Copilot Implementation Specification
 
-Version: 2.0
-Date: 2026-06-11
+Version: 2.0 (original), annotated 2026-07-09
+Date: 2026-06-11 (original requirements baseline)
 
 This document expands the original high-level specification into implementation-ready architecture and delivery guidance.
 
+> **Reconciliation note (2026-07-09):** This is the original requirements/specification
+> document, annotated in place. Every major section below now carries an
+> "Implementation Status" note reflecting what has actually been built, verified against
+> `docs/PLATFORM_STATUS.md` and `architecture/GAP_ANALYSIS_FINDINGS.md`'s implementation
+> status table (both current as of today). This document remains the reference for
+> original intent and design rationale — it is **not** a status report. For current
+> deployment state, connector connectivity, and live data figures, treat
+> `docs/PLATFORM_STATUS.md` as authoritative; for open gaps and their severity, treat
+> `architecture/GAP_ANALYSIS_FINDINGS.md` as authoritative. Where a design decision below
+> was later superseded (e.g. multi-tenancy, which did not exist in the original scope at
+> all), that is called out with a pointer to `architecture/MULTI_TENANT_ROLLOUT_PLAN.md`.
+> Original requirement text is left intact below except where a claim was flatly wrong
+> given what shipped (e.g. a runtime version that changed) — those are corrected inline
+> and noted.
+
 Global implementation constraints:
 
-- Use Python 3.14.x as the default runtime baseline for all implementation planning unless a dependency compatibility exception is formally approved.
-- Pin production builds to a tested Python 3.14 patch release and review quarterly for security and compatibility updates.
-- Use Terraform as the infrastructure-as-code standard (not AWS CDK) to preserve cloud portability.
-- AWS is the primary cloud for initial delivery; design abstractions, naming, and contracts to allow future Azure and GCP adoption.
-- Do not hardcode Salesforce fields.
-- Do not create one extractor per Salesforce object.
-- Raw extraction remains isolated from transformation and entity resolution.
-- All APIs must be authenticated and authorized.
-- All services must enforce least privilege.
-- Secrets must be sourced from cloud secret-management services.
-- Credentials, tokens, and PII must never be logged.
+- Use Python 3.14.x as the default runtime baseline for all implementation planning unless a dependency compatibility exception is formally approved. **[Corrected 2026-07-09]** Local dev tooling and `pyproject.toml` target 3.14, but the deployed Lambda runtime is standardized on **Python 3.13**, not 3.14 (`INFRA-8`, `INFRA-9` in the gap-analysis findings) — PyPI has no `pyarrow` wheel for 3.14 yet, and Python 3.14's parenthesized-exception-group syntax (PEP 758) is a hard `SyntaxError` on the 3.13 Lambda runtime, which broke every extraction invocation until fixed. Treat 3.13 as the actual production runtime baseline until a `pyarrow` 3.14 wheel exists.
+- Pin production builds to a tested Python 3.14 patch release and review quarterly for security and compatibility updates. **Superseded by the above** — pin to a tested 3.13 patch release instead, for the same reason.
+- Use Terraform as the infrastructure-as-code standard (not AWS CDK) to preserve cloud portability. **[Met]**
+- AWS is the primary cloud for initial delivery; design abstractions, naming, and contracts to allow future Azure and GCP adoption. **[Partially met]** AWS-first is real and the only implemented target; no Azure/GCP abstraction layer or provider code exists yet — this remains aspirational, not started.
+- Do not hardcode Salesforce fields. **[Met]** — metadata-driven Describe/SOQL builder, no per-object extractors.
+- Do not create one extractor per Salesforce object. **[Met]**
+- Raw extraction remains isolated from transformation and entity resolution. **[Met]**
+- All APIs must be authenticated and authorized. **[Mostly met]** — the control-plane API (added after this document was written; see §3) uses Cognito/JWT, but one route (`POST /tenants`) currently accepts any authenticated caller rather than an admin-scoped claim (`SEC-8`, open).
+- All services must enforce least privilege. **[Partially met]** — see §6.
+- Secrets must be sourced from cloud secret-management services. **[Met]** — all 5 source-credential secrets are Terraform-managed Secrets Manager resources.
+- Credentials, tokens, and PII must never be logged. **[Met in intent; PII masking activation was a real, now-fixed bug — see §14.]**
 
 ---
 
@@ -82,15 +97,37 @@ Global implementation constraints:
 - Platform architecture review board approves design as implementation-ready.
 - At least one end-to-end source-to-raw-to-curated flow is documented with operational controls.
 
+## Implementation Status (2026-07-09)
+
+**Exceeded in scope, met in mechanism.** The metadata-driven, connector-based architecture
+described here is built and running in `dev`: Salesforce and MySQL RDS extract, transform,
+resolve, and publish real data end to end (34 Salesforce accounts, 36,023 MySQL contract rows,
+queryable in Athena). The connector roster grew beyond the original three (Salesforce, NetSuite,
+MySQL RDS) to include Sage Intacct and Sage X3 — see §2 and §23. A second major capability not
+present in this original scope at all — multi-tenancy (`tenant_code` as a first-class dimension)
+and a SaaS control-plane API — was added afterward; see `architecture/MULTI_TENANT_ROLLOUT_PLAN.md`
+for that design and `architecture/GAP_ANALYSIS_FINDINGS.md` for its current gaps (`SEC-2`
+tenant isolation is prefix/key-level, not yet IAM-enforced). Only `dev` is deployed; staging and
+production are not yet provisioned (Terraform validates cleanly for both).
+
 ---
 
 # 2. Business Requirements
 
 ## Detailed Requirements
 
-- Current production connectors: Salesforce, NetSuite, MySQL RDS.
-- Planned connectors: Dynamics 365, HubSpot, SAP, PostgreSQL, REST APIs, CSV/Excel, SFTP.
-- Business outcomes: centralized raw repository, trusted curated entities, entity resolution, golden records, analytics readiness, and AI/ML feature generation pathways.
+- Current production connectors: Salesforce, NetSuite, MySQL RDS. **[Corrected 2026-07-09]**
+  Salesforce and MySQL RDS are connected with verified live data; NetSuite is code-complete
+  (connector, OAuth/TBA auth client, SuiteQL query planner, raw layer writer all implemented
+  under `connector_runtime/adapters/netsuite/`) but not yet connected — its credentials secret
+  is still an empty shell. Two connectors not in this original list were built instead: **Sage
+  Intacct** and **Sage X3**, both code-complete, also not yet connected (see §23).
+- Planned connectors: Dynamics 365, HubSpot, SAP, PostgreSQL, REST APIs, CSV/Excel, SFTP. **[Status:
+  none of these have been built.]** The connectors actually added since this document was written
+  were Sage Intacct and Sage X3, not any item on this original planned list — treat this list as
+  stale intent rather than a current roadmap; there is no evidence a decision was made to drop it,
+  it was simply superseded by different prioritization.
+- Business outcomes: centralized raw repository, trusted curated entities, entity resolution, golden records, analytics readiness, and AI/ML feature generation pathways. **[Met, for the connected sources.]** Nine entity types are resolved into golden records today: `company`, `person`, `contract`, `supplier`, `ar_invoice`, `ap_bill`, `opportunity`, `sales-contract`, `contract-term` (`entity_resolution/entity_type_registry.py`) — several of these (`opportunity`, `sales-contract`, `contract-term`, `ar_invoice`, `ap_bill`, `supplier`) did not exist in the original scope and were added as the connector roster grew.
 
 ## Best Practices
 
@@ -132,6 +169,20 @@ Global implementation constraints:
 - Approved onboarding templates exist for Salesforce, NetSuite, and MySQL RDS.
 - New source onboarding can be completed without application code changes.
 
+## Implementation Status (2026-07-09)
+
+**Mostly met, with one real gap.** Onboarding a new *entity* for an already-built connector is
+genuinely config-only (`scripts/seed_entity_config.py`, field-mapping JSON, entity-resolution
+JSON — no code change), demonstrated by `salesforce-opportunity`, `salesforce-contract`, and
+`mysql-rds-contractterms`, all added without touching the Salesforce or MySQL RDS adapters
+because both are generic (object/table name comes from config). Onboarding a brand-new *source*
+(e.g. Sage) still requires writing a new connector adapter — this document's own "no code
+changes" acceptance criterion was always scoped to entities within an existing connector, not
+to net-new source systems, and the code matches that reading. A SaaS-style self-service
+onboarding *tenant* flow now also exists (the control-plane API, `POST /tenants/{tenant_code}/entities`)
+that was not part of this original requirement at all — see §3 and
+`architecture/MULTI_TENANT_ROLLOUT_PLAN.md`.
+
 ---
 
 # 3. High Level Architecture
@@ -170,6 +221,21 @@ Terminology clarification for downstream stages:
 - Golden Record: a mastered entity dataset created by matching and survivorship across source systems. It is not a replacement for every downstream dataset.
 - Analytics Layer: a consumption-optimized data layer that can contain both curated domain datasets and golden record datasets.
 - Target Database: the serving database or warehouse loaded from curated and/or analytics outputs for BI tools, APIs, and applications.
+
+> **Diagram drift note (2026-07-09):** the diagram and sequence below still show only
+> Salesforce/NetSuite/MySQL as sources — Sage Intacct and Sage X3 connectors were added since
+> and are not pictured; they enter the flow the same way ("Source Extractors" -> Raw). More
+> significantly, an entire control-plane layer was added that isn't in this diagram at all: a
+> Cognito/JWT-authenticated REST API (`connector_runtime/api/`, `infrastructure/modules/control_plane/`)
+> sits alongside EventBridge Scheduler as a second trigger path into Step Functions, for
+> tenant provisioning, entity registration, and on-demand pipeline triggers. Every stage box in
+> this diagram is now also implicitly tenant-scoped (`tenant_code` threads through Config,
+> Watermark, Raw, Curated, and Analytics) — see `architecture/MULTI_TENANT_ROLLOUT_PLAN.md` for
+> the design this diagram doesn't show, and `architecture/GAP_ANALYSIS_FINDINGS.md`'s `SEC-2`
+> for what's still only prefix/key-isolated rather than IAM-enforced. The `Target Database` /
+> `LoadServingStore` stage in the flow list above exists in Terraform and code
+> (`transformation/serving_store_loader.py`) but is a conditional no-op in every environment
+> today — no `serving_store_loader_lambda_arn` is set anywhere, so it's latent, not live.
 
 ```mermaid
 flowchart LR
@@ -348,15 +414,28 @@ sequenceDiagram
 - Architecture decision record includes stage boundaries, failure behavior, and replay behavior.
 - Cross-layer data movement is fully documented and traceable.
 
+## Implementation Status (2026-07-09)
+
+**Met, and extended.** Stage boundaries, failure behavior, and replay are implemented: a single
+Step Functions state machine (`EdlExtractionPipeline`) runs extraction → transformation → entity
+resolution → analytics with a DLQ-backed failure/replay path (`EdlDlqProcessor`,
+`orchestration/step_functions/run_replay_controller.py`). Two things this section didn't
+anticipate are now real: (1) mid-run checkpointing on approaching Lambda timeout (`LambdaTimeoutWarning`,
+partial watermark commit, `ExtractionCheckpointed` terminal state) — automatic re-invocation from
+a checkpoint is not yet implemented, so a checkpointed run needs a manual re-trigger today
+(`PERF-5`, partial); (2) a distributed circuit breaker per `tenant_code:source_id:entity_id`
+(`orchestration/step_functions/extraction_retry_policy.py`) — two related bugs in its wiring were
+found and fixed during the 2026-07-08 hardening pass (`ARCH-7`, `ARCH-15`).
+
 ---
 
 # 4. Repository Structure
 
 ## Detailed Requirements
 
-- Organize by domain: connector_runtime, orchestration, schema_management, governance, observability, infrastructure, ci_cd.
-- Separate runtime code, Terraform modules, deployment manifests, and documentation.
-- Keep source-specific adapters under clear folders without duplicating framework logic.
+- Organize by domain: connector_runtime, orchestration, schema_management, governance, observability, infrastructure, ci_cd. **[Met, and grown.]** The current top-level module set matches this list plus several domains this document didn't anticipate, each with its own `tests/` per the repo's registration convention: `contracts` (identifier/tenant validation, entity-configuration contracts), `entity_resolution`, `transformation`, `analytics_publisher`, `watermark_management`, and `connector_runtime/api` (the control-plane API). `ci_cd` was never a literal top-level folder — CI lives in `.github/workflows/ci.yml`, functionally equivalent.
+- Separate runtime code, Terraform modules, deployment manifests, and documentation. **[Met]** — `infrastructure/` (Terraform), `docs/`, module-local `tests/`.
+- Keep source-specific adapters under clear folders without duplicating framework logic. **[Mostly met.]** `connector_runtime/adapters/{salesforce,netsuite,mysql_rds,sage}/` each hold thin, source-specific code on top of a shared `RawLayerWriter` base class (`DUP-1`, ~950 duplicated lines removed in the 2026-07-08 pass). One inconsistency remains: Sage's credential-manager and Deterministic/Transient error-taxonomy pattern is clean and reusable but was never lifted into the shared framework for Salesforce/NetSuite/MySQL to inherit — each of those three still hand-rolls near-identical Secrets Manager and error-classification boilerplate (`DP-2`, `DP-3`, open P1 debt).
 
 ## Best Practices
 
@@ -398,6 +477,12 @@ sequenceDiagram
 
 - Repository linter and review checklist enforce naming and structure standards.
 - New connector can be added without modifying unrelated modules.
+
+## Implementation Status (2026-07-09)
+
+**Met.** `make banned-names` enforces the naming rule in CI (a dedicated `banned-names` job in
+`.github/workflows/ci.yml`, not just a local convention), and Sage Intacct/Sage X3 were both
+added as new connectors without modifying Salesforce, NetSuite, or MySQL RDS code.
 
 ---
 
@@ -447,6 +532,14 @@ sequenceDiagram
 ## Acceptance Criteria
 
 - Pull requests with prohibited generic naming fail validation.
+
+## Implementation Status (2026-07-09)
+
+**Met.** `PROHIBITED_IDENTIFIERS` in `contracts/identifier_policy.py` (`helper`, `util`,
+`common`, `manager`, `phase1`, `phase2`) is the single source of truth, imported everywhere
+`source_id`/`entity_id`/`tenant_code` are validated, and enforced both locally (`make banned-names`)
+and in CI. Naming has held up under real growth: nine entity types and five connectors exist
+today without a single prohibited identifier surfacing.
 
 ---
 
@@ -504,6 +597,27 @@ sequenceDiagram
 
 - Security architecture review approves IAM, secrets, encryption, and logging controls.
 - Penetration and configuration review show no critical open issues.
+
+## Implementation Status (2026-07-09)
+
+**Partially met — two real open issues, both tracked, neither hidden.** Secrets management is
+solid: all five source-credential secrets are Terraform-managed with a resource policy denying
+`GetSecretValue` to anyone but the extraction runtime role (`SEC-3`), and a daily
+`EdlCredentialExpiryNotifier` alerts on rotation age (`SEC-6`). Two gaps remain open rather than
+resolved:
+- **Multi-tenant isolation is not IAM-enforced yet** (`SEC-2`). `tenant_code` prefixing genuinely
+  isolates S3 keys and the entity-type-registry and watermark DynamoDB tables at the
+  key/prefix level, but this is enforced by writer code, not by an S3 bucket-policy condition or
+  DynamoDB fine-grained-access-control policy — don't treat it as a hard security boundary yet.
+  `entity-extraction-config` is additionally not tenant-partitioned at the key level at all
+  (`ARCH-12`), only guarded by an application-level check that fails closed as a 409, not a
+  data leak.
+- **The control-plane `POST /tenants` route accepts any authenticated caller**, not an
+  admin-scoped claim (`SEC-8`, open, documented directly in the handler's own docstring).
+
+Two other historical bugs in this area — SCD merge silently disabled (`DP-1`) and PII/sensitive-field
+masking wired to `None` in production (`SEC-1`) — were found and fixed in the 2026-07-08 hardening
+pass; see §14.
 
 ---
 
@@ -563,6 +677,17 @@ sequenceDiagram
 
 - CI pipeline includes OWASP-aligned controls and documented pass/fail gates.
 
+## Implementation Status (2026-07-09)
+
+**Met.** `.github/workflows/ci.yml` runs lint (`ruff`), scoped type-checking (`mypy`), the full
+pytest suite with an 80% coverage gate, `bandit` static analysis, a `detect-secrets` scan
+(`SEC-4`), and a dedicated `banned-names` job. The OWASP-category-citation convention (`OWASP A03`,
+`A09`, etc. in security-relevant code comments) is real and consistently applied — 150+
+occurrences repo-wide, not aspirational. One caveat: the `typecheck` job currently reports red on
+~71 pre-existing type errors across 15 files (`OBS-6`), tracked as follow-up remediation debt
+rather than blocking merges — see `CLAUDE.md`'s verification section for the exact scoped `mypy`
+invocation.
+
 ---
 
 # 8. Salesforce Extraction Requirements
@@ -616,6 +741,17 @@ sequenceDiagram
 - Adding a new Salesforce object requires configuration only.
 - Field additions in Salesforce are extracted automatically after metadata refresh.
 
+## Implementation Status (2026-07-09)
+
+**Met and verified live.** `connector_runtime/adapters/salesforce/` implements exactly this
+design: `salesforce_metadata_discovery_client.py` (Describe-based discovery),
+`salesforce_bulk_query_job_controller.py` (dynamic SOQL + Bulk API 2.0), no per-object extractor
+classes, no hardcoded field lists. `salesforce-account` and `salesforce-contact` have run
+end-to-end against real Salesforce data in `dev` (34 accounts confirmed via Athena).
+`salesforce-opportunity` and `salesforce-contract` were added purely as configuration
+(field-mapping + entity-resolution JSON) with zero adapter code changes, directly demonstrating
+this section's acceptance criteria — though neither has been seeded/scheduled with real data yet.
+
 ---
 
 # 9. Bulk API Strategy
@@ -665,6 +801,16 @@ sequenceDiagram
 
 - Bulk extraction path supports million-record entities with controlled retries and resumability.
 
+## Implementation Status (2026-07-09)
+
+**Met in design; not yet exercised at million-record scale.** The Bulk API 2.0 job-orchestration
+pattern (create job, monitor status, fetch results, persist raw files) is implemented and
+tested. Real `dev` volumes so far (34 accounts) are far below the million-record scale this
+requirement targets, so throughput/resumability at that scale hasn't been proven against a live
+Salesforce org yet — the mechanism exists but is unvalidated at target scale. Mid-run
+checkpointing (Lambda-timeout-triggered partial commit) was added since this document was
+written and provides a form of resumability this section didn't originally specify; see §3.
+
 ---
 
 # 10. Configuration Driven Design
@@ -713,6 +859,18 @@ sequenceDiagram
 
 - New entity onboarding and behavior changes are completed without code changes.
 
+## Implementation Status (2026-07-09)
+
+**Met, with one tenant-scoping gap.** `EdlEntityExtractionConfig` (DynamoDB) plus
+`ConfigurationRepositoryClient` back the configuration-driven design described here, and the
+three newest entities (`salesforce-opportunity`, `salesforce-contract`, `mysql-rds-contractterms`)
+were onboarded config-only. One gap this document didn't anticipate because multi-tenancy didn't
+exist yet: the config table's DynamoDB key has no tenant dimension (`PK=source_id`/`SK=entity_id`),
+so two tenants configuring the same connector/entity would collide — currently caught by an
+application-level guard that fails closed as a 409 rather than leaking data (`ARCH-12`, open,
+deferred alongside `ARCH-10`/`ARCH-11`, the same gap in the resolution-config and field-mapping
+registries).
+
 ---
 
 # 11. Watermark Framework
@@ -760,6 +918,18 @@ sequenceDiagram
 ## Acceptance Criteria
 
 - No watermark is advanced when run status is failed or partially completed.
+
+## Implementation Status (2026-07-09)
+
+**Met, and hardened beyond the original design.** `watermark_management/watermark_repository/watermark_repository.py`
+backs this requirement and now goes further than originally specified in two ways: (1) its
+DynamoDB key is genuinely tenant-scoped (`tenant_scoped_key()` on the `source_id` attribute, not
+just an application-level check) — this closed a real bug where two tenants could silently
+share/overwrite one watermark (`ARCH-1`); (2) a first-run edge case was found and fixed
+(`INFRA-10`): a brand-new entity's first incremental run previously used the capped
+`extraction_window_days` (max 365) as its lookback, so an entity with no prior watermark and no
+source changes in that window silently extracted 0 rows — easily mistaken for a
+credentials/connectivity failure. First runs now always backfill from epoch.
 
 ---
 
@@ -810,6 +980,14 @@ sequenceDiagram
 - Schema drift report produced for every extraction run.
 - Additive fields appear in raw output without extraction failure.
 
+## Implementation Status (2026-07-09)
+
+**Met.** `schema_management/snapshot_repository/snapshot_repository.py` persists per-run schema
+snapshots and drift reports at `{tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json`
+with a `latest.json` pointer (`edl-schema-snapshots-087972550871` bucket in dev), and the
+snapshot path is tenant-scoped as part of the same 2026-07-08 hardening pass that fixed watermark
+scoping (`ARCH-1`).
+
 ---
 
 # 13. Raw Layer Standards
@@ -858,6 +1036,16 @@ sequenceDiagram
 
 - Raw records match source payload structure with no transformation artifacts.
 
+## Implementation Status (2026-07-09)
+
+**Met, and closed a real collision risk.** `connector_runtime/raw_layer_writer.py::RawLayerWriter`
+is the shared base class all four connector families' raw writers now inherit
+(`DUP-1`, ~950 duplicated lines removed), writing immutable Parquet at
+`{tenant_code}/{source}/{entity_id}/extraction_date=.../run_id=.../data.parquet`. Until the
+2026-07-08 hardening pass, this path had **no tenant_code segment at all** — a guaranteed same-key
+collision across tenants, not just a latent risk (`ARCH-1`); `RawLayerWriter.__init__` now
+requires `tenant_code`.
+
 ---
 
 # 14. Curated Layer Standards
@@ -905,6 +1093,32 @@ sequenceDiagram
 ## Acceptance Criteria
 
 - Curated outputs satisfy mapping, quality, and lineage requirements and are validated before publication.
+
+## Implementation Status (2026-07-09)
+
+**Met today, but two real production bugs existed in this exact area and were only recently
+fixed — worth stating plainly rather than glossing over:**
+
+- **SCD Type-1 merge was silently disabled for every entity** (`DP-1`). A wrong keyword argument
+  in `transformation_pipeline_handler.py`'s construction of `ConfigurationRepositoryClient` raised
+  a `TypeError` on every invocation, caught by an over-broad `except Exception` and logged as a
+  warning — so `curated_accumulator` was `None` on every run and curated tables ran in
+  append-only mode (duplicate/stale rows on every update or delete) since this code shipped.
+  Fixed: correct constructor call, narrowed exception handling, and a new regression test.
+- **PII/sensitive-field masking was fully built, tested, and hardcoded off** (`SEC-1`).
+  `governance/data_classification_policy.py`'s `FieldMaskingApplier` was never actually
+  constructed in production — `transformation_pipeline_handler.py` passed
+  `classification_policy=None`, so every PII/SENSITIVE_PII field from every source flowed
+  unmasked into curated and analytics S3. Fixed: `build_auto_classification_policy()` is now wired
+  into `execute()`, and a follow-up fix (`SEC-7`) closed a bypass where pass-through entities
+  (no registered field-mapping rule set) skipped classification entirely just because no mapping
+  existed for them.
+
+Separately, the curated Glue Catalog registration path (`_register_curated_catalog`,
+tenant-scoped table naming fixed under `ARCH-19`) is implemented and tested but is **currently
+dead code in `dev`** — the transformation Lambda's `glue_catalog_database` variable is unset there,
+so no curated tables actually appear in Athena today; only the analytics layer is Glue-registered
+in `dev` (see `docs/PLATFORM_STATUS.md`'s Glue Catalog section).
 
 ---
 
@@ -956,6 +1170,22 @@ sequenceDiagram
 
 - Golden record generation is reproducible and traceable to source records and rule versions.
 
+## Implementation Status (2026-07-09)
+
+**Met, with the entity-type registry now much closer to this document's own stated principle
+than when this review began.** `entity_resolution/entity_type_registry.py::EntityTypeRegistryClient`
+(`ARCH-2`) replaced hardcoded `ENTITY_ID_TO_TYPE`/`ENTITY_TYPE_PK_FIELD`/`ENTITY_TYPE_SOURCES`
+dicts with a DynamoDB-backed, tenant-scoped registry — the dicts remain only as seed/fallback
+data for the default tenant, not the sole mechanism. Nine entity types resolve today: `company`
+(fed by Salesforce Account, NetSuite Customer, Sage Intacct/X3 Customer), `person`, `contract`,
+`supplier` (Sage Intacct Vendor / X3 Supplier), `ar_invoice`, `ap_bill`, `opportunity`,
+`sales-contract`, `contract-term` — none of `ar_invoice`/`ap_bill`/`opportunity`/`sales-contract`/
+`contract-term`/`supplier` existed when this document was written. Survivorship policy
+(`config/entity_resolution/*/survivorship_v1.json`) is versioned and externally configurable as
+specified. One gap: the survivorship/match-rule policy registry itself
+(`entity_resolution/resolution_config/resolution_config_registry.py`) is still global, not
+tenant-scoped (`ARCH-10`, open, deferred) — every tenant shares one set of match rules today.
+
 ---
 
 # 16. Observability
@@ -1004,6 +1234,17 @@ sequenceDiagram
 ## Acceptance Criteria
 
 - Operators can identify failed entities, root-cause stage, and remediation path within agreed mean time to detect.
+
+## Implementation Status (2026-07-09)
+
+**Mostly met.** Structured logging via `structlog`, a consistent `try/except/finally` Lambda
+handler pattern (bind context vars → delegate → log structured error → `clear_contextvars()`),
+and CloudWatch metrics (`extraction_duration`, `records_extracted`, etc., plus a newer end-to-end
+pipeline SLA metric, `OBS-4`) are all implemented. One item not fully migrated: three of four
+pipeline handlers (entity resolution, analytics publisher, transformation) standardize on
+`structlog.contextvars`, but `connector_runtime/extraction_pipeline_handler.py` still threads
+`run_id` as an explicit kwarg rather than through the same contextvars pattern (`OBS-3`, open,
+low severity — a consistency debt, not a missing capability).
 
 ---
 
@@ -1054,6 +1295,20 @@ sequenceDiagram
 
 - Reprocessing a failed run does not duplicate curated records and does not regress watermark correctness.
 
+## Implementation Status (2026-07-09)
+
+**Met for the retry/circuit-breaker mechanism; the 99.9% availability target is unmeasured.**
+Failure classification (transient vs. deterministic, `TransientConnectorError`/
+`DeterministicConnectorError`, `DP-3`) and a distributed circuit breaker
+(`orchestration/step_functions/extraction_retry_policy.py`) are implemented, keyed per
+`tenant_code:source_id:entity_id` since `ARCH-7`. A real wiring bug was found and fixed in this
+area: the circuit-breaker's guard check omitted `entity_id` when reading recorded failures,
+so the breaker could never actually open in production regardless of failure count (`ARCH-15`).
+Checkpoint-based idempotent reruns are implemented (see §3); automatic re-invocation from a
+checkpoint is not (`PERF-5`, partial). No environment has run long enough to measure the
+99.9%-per-production-month availability target this section specifies — only `dev` is deployed,
+and it was rebuilt from scratch on 2026-07-09.
+
 ---
 
 # 18. Testing Standards
@@ -1103,6 +1358,17 @@ sequenceDiagram
 ## Acceptance Criteria
 
 - Release pipeline blocks on failed mandatory tests and unmet coverage thresholds.
+
+## Implementation Status (2026-07-09)
+
+**Met and exceeded the stated floor.** The 80% coverage gate is enforced in CI
+(`.venv/bin/pytest -q`); actual measured coverage is 96.11% (1478 passed, 1 skipped, 0 failed, as
+of the 2026-07-08 hardening pass). `tests/test_tenant_isolation.py` is the single regression
+suite covering every tenant-isolation mechanism across the repo, with a deliberately skipped
+placeholder (not a fake pass) for the one mechanism not yet covered (Secrets Manager isolation).
+Module-scoped `mypy` is clean for authored changes; ~71 pre-existing type errors across 15 files
+remain as tracked, non-blocking debt (`OBS-6`) — see `CLAUDE.md` for the exact invocation and
+why bare `mypy .` is never run.
 
 ---
 
@@ -1155,6 +1421,21 @@ sequenceDiagram
 
 - Entire platform can be provisioned, updated, and destroyed through Terraform workflows without manual infrastructure steps.
 
+## Implementation Status (2026-07-09)
+
+**Mostly met, with one important nuance.** `dev` was provisioned end-to-end through Terraform on
+2026-07-09 (277 resources: all 8 Lambdas, Step Functions, the control-plane API, 5 DynamoDB
+tables, S3 buckets, SQS, EventBridge Scheduler). `staging` and `prod` are not provisioned —
+`terraform validate` is clean for both, but no AWS account/credentials exist yet for either. One
+manual step is unavoidable by design, not a gap: `terraform apply` creates Secrets Manager
+**shells**, but real credential values must still be written by hand
+(`aws secretsmanager put-secret-value`) — this is intentional (secrets are never meant to flow
+through Terraform state) rather than an IaC completeness gap. A real first-deploy lesson: earlier
+teardown of a previous `dev` environment deleted only the visible resources (S3, Lambda, IAM,
+DynamoDB, state bucket) instead of running `terraform destroy`, leaving six categories of orphaned
+resources that blocked the 2026-07-09 redeploy until cleaned up by hand (`INFRA-6`) — a
+pre-flight orphan check is now documented in `docs/DEPLOYMENT_GUIDE.md` for staging/prod bootstrap.
+
 ---
 
 # 20. CI/CD Standards
@@ -1201,6 +1482,14 @@ sequenceDiagram
 ## Acceptance Criteria
 
 - Production deployment is blocked on critical security findings and failed required tests.
+
+## Implementation Status (2026-07-09)
+
+**Met.** `.github/workflows/ci.yml` gates on lint, scoped type-check, tests + coverage, `bandit`,
+`detect-secrets`, and `banned-names`. Separately, `terraform apply`/`destroy` against
+`infrastructure/environments/prod` is hard-blocked at the tool level by `.claude/settings.json`
+regardless of session context — an operational control this document didn't specify but which
+directly serves its "approvals for production promotion" requirement.
 
 ---
 
@@ -1250,6 +1539,25 @@ sequenceDiagram
 
 - Documented benchmark demonstrates target throughput within operational cost and reliability constraints.
 
+## Implementation Status (2026-07-09)
+
+**Partially met — no formal benchmark exists, and several scaling gaps are open but low-severity
+at today's volumes.** One real bug was found and fixed: the MySQL connector's "streaming"
+extractor was actually a fully-buffered `DictCursor` masquerading as bounded-memory pagination —
+switched to `pymysql.cursors.SSDictCursor` (`PERF-1`), with a module-level connection cache
+(`PERF-2`). Cross-source entity resolution streams curated records via DuckDB rather than fully
+materializing them (`PERF-3`) — though `duckdb` is currently absent from the Lambda dependency
+bundle, so every SCD merge actually takes the slower Python fallback path in practice, not the
+intended DuckDB-accelerated one (`INFRA-12`). No documented throughput benchmark exists yet;
+`dev` volumes today (34 accounts, 36,023 rows) are far below a scale that would validate the
+"millions of records" target. Several P2 scaling gaps are open, all fine at today's single-digit
+tenant count and explicitly not urgent: tenant-scoped listing queries do a full DynamoDB `Scan`
+rather than using a tenant-keyed GSI (`PERF-7`); two large-entity code paths fully materialize
+records in memory (`PERF-8`); EventBridge schedules have no jitter, risking a thundering herd
+once many tenants share cron boundaries (`PERF-9`); the watermark table's only GSI is hash-keyed
+on a 3-value `environment` field, a hot-partition design (`PERF-10`); the analytics publisher
+holds two full in-memory copies of a golden-record set at once in a 512 MB Lambda (`PERF-11`).
+
 ---
 
 # 22. Governance
@@ -1298,15 +1606,31 @@ sequenceDiagram
 
 - Every production dataset has registered owner, lineage path, classification, and retention policy.
 
+## Implementation Status (2026-07-09)
+
+**Partially met.** Lineage capture is implemented and live (`governance/lineage_record.py::LineageEmitter`,
+called from both the transformation pipeline and both golden-record publishers) and PII/sensitive-field
+classification is now genuinely wired into production (see §14's `SEC-1`/`SEC-7` fix). One gap:
+lineage records and quality reports are written at `lineage/{entity_id}/{run_id}/...` and
+`quality-reports/{source_id}/{entity_id}/{run_id}/...` with **no tenant_code segment** (`ARCH-13`,
+`ARCH-14`, both open, deliberately deferred as lower severity — `run_id` is globally unique, so
+two tenants' records don't overwrite each other, they're just interleaved under one shared prefix
+with no boundary an IAM policy or a `list_objects_v2` scan could rely on). This contradicts
+`architecture/IMPROVEMENT_PLAN.md`'s own documented design of a tenant-prefixed lineage path — not
+yet reconciled.
+
 ---
 
 # 23. Future Multi-Source Connector Framework
 
 ## Detailed Requirements
 
-- Connector framework must support Salesforce, NetSuite, MySQL RDS initially.
-- Framework must support onboarding SQL Server, REST APIs, files, and additional SaaS connectors later.
-- Connector contract includes discovery, extraction, pagination/chunking, incremental strategy, schema snapshot, and error taxonomy.
+- Connector framework must support Salesforce, NetSuite, MySQL RDS initially. **[Met, plus two
+  more.]** Salesforce and MySQL RDS are connected and verified live; NetSuite is code-complete
+  but not yet connected (empty credentials shell). Sage Intacct and Sage X3 — not in this
+  original list — were built and are also code-complete but not connected.
+- Framework must support onboarding SQL Server, REST APIs, files, and additional SaaS connectors later. **[Not started for SQL Server/REST/files specifically; the "additional SaaS connectors" slot was filled by Sage Intacct and Sage X3 instead.]**
+- Connector contract includes discovery, extraction, pagination/chunking, incremental strategy, schema snapshot, and error taxonomy. **[Met.]** `connector_runtime/interfaces/connector_interface.py`'s `ConnectorInterface` defines this contract; all five connector adapters (Salesforce, NetSuite, MySQL RDS, Sage Intacct, Sage X3) implement it, sharing a common `RawLayerWriter` base and (for Salesforce/NetSuite/MySQL) a common incremental query builder (`connector_runtime/query_builders/incremental_query_builder.py`, byte-identical output verified — `DUP-4`). Sage's Intacct/X3 query engines are deliberately left out of that consolidation since they build JSON/OData request bodies, not SQL text.
 
 ## Best Practices
 
@@ -1345,6 +1669,19 @@ sequenceDiagram
 ## Acceptance Criteria
 
 - New connector can be integrated by implementing connector contract and configuration, without core runtime refactoring.
+
+## Implementation Status (2026-07-09)
+
+**Met — demonstrated twice.** Sage Intacct and Sage X3 were both added as net-new connectors
+without core runtime refactoring, implementing `ConnectorInterface` and reusing
+`RawLayerWriter`/the credential-retrieval and telemetry plumbing already in place. A connector
+certification checklist exists (`connector_runtime/certification/connector_certification_checklist.py`)
+as this section's "connector certification checklist" requirement asked for. One reuse gap
+remains open: Sage's credential-manager and error-taxonomy pattern (`sage_credential_manager.py`,
+`sage_errors.py`) is clean enough to promote into the shared interfaces layer for Salesforce/
+NetSuite/MySQL to inherit, but hasn't been (`DP-2`, `DP-3`) — each of those three still
+hand-rolls its own version. See `docs/PLATFORM_STATUS.md`'s "Onboard NetSuite" section for the
+concrete remaining steps (all configuration, no code) to bring NetSuite live.
 
 ---
 
@@ -1392,6 +1729,14 @@ sequenceDiagram
 ## Acceptance Criteria
 
 - Implementation pull requests demonstrate conformance to this specification and pass all policy gates.
+
+## Implementation Status (2026-07-09)
+
+**Met.** `.github/pull_request_template.md` codifies the CI gates and security checklist this
+section calls for, and `.github/CODEOWNERS` enforces path-based review ownership. "Copilot" in
+this section's title is a naming artifact of when this document was written — the same review
+discipline (PR template, CI gates, naming/security/least-privilege checks) applies regardless of
+which AI coding assistant or engineer authored the change.
 
 ---
 
@@ -1444,6 +1789,18 @@ sequenceDiagram
 
 - Governance board approves that all principles are mapped to controls, owners, and measurable KPIs.
 
+## Implementation Status (2026-07-09)
+
+**Directionally true, unevenly enforced.** Security-first, configuration-first, metadata-first,
+and observable/auditable are all real, verifiable properties of the running system (see §6,
+§10, §8, §16). Least-privilege is real but incomplete — multi-tenant isolation is prefix/key-level,
+not yet IAM-enforced (`SEC-2`). Cloud-portable-by-design remains AWS-only in practice; no
+Azure/GCP code exists. Cost-aware operations has no formal cost-tracking mechanism documented
+here or in the codebase today — treat that principle as aspirational, not yet instrumented. No
+formal quarterly architecture-health review process exists yet; this document and the two
+companion documents (`docs/PLATFORM_STATUS.md`, `architecture/GAP_ANALYSIS_FINDINGS.md`) are
+the closest current substitute.
+
 ---
 
 # 26. External Standards Baseline
@@ -1492,5 +1849,50 @@ sequenceDiagram
 ## Acceptance Criteria
 
 - Architecture sign-off includes dated evidence that baseline references were reviewed and incorporated.
+
+## Implementation Status (2026-07-09)
+
+**Overdue for re-validation on one item.** This document's own baseline says it's "aligned to
+public documentation current as of 2026-06-11." The Python runtime line item is now stale in
+practice: production Lambda runs on Python 3.13, not 3.14, because `pyarrow` has no 3.14 wheel
+yet and Python 3.14's parenthesized-except-group syntax is a hard `SyntaxError` on 3.13
+(`INFRA-8`, `INFRA-9`) — see the corrected global constraints at the top of this document. The
+other baseline references (Salesforce Bulk API 2.0, OWASP Top 10:2025, Terraform, AWS IAM/
+Well-Architected guidance) have not been re-validated against their source URLs as part of this
+2026-07-09 pass; treat them as due for their next quarterly check, not as freshly confirmed.
+
+---
+
+# 27. Multi-Tenancy and Control Plane (added 2026-07-09 — not in original scope)
+
+This capability did not exist when the original specification (§1–§26) was written and is
+**not retrofitted into the sections above as if it always existed** — it is called out here as
+its own addition, the way this document's closing sections would have framed it had it been
+part of the original scope.
+
+## Summary
+
+- `tenant_code` is a first-class dimension across the platform: validated via
+  `contracts/identifier_policy.py` (`TENANT_CODE_PATTERN`, `DEFAULT_TENANT_CODE = "demo"`,
+  `tenant_scoped_key()`), required (not defaulted) in every pipeline Lambda's event contract,
+  and prefixed into S3 keys for every data-plane layer (raw, curated, golden/canonical,
+  analytics, schema snapshots) plus the watermark and entity-type-registry DynamoDB tables.
+- A SaaS control-plane REST API (`connector_runtime/api/`, `infrastructure/modules/control_plane/`)
+  provides tenant provisioning, entity registration/listing, pipeline triggering, and run-status
+  queries behind a Cognito/JWT authorizer — six routes, deployed to `dev`, `terraform validate`
+  clean. The exact JWT-claims path (HTTP API payload format 1.0) has not been exercised
+  end-to-end against the live, deployed API Gateway + Cognito pool yet; the handler defensively
+  checks both plausible claims locations and fails closed (401) either way.
+- Full design and phased rollout plan: `architecture/MULTI_TENANT_ROLLOUT_PLAN.md`. Full list of
+  what's isolated, what's partially isolated, and what's still shared across tenants:
+  `architecture/GAP_ANALYSIS_FINDINGS.md` (`SEC-2` is the single most important row — tenant
+  isolation is prefix/key-level today, not IAM-enforced).
+- Current known gaps, in order of what a new tenant should know before onboarding: (1) any
+  authenticated caller can currently provision a new tenant via `POST /tenants` — no
+  admin-scoped claim exists yet (`SEC-8`); (2) `entity-extraction-config`, the resolution-config
+  registry, the field-mapping registry, and lineage/quality-report paths are not tenant-scoped
+  at the key/prefix level yet (`ARCH-10`, `ARCH-11`, `ARCH-12`, `ARCH-13`, `ARCH-14`); (3) no
+  live pilot tenant has yet onboarded with real traffic — only the `demo` tenant has run
+  end-to-end, using real Salesforce and MySQL RDS data.
 
 END OF DOCUMENT

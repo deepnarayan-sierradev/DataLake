@@ -1,80 +1,85 @@
 {
-  "entity_id": "sage-x3-supplier",
   "source_id": "sage",
-  "version": "1",
-  "field_mappings": [
+  "entity_id": "sage-x3-supplier",
+  "mapping_version": "v1",
+  "_comment": [
+    "Canonical mapping for Sage X3 BPSUPPLIER (business partner / supplier) object.",
+    "Migrated from a pre-schema-migration format (source_field/target_field/data_type)",
+    "to the current rules/canonical_field/transformation format used by every other",
+    "field mapping file — the old format was never compatible with FieldMappingRule.",
+    "",
+    "PK alignment: BPSNUM_0 (X3 supplier code) maps to 'vendor_id' so entity",
+    "resolution can use a single PK field name across all supplier sources."
+  ],
+  "rules": [
     {
-      "source_field": "BPSNUM_0",
-      "target_field": "vendor_id",
-      "data_type": "string",
-      "nullable": false,
-      "on_null": "raise_error"
+      "source_fields": ["BPSNUM_0"],
+      "canonical_field": "vendor_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
     },
     {
-      "source_field": "BPSNAM_0",
-      "target_field": "full_name",
-      "data_type": "string",
-      "nullable": false,
-      "on_null": "raise_error"
+      "source_fields": ["BPSNAM_0"],
+      "canonical_field": "full_name",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
     },
     {
-      "source_field": "EACNUM_0",
-      "target_field": "email_address",
-      "data_type": "string",
-      "nullable": true,
-      "on_null": "set_null"
+      "source_fields": ["EACNUM_0"],
+      "canonical_field": "email_address",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
     },
     {
-      "source_field": "TEL_0",
-      "target_field": "phone_number",
-      "data_type": "string",
-      "nullable": true,
-      "on_null": "set_null"
+      "source_fields": ["TEL_0"],
+      "canonical_field": "phone_number",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
     },
     {
-      "source_field": "CRY_0",
-      "target_field": "billing_country",
-      "data_type": "string",
-      "nullable": true,
-      "on_null": "set_null"
+      "source_fields": ["CRY_0"],
+      "canonical_field": "billing_country",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
     },
     {
-      "source_field": "CUR_0",
-      "target_field": "currency_code",
-      "data_type": "string",
-      "nullable": true,
-      "on_null": "set_null"
+      "source_fields": ["CUR_0"],
+      "canonical_field": "currency_code",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "drop_field"
     },
     {
-      "source_field": "IPTFLG_0",
-      "target_field": "is_active",
-      "data_type": "boolean",
-      "nullable": true,
-      "on_null": "set_null"
+      "source_fields": ["IPTFLG_0"],
+      "canonical_field": "is_active",
+      "transformation": "cast",
+      "transformation_params": { "type": "boolean" },
+      "missing_field_behavior": "drop_field"
     },
     {
-      "source_field": "CREDAT_0",
-      "target_field": "created_date",
-      "data_type": "date",
-      "nullable": true,
-      "on_null": "set_null",
-      "transform": {
-        "type": "date_format",
+      "source_fields": ["CREDAT_0"],
+      "canonical_field": "created_date",
+      "transformation": "date_format",
+      "transformation_params": {
         "input_format": "%Y-%m-%dT%H:%M:%S",
-        "output_format": "iso8601"
-      }
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
     },
     {
-      "source_field": "MODDAT_0",
-      "target_field": "last_modified_date",
-      "data_type": "date",
-      "nullable": true,
-      "on_null": "set_null",
-      "transform": {
-        "type": "date_format",
+      "source_fields": ["MODDAT_0"],
+      "canonical_field": "last_modified_date",
+      "transformation": "date_format",
+      "transformation_params": {
         "input_format": "%Y-%m-%dT%H:%M:%S",
-        "output_format": "iso8601"
-      }
+        "output_format": "%Y-%m-%d"
+      },
+      "missing_field_behavior": "drop_field"
     }
   ]
 }

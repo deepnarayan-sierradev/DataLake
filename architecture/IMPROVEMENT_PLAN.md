@@ -5,6 +5,19 @@
 **Principle:** Every change must be backward-compatible — existing running pipelines
 (dev Salesforce, MySQL, Sage extractions) continue to work without modification.
 
+> **Status note (read first):** This document is the original plan, written before any of the
+> work it proposes was implemented. It is **superseded for status** by
+> `architecture/GAP_ANALYSIS_FINDINGS.md` (current done/partial/deferred state, per finding ID) and
+> `architecture/MULTI_TENANT_ROLLOUT_PLAN.md` (§"Reconciliation with `architecture/IMPROVEMENT_PLAN.md`"
+> maps every section below to its current status and finding ID) — check those two documents for
+> whether a given item here is done, partial, or still open; **do not treat any status implied by
+> this document's prose as current**. What remains genuinely useful here is design detail: the
+> problem statements, proposed solutions, and affected-file lists below are still the best record
+> of *why* a change was proposed and *how* it was meant to work, for items the other two docs cite
+> by section number rather than re-deriving. Where the other docs say an item is "resolved" or
+> "never built as originally scoped" (e.g. §1.4, §1.5), treat the reconciliation table as the final
+> word even if the section below still reads as an open proposal.
+
 ---
 
 ## How to Read This Document

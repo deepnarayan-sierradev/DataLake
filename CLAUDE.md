@@ -52,16 +52,18 @@ As of 2026-07-08, `.github/workflows/ci.yml`'s `typecheck` job was itself fixed 
 bare `mypy .` (which crashed on the same duplicate-module collision) and now runs the exact scoped
 form: `mypy -p connector_runtime -p transformation -p entity_resolution -p analytics_publisher
 -p orchestration -p observability -p watermark_management -p schema_management -p contracts
--p governance`. Once unblocked, that command surfaces **75 pre-existing type errors across 16
-files** (confirmed via `git show HEAD:<file> | .venv/bin/mypy -` on the affected files — pre-existing,
-not introduced by the 2026-07-08 pass) — tracked as follow-up remediation debt (`architecture/GAP_ANALYSIS_FINDINGS.md`,
-`OBS-6`), not something to fix incidentally per the untyped-test-fixture warning above. The CI
-type-check job will report red on this debt until it's separately remediated.
+-p governance`. Once unblocked, that command surfaces **71 pre-existing type errors across 15
+files** as of 2026-07-09 (re-confirm the count before quoting it elsewhere — it drifts as
+incidental fixes land in touched files) — tracked as follow-up remediation debt
+(`architecture/GAP_ANALYSIS_FINDINGS.md`, `OBS-6`), not something to fix incidentally per the
+untyped-test-fixture warning above. The CI type-check job will report red on this debt until
+it's separately remediated.
 
 For Terraform: `cd infrastructure/environments/<env> && terraform init -backend=false &&
-terraform validate`. Only `dev` is guaranteed clean — `staging`/`prod` have pre-existing,
-unrelated missing-argument errors on the `orchestration` module block (confirmed via `git diff`
-to predate any recent change — don't assume you broke something there).
+terraform validate`. All three environments (`dev`, `staging`, `prod`) validate cleanly as of
+2026-07-09 — the previously-tracked pre-existing `orchestration` module errors in
+`staging`/`prod` were fixed by commit `138b692` (2026-07-08); this note just hadn't been updated
+since. If you hit a validate error in staging/prod, treat it as new, not pre-existing debt.
 
 Before claiming any mypy/ruff finding is pre-existing rather than something you introduced,
 confirm it: `git show HEAD:<file> | .venv/bin/mypy -` (or the ruff/git-diff equivalent) — don't

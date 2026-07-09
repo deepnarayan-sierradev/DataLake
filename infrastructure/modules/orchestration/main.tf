@@ -583,7 +583,7 @@ resource "aws_lambda_function" "pipeline_trigger" {
   source_code_hash = var.lambda_package_source_hash
 
   handler     = "orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler"
-  runtime     = "python3.12"
+  runtime     = "python3.13"
   timeout     = 60 # Short timeout — each invocation processes one message
   memory_size = 256
 
@@ -597,7 +597,6 @@ resource "aws_lambda_function" "pipeline_trigger" {
     variables = {
       PLATFORM_ENVIRONMENT = var.environment
       STATE_MACHINE_ARN    = aws_sfn_state_machine.extraction_pipeline.arn
-      AWS_REGION           = data.aws_region.current.name
     }
   }
 
@@ -676,7 +675,7 @@ resource "aws_lambda_function" "dlq_processor" {
   source_code_hash = var.lambda_package_source_hash
 
   handler     = "orchestration.dlq_processor.dlq_processor_handler.lambda_handler"
-  runtime     = "python3.12"
+  runtime     = "python3.13"
   timeout     = 60
   memory_size = 256
 

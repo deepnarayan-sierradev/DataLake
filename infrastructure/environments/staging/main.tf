@@ -157,6 +157,8 @@ module "glue" {
   athena_results_bucket_id  = module.storage.analytics_layer_bucket_id
   kms_key_arn               = module.kms_storage.key_arn
 
+  analytics_reader_principals = var.analytics_reader_principals
+
   tags = local.common_tags
 
   depends_on = [module.storage]

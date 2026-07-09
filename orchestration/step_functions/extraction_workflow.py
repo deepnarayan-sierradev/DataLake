@@ -603,7 +603,7 @@ class ExtractionWorkflow:
                 completed_at=completed_at.isoformat(),
             )
 
-        except CircuitOpenError, LambdaTimeoutWarning:
+        except (CircuitOpenError, LambdaTimeoutWarning):
             # LambdaTimeoutWarning (PERF-5) is a non-fatal checkpoint: the
             # partial watermark advance and checkpoint audit record were
             # already committed in _commit_checkpoint_and_raise(). Like

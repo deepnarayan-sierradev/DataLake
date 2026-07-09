@@ -1,47 +1,65 @@
 # Sage ERP — Gap Analysis & Implementation Plan
 
-> Platform: Enterprise Data Lake  
-> Scope: Sage Intacct (Phase 5, completed 2026-07-01) → full end-to-end pipeline  
-> Author: Engineering Team  
-> Date: 2026-07-01
-
----
-
-> **Staleness note:** This plan was written 2026-07-01, immediately after Phase 5 (Sage
-> Intacct only) shipped. Significant work has landed since then — most notably a full Sage
-> X3 implementation (`connector_runtime/adapters/sage/products/x3/`) and a broader
-> multi-tenant/control-plane batch — that this document does not reflect everywhere. Gaps
-> known to be stale as a result are annotated inline below. Before treating any "OPEN" item
-> here as still open, cross-check it against `docs/PLATFORM_STATUS.md`, the canonical and
-> more frequently updated resource inventory.
+> Platform: Enterprise Data Lake
+> Scope: Sage Intacct + Sage X3 connector layer, entity resolution, and field mappings
+> Author: Engineering Team
+> Last verified against code: 2026-07-09
 
 ---
 
 ## 1. Current State
 
-Phase 5 delivered the **connector layer** for Sage Intacct:
+The Sage connector layer supports two products — **Intacct** and **X3** — through a single
+`SageConnector` Strategy-pattern implementation. Both are code-complete and unit-tested; neither
+has live credentials populated yet (see `docs/PLATFORM_STATUS.md` — all Sage secrets exist only
+as empty Terraform-managed shells in dev).
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| `SageConnector` (Strategy pattern) | `connector_runtime/adapters/sage/sage_connector.py` | ✅ Complete |
+| `SageConnector` (Strategy pattern, dispatches Intacct JSON-POST vs. X3 OData GET) | `connector_runtime/adapters/sage/sage_connector.py` | ✅ Complete |
 | `IntacctAuthClient` (OAuth 2.0 client_credentials) | `products/intacct/intacct_auth.py` | ✅ Complete |
 | `IntacctMetadataClient` (Models endpoint) | `products/intacct/intacct_metadata_client.py` | ✅ Complete |
-| `IntacctQueryEngine` (JSON DSL, pagination) | `products/intacct/intacct_query_engine.py` | ✅ Complete |
-| `SageHttpClient`, `SageCredentialManager`, `SageRawLayerWriter` | `common/` | ✅ Complete |
-| `SageProductRegistry` | `common/sage_product_registry.py` | ✅ Complete |
+| `IntacctQueryEngine` (JSON DSL, start/size pagination) | `products/intacct/intacct_query_engine.py` | ✅ Complete |
+| `X3AuthClient` (OAuth 2.0 client_credentials, folder-scoped) | `products/x3/x3_auth.py` | ✅ Complete |
+| `X3MetadataClient` (live `$top=1` sampling + curated static fallback for BPCUSTOMER/BPSUPPLIER/SORDER/SINVOICE/PITM) | `products/x3/x3_metadata_client.py` | ✅ Complete |
+| `X3QueryEngine` (OData v4 `$select`/`$filter`/`$orderby`, nextLink + `$skip` pagination) | `products/x3/x3_query_engine.py` | ✅ Complete |
+| `SageHttpClient`, `SageCredentialManager`, `SageRawLayerWriter` | `common/` | ✅ Complete (shared by both products) |
+| `SageProductRegistry` (`SUPPORTED_SAGE_PRODUCTS = {"intacct", "x3"}`) | `common/sage_product_registry.py` | ✅ Complete |
 | Protocols for extension (`SageAuthProtocol`, etc.) | `protocols/` | ✅ Complete |
-| Unit tests (9 test modules) | `connector_runtime/tests/sage/` | ✅ Complete |
+| Unit tests (11 modules: 8 shared/Intacct + 3 X3-specific) | `connector_runtime/tests/sage/` | ✅ Complete |
 | Registered with `extraction_pipeline_handler.py` | Import line added | ✅ Complete |
+| Formal connector certification run (`connector_runtime/certification/connector_certification_checklist.py`) | — | ⚠️ Not exercised — see §1.1 |
 
-**What the Phase 5 connector does NOT cover:**
-- Entity extraction config in DynamoDB (pipeline cannot run without this)
-- Field mapping configs (transformation pipeline fails without these)
-- Entity resolution integration (Sage records excluded from golden records)
-- Company survivorship policy update (Sage ignored as a data source)
-- Local test runner (no developer onboarding tooling)
-- Two security defects in error classification and rate-limit handling
-- Infrastructure: Terraform Secrets Manager placeholder
-- Governance: lineage record emission for Sage runs
+Sage 100, Sage 200, Sage 300, and Sage Accounting remain commented-out placeholders in
+`SUPPORTED_SAGE_PRODUCTS` — genuinely not implemented.
+
+**Entity coverage (`entity_resolution/entity_type_registry.py`):**
+
+| Entity ID | Product | Entity type | Golden-record wiring |
+|---|---|---|---|
+| `sage-intacct-customer` | Intacct | `company` | ✅ `salesforce` → `netsuite` → `sage-intacct-customer` → `sage-x3-customer` |
+| `sage-x3-customer` | X3 | `company` | ✅ same `company` survivorship policy |
+| `sage-intacct-vendor` | Intacct | `supplier` (new type) | ✅ own match rules + survivorship (`config/entity_resolution/supplier/`) |
+| `sage-x3-supplier` | X3 | `supplier` | ✅ same `supplier` survivorship policy |
+| `sage-intacct-arinvoice` | Intacct | `ar_invoice` (new type) | ✅ own match rules + survivorship (`config/entity_resolution/ar_invoice/`) |
+| `sage-intacct-apbill` | Intacct | `ap_bill` (new type) | ✅ own match rules + survivorship (`config/entity_resolution/ap_bill/`) |
+
+All six entities are seeded in `scripts/seed_entity_config.py`. `sage-x3-supplier` is seeded with
+`schedule_enabled: false` (no live X3 environment validated against yet); the other five are
+schedule-enabled.
+
+### 1.1 Certification status
+
+`ConnectorCertificationChecklist` (source_id format, `ConnectorInterface` subclass check, required
+methods implemented, no `os.environ` access, no banned identifiers in the class name) is generic
+infrastructure — its own test suite (`connector_runtime/tests/test_connector_certification_checklist.py`)
+exercises it against a fake connector, not against `SageConnector`. There is no persisted
+certification report or test run that says "Sage Intacct passed" or "Sage X3 passed." By
+inspection `SageConnector` would pass every automated check (source_id `"sage"` matches the
+pattern, subclasses `ConnectorInterface`, implements all five abstract methods with real bodies,
+never touches `os.environ`, and the class name contains none of the prohibited terms) — but treat
+that as "should pass if run," not "certified," until someone actually calls `checklist.certify()`
+against it and the report is captured somewhere durable.
 
 ---
 
@@ -50,250 +68,183 @@ Phase 5 delivered the **connector layer** for Sage Intacct:
 ### 2.1 Security Gaps
 
 #### GAP-S1 — `SageMetadataError` classified as `UNKNOWN` (FIXED ✅)
-**File:** `sage_connector.py` → `classify_extraction_error()`  
-**Risk:** An invalid `object_path` (deterministic config error) was routed to `UNKNOWN`
-instead of `DETERMINISTIC_INVALID_OBJECT`. This caused Step Functions to keep retrying a
-request that can never succeed, consuming API quota and delaying alerting.  
-**Fix (applied):** Added `SageMetadataDeterministicError` and `SageMetadataTransientError`
-subclasses in `intacct_metadata_client.py`. The `_fetch_fields` method now raises the
-correct subclass (`SageObjectNotFoundError` → deterministic; other `SageHttpError` → transient).
-`classify_extraction_error` now routes each subclass independently.
+**File:** `sage_connector.py` → `classify_extraction_error()`
+Added `SageMetadataDeterministicError` / `SageMetadataTransientError` subclasses in
+`intacct_metadata_client.py`; `classify_extraction_error` routes each independently. X3's metadata
+client raises the same subclasses, so this fix already covers both products without change.
 
 #### GAP-S2 — Retry-After header not surfaced (FIXED ✅)
-**File:** `sage_http_client.py` → `_parse_response()`  
-**Risk:** HTTP 429 from Intacct includes a `Retry-After` header indicating when the client
-may retry. Ignoring it prevented operators from tuning Step Functions retry intervals, and
-wasted retries that would also be rate-limited.  
-**Fix (applied):** The `Retry-After` value is now extracted and emitted as a structured log
-event (`sage_rate_limit_exceeded`) so CloudWatch dashboards and alerting can surface it.
-The retry sleep itself is intentionally left to Step Functions (platform convention).
+**File:** `sage_http_client.py` → `_parse_response()`. HTTP 429 `Retry-After` is extracted and
+logged as `sage_rate_limit_exceeded` for both products (shared client).
 
 #### GAP-S3 — No Terraform placeholder for Sage Secrets Manager secret (FIXED ✅)
-**Risk (OWASP A07):** There was no Terraform resource creating `edl/sources/sage/intacct/credentials`
-even as a placeholder. Operators had to remember to create it manually before the first run.
-A missing secret causes a runtime `SageCredentialError` that is only caught when the Lambda
-actually executes, with no pre-deployment validation.  
-**Fix (applied):** `infrastructure/modules/secrets/main.tf` now defines
+`infrastructure/modules/secrets/main.tf` defines both
 `aws_secretsmanager_secret.sage_intacct_credentials` and `aws_secretsmanager_secret.sage_x3_credentials`,
-each with an `aws_secretsmanager_secret_policy` restricting `GetSecretValue` to the extraction
-runtime role only. Terraform creates the secret as an empty shell — populating the actual
-credential *value* is still a manual step (see §4).
+each with a resource policy restricting `GetSecretValue` to the extraction runtime role. Both are
+still empty shells — populating the actual credential value remains a manual step (see §4).
 
-#### GAP-S4 — Credential cache TTL does not invalidate on auth failure (OPEN)
-**File:** `sage_credential_manager.py`  
-**Risk:** `SageCredentialManager` caches credentials for `_CREDENTIAL_CACHE_TTL_SECONDS` (3600s).
-If Secrets Manager rotation fires mid-run, the connector retries with a stale `client_secret`
-for up to an hour. `IntacctAuthClient.invalidate_token()` handles token-level expiry but does
-not invalidate the credential cache.  
-**Remediation (Phase 6):** On `IntacctAuthError` in `_refresh_token`, call
-`self._credentials.invalidate()` (add a public `invalidate()` method to `SageCredentialManager`)
-before re-raising so the next attempt re-fetches from Secrets Manager.
+#### GAP-S4 — Credential cache TTL does not invalidate on auth failure (OPEN — confirmed still true)
+**Files:** `products/intacct/intacct_auth.py::_refresh_token()`, `products/x3/x3_auth.py::_refresh_token()`
+`SageCredentialManager` (via `SecretsManagerCredentialClient`) now has a public `invalidate_cache()`
+method, but neither `IntacctAuthClient._refresh_token()` nor `X3AuthClient._refresh_token()` calls
+it when the token endpoint rejects the credentials (`SageAuthenticationError` → `IntacctAuthError`/
+`X3AuthError`). If Secrets Manager rotation fires mid-run, both products retry with a stale
+`client_secret` for up to the 3600s cache TTL.
+**Remediation:** In both `_refresh_token` methods, call `self._credentials.invalidate_cache()`
+before re-raising on a rejected-credentials response.
 
 ---
 
 ### 2.2 Performance Gaps
 
-#### GAP-P1 — `PAGE_SIZE` hardcoded at 4,000 (OPEN)
-**File:** `intacct_query_engine.py`  
-**Impact:** Intacct's hard limit is 4,000 records per page (platform max). The value is
-correct but is not configurable per entity. For objects with very wide schemas (many fields),
-Intacct may return pages slower; for objects with very narrow schemas, a larger page size
-would be beneficial if Intacct ever raises the limit.  
-**Remediation (Phase 6):** Expose `page_size` as an optional `connector_params` key with
-`PAGE_SIZE` as the default. Validate: `1 ≤ page_size ≤ PAGE_SIZE`.
+#### GAP-P1 — Page size hardcoded, not configurable (OPEN — now applies to both products)
+**Files:** `intacct_query_engine.py` (`PAGE_SIZE = 4_000`), `x3_query_engine.py` (`X3_PAGE_SIZE = 1_000`)
+Both are Intacct's/X3's respective platform maximums and are correct defaults, but neither is
+exposed as a per-entity `connector_params` override.
 
-#### GAP-P2 — Lambda timeout risk for large Intacct datasets (OPEN)
-**Impact:** At 4,000 records/page and the default Lambda timeout (15 min), the connector
-can process approximately 1.2M–2M records before timing out (assuming ~30ms/page round-trip).
-Very large Intacct environments (>2M customers) will fail with a timeout.  
-**Remediation (Phase 6):** Add a record-count circuit breaker: if the record count after N
-pages exceeds a configurable `max_records_per_run` threshold (default: 500,000), complete the
-current page, write what was collected, and record the last-seen `auditInfo.modifiedAt` as
-a partial watermark so the next run resumes from there.
+#### GAP-P2 — Lambda timeout risk for large datasets (OPEN — unchanged)
+No record-count circuit breaker exists for either product. Still applies to high-volume Intacct
+AR invoice/AP bill entities in particular now that those entities exist (see §2.3 GAP-SC3).
 
-#### GAP-P3 — Metadata caching is per Lambda instance only (OPEN)
-**Impact:** Every cold-start Lambda invocation makes a Models endpoint call to discover fields.
-For high-frequency Intacct entities, this adds latency and API calls.  
-**Remediation (Phase 6):** Cache the `FieldContract` fingerprint in the `schema_snapshot_repository`
-(already used by the platform for drift detection). If the fingerprint matches the snapshot, skip
-the live Models call and use the snapshot's field list.
+#### GAP-P3 — Metadata caching is per-Lambda-instance only (OPEN — unchanged)
+Neither `IntacctMetadataClient` nor `X3MetadataClient` persists its discovered schema to
+`schema_snapshot_repository` for cross-invocation reuse; both cache in-memory per instance only.
+X3's live `$top=1` sampling makes this marginally more expensive per cold start than Intacct's
+Models call, since it also executes the sample query described in GAP-D4 below.
 
-#### GAP-P4 — `SageHttpClient` uses default connection pool settings (OPEN)
-**File:** `sage_http_client.py`  
-**Impact:** `requests.Session` defaults to a connection pool of size 10. For Lambda
-(single-threaded), this is sufficient but the pool is rebuilt on every cold start.  
-**Remediation (Phase 6):** Mount a `HTTPAdapter` with `pool_connections=1, pool_maxsize=2`
-and enable `keep_alive` for connection reuse within a single pagination loop.
+#### GAP-P4 — `SageHttpClient` uses default connection pool settings (OPEN — unchanged)
+`requests.Session()` defaults still apply; not overridden for either product.
 
 ---
 
 ### 2.3 Architecture Gaps
 
 #### GAP-A1 — No entity extraction config in DynamoDB (FIXED ✅)
-**File:** `scripts/seed_entity_config.py`  
-**Impact (blocker):** Without DynamoDB records for `sage-intacct-customer` and
-`sage-intacct-vendor`, the extraction pipeline fails immediately when resolving entity config.  
-**Fix (applied):** Added both entities to `_build_records()` with correct connector_params,
-watermark field (`auditInfo.modifiedAt`), and sage-specific raw S3 prefix function
-(`_sage_raw_prefix` using the `sage/{product_name}/{entity_id}/` path scheme used by
-`SageRawLayerWriter`).
+`scripts/seed_entity_config.py` now seeds all six entities listed in §1 (both Intacct's four and
+X3's two), each with correct `connector_params`, watermark field, and raw S3 prefix.
 
-#### GAP-A2 — No field mapping configs (FIXED ✅)
-**Files created:**
+#### GAP-A2 — No field mapping configs (FIXED ✅ — now covers both products)
 - `config/field_mappings/sage/sage-intacct-customer/v1.json`
-- `config/field_mappings/sage/sage-intacct-vendor/v1.json`  
+- `config/field_mappings/sage/sage-intacct-vendor/v1.json`
+- `config/field_mappings/sage/sage-x3-customer/v1.json`
+- `config/field_mappings/sage/sage-x3-supplier/v1.json`
 
-**Impact (blocker):** The transformation pipeline reads field mappings from S3. With no
-mapping file, every Sage record would be dropped at the curated layer.  
-**Fix (applied):** Both mappings created. Customer maps Intacct `id → account_id` (consistent
-with the cross-source `company` PK convention). Vendor uses `vendor_id` (not yet in entity
-resolution — tracked as GAP-A5).
+X3's customer/supplier mappings both align their native PK (`BPCNUM_0`/`BPSNUM_0`) to
+`account_id`/`vendor_id` respectively, matching the cross-source PK convention.
 
 #### GAP-A3 — Sage not wired into entity resolution (FIXED ✅)
-**File:** `entity_resolution/entity_resolution_pipeline_handler.py`  
-**Impact:** `sage-intacct-customer` triggered an unhandled `ValueError` ("No entity type
-mapping found") in the entity resolution Lambda, causing the Step Functions execution to fail
-at that stage even though extraction + transformation succeeded.  
-**Fix (applied):** Added `sage-intacct-customer → company` to `_ENTITY_ID_TO_TYPE` and
-`("sage", "sage-intacct-customer")` to `_ENTITY_TYPE_SOURCES["company"]`. Sources with no
-curated data are skipped gracefully (existing platform logic).
+`sage-intacct-customer` and `sage-x3-customer` both resolve to the `company` entity type and
+participate in `config/entity_resolution/company/survivorship_v1.json`.
 
 #### GAP-A4 — Company survivorship ignored Sage Intacct (FIXED ✅)
-**File:** `config/entity_resolution/company/survivorship_v1.json`  
-**Impact:** Even with entity resolution wired, survivorship rules only referenced
-`salesforce` and `netsuite`. Sage Intacct — the operational AR system — was not preferred
-for financial fields (credit_limit, outstanding_balance, currency_code).  
-**Fix (applied):** Updated all `source_priority` lists to include `sage` as the third source.
-Sage is preferred for `credit_limit`, `outstanding_balance`, `currency_code`, and `is_active`
-since Intacct AR is the system of record for these financial attributes.
+`source_priority` lists in `config/entity_resolution/company/survivorship_v1.json` include `sage`
+(covering both `sage-intacct-customer` and `sage-x3-customer`, since both map to source_id
+`"sage"`) as a preferred source for `credit_limit`, `outstanding_balance`, `currency_code`, and
+`is_active`.
 
-#### GAP-A5 — `sage-intacct-vendor` not in entity resolution (OPEN)
-**Impact:** Vendor records flow through extraction → transformation but fail the entity
-resolution stage (no `_ENTITY_ID_TO_TYPE` mapping).  
-**Remediation (Phase 6):** Design a `supplier` entity type with its own match rules and
-survivorship policy. Candidate cross-source match: Intacct vendor vs. NetSuite vendor
-(accounts-payable/vendor). Until then, set `schedule_enabled: false` for
-`sage-intacct-vendor` (already done in seed config) to prevent pipeline failures.
+#### GAP-A5 — `sage-intacct-vendor` not in entity resolution (FIXED ✅ — resolved since this doc was written)
+A dedicated `supplier` entity type now exists (`entity_resolution/entity_type_registry.py`:
+`ENTITY_TYPE_PK_FIELD["supplier"] = "vendor_id"`), with its own match rules and survivorship
+policy at `config/entity_resolution/supplier/`. Both `sage-intacct-vendor` and `sage-x3-supplier`
+feed it. `sage-x3-supplier` is currently `schedule_enabled: false` in the seed config, so it
+extracts on manual trigger only, not on a schedule.
 
-#### GAP-A6 — Governance lineage not emitted for Sage runs (OPEN)
-**File:** `governance/lineage_record.py`  
-**Impact:** The data catalog and lineage graph have no entries for Sage-sourced data. This
-violates the platform's data governance contract (OWASP A09 — data lineage gap).  
-**Remediation (Phase 6):** The extraction pipeline handler already calls lineage emission for
-other sources. Verify that `SageConnector` satisfies the lineage contract interface; no
-connector-specific code change should be needed.
+#### GAP-A6 — Governance lineage not emitted for Sage runs (FIXED / moot ✅)
+Lineage emission (`governance/lineage_record.py`) is called generically from
+`transformation/transformation_pipeline.py` and `entity_resolution/publishing_shared.py` with no
+source-specific branching — every entity that flows through the standard transformation pipeline,
+Sage included, gets a lineage record. This confirms the remediation note this doc originally made
+("no connector-specific code change should be needed") was correct; no further work is needed here.
+
+#### GAP-D3 (moved here from Design, since it's now resolved by an architecture change) — `s3_prefix` hardcoding (FIXED / moot ✅)
+The original concern was that `_build_sage()` hardcoded `"sage"` as the S3 prefix rather than
+reading `target_raw_s3_prefix` from entity config. That code path no longer exists:
+`SageRawLayerWriter` now derives its path segment from the validated `sage_product`
+(`path_segments=[f"sage-{sage_product}"]` in `common/sage_raw_layer_writer.py`), which is the same
+value `scripts/seed_entity_config.py::_sage_raw_prefix()` uses to compute each entity's
+`target_raw_s3_prefix`. The two can no longer diverge because both derive from the same
+whitelisted `sage_product` value.
+
+#### GAP-SC3 — No Intacct AR Invoice or AP Bill entities (FIXED ✅ — resolved since this doc was written)
+`sage-intacct-arinvoice` (`ar_invoice` entity type) and `sage-intacct-apbill` (`ap_bill` entity
+type) are both seeded in `scripts/seed_entity_config.py`, each with dedicated match rules and
+survivorship policy under `config/entity_resolution/ar_invoice/` and `config/entity_resolution/ap_bill/`.
+Caveat: `scripts/run_sage_connector_local.py`'s `_ENTITY_CONFIG` dict does not yet include these
+two entities — the local dry-run tool only knows about `sage-intacct-customer`,
+`sage-intacct-vendor`, `sage-x3-customer`, and `sage-x3-supplier`. Minor tooling gap, not a
+pipeline gap.
 
 ---
 
 ### 2.4 Design Gaps
 
-#### GAP-D1 — `is_active` mapped as raw string, not boolean (OPEN)
-**File:** `config/field_mappings/sage/sage-intacct-customer/v1.json`  
-**Impact:** Intacct returns `status = "active" | "inactive"`. The boolean cast in
-`_cast_value` maps `"true"/"1"/"yes"` to `true` — `"active"` is not in that set.
-The company survivorship policy expects `is_active` to be boolean for `first_non_null`
-and `source_priority` resolution. The current workaround maps status to `customer_status`
-(string) and drops `is_active` from the Sage mapping.  
-**Remediation (Phase 6):** Add a `value_map` transformation type to `FieldMappingApplicator`
-with a `mapping` dict in `transformation_params`:
-```json
-{
-  "transformation": "value_map",
-  "transformation_params": {
-    "mapping": {"active": true, "inactive": false},
-    "default": false
-  }
-}
-```
-Then update the Sage customer v1.json to produce `is_active: boolean`.
+#### GAP-D1 — `is_active` mapped as raw string, not boolean, for Sage Intacct customer (OPEN — unchanged)
+**File:** `config/field_mappings/sage/sage-intacct-customer/v1.json`
+Still true as originally documented: Intacct's `status = "active"|"inactive"` string isn't in the
+boolean-cast truthy set, so the mapping still routes it to a separate `customer_status` string
+field and drops `is_active` from Sage Intacct customer records. No `value_map` transformation type
+has been added to `FieldMappingApplicator`/`field_mapping_registry.py`.
 
-#### GAP-D2 — Dot-notation nested field handling not tested against live API (OPEN)
-**Files:** `config/field_mappings/sage/sage-intacct-customer/v1.json`  
-**Impact:** The Intacct REST API query service can return dot-notation fields either as flat
-string keys (`"auditInfo.modifiedAt": "..."`) or as nested JSON objects depending on the
-endpoint version and response mode. The field mapping assumes flat keys.  
-**Remediation (Phase 6):** Run `--dry-run` against a real Intacct instance. If nested objects
-are returned, add a `flatten_nested` pre-processing step in `IntacctMetadataClient` that
-walks nested dicts and produces dot-notation flat keys before passing records to the
-field mapping applicator.
+#### GAP-D2 — Dot-notation nested field handling not tested against live API (OPEN — unchanged)
+Still unverified against a real Intacct instance whether dot-notation fields
+(`auditInfo.modifiedAt`) arrive flat or nested.
 
-#### GAP-D3 — `SageRawLayerWriter` `s3_prefix="sage"` is hardcoded in `_build_sage` (OPEN)
-**File:** `sage_connector.py` → `_build_sage()`  
-**Impact:** The `s3_prefix` is baked in as the string `"sage"` rather than being read from
-the entity config's `target_raw_s3_prefix`. This prevents per-environment path customisation
-and makes the actual write path diverge from the DynamoDB-stored prefix when they disagree.  
-**Remediation (Phase 6):** Thread `entity_config.target_raw_s3_prefix` through the builder
-so `SageRawLayerWriter` uses the config value instead of a hardcoded prefix.
+#### GAP-D4 — X3 `is_active` field mapping may reference the wrong field name (NEW — needs verification)
+**Files:** `config/field_mappings/sage/sage-x3-customer/v1.json`, `sage-x3-supplier/v1.json`
+Both map `IPTFLG_0` → `is_active` (cast to boolean). But `X3MetadataClient`'s curated static
+fallback schema (`products/x3/x3_metadata_client.py::_X3_STATIC_SCHEMAS`) for both `BPCUSTOMER`
+and `BPSUPPLIER` lists `ENAFLG_0` ("Active Flag (1=active, 2=inactive)") — there is no `IPTFLG_0`
+in either static schema. If live `$top=1` sampling succeeds, whatever field names the real X3 API
+returns win (so `IPTFLG_0` may well be correct there); but if the endpoint is empty and the static
+fallback is used, `IPTFLG_0` is absent and `is_active` silently drops (`missing_field_behavior:
+"drop_field"`). Also note the static schema's `ENAFLG_0` is typed `"integer"` (1/2), not boolean,
+so a direct `cast: boolean` on it wouldn't work correctly either (2 is still truthy) — this needs
+resolving against a real X3 instance before go-live, not just a naming fix.
 
 ---
 
 ### 2.5 Scalability Gaps
 
-#### GAP-SC1 — Only `intacct` product supported (PARTIALLY FIXED — Sage X3 ✅, others still OPEN)
-**File:** `common/sage_product_registry.py`  
-**Update:** Sage X3 is now fully implemented, not a stub: `connector_runtime/adapters/sage/products/x3/`
-provides `X3AuthClient`, `X3MetadataClient`, and `X3QueryEngine`, all registered in
-`SUPPORTED_SAGE_PRODUCTS` and wired into `SageConnector` (`_PRODUCT_REQUIRED_CREDENTIAL_KEYS["x3"]`,
-`_execute_x3_extraction()`), with live entity configs (`sage-x3-customer`, `sage-x3-supplier`) in
-`scripts/seed_entity_config.py`. Sage 100, Sage 200, Sage 300, and Sage Accounting remain listed only
-as commented-out placeholders in `SUPPORTED_SAGE_PRODUCTS` and are genuinely not implemented.  
-**Remediation (Phase 7+):** Implement per-product strategy triples for the remaining products:
+#### GAP-SC1 — Only `intacct` product supported (RESOLVED for X3 ✅ — Sage 100/200/300/Accounting still OPEN)
+Sage X3 is fully implemented end-to-end (see §1). Remaining products:
 
 | Product | Auth | Query | Priority |
 |---------|------|-------|----------|
-| Sage X3 | SOAP/REST hybrid | X3 query service | ✅ Done |
-| Sage 100 | SQL Server ODBC | Direct SQL | Phase 7 |
-| Sage 200 | REST (Sage 200 API) | OData v4 | Phase 8 |
-| Sage Accounting | REST (Sage Accounting API) | REST GET | Phase 8 |
+| Sage X3 | OAuth 2.0 client_credentials | OData v4 | ✅ Done |
+| Sage 100 | SQL Server ODBC | Direct SQL | Not started |
+| Sage 200 | REST (Sage 200 API) | OData v4 | Not started |
+| Sage Accounting | REST (Sage Accounting API) | REST GET | Not started |
 
-Each remaining product only needs the three classes + a registry entry — `SageConnector` itself
-does not change (as demonstrated by the X3 addition).
+Each remaining product only needs the three strategy classes + a registry entry — confirmed by
+the X3 addition, which touched none of `SageConnector`, `ConnectorInterface`, or the extraction
+pipeline handler.
 
-#### GAP-SC2 — Single entity per Step Functions execution (OPEN)
-**Impact:** Each Sage object (customer, vendor, invoice, etc.) requires a separate Step
-Functions execution. For Intacct environments with 20+ configured entities, the orchestration
-layer must schedule 20 separate executions.  
-**Remediation (Phase 7):** The platform Step Functions orchestration already handles this via
-scheduled EventBridge rules per entity. No connector changes needed — this is a configuration
-and schedule management concern.
-
-#### GAP-SC3 — No Intacct AR Invoice or AP Bill entities (OPEN)
-**Impact:** The most volumetric Intacct objects — AR invoices and AP bills — are not configured.
-These are the records that give the data lake its transactional value.  
-**Remediation (Phase 6):** Add entity configs and field mappings for:
-- `sage-intacct-arinvoice` → `accounts-receivable/invoice` → entity type: `contract` (AR)
-- `sage-intacct-apbill` → `accounts-payable/bill` → entity type: `contract` (AP)
+#### GAP-SC2 — Single entity per Step Functions execution (OPEN — unchanged, by design)
+Each Sage entity (now 6, not 2) still requires its own scheduled execution. This is a platform
+convention (EventBridge Scheduler per entity), not a Sage-specific gap.
 
 ---
 
 ### 2.6 Maintainability Gaps
 
 #### GAP-M1 — No local test runner (FIXED ✅)
-**File created:** `scripts/run_sage_connector_local.py`  
-**Fix (applied):** Local runner with `--dry-run` mode (OAuth + schema + 5 records, no S3
-write) mirrors the pattern of `run_salesforce_connector_local.py`.
+`scripts/run_sage_connector_local.py` supports all four schedule-enabled entities
+(`sage-intacct-customer`, `sage-intacct-vendor`, `sage-x3-customer`, `sage-x3-supplier`) in
+`--dry-run` mode. Does not yet cover `sage-intacct-arinvoice`/`sage-intacct-apbill` (see GAP-SC3
+caveat above).
 
-#### GAP-M2 — Runbook lacks Sage trigger commands (OPEN)
-**File:** `/memories/repo/pending-work-and-runbook.md`  
-**Remediation (Phase 6):** Add Sage trigger commands to the runbook (see §4 below for the
-commands). Update memory file once Step Functions execution is validated end-to-end.
+#### GAP-M2 — Runbook lacks Sage trigger commands (OPEN — unchanged, low confidence in current path)
+The original remediation pointed at a memory file outside this repo; not something this doc can
+verify. §4 below has trigger commands for both products; treat that as the actual runbook content
+until a formal one exists.
 
-#### GAP-M3 — No integration test for Sage extraction pipeline (OPEN)
-**Impact:** Unit tests exist for all Sage components (9 test modules) but there is no
-integration test that validates the full path: entity config → extraction → raw Parquet
-→ transformation → curated Parquet.  
-**Remediation (Phase 6):** Extend `connector_runtime/tests/sage/` with a mock-based
-integration test that wires `SageConnector` through `ExtractionWorkflow` against stubbed
-DynamoDB, S3, and Intacct API responses. Pattern: follow `test_extraction_pipeline_handler.py`.
+#### GAP-M3 — No integration test for Sage extraction pipeline (OPEN — unchanged, now covers X3 too)
+Unit tests exist for all 11 Sage modules (8 shared/Intacct + 3 X3), but there is still no
+integration test wiring `SageConnector` through `ExtractionWorkflow` end-to-end for either product.
 
-#### GAP-M4 — `_FIELD_NAME_PATTERN` dot-notation support undocumented (OPEN)
-**File:** `transformation/field_mapping/field_mapping_registry.py`  
-**Impact:** `_FIELD_NAME_PATTERN` allows dots (`a-zA-Z0-9_.`) but this is not documented in
-the module docstring. Developers adding new source-specific mappings may not know that
-dot-notation field names are valid.  
-**Remediation (Phase 6):** Add a comment in `FieldMappingRule.__post_init__` explaining that
-dot-notation names (e.g. `auditInfo.modifiedAt`) require the source record to contain them
-as flat string keys.
+#### GAP-M4 — `_FIELD_NAME_PATTERN` dot-notation support undocumented (OPEN — unchanged)
+`transformation/field_mapping/field_mapping_registry.py`'s `_FIELD_NAME_PATTERN` still allows dots
+with no docstring or comment explaining why.
 
 ---
 
@@ -301,60 +252,60 @@ as flat string keys.
 
 ### Phase 5 (COMPLETE — 2026-07-01)
 - [x] Sage connector layer (SageConnector + all Intacct strategies)
-- [x] Unit tests (9 modules)
+- [x] Unit tests (original 9 modules)
 - [x] extraction_pipeline_handler import
 
-### Phase 5.5 — Gaps Fixed This Session (2026-07-01)
+### Phase 5.5 (COMPLETE — 2026-07-01)
+Gaps fixed: GAP-S1, GAP-S2, GAP-A1, GAP-A2 (Intacct only at the time), GAP-A3, GAP-A4, GAP-M1.
 
-| # | Gap | File(s) Changed |
-|---|-----|-----------------|
-| GAP-S1 | `SageMetadataError` correct error classification | `intacct_metadata_client.py`, `sage_connector.py` |
-| GAP-S2 | `Retry-After` header surfaced in structured logs | `sage_http_client.py` |
-| GAP-A1 | Entity extraction configs in DynamoDB seed script | `scripts/seed_entity_config.py` |
-| GAP-A2 | Field mapping configs (customer + vendor) | `config/field_mappings/sage/` (new directory) |
-| GAP-A3 | `sage-intacct-customer` wired into entity resolution | `entity_resolution_pipeline_handler.py` |
-| GAP-A4 | Company survivorship includes Sage as 3rd source | `config/entity_resolution/company/survivorship_v1.json` |
-| GAP-M1 | Local test runner script | `scripts/run_sage_connector_local.py` (new file) |
+### Phase 6 (COMPLETE — landed since 2026-07-01, exact date not tracked in this doc)
+The batch that made this doc stale. Confirmed against current code:
+- [x] **GAP-SC1** — Full Sage X3 product implementation (auth, metadata, query engine, tests,
+  entity configs, field mappings)
+- [x] **GAP-S3** — Terraform secret shells for both `sage/intacct` and `sage/x3`
+- [x] **GAP-A5** — `supplier` entity type; `sage-intacct-vendor` and `sage-x3-supplier` both wired
+  into entity resolution
+- [x] **GAP-SC3** — `sage-intacct-arinvoice` (`ar_invoice`) and `sage-intacct-apbill` (`ap_bill`)
+  entities, each with dedicated entity-resolution config
+- [x] **GAP-A6** — confirmed moot (lineage emission was already generic)
+- [x] **GAP-D3** — confirmed moot (superseded by product-derived path segments)
 
-### Phase 6 — Remaining Gaps (Recommended Next Sprint)
+### Phase 7 — Remaining Gaps (recommended next)
 
-**Priority 1 — Blockers / High Risk:**
-1. ~~**GAP-S3** — Terraform Secrets Manager placeholder for `edl/sources/sage/intacct/credentials`~~
-   RESOLVED: the Terraform resource exists (`infrastructure/modules/secrets/main.tf`). The only
-   remaining step is populating the secret's actual credential *value* via
-   `aws secretsmanager put-secret-value` (Terraform only creates an empty shell) — see §4.
-2. **GAP-S4** — Credential cache invalidation on `IntacctAuthError`
-3. **GAP-D1** — `value_map` transformation type for `is_active` boolean mapping
-4. **GAP-D2** — Validate dot-notation nested field handling against live Intacct API
-5. **GAP-A5** — `sage-intacct-vendor` entity resolution (supplier entity type design)
-6. **GAP-A6** — Governance lineage record emission for Sage runs
+**Priority 1 — Correctness / security:**
+1. **GAP-D4** (new) — Verify `IPTFLG_0` vs. `ENAFLG_0` for X3 `is_active` against a live X3
+   instance; fix the static fallback schema and/or field mapping, whichever is wrong
+2. **GAP-S4** — Call `invalidate_cache()` on auth rejection in both `IntacctAuthClient` and
+   `X3AuthClient`
+3. **GAP-D1** — `value_map` transformation type for Intacct customer `is_active`
+4. **GAP-D2** — Validate dot-notation nested field handling against a live Intacct API
 
-**Priority 2 — Performance / Scalability:**
-7. **GAP-P1** — Configurable `page_size` in `connector_params`
-8. **GAP-P2** — Lambda timeout circuit breaker for very large datasets
-9. **GAP-P3** — `FieldContract` fingerprint cache via `SchemaSnapshotRepository`
-10. **GAP-SC3** — `sage-intacct-arinvoice` and `sage-intacct-apbill` entities
+**Priority 2 — Performance / scalability:**
+5. **GAP-P1** — Configurable page size for both `intacct_query_engine.py` and `x3_query_engine.py`
+6. **GAP-P2** — Lambda timeout circuit breaker (now more urgent given AR invoice/AP bill volume)
+7. **GAP-P3** — `FieldContract` fingerprint cache via `SchemaSnapshotRepository`
+8. **GAP-P4** — `SageHttpClient` connection pool tuning
 
-**Priority 3 — Maintainability / Observability:**
-11. **GAP-M2** — Runbook Sage trigger commands
-12. **GAP-M3** — Integration test for full Sage pipeline
-13. **GAP-M4** — Document dot-notation support in field mapping
+**Priority 3 — Maintainability / observability:**
+9. **GAP-M3** — Integration test covering both Intacct and X3 end-to-end
+10. Add `sage-intacct-arinvoice`/`sage-intacct-apbill` to `run_sage_connector_local.py`'s
+    `_ENTITY_CONFIG` (tooling gap noted under GAP-SC3)
+11. **GAP-M4** — Document dot-notation support in field mapping
+12. Actually run `ConnectorCertificationChecklist.certify()` against `SageConnector` for both
+    products and persist the report somewhere durable (§1.1)
 
-**Priority 4 — Scalability (Phase 7+):**
-14. ~~**GAP-SC1** — Sage X3 product strategy implementation~~ DONE (Sage X3 is fully implemented;
-    remaining work under GAP-SC1 is limited to Sage 100 / 200 / 300 / Accounting)
-15. **GAP-D3** — Thread `target_raw_s3_prefix` through `_build_sage` builder
+**Priority 4 — Scalability (future):**
+13. Sage 100 / 200 / 300 / Accounting product implementations (GAP-SC1 remainder)
 
 ---
 
-## 4. Operational Commands — Sage Intacct
+## 4. Operational Commands — Sage Intacct and Sage X3
 
 ### Prerequisites (one-time setup per environment)
 ```bash
-# 1. Populate the Secrets Manager secret value. Terraform now creates the secret
-#    resource itself (aws_secretsmanager_secret.sage_intacct_credentials in
-#    infrastructure/modules/secrets/main.tf — GAP-S3 is fixed), but only as an
-#    empty shell. Populating the actual credential value remains a manual step.
+# 1. Populate the Secrets Manager secret values. Terraform creates both secret
+#    resources as empty shells (infrastructure/modules/secrets/main.tf) —
+#    populating the actual credential values is a manual step for each product.
 AWS_PROFILE=dev aws secretsmanager put-secret-value \
   --secret-id edl/sources/sage/intacct/credentials \
   --secret-string '{
@@ -366,7 +317,18 @@ AWS_PROFILE=dev aws secretsmanager put-secret-value \
   }' \
   --region us-east-1
 
-# 2. Seed entity configs to DynamoDB
+AWS_PROFILE=dev aws secretsmanager put-secret-value \
+  --secret-id edl/sources/sage/x3/credentials \
+  --secret-string '{
+    "base_url":      "https://x3.yourcompany.com",
+    "token_url":     "https://x3.yourcompany.com/auth/token",
+    "client_id":     "<your-client-id>",
+    "client_secret": "<your-client-secret>",
+    "folder":        "<your-x3-folder, e.g. SEED or PROD>"
+  }' \
+  --region us-east-1
+
+# 2. Seed entity configs to DynamoDB (all 6 Sage entities across both products)
 AWS_PROFILE=dev python scripts/seed_entity_config.py --environment dev --region us-east-1
 
 # 3. Upload field mappings to S3
@@ -378,9 +340,14 @@ AWS_PROFILE=dev python scripts/seed_field_mappings.py \
 ```bash
 AWS_PROFILE=dev python scripts/run_sage_connector_local.py \
   --entity-id sage-intacct-customer --dry-run
-
 AWS_PROFILE=dev python scripts/run_sage_connector_local.py \
   --entity-id sage-intacct-vendor --dry-run
+AWS_PROFILE=dev python scripts/run_sage_connector_local.py \
+  --entity-id sage-x3-customer --dry-run
+AWS_PROFILE=dev python scripts/run_sage_connector_local.py \
+  --entity-id sage-x3-supplier --dry-run
+# sage-intacct-arinvoice / sage-intacct-apbill are not yet in this tool's
+# _ENTITY_CONFIG — trigger those via Step Functions directly (below) instead.
 ```
 
 ### Trigger Extraction via Step Functions
@@ -393,13 +360,45 @@ AWS_PROFILE=dev python scripts/trigger_extraction.py \
   --param sage_product=intacct \
   --param object_path=accounts-receivable/customer
 
-# Sage Intacct Vendor (incremental, no entity resolution yet)
+# Sage Intacct Vendor (incremental, contributes to supplier entity resolution)
 AWS_PROFILE=dev python scripts/trigger_extraction.py \
   --source-id sage --entity-id sage-intacct-vendor \
   --environment dev --region us-east-1 \
   --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct \
   --param object_path=accounts-payable/vendor
+
+# Sage Intacct AR Invoice
+AWS_PROFILE=dev python scripts/trigger_extraction.py \
+  --source-id sage --entity-id sage-intacct-arinvoice \
+  --environment dev --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
+  --param sage_product=intacct \
+  --param object_path=accounts-receivable/invoice
+
+# Sage Intacct AP Bill
+AWS_PROFILE=dev python scripts/trigger_extraction.py \
+  --source-id sage --entity-id sage-intacct-apbill \
+  --environment dev --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
+  --param sage_product=intacct \
+  --param object_path=accounts-payable/bill
+
+# Sage X3 Customer (incremental, contributes to company entity resolution)
+AWS_PROFILE=dev python scripts/trigger_extraction.py \
+  --source-id sage --entity-id sage-x3-customer \
+  --environment dev --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
+  --param sage_product=x3 \
+  --param object_path=BPCUSTOMER
+
+# Sage X3 Supplier (schedule_enabled: false in seed config — manual trigger only)
+AWS_PROFILE=dev python scripts/trigger_extraction.py \
+  --source-id sage --entity-id sage-x3-supplier \
+  --environment dev --region us-east-1 \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
+  --param sage_product=x3 \
+  --param object_path=BPSUPPLIER
 ```
 
 ### Upload Field Mappings After Config Change
@@ -412,14 +411,11 @@ AWS_PROFILE=dev python scripts/seed_field_mappings.py \
 
 ## 5. Adding a New Sage Product (e.g. Sage 100)
 
-> **Note:** This section originally used Sage X3 as the hypothetical example. Sage X3 has
-> since been implemented end-to-end following exactly this recipe — see
-> `connector_runtime/adapters/sage/products/x3/` (`x3_auth.py`, `x3_metadata_client.py`,
-> `x3_query_engine.py`), the `"x3"` entries in `sage_product_registry.py` and
-> `sage_connector.py`'s `_PRODUCT_REQUIRED_CREDENTIAL_KEYS`, and the `sage-x3-customer` /
-> `sage-x3-supplier` entity configs in `seed_entity_config.py`. Treat it as a working
-> reference implementation of the steps below, not as an example of a gap. The steps
-> themselves remain the template for the next new product (e.g. Sage 100).
+Sage X3 is the working reference implementation of this recipe — see
+`connector_runtime/adapters/sage/products/x3/` (`x3_auth.py`, `x3_metadata_client.py`,
+`x3_query_engine.py`), the `"x3"` entries in `sage_product_registry.py` and
+`sage_connector.py`'s `_PRODUCT_REQUIRED_CREDENTIAL_KEYS`, and the `sage-x3-customer` /
+`sage-x3-supplier` entity configs in `seed_entity_config.py`.
 
 1. Create `connector_runtime/adapters/sage/products/100/` with:
    - `<product>_auth.py` — implements `SageAuthProtocol`
@@ -432,13 +428,21 @@ AWS_PROFILE=dev python scripts/seed_field_mappings.py \
 
 3. In `sage_connector.py`:
    - Add `<name>: frozenset({...})` to `_PRODUCT_REQUIRED_CREDENTIAL_KEYS`
+   - If the product's query protocol isn't a JSON-POST body like Intacct's, add a discriminant
+     check in `execute_extraction()` and a dedicated `_execute_<product>_extraction()` method,
+     following the X3 OData GET pattern
 
 4. Create entity configs in `seed_entity_config.py` with `"sage_product": <name>`
 
 5. Create field mappings in `config/field_mappings/sage/sage-<name>-{entity}/v1.json`
 
-No changes to `SageConnector`, `ConnectorInterface`, or the extraction pipeline handler —
-confirmed in practice by the X3 addition, which touched none of these.
+6. If the new entity introduces a genuinely new entity type (not `company`/`supplier`/etc.),
+   add match rules + survivorship policy under `config/entity_resolution/<entity_type>/` and
+   register it in `entity_resolution/entity_type_registry.py` — see the `ar_invoice`/`ap_bill`
+   addition for a template.
+
+No changes to `SageConnector`'s constructor, `ConnectorInterface`, or the extraction pipeline
+handler — confirmed in practice by the X3 addition, which touched none of these.
 
 ---
 
@@ -455,9 +459,9 @@ confirmed in practice by the X3 addition, which touched none of these.
   separate IAM policy statements, and separate Secrets Manager path prefixes — increasing
   infrastructure complexity for each new product without behavioural benefit.
 
-**Consequence:** The S3 raw path includes `{sage_product}` as the second segment
-(`sage/{product_name}/{entity_id}/`) to prevent cross-product collisions:
+**Consequence:** The S3 raw path includes `{sage_product}` folded into a single hyphenated
+segment (`sage-{sage_product}`) to prevent cross-product collisions:
 ```
-s3://edl-raw-087972550871/sage/intacct/sage-intacct-customer/extraction_date=.../
-s3://edl-raw-087972550871/sage/x3/sage-x3-customer/extraction_date=.../
+s3://edl-raw-087972550871/{tenant_code}/sage-intacct/sage-intacct-customer/extraction_date=.../
+s3://edl-raw-087972550871/{tenant_code}/sage-x3/sage-x3-customer/extraction_date=.../
 ```

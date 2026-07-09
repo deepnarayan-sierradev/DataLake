@@ -49,7 +49,13 @@ _logger = get_platform_logger(__name__)
 
 _WATERMARK_TABLE_NAME: Final[str] = "EdlWatermarkRepository"
 
-# Lower-bound sentinel used when no prior successful run exists (INCREMENTAL first run).
+# Lower-bound sentinel for an entity's first-ever run: initialise_watermark()
+# already seeds last_successful_watermark to this value, and
+# compute_extraction_window() now uses it directly for the "no watermark yet"
+# case too, so the actual extraction query and the watermark bookkeeping agree
+# on what "first run" means. Deliberately epoch, not extraction_window_days —
+# that field is capped at 365 days (contracts/entity_configuration_contract.py)
+# as a steady-state guardrail, never meant to bound a first-time backfill.
 _EPOCH: Final[datetime] = datetime(1970, 1, 1, tzinfo=UTC)
 
 
@@ -283,8 +289,8 @@ class WatermarkRepository:
           lower = last_successful_watermark - watermark_overlap_hours
           upper = reference_time
 
-        INCREMENTAL first run (no watermark):
-          lower = reference_time - extraction_window_days
+        INCREMENTAL first run (no watermark) — full historical backfill:
+          lower = epoch (1970-01-01), regardless of extraction_window_days
           upper = reference_time
 
         FULL load:
@@ -296,8 +302,14 @@ class WatermarkRepository:
         if config.load_type == LoadType.FULL:
             lower = reference_time - timedelta(days=config.extraction_window_days)
         elif watermark is None:
-            # First incremental run — use extraction_window_days to bound the window.
-            lower = reference_time - timedelta(days=config.extraction_window_days)
+            # First-ever incremental run for this entity (per tenant) — pull
+            # full history from epoch. extraction_window_days does not apply
+            # here: it's capped at 365 days as a steady-state guardrail, which
+            # would silently truncate a first-time backfill of older data.
+            # Large/slow first runs rely on the existing checkpoint mechanism
+            # (max_records_per_lambda_run / LambdaTimeoutWarning) rather than
+            # a bounded window, same as any other incremental run would.
+            lower = _EPOCH
         else:
             overlap = timedelta(hours=config.watermark_overlap_hours)
             lower = watermark.last_successful_watermark - overlap

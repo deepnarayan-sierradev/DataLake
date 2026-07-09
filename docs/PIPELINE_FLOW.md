@@ -1,8 +1,8 @@
 # Enterprise Data Lake — Full Pipeline Flow
 
-> **Spec version:** 2.0 | **Last updated:** 2026-06-29
+> **Spec version:** 2.1 | **Last updated:** 2026-07-09
 
-> **Dev status:** ✅ All stages deployed and live. Data flowing end-to-end: Salesforce (Account, Contact) + MySQL RDS (Contracts) + Sage Intacct (Customer, Vendor, AR Invoice, AP Bill) + Sage X3 (Customer, Supplier). Entity resolution and analytics publisher both operational. NetSuite: 🟡 code-complete (connector, metadata adapter, incremental query planner, auth client, and raw layer writer all implemented, matching the Salesforce/Sage connector shape) but not yet confirmed activated — entity config seeding and schedule-enable status were not independently verified for this document.
+> **Dev status:** All stages deployed and live. Data flowing end-to-end: Salesforce (Account, Contact) + MySQL RDS (Contracts) + Sage Intacct (Customer, Vendor, AR Invoice, AP Bill) + Sage X3 (Customer, Supplier). Entity resolution and analytics publisher both operational. NetSuite: code-complete (connector, metadata adapter, incremental query planner, auth client, and raw layer writer all implemented, matching the Salesforce/Sage connector shape) but not yet confirmed activated — entity config seeding and schedule-enable status were not independently verified for this document. `entity_resolution/entity_type_registry.py` and `config/entity_resolution/` / `config/field_mappings/` also now define four additional entity types not yet reflected anywhere else in this document's narrative text below — `opportunity` (Salesforce Opportunity), `sales-contract` (Salesforce Contract), `contract` and `contract-term` (MySQL RDS Contracts/ContractTerms). Their config JSON exists in-repo (some as uncommitted working-tree additions as of this writing) and their Python-side registration is real, but whether they have been seeded to a live environment and are actually running on a schedule was **not independently verified** for this document — treat them as code-complete/config-complete, not confirmed-live, the same caveat already applied to NetSuite above.
 
 ---
 
@@ -82,8 +82,12 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
                ▼
 ┌─────────────────────────────────┐
 │  S3 ANALYTICS LAYER             │
-│  curated/ — domain datasets     │
-│  canonical/ — mastered entities │
+│  canonical/ — golden records,   │
+│    one Parquet file per run_id  │
+│  analytics/ — same golden       │
+│    records, ER-internal fields  │
+│    stripped, BI-facing, one     │
+│    file per day (overwritten)   │
 │  Glue-catalogued, Athena-ready  │
 └──────────────┬──────────────────┘
                │
@@ -102,7 +106,7 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 |---|---|---|---|---|
 | **Raw** | Exact copy of source data, no transformation | `edl-raw-{account_id}` S3 | Parquet (large_utf8 columns) | Immutable — Object Lock GOVERNANCE |
 | **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked. For incremental entities with `primary_key_field` set, each partition holds the **full current state** (SCD Type 1 merge — not just the day's delta) | `edl-curated-{account_id}` S3 | Parquet (Snappy) | Full-load entities: append-only per run_id. Incremental entities with merge: full snapshot per run_id (overwrites previous state within the partition) |
-| **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Contains curated domain datasets (`curated/` prefix) and canonical (entity-resolved) outputs (`canonical/` prefix) | `edl-analytics-{account_id}` S3 | Parquet (Snappy) | Append-only |
+| **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Two distinct prefixes, both tenant-prefixed (`{tenant_code}/...`): `canonical/{entity_type}/` — golden/mastered records straight from entity resolution, one Parquet file per run under a `run_id=` partition; `analytics/{entity_type}/` — the same golden records with internal entity-resolution-only fields stripped, republished by the Analytics Layer Publish stage as the BI-facing dataset | `edl-analytics-{account_id}` S3 | Parquet (Snappy) | `canonical/`: append-only, one file per `run_id`. `analytics/`: **not** append-only — partitioned only by `analytics_date=`, no `run_id`, so a second run on the same UTC day overwrites the first run's file for that day |
 | **Serving Store** | Optional operational store for low-latency API and application reads | MySQL RDS (private VPC) | SQL rows | Upsert (REPLACE INTO) |
 
 ### Multi-tenancy
@@ -110,9 +114,9 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 Every stage is tenant-scoped via a `tenant_code` parameter — default `"demo"`, sourced from `contracts.identifier_policy.DEFAULT_TENANT_CODE` and validated on every call via `validate_tenant_code()` / `TENANT_CODE_PATTERN`. It threads through:
 
 - **Configuration Load (Stage 3):** `ConfigurationRepositoryClient.load_config()` takes `tenant_code`; the S3 config key is `{tenant_code}/{source_id}/{entity_id}/config.json`, and the loaded record's own `tenant_code` field is cross-checked against the caller's.
-- **Watermark Update (Stage 11):** `WatermarkRepository.get_watermark()` / `advance_watermark()` both take `tenant_code`; watermark records carry it and mismatches are rejected.
+- **Watermark Update (Stage 11):** `WatermarkRepository.get_watermark()` and `initialise_watermark()` take `tenant_code` explicitly (default `demo`) and scope the DynamoDB partition key via `tenant_scoped_key()`; `advance_watermark()` does not take a separate `tenant_code` argument — it reuses the `tenant_code` already carried on the `WatermarkRecord` passed in. Watermark records carry `tenant_code` and mismatches are rejected.
 - **Schema Snapshot (Stage 8):** `SchemaSnapshotRepository` keys are tenant-prefixed (`{tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json`).
-- **Entity Resolution:** `EntityTypeRegistryClient` uses a single-table design keyed on `tenant_code` as the partition key.
+- **Entity Resolution:** `EntityTypeRegistryClient` uses a single-table design keyed on `tenant_code` as the partition key. The entity resolution and analytics publisher Lambda handlers both treat `tenant_code` as a **required** Step Functions input field (ARCH-4) — `_validate_event()` in `entity_resolution/entity_resolution_pipeline_handler.py` and `analytics_publisher/analytics_publisher_handler.py` raise `ValueError` and fail the run closed if it is missing or fails `TENANT_CODE_PATTERN`, rather than silently defaulting to another tenant's identity. Both stages' S3 outputs are tenant-prefixed: `canonical/` (Stage 14) and `analytics/` (Stage 15) both write under `{tenant_code}/...`.
 - **Step Functions state machine:** `infrastructure/modules/orchestration/main.tf` passes `"tenant_code.$" = "$.tenant_code"` explicitly into the Transformation, Entity Resolution, and Analytics Publish task `Parameters`.
 
 **Known asymmetry:** the S3 **raw layer** partition scheme (Stage 7) is deliberately *not* tenant-prefixed today. This is a real, tracked gap — raw-layer tenant prefixing has not been implemented yet — not an oversight in this document.
@@ -190,7 +194,7 @@ Step Functions: START EXECUTION
   │  3. Apply survivorship policy (which source wins/field)  │         │
   │  4. Produce golden records                               │         │
   │  5. Write canonical (mastered) records to analytics S3 layer           │         │
-  │     (s3://{analytics-layer}/canonical/...)          │         │
+  │     (s3://{analytics-layer}/{tenant_code}/canonical/...)          │         │
   │  6. Emit match statistics + lineage                      │         │
   └──────────────────────┬──────────────────────────────────┘         │
                          │                                             │
@@ -198,10 +202,14 @@ Step Functions: START EXECUTION
   ┌─────────────────────────────────────────────────────────┐         │
   │  STAGE D — ANALYTICS LAYER PUBLISH (Lambda)             │         │
   │                                                          │         │
-  │  1. Promote curated domain datasets to optimised Parquet  │         │
-  │  2. Write consumption-ready Parquet to analytics layer   │         │
-  │  3. Register/update Glue Catalog table                   │         │
-  │  4. Emit lineage record                                  │         │
+  │  1. Read golden records from Stage C's canonical_prefix  │         │
+  │  2. Strip entity-resolution-internal fields (_record_id, │         │
+  │     _source_id, contributing_source_records, etc.)      │         │
+  │  3. Write BI-facing Parquet to analytics/ (one file per  │         │
+  │     day — no run_id; overwrites same-day re-runs)        │         │
+  │  4. Register/update Glue Catalog table + day's partition │         │
+  │  5. No lineage record is emitted at this stage today     │         │
+  │     (see Stage 15 reference below)                       │         │
   └──────────────────────┬──────────────────────────────────┘         │
                          │                                             │
                          ▼                                            │
@@ -435,39 +443,47 @@ s3://{curated-bucket}/entity-resolution/{entity_type}/survivorship_{version}.jso
 s3://{curated-bucket}/entity-resolution/{entity_type}/latest.json  ← version pointer
 ```
 
-**Defined entity types:**
+**Defined entity types** (`entity_resolution/entity_type_registry.py`, `ENTITY_ID_TO_TYPE` / `ENTITY_TYPE_SOURCES` — these are seed defaults for the `demo` tenant; other tenants can register their own via `EntityTypeRegistryClient.register_entity_type()` with no redeploy required):
 
 | Entity type | Sources merged | Output prefix |
 |---|---|---|
-| `company` | Salesforce Account + NetSuite Customer + Sage Intacct Customer + Sage X3 Customer | `canonical/company/` |
-| `person` | Salesforce Contact | `canonical/person/` |
-| `supplier` | Sage Intacct Vendor + Sage X3 Supplier | `canonical/supplier/` |
-| `ar_invoice` | Sage Intacct AR Invoice | `canonical/ar_invoice/` |
-| `ap_bill` | Sage Intacct AP Bill | `canonical/ap_bill/` |
+| `company` | Salesforce Account + NetSuite Customer + Sage Intacct Customer + Sage X3 Customer | `{tenant_code}/canonical/company/` |
+| `person` | Salesforce Contact | `{tenant_code}/canonical/person/` |
+| `supplier` | Sage Intacct Vendor + Sage X3 Supplier | `{tenant_code}/canonical/supplier/` |
+| `ar_invoice` | Sage Intacct AR Invoice | `{tenant_code}/canonical/ar_invoice/` |
+| `ap_bill` | Sage Intacct AP Bill | `{tenant_code}/canonical/ap_bill/` |
+| `contract` | MySQL RDS Contracts | `{tenant_code}/canonical/contract/` |
+| `opportunity` | Salesforce Opportunity | `{tenant_code}/canonical/opportunity/` |
+| `sales-contract` | Salesforce Contract | `{tenant_code}/canonical/sales-contract/` |
+| `contract-term` | MySQL RDS ContractTerms | `{tenant_code}/canonical/contract-term/` |
+
+`sales-contract` and `contract` are deliberately kept as separate entity types rather than merged, even though both represent "contracts" — Salesforce Contract and MySQL RDS Contracts share no common key, and forcing a fuzzy name/account match to merge them risks silently combining unrelated records (see the comment above `ENTITY_ID_TO_TYPE` in `entity_type_registry.py`).
 
 ---
 
 ### Stage 14 — Golden Record Publish
 
-**Component:** `GoldenRecordPublisher`, `GoldenRecordSurvivorshipPolicy`, `ResolutionConfigRegistry`  
-**Purpose:** Applies survivorship rules to each match cluster to produce one trusted record per real-world entity.  
+**Component:** `GoldenRecordPublisher` (`entity_resolution/canonical_record_publisher/canonical_record_publisher.py`), `GoldenRecordSurvivorshipPolicy`, `ResolutionConfigRegistry`  
+**Purpose:** Applies survivorship rules to each match cluster to produce one trusted record per real-world entity.
+
+**Known duplication (DUP-3, tracked, not yet cleaned up):** there are **two** near-identical implementations of this class — `entity_resolution/canonical_record_publisher/canonical_record_publisher.py` and `entity_resolution/golden_record_publisher/golden_record_publisher.py` — both defining a `GoldenRecordPublisher` class with the same `publish()` logic. `entity_resolution/entity_resolution_pipeline_handler.py` (the actual Step Functions Lambda handler) imports from **`canonical_record_publisher`** — that is the file on the live code path. `golden_record_publisher.py` is not wired into the Lambda handler; treat it as legacy/duplicate rather than a second production path. The shared logic both files used to duplicate (Parquet-list flattening, decision-audit serialisation, lineage emission) was since extracted into `entity_resolution/publishing_shared.py`, but the two top-level classes themselves were not yet consolidated.
+
 **Survivorship strategies per field:**
-- `SOURCE_PRIORITY` — prefer the value from the highest-ranked source (e.g. NetSuite > Salesforce for `full_name`)
-- `MOST_RECENT` — prefer the value with the latest timestamp
-- `LONGEST` — prefer the longest non-null string
-- `FIRST_NON_NULL` — use first available value in source priority order
+- `source_priority` — prefer the value from the highest-ranked source (e.g. `sage` > `netsuite` > `salesforce` for `credit_limit` in the `company` survivorship policy — see the concrete example in [§6](#6-entity-resolution-config-system))
+- `most_recent` — prefer the value with the latest timestamp (e.g. `last_modified_date`)
+- `first_non_null` — the policy-wide `default_strategy`; use first available value in source priority order
 
 **Field provenance tracking:**  
-Every golden record includes a `field_provenance` column — a JSON map documenting which source system won for each output field (via the survivorship rules above). This enables instant source attribution queries in Athena or the Serving Store without re-computation. Example queries available in [PLATFORM_FLOW.md: Field Provenance and Source Attribution](PLATFORM_FLOW.md#field-provenance-and-source-attribution).
+Every golden record includes a `field_provenance` column — a JSON map documenting which source system won for each output field (via the survivorship rules above). This enables instant source attribution queries in Athena (e.g. `json_extract_scalar(field_provenance, '$.full_name')`) or the Serving Store without re-computation.
 
 **System fields automatically added:**
-- `golden_id` — deterministic ID stable across re-runs
+- `golden_id` — deterministic ID stable across re-runs (derived from `source_field` + `entity_type` + sorted contributing IDs via `stable_cluster_id()`)
 - `contributing_source_records` — array of source record IDs that formed this golden record
 - `survivorship_version` — policy version applied (e.g., "v1")
 - `match_run_id` — entity resolution run ID
 - `field_provenance` — JSON map of field winners (see above)
 
-**Total: 19 fields** (14 declared output_fields + 5 system fields). See [PLATFORM_FLOW: System Fields in Golden Records](PLATFORM_FLOW.md#system-fields-in-golden-records) for schema table.
+**Total field count varies by entity type** — it is always `len(output_fields)` (from the survivorship policy JSON) + the 5 system fields above. For `company`, `output_fields` currently declares 14 fields → 19 total; `supplier` declares 9 → 14 total. Check the specific entity type's `config/entity_resolution/{entity_type}/survivorship_v1.json` rather than assuming a fixed number.
 
 **Output schema projection (`output_fields`):**  
 Each survivorship policy declares an explicit `output_fields` list. Only those fields appear in the canonical Parquet files — source-internal IDs, duplicate name variants, and system-only fields are excluded. Empty `output_fields` = pass-through (used only in tests).
@@ -484,20 +500,25 @@ publisher = GoldenRecordPublisher.from_registry(
 ```
 The registry resolves the `latest` version pointer, loads and caches both JSON configs, and constructs the publisher. No rule set or policy is ever hardcoded in the Lambda handler.
 
-**Key output:** Golden records with `golden_id`, `contributing_source_records`, `survivorship_version`, `match_run_id`, and only the fields declared in `output_fields`. Written to:
+**Key output:** Golden records with `golden_id`, `contributing_source_records`, `survivorship_version`, `match_run_id`, and only the fields declared in `output_fields`. Written to (tenant-prefixed, ARCH-1):
 ```
-s3://{analytics-layer}/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet
-s3://{analytics-layer}/canonical/{entity_type}/match-decisions/{run_id}/decisions.json
+s3://{analytics-layer}/{tenant_code}/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet
+s3://{analytics-layer}/{tenant_code}/canonical/{entity_type}/match-decisions/{run_id}/decisions.json
 ```
-**Lineage:** Every field traces back to its contributing source record.
+**Lineage:** `entity_resolution/publishing_shared.py::emit_golden_record_lineage()` writes an `ENTITY_RESOLUTION` lineage record — but only when both `GOVERNANCE_S3_BUCKET` and `curated_s3_bucket` were supplied to the publisher (best-effort; skipped silently otherwise). Every field traces back to its contributing source record via `field_provenance` + `contributing_source_records`.
 
 ---
 
 ### Stage 15 — Analytics Layer Publish
 
-**Component:** `AnalyticsLayerPublisher`  
-**Purpose:** Promotes curated domain datasets to consumption-optimised Parquet in the analytics layer and registers/updates Glue Catalog tables. The analytics layer (`edl-analytics-{account_id}`) is the single bucket for all consumption — it holds curated domain datasets under the `curated/` prefix and canonical (entity-resolved) outputs under the `canonical/` prefix.  
-**Partition scheme:** `s3://{bucket}/analytics/{domain}/{entity_id}/analytics_date={date}/run_id={run_id}/data.parquet`  
+**Component:** `analytics_publisher/analytics_publisher_handler.py`  
+**Purpose:** Reads the **golden records** written by Stage 14 (not curated domain data directly — despite the Step Functions state's Terraform comment describing it as reading "golden records and curated datasets," the handler's actual business logic only reads `canonical_prefix`; `curated_s3_prefix` is validated on the event but is not otherwise used by this stage today), strips entity-resolution-internal fields, and republishes the result as the BI-facing analytics dataset with a Glue Catalog table registered/updated.
+
+**Fields stripped before the BI-facing write** (`_INTERNAL_FIELDS_TO_DROP`): `_record_id`, `_source_id`, `contributing_source_records`, `survivorship_version`, `match_run_id`, `field_provenance`. `golden_id` is deliberately **kept** — it is the stable join key across entity types.
+
+**Partition scheme (tenant-prefixed, ARCH-1):** `s3://{bucket}/{tenant_code}/analytics/{entity_type}/analytics_date={date}/data.parquet` — note there is **no `run_id` in this path**. Unlike every other layer in this pipeline, a second run for the same entity type on the same UTC day **overwrites** the prior run's file, because nothing in the key disambiguates them. This is a real behavioural asymmetry versus the `canonical/` layer (which does partition by `run_id`), not a documentation inconsistency — confirm against `analytics_publisher_handler.py`'s `analytics_prefix` construction before assuming otherwise.
+
+**Glue Catalog:** one table per `(tenant_code, entity_type)`, named `{tenant_code_with_hyphens_as_underscores}_{entity_type}` (Glue/Athena table names only allow `[a-z0-9_]`), registered via `governance.data_catalog_registration.DataCatalogRegistrationClient`. The day's Hive partition (`analytics_date=`) is registered explicitly via `glue_client.create_partition()` / `update_partition()` so `MSCK REPAIR TABLE` is not required after every run. Catalog/partition registration failures are logged as warnings and do **not** fail the pipeline — the Parquet is already written and directly queryable via its S3 path even if cataloguing fails.  
 **Consumers:** Athena, QuickSight, ML feature stores, data science notebooks.
 
 ---
@@ -525,10 +546,13 @@ config/field_mappings/
   salesforce/
     salesforce-account/v1.json
     salesforce-contact/v1.json
+    salesforce-contract/v1.json
+    salesforce-opportunity/v1.json
   netsuite/
     netsuite-customer/v1.json
   mysql-rds/
-    mysql-rds-orders/v1.json
+    mysql-rds-contracts/v1.json
+    mysql-rds-contractterms/v1.json
   sage/
     sage-intacct-customer/v1.json
     sage-intacct-vendor/v1.json
@@ -616,7 +640,20 @@ config/entity_resolution/
   ap_bill/
     match_rules_v1.json     ← deterministic on bill_id (Intacct sole source — pass-through)
     survivorship_v1.json    ← AP bill output schema
+  contract/
+    match_rules_v1.json     ← MySQL RDS Contracts (sole source — pass-through)
+    survivorship_v1.json    ← contract output schema
+  opportunity/
+    match_rules_v1.json     ← Salesforce Opportunity (sole source — pass-through)
+    survivorship_v1.json    ← opportunity output schema
+  sales-contract/
+    match_rules_v1.json     ← Salesforce Contract (sole source — pass-through)
+    survivorship_v1.json    ← sales-contract output schema
+  contract-term/
+    match_rules_v1.json     ← MySQL RDS ContractTerms (sole source — pass-through)
+    survivorship_v1.json    ← contract-term output schema
 ```
+Not independently verified for this document: whether `contract`, `opportunity`, `sales-contract`, and `contract-term` have actually been seeded to a live environment via `seed_entity_resolution_configs.py` — see the Dev status note at the top of this document.
 
 ### S3 location (runtime)
 
@@ -871,7 +908,7 @@ This section maps each pipeline stage to the exact tools, AWS services, Python l
 | Stage 12 — Transformation | AWS Lambda or AWS Glue; Amazon S3 (curated layer); AWS Glue Data Catalog |
 | Stage 13 — Entity Resolution | AWS Lambda; Amazon S3 (curated source read + analytics write) |
 | Stage 14 — Golden Record Publish | AWS Lambda; Amazon S3 (analytics layer `canonical/` prefix) |
-| Stage 15 — Analytics Layer Publish | Amazon S3 (analytics layer); AWS Glue Data Catalog |
+| Stage 15 — Analytics Layer Publish | AWS Lambda; Amazon S3 (analytics layer `analytics/` prefix, read from `canonical/`); AWS Glue Data Catalog (table + partition registration) |
 | Stage 16 — Serving Store Load | Amazon RDS MySQL 8 (private VPC); AWS Secrets Manager |
 | DLQ Processing (failure path) | AWS Lambda (`dlq_processor`); Amazon SQS (`EdlExtractionFailureDlq`, event source mapping `batch_size=1`); Amazon DynamoDB (run audit log); Amazon SNS (platform alerts topic); AWS Step Functions (optional auto-replay) |
 | All stages | Amazon CloudWatch Logs; Amazon CloudWatch Metrics; AWS X-Ray; Amazon SQS (DLQ) |

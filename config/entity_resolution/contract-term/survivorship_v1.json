@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Survivorship policy for the contract_term entity type.",
+    "Current source: mysql-rds (ContractTerms table) only.",
+    "",
+    "Single source — direct pass-through. default_strategy first_non_null",
+    "handles any occasional null field within a record set.",
+    "",
+    "Field names (term_type, term_value, contract_id FK) are a best-effort",
+    "guess following the same audit-column convention as mysql-rds-contracts —",
+    "verify against the real ContractTerms schema and adjust the field",
+    "mapping (config/field_mappings/mysql-rds/mysql-rds-contractterms/v1.json)",
+    "if the actual column names differ."
+  ],
+  "entity_type": "contract-term",
+  "policy_version": "v1",
+
+  "output_fields": [
+    "contract_term_id",
+    "contract_id",
+    "tenant_id",
+    "term_type",
+    "term_value",
+    "is_deleted",
+    "created_by",
+    "created_at",
+    "modified_by",
+    "updated_at"
+  ],
+
+  "default_strategy": "first_non_null",
+
+  "attribute_rules": [
+    {
+      "_comment": "Primary key — always from mysql-rds, never null (raise_error in field mapping).",
+      "canonical_field": "contract_term_id",
+      "strategy": "source_priority",
+      "source_priority": ["mysql-rds"]
+    },
+    {
+      "canonical_field": "updated_at",
+      "strategy": "most_recent",
+      "timestamp_field": "updated_at"
+    }
+  ]
+}

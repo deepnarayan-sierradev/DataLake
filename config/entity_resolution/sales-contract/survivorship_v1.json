@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "Survivorship policy for the sales_contract entity type.",
+    "Current source: salesforce (Contract object) only.",
+    "",
+    "Single source — direct pass-through. default_strategy first_non_null",
+    "handles any occasional null field within a record set."
+  ],
+  "entity_type": "sales-contract",
+  "policy_version": "v1",
+
+  "output_fields": [
+    "sales_contract_id",
+    "contract_number",
+    "account_id",
+    "status",
+    "start_date",
+    "end_date",
+    "contract_term_months",
+    "owner_id",
+    "created_at",
+    "updated_at"
+  ],
+
+  "default_strategy": "first_non_null",
+
+  "attribute_rules": [
+    {
+      "_comment": "Primary key — always from salesforce, never null (raise_error in field mapping).",
+      "canonical_field": "sales_contract_id",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce"]
+    },
+    {
+      "canonical_field": "updated_at",
+      "strategy": "most_recent",
+      "timestamp_field": "updated_at"
+    }
+  ]
+}

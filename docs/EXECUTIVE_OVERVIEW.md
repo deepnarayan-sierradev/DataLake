@@ -1,10 +1,17 @@
 # Enterprise Data Lake Platform — Executive Overview
 
-**Version:** 2.0  
-**Date:** 2026-06-29  
+**Version:** 2.1  
+**Date:** 2026-07-09  
 **Classification:** Internal — Leadership Review  
 
-> **Current Status:** Dev environment fully operational as of 2026-06-29. 34 companies, 49 persons, and 35,971 contracts are live and queryable via Athena. Staging and Production deployments are next.  
+> **Current Status:** Only the Dev AWS environment is deployed (rebuilt from scratch on
+> 2026-07-09). Of five planned source connectors, two — Salesforce and MySQL RDS — have real
+> credentials and have run end-to-end: **34 Salesforce accounts** and **36,023 MySQL RDS
+> contract rows** are extracted, transformed, resolved, and queryable via Athena today. The
+> other three connectors (Sage Intacct, Sage X3, NetSuite) are code-complete but have no
+> credentials populated, so nothing has run for them yet. Staging and Production are not
+> deployed — no AWS account exists for either. See [PLATFORM_STATUS.md](PLATFORM_STATUS.md) for
+> the full current inventory.  
 > For a concise leadership-ready summary, see [LEADERSHIP_BRIEF.md](LEADERSHIP_BRIEF.md).
 **Audience:** Engineering leadership, product leadership, data governance, security, and finance stakeholders
 
@@ -49,7 +56,8 @@ Analytics teams waited days for data. Compliance teams had no record of who acce
 
 ### What We Built
 
-An **Enterprise Data Lake Platform** — a production-grade, security-first, metadata-driven pipeline that:
+An **Enterprise Data Lake Platform** — a security-first, metadata-driven pipeline, currently
+running in a single Dev environment, that:
 
 - Continuously extracts data from all source systems on defined schedules
 - Stores it in three governed layers (Raw, Curated, Analytics)
@@ -72,6 +80,10 @@ An **Enterprise Data Lake Platform** — a production-grade, security-first, met
 | Data quality visibility | No monitoring | Quality reports per entity per run |
 | Credential security | Scripts and .env files | AWS Secrets Manager with daily expiry-check alerting (auto-rotation planned) |
 | Compliance readiness | Manual documentation | Automated lineage + retention enforcement |
+
+These outcomes describe the pipeline's designed and implemented behavior, demonstrated so far in
+the Dev environment for the two connected sources (Salesforce, MySQL RDS). They have not yet been
+demonstrated at production scale, across all five source connectors, or with a second tenant.
 
 ---
 
@@ -160,15 +172,22 @@ Each step produces a machine-readable audit record. No step is skipped. No data 
 
 ## 5. Connected Data Sources
 
-| Source System | Type | Current Entities | Extraction Method |
-|---|---|---|---|
-| **Salesforce** | CRM | Account, Contact, Opportunity, Lead, Case (configurable — no hardcoded list) | Salesforce Bulk API 2.0 (high-volume, async) |
-| **NetSuite** | ERP | Customer, Vendor, Invoice, Purchase Order, GL Journal (configurable) | SuiteQL REST API |
-| **MySQL RDS** | Transactional DB | Orders, Products, Inventory, Users (configurable) | JDBC / SQLAlchemy read-only connection |
-| **Sage Intacct** | Cloud Accounting ERP | AR Customer, AP Vendor, AR Invoice, AP Bill (configured — extensible to GL, journal entries, etc.) | Intacct REST API (OAuth 2.0; JSON-POST; `ia::meta.next` cursor pagination) |
-| **Sage X3** | Enterprise ERP | Customer (BPCUSTOMER), Supplier (BPSUPPLIER); extensible to orders, invoices | OData v4 REST API (OAuth 2.0; `@odata.nextLink` pagination) |
+Of five source connectors, two have real credentials and are running; three are code-complete
+but not yet connected to a real account.
 
-**Planned future sources** (configuration-only addition — no code change):  
+| Source System | Type | Status | Configured Entities | Extraction Method |
+|---|---|---|---|---|
+| **Salesforce** | CRM | ✅ Connected, live | Account (companies — **live, 34 records**), Contact (persons — live, count not re-confirmed), Opportunity and Contract (configured, not yet seeded) | Salesforce Bulk API 2.0 (high-volume, async) |
+| **MySQL RDS** | Transactional DB | ✅ Connected, live | Contracts (**live, 36,023 rows**), Contract Terms (configured, not yet seeded) | JDBC / SQLAlchemy read-only connection |
+| **Sage Intacct** | Cloud Accounting ERP | 🟡 Code-complete, no credentials yet | Customer, Vendor, AR Invoice, AP Bill (configured, not run) | Intacct REST API (OAuth 2.0; JSON-POST; `ia::meta.next` cursor pagination) |
+| **Sage X3** | Enterprise ERP | 🟡 Code-complete, no credentials yet | Customer, Supplier (configured, not run) | OData v4 REST API (OAuth 2.0; `@odata.nextLink` pagination) |
+| **NetSuite** | ERP | 🟡 Code-complete, no credentials yet | Customer (configured, not run) | SuiteQL REST API |
+
+Bringing a code-complete source online requires only populating its Secrets Manager credential
+and seeding its entity configuration — no new code — but that work has not been done for
+Sage Intacct, Sage X3, or NetSuite yet.
+
+**Planned future sources** (configuration-only addition — no code change expected):  
 Dynamics 365, HubSpot, SAP, PostgreSQL, REST APIs, CSV/Excel/SFTP
 
 ---
@@ -223,7 +242,13 @@ Load type is set per entity in the configuration record — no code change to sw
 
 Schedules are managed by **AWS EventBridge Scheduler**. Each entity has exactly one schedule. Schedules can be updated at any time without deployment.
 
-### Production Schedule Reference
+> **Illustrative, not current state:** the table below shows the scheduling pattern the platform
+> supports and how a fully onboarded set of entities would be scheduled. No entity schedule is
+> enabled in Dev today — the only EventBridge schedule actually running is the daily credential
+> expiry check. Today's live entities (Salesforce Account/Contact, MySQL RDS Contracts) have been
+> run via manual trigger, not yet on an enabled cron schedule.
+
+### Illustrative Schedule Reference
 
 | Source | Entity | Schedule | UTC Time | Frequency | Notes |
 |---|---|---|---|---|---|
@@ -331,13 +356,16 @@ Each source has its own Secrets Manager secret:
 
 - Year/month/day partitioned for efficient time-range queries
 - Contains **curated domain datasets** and **canonical entity records** (entity-resolved golden records)
-- Two canonical entity types currently defined:
-  - **`company`** — merges Salesforce Account + NetSuite Customer + Sage Intacct Customer + Sage X3 Customer into a single trusted company profile
-  - **`person`** — normalises Salesforce Contact into a canonical person record
-  - **`supplier`** — merges Sage Intacct Vendor + Sage X3 Supplier into a single trusted supplier profile
-  - **`ar_invoice`** — Sage Intacct AR invoices (receivables); extensible to additional AR sources
-  - **`ap_bill`** — Sage Intacct AP bills (payables); extensible to additional AP sources
-- Every golden record includes **5 system fields** beyond the 14 business `output_fields`: `golden_id`, `contributing_source_records`, `survivorship_version`, `match_run_id`, and `field_provenance`. See [PLATFORM_FLOW: System Fields in Golden Records](../PLATFORM_FLOW.md#system-fields-in-golden-records) for details.
+- Several canonical entity types are defined in configuration today; only two have live data
+  flowing into them, since only Salesforce and MySQL RDS are connected:
+  - **`company`** — designed to merge Salesforce Account + NetSuite Customer + Sage Intacct
+    Customer + Sage X3 Customer into a single trusted company profile; **live today with
+    Salesforce Account data only** (34 records) — the other three sources aren't connected yet
+  - **`person`** — normalises Salesforce Contact into a canonical person record; **live**
+  - **`contract`**, **`supplier`**, **`ar_invoice`**, **`ap_bill`**, **`opportunity`**,
+    **`sales-contract`**, **`contract-term`** — configured, awaiting either seeding or
+    connection of their source system before any golden records are produced
+- Every golden record includes **5 system fields** beyond the business `output_fields` (count varies 14-20 by entity type): `golden_id`, `contributing_source_records`, `survivorship_version`, `match_run_id`, and `field_provenance`. See [PIPELINE_FLOW: Golden Record Publish](PIPELINE_FLOW.md#stage-14-golden-record-publish) for details.
 - Registered in Glue catalog; Athena workgroup configured per team
 - Retention: 1 year active; archival to Glacier after
 - Access: read-only for approved BI users and ML engineers (prefix-scoped)
@@ -350,6 +378,9 @@ Each source has its own Secrets Manager secret:
 - Target: RDS (PostgreSQL), Redshift, or DynamoDB (depending on deployment profile)
 - Supports both full-replace and incremental-merge load modes
 - **Not the same as Athena reporting** — Athena is the query engine that runs SQL over the Analytics layer (S3 Parquet) for BI tools, dashboards, and ad-hoc analysis. Serving Store is the operational store for predictable sub-second API reads at high concurrency.
+- **Not yet active in any environment:** the Step Functions workflow has a conditional stage for
+  this, but no Serving Store Lambda handler has been built yet, so the stage currently runs as a
+  no-op in every environment, including Dev.
 
 ---
 
@@ -440,6 +471,17 @@ The platform is built security-first, with controls embedded at every layer:
 - All roles are scoped to specific tables, bucket prefixes, and actions
 - CI/CD deployment role cannot access data buckets
 - BI consumers can only read prefix-scoped analytics data
+
+### Multi-Tenant Isolation — Partial, Not Yet Production-Grade
+- Each tenant's data is prefixed by `tenant_code` in S3 (raw, curated, analytics, schema
+  snapshots) and in the DynamoDB watermark and entity-type-registry tables — this isolation is
+  enforced by the application's writer/reader code today
+- Two gaps remain: the entity-extraction-config table is isolated only by an application-level
+  guard, not a tenant-scoped key, and no S3 bucket-policy or IAM condition yet enforces the
+  tenant prefix as a hard boundary (tracked internally as `SEC-2`)
+- No second tenant has been onboarded yet, so this isolation model has not been exercised with
+  real multi-tenant traffic
+- Do not represent tenant isolation as complete or IAM-enforced until `SEC-2` is closed
 
 ---
 
@@ -679,6 +721,10 @@ Compare: previous approach of writing a new ETL script = 2–4 weeks.
 
 ## 17. Key Metrics and SLOs
 
+These are the design targets the alarms and dashboards are built around. They have not yet been
+measured over a sustained period of real, scheduled production traffic — today's evidence is a
+small number of manually-verified runs against two connected sources in Dev.
+
 ### Service Level Objectives
 
 | SLO | Target | Alert threshold |
@@ -704,11 +750,22 @@ Compare: previous approach of writing a new ETL script = 2–4 weeks.
 
 ## 18. Roadmap
 
-### Near-term (next quarter)
+### Immediate next steps (the actual gating items before a second tenant or a staging deployment)
 
 | Item | Description |
 |---|---|
-| SaaS control plane / multi-tenancy | Self-service tenant provisioning, entity registration, and pipeline triggering via a Cognito-authenticated REST API — code-complete and wired into all three environments, but not yet verified against a live AWS deployment. Pilot tenant onboarding and load testing are the next gating steps. |
+| Populate remaining source credentials | Sage Intacct, Sage X3, and NetSuite connectors are code-complete but have no real credentials yet — needed before any of the three can run |
+| Verify control-plane API end-to-end | The Cognito-authenticated REST API (tenant provisioning, entity registration, pipeline trigger) is deployed in Dev, but a live login/JWT round-trip against the deployed API Gateway + Cognito pool has not yet been exercised |
+| Pilot tenant onboarding | Onboard one real second tenant and run it in parallel with the default tenant for roughly a week with no cross-tenant incidents — not yet started |
+| Load test at target scale | Synthetic load test across the target entity count and tenant count — not yet started |
+| Close remaining tenant-isolation gaps | `entity-extraction-config` tenant-key scoping and the S3 bucket-policy tenant-prefix condition (`SEC-2`) should land before pilot tenant traffic is trusted |
+| Staging deployment | Requires its own AWS account/credentials; `terraform validate` is already clean for `staging`, so this is provisioning work, not code work |
+| Production deployment | Gated on staging sign-off per this repo's promotion policy; no AWS account exists for production yet |
+
+### Near-term (next quarter, after the items above)
+
+| Item | Description |
+|---|---|
 | Dynamics 365 connector | Configuration-only addition; adapter code ~3 days |
 | HubSpot connector | Marketing activity data for unified customer view |
 | Real-time CDC pipeline | Debezium + Kafka for sub-minute latency on MySQL changes |
@@ -734,6 +791,6 @@ Compare: previous approach of writing a new ETL script = 2–4 weeks.
 
 ---
 
-*For technical implementation details, see [docs/PLATFORM_FLOW.md](PLATFORM_FLOW.md).*  
+*For technical implementation details, see [docs/PIPELINE_FLOW.md](PIPELINE_FLOW.md).*  
 *For infrastructure configuration, see [infrastructure/environments/](../infrastructure/environments/).*  
 *For source onboarding, see [governance/source_onboarding_registry.py](../governance/source_onboarding_registry.py).*

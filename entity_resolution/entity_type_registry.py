@@ -47,6 +47,14 @@ ENTITY_ID_TO_TYPE: Final[dict[str, str]] = {
     "sage-x3-supplier": "supplier",  # Sage X3 business partner (supplier)
     "sage-intacct-arinvoice": "ar_invoice",  # Sage Intacct AR invoice
     "sage-intacct-apbill": "ap_bill",  # Sage Intacct AP bill
+    "salesforce-opportunity": "opportunity",
+    # Deliberately its own type, not merged into "contract": Salesforce
+    # Contract and MySQL RDS Contracts share no common key, so treating them
+    # as one golden-record type would require a fuzzy name/account match that
+    # risks silently combining unrelated records. Revisit if a real shared
+    # identifier between the two systems is established.
+    "salesforce-contract": "sales-contract",
+    "mysql-rds-contractterms": "contract-term",
 }
 
 # ---------------------------------------------------------------------------
@@ -62,6 +70,9 @@ ENTITY_TYPE_PK_FIELD: Final[dict[str, str]] = {
     "supplier": "vendor_id",  # Sage Intacct Vendor, Sage X3 Supplier
     "ar_invoice": "invoice_id",  # Sage Intacct AR Invoice
     "ap_bill": "bill_id",  # Sage Intacct AP Bill
+    "opportunity": "opportunity_id",  # Salesforce Opportunity
+    "sales-contract": "sales_contract_id",  # Salesforce Contract
+    "contract-term": "contract_term_id",  # MySQL RDS ContractTerms
 }
 
 # ---------------------------------------------------------------------------
@@ -92,6 +103,15 @@ ENTITY_TYPE_SOURCES: Final[dict[str, list[tuple[str, str]]]] = {
     ],
     "ap_bill": [
         ("sage", "sage-intacct-apbill"),
+    ],
+    "opportunity": [
+        ("salesforce", "salesforce-opportunity"),
+    ],
+    "sales-contract": [
+        ("salesforce", "salesforce-contract"),
+    ],
+    "contract-term": [
+        ("mysql-rds", "mysql-rds-contractterms"),
     ],
 }
 

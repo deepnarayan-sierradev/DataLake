@@ -1,8 +1,9 @@
 # Developer Guide — Enterprise Data Lake Platform
 
 **Audience:** Engineers new to the codebase, or anyone setting up a fresh workstation
-**Last updated:** 2026-07-07
-**Status:** Dev environment is live and fully operational
+**Last updated:** 2026-07-09
+**Status:** Dev infrastructure is deployed; no source credentials are populated and no pipeline
+has run yet in any environment (see `docs/PLATFORM_STATUS.md` for current detail)
 
 > If you're using Claude Code (or another AI coding agent) on this repo, read root `CLAUDE.md`
 > first — it captures the same setup/verification conventions as this guide plus non-obvious
@@ -301,30 +302,36 @@ pytest tests/ -v --no-cov
 ### Full CI check suite (same as GitHub Actions)
 
 ```bash
-ruff check .                           # lint
-ruff format --check .                  # formatting (separate CI job from lint)
-mypy .                                 # type check — SEE CAVEAT BELOW, currently broken
-pytest --cov --cov-fail-under=80       # tests + coverage
-bandit -r . -c pyproject.toml          # SAST security scan
-pip-audit                              # dependency CVE scan
-make banned-names                      # rejects helper/util/common/manager identifiers
+ruff check .                            # lint
+ruff format --check .                   # formatting (separate CI job from lint)
+mypy -p connector_runtime -p transformation -p entity_resolution -p analytics_publisher \
+     -p orchestration -p observability -p watermark_management -p schema_management \
+     -p contracts -p governance          # type check — SEE CAVEAT BELOW
+pytest --cov --cov-fail-under=80        # tests + coverage
+bandit -r . --exclude .venv,tests,dist -c pyproject.toml   # SAST security scan
+pip-audit                               # dependency CVE scan
+make banned-names                       # rejects helper/util/common/manager identifiers
 ```
 
-> **`mypy .` currently fails for reasons unrelated to your change.** It stops immediately on
-> `dist/lambda-build/typing_extensions.py` shadowing the real `typing_extensions` package (present
-> after running `make lambda-package`), and — once that's worked around — on a module-name
-> collision between `scripts/generate_presentation.py` and `pptx/generate_presentation.py`.
-> `make typecheck` has the exact same problem (it also just runs bare `mypy .`), so switching to
-> the Makefile target doesn't help. **Scope mypy to the packages you actually touched** instead,
-> e.g. `mypy connector_runtime schema_management watermark_management observability orchestration
-> transformation governance entity_resolution analytics_publisher contracts` (this excludes
-> `dist/`, `scripts/`, and `pptx/` by construction). This is tracked as a real bug, not just a
-> docs caveat — fixing the root cause (excluding `dist/` from mypy's search path, and renaming one
-> of the two colliding `generate_presentation.py` files) is still open.
+> **Never run bare `mypy .`** — it stops immediately on `dist/lambda-build/typing_extensions.py`
+> shadowing the real `typing_extensions` package (present after running `make lambda-package`),
+> and — once that's worked around — on a module-name collision between
+> `scripts/generate_presentation.py` and `pptx/generate_presentation.py`. `make typecheck` has the
+> exact same problem (it also just runs bare `mypy .`), so switching to the Makefile target doesn't
+> help. CI's `typecheck` job was fixed (2026-07-08) to run the exact scoped `-p` form shown above
+> instead of bare `mypy .`, so it no longer crashes — but that command currently surfaces **75
+> pre-existing type errors across 16 files**, tracked as follow-up remediation debt
+> (`architecture/GAP_ANALYSIS_FINDINGS.md`, `OBS-6`), not something to fix incidentally. The CI
+> type-check job will report red on this debt until it's separately remediated.
 
 ---
 
 ## 8. Running Pipelines
+
+> **Prerequisite:** none of this works yet in dev as of this writing — no source secret is
+> populated (see [Connector Credentials](../README.md#connector-credentials-aws-secrets-manager)
+> in the README) and no entity config is seeded (§11 below). The commands below are the procedure
+> once both are done, not evidence that they've already been run.
 
 > **Important:** The `edl-raw-087972550871` S3 bucket policy only allows writes from the Lambda execution role (`EdlExtractionRuntimeRole`). Local scripts can run with `--dry-run` for schema/connectivity checks, but full extraction must go through Step Functions.
 
@@ -438,24 +445,29 @@ python scripts/trigger_extraction.py \
 
 ### Query analytics output via Athena
 
+Real data exists in dev for `company` (Salesforce accounts) and `mysql-rds-contracts` — the
+pipeline has run end-to-end for these (see `docs/PLATFORM_STATUS.md`). Other entities (persons,
+opportunities, contracts, Sage/NetSuite sources) aren't seeded/connected yet, so treat those rows
+as illustrative only. Replace `analytics_date` with a real run's date:
+
 ```sql
 -- Latest companies
-SELECT * FROM edl_analytics.company WHERE analytics_date='2026-06-29';
+SELECT * FROM edl_analytics.company WHERE analytics_date='YYYY-MM-DD';
 
 -- Latest persons
-SELECT * FROM edl_analytics.person WHERE analytics_date='2026-06-29';
+SELECT * FROM edl_analytics.person WHERE analytics_date='YYYY-MM-DD';
 
 -- Latest contracts
-SELECT COUNT(*) FROM edl_analytics.contract   WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.contract   WHERE analytics_date='YYYY-MM-DD';
 
 -- Latest suppliers (Sage Intacct vendors + Sage X3 suppliers merged)
-SELECT COUNT(*) FROM edl_analytics.supplier   WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.supplier   WHERE analytics_date='YYYY-MM-DD';
 
 -- Latest AR invoices
-SELECT COUNT(*) FROM edl_analytics.ar_invoice  WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.ar_invoice  WHERE analytics_date='YYYY-MM-DD';
 
 -- Latest AP bills
-SELECT COUNT(*) FROM edl_analytics.ap_bill     WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.ap_bill     WHERE analytics_date='YYYY-MM-DD';
 ```
 
 ---
@@ -619,7 +631,7 @@ SQS FIFO queue ──► EdlPipelineTrigger Lambda (rate-limited) ──► Step
             Emits an end-to-end pipeline SLA metric (run start → analytics publish latency)
 ```
 
-**Entity type mapping:**
+**Entity type mapping** (`entity_resolution/entity_type_registry.py::ENTITY_ID_TO_TYPE`):
 
 | Source entity | Entity type |
 |---|---|
@@ -632,6 +644,17 @@ SQS FIFO queue ──► EdlPipelineTrigger Lambda (rate-limited) ──► Step
 | `sage-x3-supplier` | `supplier` |
 | `sage-intacct-arinvoice` | `ar_invoice` |
 | `sage-intacct-apbill` | `ap_bill` |
+| `salesforce-opportunity` | `opportunity` |
+| `salesforce-contract` | `sales-contract` |
+| `mysql-rds-contractterms` | `contract-term` |
+
+The last three rows are newly added (field mapping under `config/field_mappings/`, entity
+resolution config under `config/entity_resolution/`, and registry/seed-script wiring are all in
+place) but not yet seeded to any environment's DynamoDB — run `scripts/seed_entity_config.py`
+after reviewing the new records. `sales-contract` and `contract-term` are deliberately separate
+entity types rather than merged into `contract`: Salesforce Contract and MySQL RDS ContractTerms
+share no common key, so merging them would require a fuzzy match that risks combining unrelated
+records.
 
 ---
 
@@ -641,11 +664,21 @@ SQS FIFO queue ──► EdlPipelineTrigger Lambda (rate-limited) ──► Step
 
 2. **Terraform module apply order** — `module.iam` → `module.metadata_persistence` → (`module.lambda_pipeline` + `module.transformation_lambda` + `module.entity_resolution_lambda` + `module.analytics_publisher_lambda`) → `module.orchestration` → `module.control_plane` (needs `iam`, `orchestration`, *and* `metadata_persistence`). Orchestration and control_plane fail at plan time if any dependency's ARN is empty. See §9.
 
-3. **DynamoDB tables — unresolved doc/infra contradiction, verify before applying.** This doc previously said these tables are "NOT Terraform-managed... Terraform uses `data \"aws_dynamodb_table\"` lookups." That's contradicted by the actual code: `infrastructure/modules/metadata_persistence/main.tf` defines real `aws_dynamodb_table` *resource* blocks (with `prevent_destroy`) for `watermark_repository`, `run_audit_log`, `entity_extraction_config`, and `entity_type_registry` — and this predates the current round of changes (confirmed via `git log` on that file), so it's a pre-existing mismatch, not something newly broken. **Before running `terraform apply` in any environment**, run `terraform state list | grep dynamodb` to check whether these are already tracked in state. If they exist in AWS but aren't in state, `apply` will fail with "already exists"; if you're setting up a fresh environment, they may need to be created via Terraform directly rather than by hand as this doc used to instruct.
+3. **DynamoDB tables are all Terraform-managed** — `module.metadata_persistence` defines real `aws_dynamodb_table` resources for all five (`entity_extraction_config`, `entity_type_registry`, `run_audit_log`, `source_onboarding_registry`, `watermark_repository`). Don't create any of them by hand.
 
 4. **Raw layer bucket rejects IAM user writes** — `edl-raw-087972550871` policy allows writes only from `EdlExtractionRuntimeRole` (Lambda). Local scripts must use `--dry-run`. Full runs go through Step Functions.
 
 5. **Entity config `s3://` prefix required** — `target_raw_s3_prefix` and `schema_snapshot_s3_prefix` in entity configs must start with `s3://`. Bare paths fail Pydantic validation at runtime.
+
+6. **Lambda `environment.variables` can never set `AWS_REGION`** (or any other AWS-reserved key) — `CreateFunction`/`UpdateFunctionConfiguration` reject the whole request. Lambda injects it automatically — see `infrastructure/CLAUDE.md` for detail.
+
+7. **A queue's `visibility_timeout_seconds` must be ≥ the timeout of any Lambda consuming it via an event source mapping**, or `CreateEventSourceMapping` fails outright — see `infrastructure/CLAUDE.md`.
+
+8. **A one-attribute fix in one module can force spurious security-group/Lambda-permission replacement in every module that consumes its outputs** (Terraform defers `data.aws_region`/`data.aws_caller_identity`/`data.aws_vpc` reads to apply-time whenever their containing module "depends on a module with changes pending"). Land small unrelated fixes via `-target` first, then re-plan the full environment. See `infrastructure/CLAUDE.md` for the full mechanism.
+
+9. **Never assume an environment's AWS account is orphan-free just because nothing was "officially" deployed there.** A prior deployment torn down by deleting only the big, visible resources (not via `terraform destroy`) can leave SQS queues, Secrets Manager secrets, CloudWatch Logs query definitions, an X-Ray group, a Glue resource policy, or an EventBridge Scheduler group behind, blocking the next `apply` with `AlreadyExists` errors. Run an inventory sweep before assuming a clean slate — see `infrastructure/CLAUDE.md` for the exact commands.
+
+10. **`make lambda-package` is not byte-reproducible** (unpinned dependency ranges in `pyproject.toml`) — running it twice, or running `lambda-package` then `lambda-upload` as separate commands, can upload a different artifact than the one whose hash you copied. Always run `make lambda-deploy` as a single command, which updates all eight Lambda functions in one pass — see `infrastructure/CLAUDE.md`.
 
 6. **Salesforce `connector_params` must include `object_name`** — e.g. `{"object_name": "Account"}`. Missing this raises `ValueError` at runtime.
 

@@ -368,10 +368,12 @@ def render_metrics(prs, sd: dict):
            align=PP_ALIGN.CENTER, font=FB)
 
     tbl = sd.get("table")
+    table_bottom = Inches(6.35)  # default note position when no table is present
     if tbl:
-        hdrs    = tbl.get("headers", [])
-        rows    = tbl.get("rows",    [])
-        widths  = [float(w) for w in tbl.get("widths", [])]
+        hdrs     = tbl.get("headers", [])
+        rows     = tbl.get("rows",    [])
+        widths   = [float(w) for w in tbl.get("widths", [])]
+        row_h    = Inches(float(tbl.get("row_height", 0.44)))
         if not widths:
             nh = len(hdrs)
             widths = [float(CW.inches / nh)] * nh if nh else []
@@ -389,17 +391,20 @@ def render_metrics(prs, sd: dict):
                sz=Pt(11), bold=True, color=WHITE, font=FH)
 
         for ri, (row, bg) in enumerate(zip(rows, [WHITE, LIGHT_BG] * 50)):
-            rt = ht + Inches(0.36) + ri * Inches(0.44)
+            rt = ht + Inches(0.36) + ri * row_h
             for cell, cx, w in zip(row, col_xs, widths):
-                _box(s, cx, rt, Inches(w), Inches(0.42), fill=bg)
+                _box(s, cx, rt, Inches(w), row_h, fill=bg)
                 c = GREEN_OK if str(cell) == "✅" else TEXT
                 _t(s, str(cell), cx + Inches(0.07), rt + Inches(0.06),
-                   Inches(w) - Inches(0.1), Inches(0.34),
+                   Inches(w) - Inches(0.1), row_h - Inches(0.08),
                    sz=Pt(11), color=c, font=FB,
                    align=PP_ALIGN.CENTER if str(cell) == "✅" else PP_ALIGN.LEFT)
 
+        table_bottom = ht + Inches(0.36) + len(rows) * row_h
+
     if note := sd.get("note"):
-        _t(s, note, CX, Inches(6.35), CW, Inches(0.32),
+        note_y = table_bottom + Inches(0.1) if tbl else table_bottom
+        _t(s, note, CX, note_y, CW, Inches(0.32),
            sz=Pt(11), color=MUTED, font=FB)
 
     _sd_footer(s, sd)

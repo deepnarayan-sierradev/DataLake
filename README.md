@@ -2,7 +2,10 @@
 
 Metadata-driven, connector-based, multi-tenant-aware extraction platform built on AWS.
 
-**Status:** Dev environment live ✅ | Staging 🔲 | Production 🔲
+**Status:** Dev deployed and pipeline verified live ✅ | Staging 🔲 | Production 🔲 — Salesforce and
+MySQL RDS are connected with real data flowing end-to-end in dev; Sage Intacct, Sage X3, and
+NetSuite are code-complete but not yet connected. See
+[docs/PLATFORM_STATUS.md](docs/PLATFORM_STATUS.md) for the current, detailed state.
 
 If you're using Claude Code or another AI coding agent on this repo, it reads root `CLAUDE.md`
 automatically — that file, plus `infrastructure/CLAUDE.md` and `connector_runtime/CLAUDE.md`, are
@@ -48,19 +51,25 @@ account, so the secret path doesn't need to disambiguate environment within a si
 **Sage is the one exception** — it has an extra `{product_name}` segment because it has two
 distinct products (Intacct and X3) with separate credentials: `edl/sources/sage/{product_name}/credentials`.
 
-| Source | Secret ID | Status | Required JSON keys |
-|---|---|---|---|
-| Salesforce | `edl/sources/salesforce/credentials` | ✅ Connected | `instance_url`, `client_id`, `client_secret` |
-| MySQL RDS | `edl/sources/mysql-rds/credentials` | ✅ Connected | `host`, `port`, `username`, `password`, `database` |
-| Sage Intacct | `edl/sources/sage/intacct/credentials` | ✅ Connected | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
-| Sage X3 | `edl/sources/sage/x3/credentials` | ✅ Connected | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
-| NetSuite | `edl/sources/netsuite/credentials` | 🟡 Code-complete, not yet live — connector, auth client, and query planner are fully implemented (`connector_runtime/adapters/netsuite/`); confirm the secret is populated and entity config is schedule-enabled before assuming live extraction | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
+| Source | Secret ID | Status | Entities | Required JSON keys |
+|---|---|---|---|---|
+| Salesforce | `edl/sources/salesforce/credentials` | 🟡 Code-complete, not connected | Account, Contact, Contract, Opportunity | `instance_url`, `client_id`, `client_secret` |
+| MySQL RDS | `edl/sources/mysql-rds/credentials` | 🟡 Code-complete, not connected | Contracts, ContractTerms | `host`, `port`, `username`, `password`, `database` |
+| Sage Intacct | `edl/sources/sage/intacct/credentials` | 🟡 Code-complete, not connected | Customer, Vendor, AR Invoice, AP Bill | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
+| Sage X3 | `edl/sources/sage/x3/credentials` | 🟡 Code-complete, not connected | Customer, Supplier | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
+| NetSuite | `edl/sources/netsuite/credentials` | 🟡 Code-complete, not connected | Customer | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
 
 All five secrets above are Terraform-managed (`infrastructure/modules/secrets/main.tf` creates
 the empty secret shells with a resource policy restricting reads to the extraction runtime role)
-— you still need to populate the actual values by hand. See
+but none are populated in any environment yet — every source above is code-complete, not
+connected. See [docs/PLATFORM_STATUS.md](docs/PLATFORM_STATUS.md) for the current status and
 [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) for `aws secretsmanager put-secret-value`
 examples.
+
+Salesforce Contract, Salesforce Opportunity, and MySQL RDS ContractTerms are newly added entities
+(field mapping and entity-resolution config exist under `config/field_mappings/` and
+`config/entity_resolution/`) — configured in `scripts/seed_entity_config.py` but not yet seeded to
+any environment's DynamoDB table.
 
 ## Development Setup
 
@@ -91,9 +100,10 @@ pytest --cov --cov-fail-under=80
 
 # 5. Run linting and type checks
 ruff check .
-mypy connector_runtime schema_management watermark_management observability orchestration \
-     transformation governance entity_resolution analytics_publisher contracts
-# NOTE: bare `mypy .` currently fails for reasons unrelated to any given change — see the
+mypy -p connector_runtime -p transformation -p entity_resolution -p analytics_publisher \
+     -p orchestration -p observability -p watermark_management -p schema_management \
+     -p contracts -p governance
+# NOTE: bare `mypy .` fails for reasons unrelated to any given change — see the
 # caveat in "Running CI checks locally" below. Scope it as shown above instead.
 ```
 
@@ -104,18 +114,21 @@ mypy connector_runtime schema_management watermark_management observability orch
 ruff check . --output-format=github
 ruff format --check .
 
-# Type check — scope it; bare `mypy .` fails on a dist/lambda-build/typing_extensions.py
-# shadow conflict (present after `make lambda-package`) and a scripts/generate_presentation.py
-# vs. pptx/generate_presentation.py module-name collision. Neither is fixed yet, and
-# `make typecheck` has the same problem since it also just runs bare `mypy .`.
-mypy connector_runtime schema_management watermark_management observability orchestration \
-     transformation governance entity_resolution analytics_publisher contracts
+# Type check — bare `mypy .` fails on a dist/lambda-build/typing_extensions.py shadow
+# conflict (present after `make lambda-package`) and a scripts/generate_presentation.py
+# vs. pptx/generate_presentation.py module-name collision. `make typecheck` has the same
+# problem since it also just runs bare `mypy .`. CI itself runs the scoped form below —
+# it currently reports 75 pre-existing type errors (tracked debt, not a regression to fix
+# incidentally; see architecture/GAP_ANALYSIS_FINDINGS.md, OBS-6).
+mypy -p connector_runtime -p transformation -p entity_resolution -p analytics_publisher \
+     -p orchestration -p observability -p watermark_management -p schema_management \
+     -p contracts -p governance
 
 # Tests with coverage
 pytest --cov --cov-report=term-missing --cov-fail-under=80
 
 # Security scan
-bandit -r . -c pyproject.toml
+bandit -r . --exclude .venv,tests,dist -c pyproject.toml
 
 # Dependency CVE scan
 pip-audit

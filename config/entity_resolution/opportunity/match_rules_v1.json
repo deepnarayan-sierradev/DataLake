@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "Match rules for the opportunity entity type.",
+    "Current source: salesforce (Opportunity object) only.",
+    "",
+    "Single source with a stable system-assigned primary key (opportunity_id) —",
+    "deterministic exact matching on that key is sufficient. No probabilistic",
+    "fuzzy matching is needed.",
+    "",
+    "Blocking: RECORD_ID_PREFIX on opportunity_id keeps block sizes manageable",
+    "while preserving correctness for deterministic matching."
+  ],
+  "entity_type": "opportunity",
+  "rule_set_version": "v1",
+
+  "blocking": {
+    "key_type": "record_id_prefix",
+    "source_field": "opportunity_id",
+    "max_block_size": 500
+  },
+
+  "rules": [
+    {
+      "_comment": "Rule 1 — Deterministic: identical opportunity_id = same opportunity.",
+      "rule_id": "opportunity-id-exact",
+      "strategy": "deterministic",
+      "fields": [
+        { "field_name": "opportunity_id", "normalise": false }
+      ]
+    }
+  ]
+}

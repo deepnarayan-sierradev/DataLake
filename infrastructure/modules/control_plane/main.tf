@@ -210,7 +210,7 @@ resource "aws_lambda_function" "control_plane" {
   source_code_hash = var.lambda_package_source_hash
 
   handler = "connector_runtime.api.control_plane_handler.lambda_handler"
-  runtime = "python3.12"
+  runtime = "python3.13"
   # 29s: just under the HTTP API integration's hard 30s timeout cap.
   timeout     = 29
   memory_size = 512
@@ -224,7 +224,9 @@ resource "aws_lambda_function" "control_plane" {
       ENTITY_CONFIG_TABLE        = var.entity_config_table_name
       ENTITY_TYPE_REGISTRY_TABLE = var.entity_type_registry_table_name
       AUDIT_LOG_TABLE            = var.run_audit_log_table_name
-      AWS_REGION                 = data.aws_region.current.name
+      # AWS_REGION is a reserved Lambda environment variable injected
+      # automatically by the runtime — Lambda rejects CreateFunction/
+      # UpdateFunctionConfiguration if it's set explicitly here.
     }
   }
 

@@ -233,12 +233,16 @@ class TestComputeExtractionWindow:
         assert upper == _NOW
         assert lower == last_success - timedelta(hours=2)
 
-    def test_incremental_first_run_uses_extraction_window_days(self) -> None:
+    def test_incremental_first_run_backfills_from_epoch(self) -> None:
+        """First run for an entity with no watermark must pull full history,
+        not a window bounded by extraction_window_days (capped at 365 days —
+        a steady-state guardrail that would silently truncate older data on
+        a genuine first-time backfill)."""
         repo = WatermarkRepository.__new__(WatermarkRepository)
         config = _incremental_config()
         lower, upper = repo.compute_extraction_window(None, config, _NOW)
         assert upper == _NOW
-        assert lower == _NOW - timedelta(days=config.extraction_window_days)
+        assert lower == datetime(1970, 1, 1, tzinfo=UTC)
 
     def test_full_load_uses_extraction_window_days(self) -> None:
         repo = WatermarkRepository.__new__(WatermarkRepository)
@@ -353,7 +357,7 @@ class TestComputeExtractionWindowIsStatic:
         config = _incremental_config()
         lower, upper = WatermarkRepository.compute_extraction_window(None, config, _NOW)
         assert upper == _NOW
-        assert lower == _NOW - timedelta(days=config.extraction_window_days)
+        assert lower == datetime(1970, 1, 1, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------

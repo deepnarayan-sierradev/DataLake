@@ -3,7 +3,8 @@
 Consolidated notes from a walkthrough of the Enterprise Data Lake Platform: schedules, S3
 buckets, credentials, Glue's role, Lambda names, how data merges across layers, the full source
 table inventory, and the exact rules applied at each layer. See also
-[LOCAL_SETUP_PLAN.md](LOCAL_SETUP_PLAN.md) for local setup instructions and pipeline overview.
+[`docs/DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) — §4 "First-Time Setup" for local environment
+setup, §2 "Codebase Module Map" for a pipeline overview.
 
 ---
 
@@ -21,7 +22,10 @@ All pipelines run **once daily, staggered a few minutes apart between 02:00–03
 |---|---|---|
 | salesforce-account | `cron(0 2 * * ? *)` → 02:00 | Yes |
 | salesforce-contact | `cron(15 2 * * ? *)` → 02:15 | Yes |
+| salesforce-opportunity | `cron(20 2 * * ? *)` → 02:20 | Yes |
+| salesforce-contract | `cron(25 2 * * ? *)` → 02:25 | Yes |
 | mysql-rds-contracts | `cron(30 2 * * ? *)` → 02:30 | Yes |
+| mysql-rds-contractterms | `cron(35 2 * * ? *)` → 02:35 | Yes |
 | sage-intacct-customer | `cron(45 2 * * ? *)` → 02:45 | Yes |
 | sage-intacct-vendor | `cron(50 2 * * ? *)` → 02:50 | Yes |
 | sage-intacct-arinvoice | `cron(55 2 * * ? *)` → 02:55 | Yes |
@@ -29,6 +33,12 @@ All pipelines run **once daily, staggered a few minutes apart between 02:00–03
 | sage-intacct-apbill | `cron(5 3 * * ? *)` → 03:05 | Yes |
 | sage-x3-supplier | `cron(0 3 * * ? *)` → 03:00 | No (disabled) |
 | netsuite-customer | none | No (disabled) |
+
+Three new entities (`salesforce-opportunity`, `salesforce-contract`, `mysql-rds-contractterms`)
+were added to `scripts/seed_entity_config.py` since this section was last checked — all three are
+seeded enabled and scheduled. `sage-intacct-arinvoice` and `sage-x3-customer` still share the same
+02:55 cron slot (pre-existing, not newly introduced) — that's a real coincidence in the seed data,
+not a bug, since each entity's Step Functions execution is independent.
 
 **Where it lives in code** — schedules are **data in DynamoDB, not hardcoded in Terraform**:
 - Source of truth: `scripts/seed_entity_config.py` — a Python dict per entity with
@@ -134,6 +144,18 @@ metadata in the Glue Data Catalog so Athena can query the S3 Parquet files.
 - Table schema built from the PyArrow schema (Parquet/Snappy SerDe).
 - Partitions created explicitly via `glue_client.create_partition`/`update_partition` for
   each day's partition — **no crawler, no `MSCK REPAIR TABLE`.**
+
+**New since last check**: `infrastructure/modules/glue/main.tf` now provisions a *second* Glue
+database, `edl_curated` (plus matching Lake Formation `SELECT`/`DESCRIBE` grants), alongside the
+existing `edl_analytics`. This backs a curated-layer catalog-registration code path that's
+code-complete in `transformation/transformation_pipeline.py` (`_register_curated_catalog`, gated
+on `ctx.glue_catalog_database` / the `GLUE_CATALOG_DATABASE` env var). **It is not active in dev
+today**: `infrastructure/environments/dev/main.tf`'s `transformation_lambda` module block never
+sets `glue_catalog_database` (no default in `infrastructure/modules/transformation_lambda/variables.tf`
+means it defaults to `""`), so the env var is empty and the transformation Lambda skips catalog
+registration — curated Parquet is written to S3 but has no Glue table today, so it's not yet
+Athena-queryable. Wiring `glue_catalog_database = module.glue.curated_database_name` into that
+module block would turn it on.
 
 ---
 
@@ -245,6 +267,9 @@ Mapping lives in `entity_resolution/entity_type_registry.py` (`ENTITY_TYPE_SOURC
 | contract | MySQL RDS Contracts only |
 | ar_invoice | Sage Intacct AR Invoice only |
 | ap_bill | Sage Intacct AP Bill only |
+| opportunity | Salesforce Opportunity only |
+| sales-contract | Salesforce Contract only (kept as its own entity type rather than merged into `contract` — Salesforce Contract and MySQL RDS Contracts share no common key, so fuzzy-matching them risks combining unrelated records; see `entity_resolution/entity_type_registry.py`) |
+| contract-term | MySQL RDS ContractTerms only |
 
 ### Where the merge happens, by layer
 
@@ -303,9 +328,12 @@ from whichever source has it — ready to query via Athena with no joins or dedu
 
 | Source | Entity ID | Actual table/object queried | Load type | Active? | Scheduled? |
 |---|---|---|---|---|---|
-| Salesforce | salesforce-account | `Account` (SOQL object) | Full | Yes | Yes |
+| Salesforce | salesforce-account | `Account` (SOQL object) | Incremental (`SystemModstamp`) | Yes | Yes |
 | Salesforce | salesforce-contact | `Contact` (SOQL object) | Incremental (`SystemModstamp`) | Yes | Yes |
-| MySQL RDS | mysql-rds-contracts | `Contracts` table | Full | Yes | Yes |
+| Salesforce | salesforce-opportunity | `Opportunity` (SOQL object) | Incremental (`SystemModstamp`) | Yes | Yes |
+| Salesforce | salesforce-contract | `Contract` (SOQL object) | Incremental (`SystemModstamp`) | Yes | Yes |
+| MySQL RDS | mysql-rds-contracts | `Contracts` table | Incremental (`ModifiedOn`) | Yes | Yes |
+| MySQL RDS | mysql-rds-contractterms | `ContractTerms` table | Incremental (`ModifiedOn`) | Yes | Yes |
 | Sage Intacct | sage-intacct-customer | `accounts-receivable/customer` | Incremental | Yes | Yes |
 | Sage Intacct | sage-intacct-vendor | `accounts-payable/vendor` | Incremental | Yes | Yes |
 | Sage Intacct | sage-intacct-arinvoice | `accounts-receivable/invoice` | Incremental | Yes | Yes |
@@ -317,12 +345,20 @@ from whichever source has it — ready to query via Athena with no joins or dedu
 Source: `scripts/seed_entity_config.py`, cross-checked against each adapter's query builder
 (`connector_runtime/query_builders/`, `connector_runtime/adapters/{salesforce,mysql_rds,sage,netsuite}/`).
 
+**Correction**: `salesforce-account` and `mysql-rds-contracts` were previously listed here as
+`Full` load — that was stale. Both are configured `"load_type": "incremental"` in
+`scripts/seed_entity_config.py` today (watermarks `SystemModstamp` and `ModifiedOn` respectively).
+
 **Known issues found in this config**:
 - **NetSuite is broken as configured** — seeded with empty `connector_params: {}`, but
   `connector_runtime/adapters/netsuite/netsuite_connector.py` requires a `record_type` key and
   raises `ValueError` without it. Currently masked because the entity is `active: False`.
 - **Sage X3 Supplier is active but unscheduled** — `active: True` but `schedule_enabled: False`,
   so it only runs if someone manually triggers it; it never fires on cron.
+- **mysql-rds-contractterms's watermark/primary-key columns are assumed, not confirmed** — the
+  seed script's own comment flags that it reuses the `mysql-rds-contracts` convention
+  (`ModifiedOn`/`Id`) without having verified `ContractTerms` actually uses those column names;
+  adjust if the real table differs.
 
 ---
 
@@ -455,12 +491,11 @@ The golden layer merges data in three ways at once, not just one:
    `survivorship_version` (these are stripped before the Analytics layer, but are real columns
    in the golden/canonical layer).
 
-**Known issue found**: `config/entity_resolution/company/survivorship_v1.json` is currently
-**invalid JSON** — it contains two full copies of the policy object concatenated back-to-back
-(likely leftover from the commit that added Sage support), so `json.load()` fails with
-`Extra data: line 122 column 3`. Both copies define the same 14 `output_fields`, so the
-column-merge analysis above holds either way, but the file needs de-duplicating before it will
-actually load at runtime.
+**Known issue found — now RESOLVED**: `config/entity_resolution/company/survivorship_v1.json`
+previously contained two full copies of the policy object concatenated back-to-back (leftover
+from the commit that added Sage support), so `json.load()` failed with `Extra data: line 122
+column 3`. As of this check the file is valid JSON — a single copy of the same 14
+`output_fields` — so the column-merge analysis above holds and the file loads cleanly at runtime.
 
 ---
 
@@ -479,56 +514,66 @@ each doc — just the points worth actually saying out loud.
 - **The problem, in one line**: customer/financial data lived in Salesforce, MySQL, NetSuite
   (pending), Sage Intacct, and Sage X3 with no shared identity, 24–72 hour manual extraction
   delays, no audit trail, and credentials scattered in scripts.
-- **What was built**: a fully automated, security-first pipeline that extracts nightly, lands
-  data in three governed S3 layers, resolves the same customer/company across sources into one
-  golden record, masks PII automatically, and requires zero code changes to add a new source.
-- **Live today (dev, as of 2026-07-02)**: 34 company golden records, 49 person golden records,
-  35,971+ contract records — all real, all queryable in Athena right now, not a mockup.
-- **Before → after table** (good to screen-share): time to data 24–72h → 1–4h; customer
-  identity 3 disconnected views → 1 golden record; new source onboarding 2–4 weeks → 2–3 days
-  config-only; credential security scripts/.env → Secrets Manager (no automatic rotation wired
-  up yet — `rotation_lambda_arn` is unset for every source in
+- **What was built**: an automated pipeline that extracts on a schedule, lands data in three
+  governed S3 layers, resolves the same customer/company across sources into one golden record,
+  masks PII before curated/analytics, and adds a new source as configuration rather than new
+  connector code (for sources already onboarded via the generic connector pattern).
+- **Live today (dev, rebuilt from scratch and re-verified 2026-07-09)**: 34 Salesforce accounts
+  and 36,023 MySQL RDS contract rows — real, queryable in Athena right now, not a mockup. Sage
+  Intacct, Sage X3, and NetSuite are code-complete but have no populated credentials, so nothing
+  has run for them yet. Say "two of five sources live," not "the platform is live."
+- **Before → after table** (good to screen-share): time to data 24–72h → 1–4h (design target,
+  not yet measured under sustained load); customer identity 3 disconnected views → 1 golden
+  record; new source onboarding 2–4 weeks → 2–3 days config-only (for the already-onboarded
+  connector pattern); credential security scripts/.env → Secrets Manager (no automatic rotation
+  wired up yet — `rotation_lambda_arn` is unset for every source in
   `infrastructure/modules/secrets/main.tf`; the current mitigation is a daily
   `credential_expiry_notifier` Lambda that sends an SNS alert when a secret is stale, not
   automatic rotation).
-- **Status honesty**: Dev ✅ complete, Staging 🔲 not started, Production 🔲 pending staging
-  sign-off — say this plainly, don't oversell readiness.
+- **Status honesty**: Dev deployed and pipeline-verified for 2 of 5 sources; Staging 🔲 not
+  provisioned; Production 🔲 pending staging — say this plainly, don't oversell readiness.
 
 ### `docs/FAQ_FOR_MANAGEMENT.md`
-- **"Why not just buy Fivetran?"** — SaaS is $3K–$5K/month *per source*; this platform is
-  ~$700/month total infrastructure regardless of source count, plus full customization and no
-  vendor lock-in (raw Parquet + versioned JSON configs are portable).
-- **"What happens if extraction breaks?"** — alerts within 60s, 3 automatic retries, previous
-  day's clean data never disappears, DLQ replay for anything that still fails. Worst case is
-  day-old data, never "no data."
+- **"Why not just buy Fivetran?"** — SaaS list pricing runs $3K–$5K/month *per source* by public
+  vendor pricing pages; this platform is an estimated ~$770–800/month total infrastructure
+  regardless of source count (not independently benchmarked), plus no vendor lock-in (raw
+  Parquet + versioned JSON configs are portable).
+- **"What happens if extraction breaks?"** — designed for alerts + automatic retries + DLQ
+  replay so previous clean data never disappears and worst case is day-old data — this is the
+  design intent, not yet proven under a real production incident.
 - **"Are we secure / PII-safe?"** — raw layer is access-controlled and unmasked; PII is masked
   before it ever reaches curated/analytics; all credentials live only in Secrets Manager, never
-  logged; every AWS call goes over VPC endpoints, no public internet.
+  logged. Source connections currently traverse the **public internet via the dev NAT Gateway**,
+  not a private VPC endpoint — don't claim "no public internet" (see `SEC-2` in
+  `architecture/GAP_ANALYSIS_FINDINGS.md`).
 - **"What if source schema changes?"** — non-breaking changes (new optional field) flow through
   automatically; breaking changes (field removed/retyped) halt only the transformation stage
   and alert — raw data is never lost, so nothing needs to be re-extracted from the source.
-- Good one to have ready if someone tries to poke holes: the six-gate source-onboarding process
-  (SOURCE_REGISTRATION → CREDENTIAL_REGISTRATION → ENTITY_MAPPING → EXTRACTION_PROFILE →
-  SECURITY_GOVERNANCE → ACCEPTANCE_VALIDATION) — nothing skips review.
+- The "six-gate" source-onboarding process (SOURCE_REGISTRATION → CREDENTIAL_REGISTRATION →
+  ENTITY_MAPPING → EXTRACTION_PROFILE → SECURITY_GOVERNANCE → ACCEPTANCE_VALIDATION) is a
+  documented checklist concept today, not yet wired into the control-plane API as an enforced
+  workflow — say "planned gate," not "nothing skips review."
 
 ### `docs/COST_ANALYSIS_AND_ROI.md`
-- **AWS infra cost**: ~$699/month (or ~$654 without NAT Gateway) at current dev-scale volumes.
-- **Year 1 ROI: 107%**, break-even month 2–3. **Ongoing (Year 2+) ROI: 336%**.
-- **Build vs. buy vs. this platform**: commercial SaaS ≈ $36K/yr and locks you to vendor
-  roadmap; in-house build ≈ $330K/yr (2 FTE) and takes 6–9 months to first extract; this
-  platform ≈ $41K Year 1 all-in, live in under 2 weeks.
-- **Sensitivity check**: doubling extraction volume only adds ~$170/month; adding 10 more
-  sources still leaves >290% annual ROI — the cost curve is flat relative to source count.
+- **AWS infra cost**: ~$770–800/month estimate at current dev-scale volumes — flagged as needing
+  a fresh AWS Pricing Calculator check, not an observed bill (staging/prod don't exist yet).
+  NAT Gateway is required (Salesforce/NetSuite/Sage are internet APIs), not optional.
+- **ROI figures are a planning projection**, not a measured result — no pilot tenant has run at
+  scale yet. Present them as "the model says," not "we achieved."
+- **Build vs. buy vs. this platform**: directional comparison only; commercial SaaS list pricing
+  vs. an in-house build estimate vs. this platform's estimated infra cost — say clearly none of
+  these are measured outcomes yet.
 
 ### `docs/PLATFORM_STATUS.md` (exact values to actually show on screen)
 - Athena: database `edl_analytics`, workgroup `EdlAnalytics` — always filter queries
   by the latest `analytics_date` shown in this doc.
-- Live tables: `edl_analytics.company` (34 rows), `.person` (49 rows), `.contract`
-  (35,971+ rows, filter `is_deleted = false` for the honest active count).
-- Connected sources today: Salesforce ✅, MySQL RDS ✅, Sage Intacct ✅, Sage X3 ✅ (customer
-  active; supplier active but its schedule is disabled). NetSuite's connector is code-complete
-  (🟡, not yet confirmed live) — mention it as "code complete, activation pending," not "broken"
-  or "not started."
+- Live tables today: `edl_analytics.company` (34 rows, from Salesforce accounts). MySQL RDS
+  contract data (36,023 rows) is verified extracted and transformed — confirm the exact
+  `edl_analytics` table name for contracts against `docs/PLATFORM_STATUS.md` before quoting it
+  on screen, since entity-type-to-table naming should be double-checked live.
+- Connected sources today: Salesforce ✅, MySQL RDS ✅. Sage Intacct 🟡, Sage X3 🟡, NetSuite 🟡 —
+  all three are code-complete but have no populated credentials; say "code-complete, not yet
+  connected," not "active."
 
 ### `docs/PIPELINE_FLOW.md` + `docs/GLOSSARY_AND_TERMINOLOGY.md`
 - Plain-language flow: **Extract → Raw (immutable) → Transform/mask → Curated → Match/merge →
@@ -629,29 +674,33 @@ merge (dedupe), a column merge (union of fields across sources), and new pipelin
 (`golden_id`, `field_provenance`) all in one step.
 
 ### Step 7 — Close with the numbers (business)
-From `docs/COST_ANALYSIS_AND_ROI.md`: ~$699/month AWS cost, 107% Year 1 ROI, break-even in
-month 2–3, 336% ongoing ROI. From `docs/LEADERSHIP_BRIEF.md`: Dev ✅ complete, Staging next,
-NetSuite/Sage onboarding are configuration-only additions from here.
+From `docs/COST_ANALYSIS_AND_ROI.md`: ~$770–$800/month estimated AWS cost for dev; ROI figures
+there are a planning projection, not a measured result (no pilot tenant has run at scale yet).
+From `docs/LEADERSHIP_BRIEF.md`: Dev deployed and pipeline-verified for 2 of 5 sources
+(Salesforce, MySQL RDS); Staging/Production not yet provisioned; Sage/NetSuite are code-complete
+but not yet connected.
 
 ### Step 8 — Pre-empt the likely objections
 Have these three ready from `docs/FAQ_FOR_MANAGEMENT.md`:
-1. "Why not buy a SaaS tool?" → $3K–$5K/month *per source* vs. ~$700/month flat, plus no
-   vendor lock-in (raw data + configs are portable Parquet/JSON).
-2. "What if it breaks?" → automatic retry, alerting within 60s, previous data never disappears,
-   worst case is day-old data.
+1. "Why not buy a SaaS tool?" → directional cost comparison only (not independently benchmarked),
+   plus no vendor lock-in (raw data + configs are portable Parquet/JSON).
+2. "What if it breaks?" → automatic retry, alerting, previous data never disappears, worst case
+   is day-old data — this is the design intent, not yet proven under a real production incident.
 3. "Is our data secure?" → PII masked before curated/analytics, credentials only in Secrets
-   Manager, everything over private VPC endpoints, zero data breaches in production history.
+   Manager. Source connections currently traverse the public internet via the dev NAT Gateway
+   (not a private VPC endpoint) — see `SEC-2` in `architecture/GAP_ANALYSIS_FINDINGS.md`. No
+   production track record exists yet to make any breach claim, positive or negative.
 
 ---
 
-## 13. From `LOCAL_SETUP_PLAN.md` §1–3 — cross-referenced into this file
+## 13. Quick orientation — condensed platform overview
 
-`LOCAL_SETUP_PLAN.md` §1–3 give the shortest possible orientation to the platform (what it
-is, the 16-stage pipeline, and the 13 AWS services touched). Reproduced here standalone
-(§13.1–13.3) and each point tagged with `→ §N` pointing at the section in *this* file that
-already covers it in depth — use the tag to jump straight to the detailed answer.
+The shortest possible orientation to the platform (what it is, the 16-stage pipeline, and the 13
+AWS services touched), condensed from the rest of this file. Each point is tagged with `→ §N`
+pointing at the section in *this* file that already covers it in depth — use the tag to jump
+straight to the detailed answer.
 
-### 13.1 What this codebase is *(from LOCAL_SETUP_PLAN.md §1)*
+### 13.1 What this codebase is
 
 A **metadata-driven, connector-based AWS data lake / ETL platform**. It pulls data from
 source systems (Salesforce, MySQL RDS, Sage Intacct/X3, NetSuite — code-complete, activation
@@ -673,7 +722,7 @@ that's the "metadata-driven" part.
   `docs/PIPELINE_FLOW.md`) — **see §11** doc-by-doc talking points for what's actually
   demo-relevant in each.
 
-### 13.2 The pipeline, stage by stage *(from LOCAL_SETUP_PLAN.md §2 — 16 stages)*
+### 13.2 The pipeline, stage by stage (16 stages)
 
 Each numbered stage below is a real AWS-backed step, run in this order, with a pointer to
 where it's covered in more depth elsewhere in this file:
@@ -720,7 +769,7 @@ where it's covered in more depth elsewhere in this file:
 
 Infra for all of this is defined in **Terraform** (not CDK/SAM) under `infrastructure/`.
 
-### 13.3 AWS services used, in the order you'll touch them *(from LOCAL_SETUP_PLAN.md §3)*
+### 13.3 AWS services used, in the order you'll touch them
 
 | # | Service | Role | Cross-reference in this file |
 |---|---------|------|-------------------------------|

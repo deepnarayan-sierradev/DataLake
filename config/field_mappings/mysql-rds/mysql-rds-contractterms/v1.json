@@ -1,0 +1,85 @@
+{
+  "source_id": "mysql-rds",
+  "entity_id": "mysql-rds-contractterms",
+  "mapping_version": "v1",
+  "rules": [
+    {
+      "source_fields": ["Id"],
+      "canonical_field": "contract_term_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["ContractId"],
+      "canonical_field": "contract_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "raise_error"
+    },
+    {
+      "source_fields": ["TenantId"],
+      "canonical_field": "tenant_id",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": ["TermType"],
+      "canonical_field": "term_type",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": ["TermValue"],
+      "canonical_field": "term_value",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": ["IsDelete"],
+      "canonical_field": "is_deleted",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": ["CreatedBy"],
+      "canonical_field": "created_by",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": ["CreatedOn"],
+      "canonical_field": "created_at",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": ["ModifiedBy"],
+      "canonical_field": "modified_by",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    },
+    {
+      "source_fields": ["ModifiedOn"],
+      "canonical_field": "updated_at",
+      "transformation": "rename",
+      "transformation_params": {},
+      "missing_field_behavior": "use_default",
+      "default_value": null
+    }
+  ]
+}

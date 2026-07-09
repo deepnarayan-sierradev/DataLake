@@ -2,7 +2,7 @@
 
 **For:** All stakeholders  
 **Purpose:** Define technical and business terms used throughout documentation  
-**Last updated:** 2026-06-29
+**Last updated:** 2026-07-09
 
 ---
 
@@ -102,12 +102,70 @@ Platform matches them → creates one "golden record" with:
 
 ---
 
+### Survivorship (Rules)
+The rules that decide which source "wins" when two or more systems disagree on the value of a
+field for the same golden record (e.g., Salesforce says one phone number, NetSuite says another —
+survivorship picks one).
+
+**Strategies actually implemented** (`entity_resolution/canonical_record_publisher/`, config
+example: `config/entity_resolution/company/survivorship_v1.json`):
+- **`source_priority`** — an explicit, ranked list of trusted sources per field (e.g. trust the
+  ERP over the CRM for a legal company name, but trust the CRM over the ERP for annual revenue).
+- **`most_recent`** — whichever source last updated the field wins.
+- **`longest`** — the longest non-null string wins (useful for free-text fields where more detail
+  usually means a better value).
+- **`first_non_null`** — the default catch-all: take whatever value is present, in source order.
+
+Survivorship is entity-type-specific — `company`, `person`, `supplier`, and the newer
+`opportunity` / `sales-contract` / `contract-term` entity types each have their own
+`survivorship_v1.json`, since the "right" source to trust for a field differs per entity type.
+
+---
+
 ### Entity Resolution
 The process of identifying and matching the same real-world entity (person, company, product) across multiple source systems.
 
 **Methods:**
 - **Deterministic:** Exact match (e.g., SSN matches exactly → same person)
 - **Probabilistic:** Score-based match (e.g., name similarity > 95% + address match → likely same person)
+
+---
+
+### Tenant / Tenant Code
+A **tenant** is a customer or business unit whose data is kept logically separate within the
+shared platform, even though everyone runs on the same AWS infrastructure. **`tenant_code`** is
+the short, validated slug identifier for a tenant (lowercase letters/digits/hyphens, 2–48 chars,
+e.g. `"acme-corp"`, `"demo"`) — defined once in `contracts/identifier_policy.py` and reused
+everywhere so the validation rule never drifts between modules.
+
+**Tenant-scoped key**: every tenant-owned record's DynamoDB partition key and S3 key prefix is
+built by prepending `tenant_code`, via `tenant_scoped_key()` (`f"{tenant_code}#{key}"`) or an
+equivalent S3 prefix — so two tenants' records can never collide or be read across the tenant
+boundary by accident. This applies uniformly, including to the single-tenant default
+(`tenant_code = "demo"`) — there is no special "no tenant" case.
+
+**Isolation status (as of 2026-07-09)** — not every table is IAM-enforced yet:
+- Genuinely isolated at the key/prefix level: S3 object prefixes, the entity-type registry table,
+  and the watermark repository table.
+- Isolated only by an application-level guard, not yet by IAM/key structure: the
+  entity-extraction-config table (fails closed on a mismatch, so this is a 409 conflict risk on
+  onboarding, not a data-leak risk).
+- Connector credentials are **not tenant-scoped at all today** — every tenant using a given
+  source-connector type currently shares one Secrets Manager credential set. This is a tracked,
+  known gap (covered by a skipped placeholder test in `tests/test_tenant_isolation.py`), not an
+  oversight to silently patch over.
+
+---
+
+### Control Plane
+A Cognito-authenticated REST API (Lambda `EdlControlPlane`,
+`connector_runtime/api/control_plane_handler.py`) that lets a tenant self-service provision itself
+— register a new tenant, onboard a source — instead of a platform engineer manually editing
+DynamoDB records or running Terraform by hand. Built on Amazon Cognito (user pool + JWT
+authorizer) in front of an HTTP API Gateway.
+
+**Status**: code-complete but **not yet verified against a live AWS deployment** — treat as
+"built, not yet demoed" rather than production-proven.
 
 ---
 
@@ -298,7 +356,10 @@ Hardware-backed encryption key management.
 - **Quality:** Only records passing quality checks
 - **Partition:** source → entity → extraction_date → run_id
 
-**Data is here:** Ready for BI queries, but organized per source. (E.g., separate `curated.salesforce_customer` from `curated.netsuite_customer`).
+**Data is here:** Organized per source and structurally ready for BI queries — though as of
+2026-07-09 the Glue table registration for this layer is code-complete but not yet turned on in
+the dev deployment, so it isn't Athena-queryable there today (see the Analytics Layer below, which
+is registered and queryable).
 
 ---
 
@@ -375,6 +436,23 @@ No extraction can begin without all 6 gates passed.
 
 ---
 
+### Connector Certification (Gate)
+An automated, code-level self-check (`connector_runtime/certification/connector_certification_checklist.py`,
+`ConnectorCertificationChecklist`) that a new source-connector class must pass before it can be
+registered in the connector registry. It performs static analysis only (no live API calls):
+- All required `ConnectorInterface` methods are actually implemented, not left as stubs.
+- No method reads credentials from `os.environ`/`os.getenv` — they must come from the injected
+  Secrets Manager client (OWASP A07).
+- The connector's `source_id` and class name follow the platform's naming rules (no banned
+  generic identifiers like `Helper`/`Util`/`Manager`).
+
+**Not the same as Source Onboarding** (above): Source Onboarding is the 6-gate *business/security*
+sign-off process for bringing a new source online; connector certification is a narrower,
+automated check that the connector *code itself* is correctly implemented. A connector can pass
+certification and still need to go through Source Onboarding before it's allowed to run.
+
+---
+
 ### Audit Trail
 Immutable record of every extraction, transformation, and data access.
 
@@ -433,7 +511,9 @@ Quick-reference definitions for every tool and service used in the platform.
 | **Intelligent-Tiering** | S3 Intelligent-Tiering | Auto-moves analytics data to cheaper storage after 90 days of inactivity |
 | **DynamoDB** | Amazon DynamoDB | NoSQL database for config, watermark state, audit log, entity-type registry, onboarding records (5 tables) |
 | **Secrets Manager** | AWS Secrets Manager | Secure credential store; daily expiry-check alerting via a dedicated Lambda (auto-rotation planned, not yet implemented); never in code or logs |
-| **Glue Catalog** | AWS Glue Data Catalog | Metadata registry for curated and analytics tables |
+| **Cognito** | Amazon Cognito | User pool + JWT authorizer securing the self-service tenant control-plane API (code-complete, not yet verified live) |
+| **Glue Catalog** | AWS Glue Data Catalog | Metadata registry for the analytics layer (live); a second `edl_curated` database and curated-layer registration code path also exist but aren't wired on in dev yet |
+| **DuckDB** | DuckDB | In-process SQL engine used for curated-layer merges inside the transformation Lambda |
 | **Athena** | Amazon Athena | Serverless SQL query engine over S3 Parquet files |
 | **RDS** | Amazon Relational Database Service (MySQL 8) | Serving store for operational apps and low-latency reads |
 | **SQS** | Amazon Simple Queue Service | Dead-Letter Queue for failed pipeline runs; KMS-encrypted |
@@ -482,6 +562,6 @@ Quick-reference definitions for every tool and service used in the platform.
 
 ---
 
-**Last updated:** 2026-06-29  
+**Last updated:** 2026-07-09  
 **Owner:** Data Platform Team
 

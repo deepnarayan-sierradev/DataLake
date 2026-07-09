@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "Survivorship policy for the opportunity entity type.",
+    "Current source: salesforce (Opportunity object) only.",
+    "",
+    "Single source — this is a direct pass-through. default_strategy",
+    "first_non_null handles any occasional null field within a record set.",
+    "",
+    "output_fields defines the canonical opportunity schema exposed to",
+    "BI/analytics. Only these fields appear in the analytics-layer Parquet.",
+    "System fields (golden_id, contributing_source_records, survivorship_version,",
+    "match_run_id) are always added by the publisher regardless of this list."
+  ],
+  "entity_type": "opportunity",
+  "policy_version": "v1",
+
+  "output_fields": [
+    "opportunity_id",
+    "opportunity_name",
+    "account_id",
+    "amount",
+    "stage",
+    "probability",
+    "close_date",
+    "opportunity_type",
+    "lead_source",
+    "is_closed",
+    "is_won",
+    "owner_id",
+    "created_at",
+    "updated_at"
+  ],
+
+  "default_strategy": "first_non_null",
+
+  "attribute_rules": [
+    {
+      "_comment": "Primary key — always from salesforce, never null (raise_error in field mapping).",
+      "canonical_field": "opportunity_id",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce"]
+    },
+    {
+      "canonical_field": "opportunity_name",
+      "strategy": "source_priority",
+      "source_priority": ["salesforce"]
+    },
+    {
+      "canonical_field": "updated_at",
+      "strategy": "most_recent",
+      "timestamp_field": "updated_at"
+    }
+  ]
+}

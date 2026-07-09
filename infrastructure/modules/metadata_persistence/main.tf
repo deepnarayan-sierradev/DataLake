@@ -263,7 +263,9 @@ resource "aws_sqs_queue" "extraction_failure_dlq" {
   kms_master_key_id                 = var.database_kms_key_arn
   kms_data_key_reuse_period_seconds = 300
 
-  visibility_timeout_seconds = 30
+  # Must exceed the DLQ processor Lambda's timeout (60s, orchestration module)
+  # or CreateEventSourceMapping is rejected; sized with margin for retries.
+  visibility_timeout_seconds = 300
 
   tags = merge(local.common_tags, {
     Name    = "EdlExtractionFailureDlq"

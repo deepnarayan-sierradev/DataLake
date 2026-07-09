@@ -2,7 +2,16 @@
 
 **For:** All stakeholder levels  
 **Format:** Q&A reference  
-**Last updated:** 2026-06-29
+**Last updated:** 2026-07-09 (revised — see status note below; originally 2026-06-29)
+
+> **Current status, plainly stated:** Only the `dev` AWS environment is deployed (rebuilt from
+> scratch on 2026-07-09). Staging and Production have no AWS account and are not deployed. Of five
+> planned source connectors, two — Salesforce and MySQL RDS — are connected with real credentials
+> and have run end-to-end (34 Salesforce accounts, 36,023 MySQL RDS rows, both queryable today).
+> Sage Intacct, Sage X3, and NetSuite are code-complete but have no credentials populated, so
+> nothing has run for them. No pilot tenant has been onboarded, and the platform has not been
+> tested at production scale. Several answers below were revised from an earlier, more optimistic
+> version of this document to reflect that reality.
 
 ---
 
@@ -10,46 +19,58 @@
 
 ### Q: "How is this different from just buying a SaaS data integration tool?"
 
-**A:** Our platform gives you what commercial tools can't:
+**A:** The architectural trade-offs are real, but treat the numbers below as directional
+estimates, not settled facts — none of this has been benchmarked against a live SaaS-tool
+alternative for our specific sources.
 
 | Aspect | SaaS Tools (Fivetran, etc.) | This Platform |
 |---|---|---|
 | **Flexibility** | Fixed connectors; can't customize | Full source code; customize everything |
-| **Cost scaling** | $3K–$5K per source | $700/month AWS + staff (flat cost for many sources) |
-| **Compliance customization** | Limited to vendor's roadmap | Your PII rules, your retention, your audit trail |
+| **Cost scaling** | ~$3K–$5K per source (industry-general figure, not a quote we've obtained) | ~$770–$800/month AWS (corrected estimate for 5 sources at assumed production volume — see `COST_ANALYSIS_AND_ROI.md`; not an observed bill) + staff |
+| **Compliance customization** | Limited to vendor's roadmap | Our PII rules, retention, and audit trail — implemented in code, not yet independently audited |
 | **Lock-in risk** | High (vendor-dependent) | Low (open infrastructure, version-controlled code) |
-| **Onboarding time** | 3–5 days (per source) | 2–3 days configuration-only; zero code |
-| **Suitable for** | High-confidence, low-customization | High-compliance, complex transformations, rapid scaling |
+| **Onboarding time** | 3–5 days (per source), industry-general estimate | New source connector: code-complete for Salesforce/NetSuite/MySQL RDS/Sage Intacct/Sage X3 today. Turning on a new *instance* of an existing connector is configuration-only. Onboarding is currently a manual, config-file-driven process — the automated self-service control-plane API exists in code but its end-to-end request flow hasn't been exercised against a live deployment yet |
+| **Suitable for** | High-confidence, low-customization | High-compliance, complex transformations, rapid scaling — once validated by a pilot tenant |
 
-**Bottom line:** For your use case (Salesforce + NetSuite + MySQL + Sage Intacct + Sage X3 with strict compliance), this platform is **10–15× more cost-effective** long-term.
+**Bottom line:** The cost/flexibility trade-off favors this platform on paper for our use case
+(Salesforce, NetSuite, MySQL RDS, Sage Intacct, Sage X3, with compliance requirements) — but we
+have not yet run a pilot tenant to confirm the projected savings hold up in practice. Avoid citing
+a specific multiplier (e.g. "10x cheaper") until that's measured.
 
 ---
 
 ### Q: "Can we still switch to a SaaS tool later if we want?"
 
-**A:** Yes, with one caveat:
+**A:** Yes, by design:
 
-- **Raw data** in S3 is portable (standard Parquet format; no vendor lock-in)
+- **Raw data** in S3 is Parquet (an open, standard columnar format; no vendor lock-in)
 - **Transformation rules** are version-controlled JSON files (portable)
-- **Entity resolution configs** are declarative YAML (portable)
-- The only non-portable layer is Lambda code (Python), but that's <5% of the value
+- **Entity resolution configs** are declarative JSON (portable)
+- The non-portable layer is the Lambda code (Python) itself
 
-**Switching cost** if you wanted to migrate away: ~$10K–$15K (data export + mapping transfer), which would break even after 5–6 months on a SaaS tool anyway.
-
-**Realistically?** Once you experience 1–4 hour data freshness vs. days, and zero code changes to add sources, you won't want to switch.
+**Switching cost** if you wanted to migrate away: not yet estimated with any real data point — the
+platform hasn't been in use long enough, or at enough scale, to size a realistic migration effort.
+Treat any dollar figure here as a guess until we've run it once.
 
 ---
 
 ### Q: "What happens if we acquire another company with different data systems?"
 
-**A:** This platform scales to that automatically:
+**A:** The architecture is designed to make this easier, with real caveats:
 
-- **New source system?** Add one more connector config (2–3 days setup, zero code change)
-- **Governance rules?** Update the PII classification policy and entity resolution config (no deployment)
-- **Data volume?** Infrastructure auto-scales; no new infrastructure procurement needed
-- **Timeline to integrated data?** 4 days total (vs. 2–4 weeks with manual scripts)
+- **New instance of an existing connector** (another Salesforce org, another MySQL database) —
+  configuration-only, no code change, once the pattern above is validated by a pilot tenant
+- **A genuinely new source system** (e.g., Dynamics 365, HubSpot) — **no connector exists today.**
+  Only Salesforce, NetSuite, MySQL RDS, Sage Intacct, and Sage X3 connectors are built
+  (`connector_runtime/adapters/`). Adding a new source system means building a new connector
+  following the existing pattern (the `/new-connector` scaffold in this repo) — real engineering
+  work, not a config change.
+- **Governance rules?** Update the PII classification policy and entity resolution config
+- **Data volume?** Infrastructure is designed to scale, but this has not been load-tested at
+  target production scale yet
 
-We're already designed for Dynamics 365, HubSpot, and PostgreSQL addition — just waiting on business prioritization.
+We do not have a committed connector for Dynamics 365, HubSpot, or PostgreSQL today — that would
+need to be scoped and built if prioritized.
 
 ---
 
@@ -57,47 +78,61 @@ We're already designed for Dynamics 365, HubSpot, and PostgreSQL addition — ju
 
 ### Q: "What happens if the extraction breaks? How long until data is stale?"
 
-**A:** Multi-layered safety:
+**A:** The failure-handling design has several real layers, though none of it has been exercised
+under a real production failure yet (dev has run cleanly so far):
 
-1. **Real-time alerts** → Ops team notified within 60 seconds of failure
-2. **Automatic retry** → 3 attempts with exponential backoff (handles 95% of transient failures)
-3. **Previous data not deleted** → Even if extraction fails today, last night's clean data is still available for reporting
-4. **Dead-Letter Queue** → Failed runs queued for manual replay; never lost
-5. **SLO target** → 99.5% of runs complete (only 1–2 failures per quarter)
+1. **Alerts** → An SNS-based alert fires on failure (credential-expiry checks run daily today; a
+   broader real-time failure alert path exists in the architecture but its response-time SLA has
+   not been measured against a real incident)
+2. **Automatic retry** → Exponential-backoff retry logic exists in the Step Functions workflow
+3. **Previous data not deleted** → Raw data is written once per run and never overwritten, so a
+   failed run doesn't destroy the prior day's clean data
+4. **Dead-Letter Queue** → Failed runs land in `EdlExtractionFailureDlq`; `EdlDlqProcessor` writes
+   an audit record and sends an SNS alert, with optional auto-replay (off by default)
+5. **SLO target** → 99.5% run-completion is a target we've set, not a measured historical rate —
+   dev hasn't run long enough or at enough volume to report a real number
 
-**Worst-case scenario:** Day-old data used for reporting (still 10× fresher than before). You're never in a situation where there's "no data."
+**Worst-case scenario, by design:** stale (not lost) data — last successful run's output remains
+available. This has not been tested under a simulated real failure yet.
 
 ---
 
 ### Q: "Are we secure? What about PII exposure?"
 
-**A:** Security-first architecture:
+**A:** The security controls below are implemented in code and exercised by automated tests, but
+**this platform has no production track record** — only the `dev` environment exists, it was
+rebuilt from scratch on 2026-07-09, and no external security or compliance audit has been
+performed against it.
 
-| Layer | Control |
-|---|---|
-| **Raw data** | Locked in private S3 with encryption; only extraction team can read |
-| **Credentials** | AWS Secrets Manager; daily automated expiry check alerts the platform team via SNS if rotation is overdue (automatic rotation is a planned follow-up, not yet implemented); never logged |
-| **Transformation** | PII identified & masked before curated data is created |
-| **Analytics** | No PII reaches analytics layer; masked version only |
-| **Network** | All AWS service calls via VPC endpoints (no internet exposure) |
-| **Audit** | Every read/write logged; immutable audit trail in DynamoDB |
-| **Compliance** | Automated lineage = audit-ready (GDPR, SOC 2, HIPAA-eligible) |
+| Layer | Control | Status |
+|---|---|---|
+| **Raw data** | Private S3 with KMS encryption; bucket policies block public access | Implemented, in Terraform |
+| **Credentials** | AWS Secrets Manager; daily automated expiry check alerts via SNS if rotation is overdue (automatic rotation is a planned follow-up, not yet implemented); never logged | Implemented |
+| **Transformation** | PII identified & masked before curated data is created | Implemented, covered by tests |
+| **Analytics** | Masked version only reaches the analytics layer | Implemented |
+| **Network** | AWS-internal service calls (S3, DynamoDB, etc.) go through private VPC endpoints; **however**, Salesforce/NetSuite/Sage are internet-hosted SaaS APIs reached via a NAT Gateway's public IP, not a private tunnel — see the connectivity question below | Implemented, but not "no internet exposure" as previously stated |
+| **Audit** | Every pipeline run logged to an immutable DynamoDB audit table | Implemented |
+| **Tenant isolation** | S3 prefixes and most DynamoDB tables are tenant-scoped; two tables (`entity-extraction-config`) still rely on an application-level guard rather than IAM enforcement, and the S3 bucket-policy tenant-prefix condition isn't turned on yet — tracked as `SEC-2`/`ARCH-12` in `architecture/GAP_ANALYSIS_FINDINGS.md` | Partially implemented |
+| **Compliance** | Automated lineage recording exists and is designed to support GDPR/SOC 2/HIPAA audits | Implemented in code; **no external compliance audit has actually been performed** |
 
-**Real data:** Platform has zero data breaches or PII exposures in 12 months of production use at scale.
+**Track record:** None yet to report — the platform has not run in production. Avoid citing an
+uptime or breach-free track record until one actually exists.
 
 ---
 
 ### Q: "What if there's a schema change in the source (e.g., Salesforce adds a new field)?"
 
-**A:** Platform handles it gracefully:
+**A:** The platform's drift-detection design distinguishes breaking from non-breaking changes:
 
-1. **New optional field added** → Raw data captures it; transformation continues; analytics notified (non-breaking)
-2. **Field length reduced** → Alert sent for manual review; transformation proceeds with caution (potentially breaking)
-3. **Field removed** → Raw data captured before removal; transformation blocks; alert escalated (breaking)
+1. **New optional field added** → Raw data captures it; transformation continues (non-breaking)
+2. **Field length reduced** → Flagged for review (potentially breaking)
+3. **Field removed** → Drift detected; transformation blocks; alert escalated (breaking)
 
-**No downtime.** No manual intervention needed for non-breaking changes. You choose whether to include the new field in analytics or leave it out.
+This logic exists in code and is covered by tests, but has not yet been triggered by a real schema
+change from a live source in dev.
 
-**Comparison:** With manual scripts, you discover schema changes when the script crashes at 3 AM.
+**Comparison:** With hand-written scripts, schema changes are typically discovered when the script
+crashes.
 
 ---
 
@@ -107,38 +142,49 @@ We're already designed for Dynamics 365, HubSpot, and PostgreSQL addition — ju
 
 | Use case | Latency | Solution |
 |---|---|---|
-| **Nightly reports** | 1–4 hours | Analytics layer (sufficient) |
-| **BI dashboards** (daily refresh) | 1–4 hours | Athena on analytics layer (free query tool) |
-| **App operational data** | < 1 second | Serving store (RDS/DynamoDB, optional add-on) |
-| **Real-time operational events** | < 100 ms | Not this platform (use Kafka/Lambda for that) |
+| **Nightly / periodic reports** | Depends on schedule cadence (design supports hourly-or-slower refresh) | Analytics layer |
+| **BI dashboards** | Same as above | Athena on analytics layer (no separate query engine to license) |
+| **App operational data** | Sub-second, in principle | A "serving store" load-back concept exists in the design, but **no Lambda implements it in any environment today** — the relevant Step Functions state is a no-op placeholder until that's built |
+| **Real-time operational events** | Not supported | This platform is not designed for sub-second event streaming (would need Kafka/Kinesis-style tooling) |
 
-**Most users:** Stay with 1–4 hour freshness (99% of reporting use cases). It's still 10–100× better than before.
+No latency figures above have been measured against a real reporting workload yet — dev has only
+run a handful of extraction jobs so far.
 
 ---
 
 ### Q: "How much data can it handle? Does it scale?"
 
-**A:** Scales from thousands to billions of records:
+**A:** The architecture is designed with headroom, but scale has not been tested — dev's real data
+volume so far is 34 Salesforce accounts and 36,023 MySQL RDS rows, far below any of the figures
+below.
 
-| Scale | Handling |
+| Scale | Design intent |
 |---|---|
-| **< 100k records/day** | Lambda (15-min limit) |
-| **100k – 5M records/day** | Salesforce Bulk API (async, batched) |
-| **> 5M records/day** | ECS Fargate task (no timeout) |
+| Smaller entities | Standard Lambda extraction (15-minute execution limit) |
+| Larger entities | Salesforce connector implements the Bulk API for async, batched extraction (`connector_runtime/adapters/salesforce/salesforce_bulk_query_job_controller.py`) |
+| Very large entities | **No ECS Fargate (or equivalent) task exists in this codebase today** — earlier documentation described this as an already-built escape hatch for datasets that exceed Lambda's limits; that component has not actually been built. Extraction beyond Lambda's timeout would need this to be built first. |
 
-**Memory:** Streaming architecture means you could extract 100M records with same 512 MB Lambda memory (only 50k records in memory at any time).
+**Memory:** The transformation/entity-resolution pipeline uses a streaming (DuckDB-backed) design
+intended to keep memory flat regardless of dataset size — a real, implemented optimization, but
+not yet stress-tested at high volume.
 
-**S3 bandwidth:** AWS guarantees 3,500 PUT requests/sec and 5.5 GB/sec throughput. We're nowhere near those limits.
-
-**Realistically?** Platform scales to 10–100× current volumes without architectural change.
+**Realistically:** the design should scale well beyond today's data volumes, but "10-100x" is an
+untested claim — remove it until a load test backs it up.
 
 ---
 
 ### Q: "What if our internet connection goes down while extraction is running?"
 
-**A:** Handled automatically:
+**A:** Partially handled automatically, but the earlier claim that source connectivity is "already
+tunneled, not public internet" was incorrect for two of our five sources:
 
-- **Source connectivity via VPN/PrivateLink** (not public internet; already tunneled)
+- **Salesforce, NetSuite, and Sage** are internet-hosted SaaS APIs. The extraction Lambda runs in
+  a private subnet and reaches them through a NAT Gateway's public IP (`docs/PLATFORM_STATUS.md`
+  confirms this IP must be allowlisted in each source's firewall/security-group settings) — this
+  traffic does traverse the public internet, it just isn't a publicly *reachable* Lambda.
+- **MySQL RDS** connectivity depends on how the customer's database network is configured; the
+  extraction Lambda reaches it the same way, via the private subnet + NAT Gateway path, unless a
+  private network path (VPC peering, PrivateLink) is separately set up.
 - **S3 upload** completes or rolls back atomically (no partial writes)
 - **If connection drops mid-run** → Watermark not advanced → next run replays same window (idempotent)
 - **If Lambda timeout reached** → Step Functions retries automatically
@@ -151,14 +197,17 @@ We're already designed for Dynamics 365, HubSpot, and PostgreSQL addition — ju
 
 ### Q: "Who's responsible for keeping this running? Do we need a new team?"
 
-**A:** Minimal new staffing required:
+**A:** Estimated staffing needs, once the platform is running a real workload (not yet validated
+against actual operational load, since only dev exists today):
 
-- **Platform ownership** → Assign to existing data engineering team (0.5 FTE)
+- **Platform ownership** → Existing data engineering team (~0.5 FTE, estimated)
 - **Alert response** → Integrate into existing on-call rotation
-- **Config management** → Data governance / data quality team (0.1 FTE for updates)
-- **Infrastructure** → Cloud platform team (monthly AWS account reviews; no daily ops)
+- **Config management** → Data governance / data quality team (~0.1 FTE, estimated)
+- **Infrastructure** → Cloud platform team (periodic AWS account reviews)
 
-**Comparison:** Manual extraction scripts required 2 FTE of dedicated development time. This saves that entirely.
+**Comparison:** the "manual scripts require 2 FTE" baseline in `COST_ANALYSIS_AND_ROI.md` is a
+modeled estimate for illustration, not a measurement of our current team's actual time spent on
+manual extraction — treat any specific savings number as directional until measured.
 
 ---
 
@@ -182,29 +231,32 @@ Analytics layer (PII-masked, curated)
   ├─ Finance (read; company entity records only)
   └─ Marketing (read; customer entity records only)
 
-Serving database (optional, for apps)
+Serving database (optional, for apps — not yet built; see the latency question above)
   ├─ API services (read-only via app IAM role)
   └─ BI tools (read-only connection string, no write)
 ```
 
-Each role has **zero permissions outside its scope.** IAM enforces this automatically.
+This access model reflects the intended design. IAM enforces most of it today, with two known,
+tracked gaps: the `entity-extraction-config` DynamoDB table and the S3 bucket-policy tenant-prefix
+condition are not yet IAM-enforced at the key/prefix level (application-level guards only —
+`SEC-2`/`ARCH-12` in `architecture/GAP_ANALYSIS_FINDINGS.md`). Neither is a data leak today (both
+fail closed), but don't describe this as a hard security boundary until that's closed.
 
 ---
 
 ### Q: "What's the approval process for adding a new data source?"
 
-**A:** Six gates (takes 4–5 days):
-
-1. **SOURCE_REGISTRATION** (Platform) — Verify credentials, SLA agreement
-2. **CREDENTIAL_REGISTRATION** (Security) — Store in Secrets Manager, enable expiry-check alerting
-3. **ENTITY_MAPPING** (Data team) — Define what gets extracted (DynamoDB config)
-4. **EXTRACTION_PROFILE** (Platform) — Dry-run in dev; capture schema
-5. **SECURITY_GOVERNANCE** (Security/Compliance) — Review access model, PII classification
-6. **ACCEPTANCE_VALIDATION** (Data team) — Canary run in staging; verify data quality & record counts
-
-Each gate is logged. No gate can be skipped without a written waiver (20+ character justification).
-
-**New sources:** Onboarded every 2–4 weeks (vs. quarterly with manual processes).
+**A:** A six-gate onboarding checklist exists as a certification concept
+(`connector_runtime/certification/connector_certification_checklist.py`), covering registration,
+credential setup, entity mapping, a dry-run extraction profile, security/governance review, and
+acceptance validation. **This is a documented checklist, not yet an enforced automated workflow**
+— there's a separate `EdlSourceOnboardingRegistry` DynamoDB table intended to track gate state,
+but it isn't currently called from the control-plane API, so no route today reads or writes it.
+In practice, bringing on a new source in dev today is a manual process: populate credentials in
+Secrets Manager, seed entity config via a script, and enable scheduling — not a self-service,
+gated workflow yet. Timeline estimates for onboarding a genuinely new source system aren't
+meaningful until that automation exists; treat "weeks" as the honest ballpark rather than a
+precise figure.
 
 ---
 
@@ -212,39 +264,44 @@ Each gate is logged. No gate can be skipped without a written waiver (20+ charac
 
 ### Q: "Is this production-ready, or is it still experimental?"
 
-**A:** **Fully production-ready:**
+**A:** Somewhere in between — **dev is real and working, production is not yet built.**
 
-- ✅ All modules have 80%+ test coverage (enforced)
-- ✅ All security & compliance controls implemented
-- ✅ All SLOs defined & monitored
-- ✅ Runbooks written for all failure scenarios
-- ✅ Incident recovery tested (chaos engineering + drills)
-- ✅ Passed security architecture review (signed off)
-- ✅ Passed compliance audit (ready for SOC 2 / GDPR / HIPAA)
+What's actually true today:
+- ✅ Modules have 80%+ automated test coverage (enforced in CI)
+- ✅ Core security/compliance mechanisms (PII masking, encryption, audit logging) are implemented in code and covered by tests
+- 🟡 Most tenant-isolation mechanisms are code-complete; two gaps remain deliberately deferred and tracked (`SEC-2`, `ARCH-12`) — not yet IAM-enforced
+- ❌ No chaos-engineering exercises or incident drills have been run against this platform
+- ❌ No external security architecture review has been signed off
+- ❌ No external compliance audit (SOC 2, GDPR, HIPAA) has been performed
+- ❌ Only `dev` is deployed; staging and production have no AWS account and are not provisioned
+- ❌ No pilot tenant has onboarded; nothing has run at production scale
 
-**Waiting for:** 
-- Board approval (this meeting)
-- Finance sign-off on budget (see COST_ANALYSIS_AND_ROI.md)
-- VP Ops sign-off on runbook & SLO commitment
+**What's actually needed before "production-ready" is a fair label:**
+- Provision a staging AWS account and deploy there
+- Onboard a pilot tenant and validate the platform under a real (even if small) workload
+- Close the two tracked tenant-isolation gaps (`SEC-2`, `ARCH-12`) if IAM-level enforcement is a launch requirement
+- Get an external security/compliance review, if that's required for our regulatory posture
 
-Timeline to go-live: **2 weeks** (once approvals received).
+There is no meaningful "timeline to go-live" figure to quote until the steps above are scoped.
 
 ---
 
 ### Q: "What's the worst-case scenario? What could go wrong?"
 
-**A:** Known risks & mitigations:
+**A:** Known risks & mitigations — none of these have been tested against a real incident yet
+(dev has run cleanly so far, at low volume):
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Source API rate limit hit | Medium | 1–2 hour extraction delay | Backoff strategy built-in; alert fired |
-| DynamoDB hot partition | Low | Watermark update slow | Auto-scale on-demand; circuit breaker |
-| S3 capacity exceeded | Very low | Writes throttled | AWS regional quota; request increase proactively |
-| Schema corruption | Very low | Data quality alert | Breaking drift detected & blocks transformation |
-| Credentials rotated unexpectedly | Very low | Extraction fails | Retry logic; manual credential update path exists |
-| **Data loss** | **Extremely low** | **All data lost** | **Impossible** (immutable raw + backup buckets + cross-region replication) |
+| Source API rate limit hit | Medium | Extraction delay | Backoff strategy built-in; alert fired |
+| DynamoDB hot partition | Low | Watermark update slow | On-demand capacity; circuit breaker logic exists in code |
+| S3 capacity exceeded | Very low | Writes throttled | Standard AWS regional quotas apply; would need a quota-increase request |
+| Schema corruption | Very low | Data quality alert | Breaking drift detected & blocks transformation (implemented, tested) |
+| Credentials rotated unexpectedly | Very low | Extraction fails | Retry logic; manual credential update path exists; automatic rotation is not yet implemented |
+| **Data loss** | Low, not zero | Data unavailable or lost | Raw data is versioned and never overwritten in place, with S3's standard multi-AZ durability. **Correction:** there is no cross-region replication or separate backup bucket configured in Terraform today — the earlier claim that data loss is "impossible" overstated this. |
 
-**Residual risk:** Low. No single point of failure that would lose data.
+**Residual risk:** Meaningfully reduced by the design, but not zero, and not yet tested against a
+real failure.
 
 ---
 
@@ -291,17 +348,22 @@ We'll deliver pre-recorded videos + live Q&A for each level.
 
 ### Q: "Does this meet our compliance requirements? (GDPR, CCPA, SOC 2, HIPAA?)"
 
-**A:** Designed to meet or exceed all major standards:
+**A:** The technical building blocks below are implemented in code and infrastructure, but **no
+external body has audited this platform against any of these standards** — treat "implementation
+exists" and "compliant" as different claims.
 
-| Standard | Requirement | Implementation |
+| Standard | Requirement | What's implemented |
 |---|---|---|
-| **GDPR** | Data lineage, right to erasure, consent audit trail | ✅ Automated lineage records; legal hold support |
-| **CCPA** | Data inventory, access logs, deletion capability | ✅ Glue catalog inventory; S3 access logs; Object Lock bypass support |
-| **SOC 2** | Audit trail, change control, incident response | ✅ DynamoDB audit log; Git version control; CloudWatch alarms |
-| **HIPAA** | Encryption, access control, audit logs | ✅ KMS encryption; IAM granular roles; audit trail |
-| **GDPR Right to Erasure** | Delete PII within 30 days of request | ✅ S3 Object Lock governance bypass; lineage records updated |
+| **GDPR** | Data lineage, right to erasure, consent audit trail | Automated lineage records exist for most write paths (two lower-severity gaps — unscoped lineage/quality-report prefixes — are tracked as `ARCH-13`/`ARCH-14`, deliberately deferred, no cross-tenant data corruption risk) |
+| **CCPA** | Data inventory, access logs, deletion capability | Glue catalog inventory (analytics layer only; curated layer isn't wired to Glue in dev today); S3 access logs; S3 Object Lock is configured |
+| **SOC 2** | Audit trail, change control, incident response | DynamoDB audit log; Git version control; CloudWatch alarms |
+| **HIPAA** | Encryption, access control, audit logs | KMS encryption; IAM roles; audit trail — note the tenant-isolation gaps flagged elsewhere in this FAQ (`SEC-2`, `ARCH-12`) if HIPAA-grade tenant separation is a requirement |
+| **GDPR Right to Erasure** | Delete PII within 30 days of request | S3 Object Lock governance-bypass mechanics exist; this has not been exercised end-to-end against a real erasure request |
 
-**Audit-ready today.** No compliance work needed to go live.
+**Not audit-ready today** in the sense of "an auditor has signed off" — no SOC 2, GDPR, or HIPAA
+audit has been performed against this platform. The building blocks that would support passing
+such an audit are largely in place, but "designed to support compliance" and "compliant" are not
+the same claim, and only the first is true right now.
 
 ---
 
@@ -351,13 +413,13 @@ We'll deliver pre-recorded videos + live Q&A for each level.
 
 | Service | Role |
 |---|---|
-| **EventBridge Scheduler** | Fires the pipeline on a cron schedule for each entity |
+| **EventBridge Scheduler** | Fires the pipeline on a cron schedule for each entity (per-entity schedules exist in code; none are currently enabled in dev) |
 | **Step Functions** | Manages pipeline stages with retry, branching, and failure routing |
-| **Lambda / ECS Fargate** | Runs the Python extraction and transformation code |
-| **S3** | Stores all data (raw 7-year, curated 3-year, analytics 1-year) |
-| **DynamoDB** | Config, entity type registry, watermark state, run audit log, onboarding records (5 tables) |
-| **Secrets Manager** | Stores Salesforce / NetSuite / MySQL / Sage Intacct / Sage X3 credentials securely |
-| **Glue Data Catalog + Athena** | Makes curated data queryable via SQL from any BI tool |
+| **Lambda** | Runs the Python extraction, transformation, entity resolution, and analytics code (8 functions deployed in dev) — **no ECS Fargate task exists in this codebase**; earlier documentation described Fargate as a large-dataset escape hatch that hasn't actually been built |
+| **S3** | Stores all data (raw, curated, analytics layers; lifecycle rules transition older data to cheaper storage classes over time) |
+| **DynamoDB** | 5 tables confirmed in Terraform: entity extraction config, watermark repository, run audit log, entity type registry, source onboarding registry |
+| **Secrets Manager** | Stores Salesforce / NetSuite / MySQL RDS / Sage Intacct / Sage X3 credentials; only Salesforce and MySQL RDS currently hold real values |
+| **Glue Data Catalog + Athena** | Makes curated/analytics data queryable via SQL; in dev today only the analytics layer is actually registered in Glue — the curated-layer registration code path exists but isn't wired up yet |
 | **CloudWatch + X-Ray + SNS** | Logs, metrics, alarms, alerts, tracing |
 | **KMS + IAM + VPC** | Encryption, access control, network isolation |
 
@@ -391,9 +453,9 @@ We'll deliver pre-recorded videos + live Q&A for each level.
 
 ### Q: "How do BI tools connect?"
 
-**A:** Two options:
-1. **Amazon Athena** — connect Tableau / Power BI / Looker via ODBC or JDBC driver; queries run directly against S3 Parquet; no separate database server
-2. **RDS MySQL serving store** — for dashboards requiring sub-second response times at high concurrency; pre-loaded from the analytics layer
+**A:** One option exists today, one is designed but not built:
+1. **Amazon Athena** — connect Tableau / Power BI / Looker via ODBC or JDBC driver; queries run directly against S3 Parquet; no separate database server. This is the only connection path that actually works today.
+2. **RDS MySQL "serving store"** — intended for dashboards needing sub-second response times; **no Lambda implements this load-back today** in any environment (the relevant Step Functions state is a no-op placeholder). Treat this as a future option, not something to demo.
 
 ---
 

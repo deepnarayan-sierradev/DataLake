@@ -1,7 +1,7 @@
 # Enterprise Data Lake — Leadership Brief
 
 **For:** CTO, CIO, VP Engineering, Product Leadership, Finance  
-**Last updated:** 2026-06-29  
+**Last updated:** 2026-07-09  
 **Read time:** 8 minutes
 
 ---
@@ -29,9 +29,11 @@ Getting data out of these systems for analysis required:
 
 ### The Solution
 
-An **Enterprise Data Lake Platform**: a fully automated, security-first, metadata-driven data pipeline that:
+An **Enterprise Data Lake Platform**: a security-first, metadata-driven data pipeline, designed
+to run fully automated on a schedule, that:
 
-- Extracts data from source systems on a nightly schedule
+- Extracts data from source systems on a scheduled cadence (currently run manually in Dev; see
+  Current Status below)
 - Stores versioned, immutable copies across three governed data layers
 - Resolves the same customer across multiple systems into a single **golden record**
 - Enforces PII masking and data classification automatically
@@ -40,31 +42,40 @@ An **Enterprise Data Lake Platform**: a fully automated, security-first, metadat
 
 ---
 
-## Current Status: Dev Environment Live ✅
+## Current Status: Dev Environment Deployed, Two of Five Sources Live
 
-As of **2026-06-29**, the full pipeline is deployed and operational in the dev environment. Real business data is flowing end-to-end.
+As of **2026-07-09**, only the Dev AWS environment exists, and it was rebuilt from scratch that
+day (an earlier "live" claim for this account had gone stale — the account was found empty and
+redeployed). Of five planned source connectors, two — Salesforce and MySQL RDS — have real
+credentials in place and have run end-to-end with real data. The other three (Sage Intacct, Sage
+X3, NetSuite) are code-complete but have no credentials populated, so nothing has run for them.
 
 ### Live Data
 
 | Data | Records | Queryable via |
 |---|---|---|
-| Company golden records (from Salesforce) | **34** | AWS Athena |
-| Person golden records (from Salesforce) | **49** | AWS Athena |
-| Contract records (from MySQL RDS) | **35,971** | AWS Athena |
+| Salesforce Account records (companies) | **34** | AWS Athena |
+| Salesforce Contact records (persons) | Extracted; exact count not re-confirmed this pass | AWS Athena |
+| Contract records (from MySQL RDS) | **36,023** | AWS Athena |
 
-Anyone with Athena access can run standard SQL to query this data today — no exports, no scripts, no waiting.
+Anyone with Athena access can run standard SQL to query this data today. The figures above are
+from a verified pipeline run on 2026-07-09; other entity counts (opportunities, contracts,
+suppliers) will exist once their sources are seeded and run — see "What's Next" below.
 
-### What "Fully Operational" Means
+### What Runs Today, and What's Still Manual
 
-The following runs automatically, end-to-end, with no manual intervention:
+The extraction → transformation → entity resolution → analytics pipeline has been verified
+end-to-end for Salesforce and MySQL RDS, triggered manually rather than on an enabled recurring
+schedule — no entity-level EventBridge schedule is turned on in Dev yet. Each stage:
 
-1. **Scheduled trigger** — EventBridge fires a nightly cron job per entity
-2. **Extraction** — Lambda reads from Salesforce/MySQL/Sage using secure credentials
-3. **Transformation** — Field mapping, quality checks, PII masking applied
-4. **Entity resolution** — Cross-source customer matching produces one golden record per customer
-5. **Analytics delivery** — Clean, partitioned data lands in Athena-queryable tables
+1. **Extraction** — Lambda reads from the source using credentials in Secrets Manager
+2. **Transformation** — Field mapping, quality checks, PII masking applied
+3. **Entity resolution** — Cross-source matching produces one golden record per customer
+4. **Analytics delivery** — Clean, partitioned data lands in Athena-queryable tables
 
-If any step fails: automatic retry with exponential backoff → alerting → dead-letter queue for replay.
+If any step fails: automatic retry with exponential backoff → alerting → dead-letter queue for
+replay. Turning on recurring schedules, running unattended for a sustained period, and validating
+SLOs under real traffic are still ahead of us — see "What's Next."
 
 ---
 
@@ -72,9 +83,9 @@ If any step fails: automatic retry with exponential backoff → alerting → dea
 
 | Environment | Status | ETA |
 |---|---|---|
-| **Dev** | ✅ Complete | Done |
-| **Staging** | 🔲 Next | TBD — requires infrastructure provisioning |
-| **Production** | 🔲 Pending staging sign-off | TBD |
+| **Dev** | ✅ Deployed; 2 of 5 sources connected and verified live | Done (redeployed 2026-07-09) |
+| **Staging** | 🔲 Not provisioned — no AWS account/credentials yet | TBD |
+| **Production** | 🔲 Not provisioned — pending staging sign-off | TBD |
 
 ---
 
@@ -91,11 +102,18 @@ If any step fails: automatic retry with exponential backoff → alerting → dea
 | Compliance readiness | Manual documentation | Automated lineage + retention enforcement |
 | Data quality visibility | No monitoring | Quality report per entity per run |
 
+These reflect the pipeline's designed and implemented behavior, demonstrated so far for the two
+connected sources in Dev — not yet proven across all five sources, at production scale, or with
+a second tenant.
+
 ---
 
 ## Cost Summary
 
 ### Monthly AWS Infrastructure Costs (Dev → Production estimate)
+
+Estimates, not measured production bills — Dev has run a handful of manually-triggered pipeline
+runs against two sources, not sustained production-scale traffic.
 
 | Component | Monthly Cost |
 |---|---|
@@ -134,13 +152,17 @@ If any step fails: automatic retry with exponential backoff → alerting → dea
 
 ## What's Next
 
+Ordered roughly as they gate one another:
+
 | Item | Description |
 |---|---|
-| **Staging deployment** | Mirror of dev — validates that the platform promotes cleanly to a production-like environment |
-| **Production deployment** | Live production workloads after staging sign-off |
-| **NetSuite onboarding** | No code changes needed — configuration-only; adds financial data to the lake |
-| **Sage Intacct + Sage X3 onboarding** | Connectors fully implemented; configuration-only activation; adds AR invoices, AP bills, vendor and supplier golden records |
-| **Additional Salesforce entities** | Opportunities, Cases — configuration-only additions |
+| **Populate Sage Intacct, Sage X3, NetSuite credentials** | All three connectors are code-complete; none has real credentials yet, so none has run |
+| **Seed and schedule the newer Salesforce/MySQL entities** | Opportunity and Contract (Salesforce), Contract Terms (MySQL RDS) are config-complete but not yet seeded or scheduled |
+| **Verify the control-plane API end-to-end** | The Cognito-authenticated tenant/entity API is deployed in Dev; a live login/JWT round-trip against it has not yet been exercised |
+| **Pilot tenant onboarding** | Onboard one real second tenant and run it alongside the default tenant for about a week with no cross-tenant incidents — not yet started |
+| **Load test at target scale** | Not yet started |
+| **Staging deployment** | Requires its own AWS account; `terraform validate` is already clean for staging |
+| **Production deployment** | Gated on staging sign-off; no AWS account exists for production yet |
 | **Self-service analytics** | Business intelligence tooling on top of Athena (e.g. QuickSight, Tableau) |
 | **Data quality dashboards** | CloudWatch-based dashboards surfacing per-entity quality scores to stakeholders |
 
@@ -151,12 +173,17 @@ If any step fails: automatic retry with exponential backoff → alerting → dea
 ```
 Source Systems                 Data Lake Layers              Analytics
 ──────────────                 ────────────────              ─────────
-Salesforce CRM ──────────────► Raw Layer (S3)                Athena SQL
-MySQL RDS       ── nightly ──► Curated Layer (S3) ─────────► QuickSight (future)
-NetSuite ERP    ── pipeline ►  Analytics Layer (S3)          BI Tools (future)Sage Intacct    ─────────┉
-Sage X3         ─────────┉(pending)
+Salesforce CRM  ── live ─────► Raw Layer (S3)                Athena SQL (live)
+MySQL RDS       ── live ─────► Curated Layer (S3) ─────────► QuickSight (future)
+Sage Intacct    ── pending ──► Analytics Layer (S3)          BI Tools (future)
+Sage X3         ── pending ──►
+NetSuite ERP    ── pending ──►
 
-Orchestration: EventBridge → Step Functions → Lambda (4 stages)
+"Live" = real credentials populated, pipeline run end-to-end with real data (Dev only).
+"Pending" = connector code-complete, no credentials populated yet, nothing has run.
+
+Orchestration: EventBridge → Step Functions → Lambda (4 stages); entity-level schedules
+               not yet enabled — today's live runs were triggered manually.
 Governance:    Glue Catalog + DynamoDB lineage records
 Security:      IAM least-privilege + KMS encryption + Secrets Manager
 ```

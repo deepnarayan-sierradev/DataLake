@@ -2,11 +2,35 @@
 
 **For:** On-call engineers, operations team, support  
 **Purpose:** Quick response guide for common incidents  
-**Last updated:** 2026-07-07
+**Last updated:** 2026-07-09
 
 > **Lambda functions:** `EdlExtractionPipeline` · `EdlTransformationPipeline` · `EdlEntityResolutionPipeline` · `EdlAnalyticsLayerPublisher`  
 > **Key buckets (prod):** `edl-raw-<PROD_ACCOUNT_ID>` · `edl-curated-<PROD_ACCOUNT_ID>` · `edl-analytics-<PROD_ACCOUNT_ID>` · `edl-schema-snapshots-<PROD_ACCOUNT_ID>`  
 > Resource names no longer carry an environment prefix — dev/staging/prod each live in their own AWS account, so the same PascalCase name (e.g. `EdlExtractionPipeline`) resolves in every account; only S3 bucket names differ per environment, ending in that account's ID instead of an env prefix. See [PLATFORM_STATUS.md](PLATFORM_STATUS.md) for all resource names.
+
+> ### Current environment reality — read before paging anyone
+>
+> **There is no production environment today.** Per [PLATFORM_STATUS.md](PLATFORM_STATUS.md):
+> `dev` is the only deployed environment (all 8 Lambdas, Step Functions, the control-plane API,
+> DynamoDB, S3, SQS/EventBridge are provisioned). Salesforce and MySQL RDS credentials are
+> populated and the pipeline has run end-to-end with real data confirmed in Athena. Sage
+> Intacct, Sage X3, and NetSuite credentials are still unpopulated, and the control-plane API's
+> live JWT-claims behavior has not yet been independently confirmed. `staging` and `prod` are
+> **not provisioned** — no
+> AWS account or credentials exist for either yet, and `terraform validate` passing for those
+> environments is not the same as anything being deployed there. Confirm current status against
+> `docs/PLATFORM_STATUS.md` before treating any step below as something you can run against a
+> live `prod` today.
+>
+> Every `<PROD_ACCOUNT_ID>` placeholder, `edl-*-<PROD_ACCOUNT_ID>` bucket name, and
+> `"environment":"prod"` payload below describes the target shape once `prod` exists. Until then,
+> treat this runbook as the procedure template — substitute `dev`'s real bucket/table names and
+> account ID from `docs/PLATFORM_STATUS.md` when actually running a command.
+>
+> `terraform apply`/`destroy` against `infrastructure/environments/prod` and `git push --force`
+> are hard-blocked at the tool level in Claude Code sessions (`.claude/settings.json`), regardless
+> of who's asking. If you're working an incident through an agent session and a step below
+> genuinely requires one of those, a human needs to run it directly — the agent cannot.
 
 ---
 
@@ -336,17 +360,22 @@ aws lambda invoke \
 ### Step 1: Check Extraction Status (2 min)
 
 ```bash
-# Get latest extraction run for the entity
+# Get latest extraction run for the entity.
+# NOTE: as of the ARCH-1 fix, EdlWatermarkRepository's "source_id" key
+# attribute stores tenant_scoped_key(tenant_code, source_id), i.e.
+# "{tenant_code}#{source_id}" (contracts/identifier_policy.py) — NOT the bare
+# source_id. For the default tenant that's "demo#salesforce", not
+# "salesforce". Querying with the bare source_id returns zero items, which
+# looks identical to "no watermark yet" — confirm the tenant_code from the
+# alert/run_id before assuming this is a fresh entity.
 aws dynamodb query \
   --table-name EdlWatermarkRepository \
   --key-condition-expression "source_id = :source AND entity_id = :entity" \
-  --expression-attribute-values '{":source":{"S":"salesforce"},":entity":{"S":"salesforce-account"}}' \
-  --sort-order Descending \
-  --limit 1
+  --expression-attribute-values '{":source":{"S":"demo#salesforce"},":entity":{"S":"salesforce-account"}}'
 
 # Example output:
 # {
-#   "source_id": "salesforce",
+#   "source_id": "demo#salesforce",
 #   "entity_id": "salesforce-account",
 #   "last_successful_extraction_time": "2026-06-16T02:00:00Z",
 #   "watermark_value": "2026-06-16T02:00:00Z",
@@ -426,14 +455,16 @@ terraform apply -target="aws_lambda_function.extraction" -var="extraction_timeou
 
 ### Step 1: Check DLQ Contents (2 min)
 
-```bash
-# List messages in DLQ (SNS topic)
-aws sns list-subscriptions-by-topic \
-  --topic-arn <DLQ_TOPIC_ARN>
+The DLQ is an SQS queue (`extraction_failure_dlq`, `infrastructure/modules/metadata_persistence/main.tf`),
+not an SNS topic — alarm notifications go through a separate SNS topic (`platform_alerts`); see
+Scenario 7 below for that distinction.
 
-# Get the message details
-aws sns receive-message \
+```bash
+# Peek at DLQ messages without deleting them (visibility-timeout 0)
+aws sqs receive-message \
   --queue-url <DLQ_QUEUE_URL> \
+  --max-number-of-messages 10 \
+  --visibility-timeout 0 \
   | jq '.Messages[0]'
 
 # Example DLQ message:
@@ -552,21 +583,16 @@ aws stepfunctions start-execution \
   --input '{"source_id":"salesforce","entity_id":"salesforce-account","environment":"prod"}'
 ```
 
-**Option B: Switch to ECS Fargate (for very large entities)**
+**Option B: ECS Fargate — not built, do not attempt mid-incident**
 
-If entity exceeds 10M records/day, Lambda becomes impractical. Migrate to ECS:
-
-```bash
-# Add ECS task definition for this entity
-# Edit extraction config in DynamoDB:
-aws dynamodb update-item \
-  --table-name EdlEntityExtractionConfig \
-  --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}' \
-  --attribute-updates '{"compute_type":{"Value":{"S":"ECS_FARGATE"},"Action":"PUT"}}'
-
-# Update Step Functions to route to ECS task instead of Lambda
-terraform apply -target="aws_ecs_task_definition.extraction"
-```
+There is no ECS Fargate path in this platform today — no `aws_ecs_*` Terraform resource exists
+anywhere in `infrastructure/`, `compute_type` is not a real field on the entity config contract,
+and Step Functions has no ECS-routing branch to send a run to. If an entity is genuinely too large
+for Lambda (Option A's memory ceiling reached), the real options are: reduce the extraction window
+(`extraction_window_days`) to shrink each run's record count, or treat this as a platform
+enhancement request — not something to hand-roll during an incident. Do not run
+`terraform apply -target="aws_ecs_task_definition.extraction"`; that resource does not exist and
+the command will fail.
 
 ### Step 4: Long-term Monitoring
 
@@ -576,33 +602,52 @@ terraform apply -target="aws_ecs_task_definition.extraction"
 
 ---
 
-## SCENARIO 7: Deadletter Queue Configuration Issue
+## SCENARIO 7: DLQ Queue or Alerting Topic Configuration Issue
 
 **Alert name:** Custom monitoring  
 **Severity:** Medium  
-**Typical root cause:** DLQ topic deleted, subscription removed, or permissions changed
+**Typical root cause:** DLQ queue policy/permissions changed, or the SNS alerting topic's
+subscription was removed
 
-### Recovery
+There are two distinct resources here — don't conflate them:
+
+- **`extraction_failure_dlq`** — an SQS queue (`infrastructure/modules/metadata_persistence/main.tf`)
+  that actually holds failed-run messages for replay.
+- **`platform_alerts`** — a separate SNS topic (`infrastructure/modules/observability/main.tf`)
+  that CloudWatch alarms publish to, fanning out to email/PagerDuty. It does not hold DLQ messages;
+  it only carries alarm notifications, including the DLQ-depth alarm that fires when
+  `extraction_failure_dlq` backs up.
+
+### Recovery — DLQ queue (SQS)
 
 ```bash
-# Verify DLQ topic exists
-aws sns list-topics | grep dlq
+# Verify the queue exists
+aws sqs get-queue-url --queue-name extraction_failure_dlq
 
 # If not found: recreate from Terraform
-terraform apply -target="aws_sns_topic.pipeline_failure_dlq"
+terraform apply -target="aws_sqs_queue.extraction_failure_dlq"
 
-# Verify Step Functions can publish to DLQ
-aws sns get-topic-attributes \
-  --topic-arn <DLQ_TOPIC_ARN> \
-  | jq '.Attributes.Policy'
+# Verify the queue policy still allows Step Functions / the extraction Lambda to send messages
+aws sqs get-queue-attributes \
+  --queue-url <DLQ_QUEUE_URL> \
+  --attribute-names Policy RedrivePolicy
+```
 
-# Verify email subscription is active
-aws sns list-subscriptions-by-topic \
-  --topic-arn <DLQ_TOPIC_ARN>
+### Recovery — alerting topic (SNS)
 
-# If subscription removed: re-add
+```bash
+# Verify the topic exists
+aws sns list-topics | grep platform_alerts
+
+# If not found: recreate from Terraform
+terraform apply -target="aws_sns_topic.platform_alerts"
+
+# Verify email/PagerDuty subscription is still active
+aws sns list-subscriptions-by-topic --topic-arn <PLATFORM_ALERTS_TOPIC_ARN>
+
+# If the subscription was removed: re-add
 aws sns subscribe \
-  --topic-arn <DLQ_TOPIC_ARN> \
+  --topic-arn <PLATFORM_ALERTS_TOPIC_ARN> \
   --protocol email \
   --notification-endpoint ops-team@company.com
 ```
@@ -747,9 +792,11 @@ After every production incident:
 
 ---
 
-**Last updated:** 2026-07-07  
+**Last updated:** 2026-07-09  
 **Owner:** Platform Engineering Lead  
-**Review cycle:** Monthly (or after major incident)
+**Review cycle:** Monthly (or after major incident) — and again the moment `staging`/`prod` are
+actually provisioned, since large parts of this runbook are currently written against a
+production environment that does not exist yet
 
 ---
 
@@ -775,12 +822,15 @@ Quick reference for tools and AWS services used during incident investigation an
 ### CLI Quick Commands for Incident Investigation
 
 ```bash
-# Check current watermark for a source/entity
+# Check current watermark for a source/entity.
+# The "source_id" key attribute is tenant-scoped ("{tenant_code}#{source_id}",
+# e.g. "demo#salesforce" for the default tenant) as of the ARCH-1 fix — not
+# the bare source_id. See the note in Scenario 4 above.
 aws dynamodb get-item \
   --table-name EdlWatermarkRepository \
-  --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
+  --key '{"source_id":{"S":"demo#salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
-# Read DLQ messages (peek without deleting)
+# Read DLQ messages (peek without deleting) — this is an SQS queue, not SNS.
 aws sqs receive-message \
   --queue-url https://sqs.us-east-1.amazonaws.com/ACCOUNT/EdlExtractionFailureDlq \
   --max-number-of-messages 10 \
@@ -795,9 +845,11 @@ aws stepfunctions list-executions \
 # Check latest schema snapshot
 aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/salesforce/salesforce-account/latest.json -
 
-# Check CloudWatch alarm state
+# Check CloudWatch alarm state (real alarm_name values from
+# infrastructure/modules/observability/main.tf — there are 17 alarms total
+# across observability + orchestration modules, not just these three)
 aws cloudwatch describe-alarms \
-  --alarm-names EdlExtractionFailures EdlSchemaDriftBreaking EdlWatermarkLag
+  --alarm-names EdlExtractionFailures EdlSchemaDriftBreakingDetected EdlWatermarkLagSloBreach
 
 # Trigger manual replay
 python scripts/trigger_extraction.py \
@@ -825,7 +877,7 @@ python scripts/trigger_extraction.py \
 |---|---|---|
 | Structured logs | structlog → CloudWatch Logs | Log group: `/edl/{service}` |
 | Custom metrics | CloudWatch (namespace: `EnterpriseDatalake`) | 6 canonical metrics per run |
-| Alarms | CloudWatch Alarms → SNS → Email/PagerDuty | 4 platform alarms |
+| Alarms | CloudWatch Alarms → SNS (`platform_alerts`) → Email/PagerDuty | 17 alarms (`infrastructure/modules/observability/main.tf` + 3 more in `orchestration/main.tf`) — not the "4" figure some older docs still cite |
 | Distributed traces | AWS X-Ray | Service map; trace by `run_id` annotation |
 | DLQ | SQS `EdlExtractionFailureDlq` | KMS-encrypted; 14-day message retention |
 

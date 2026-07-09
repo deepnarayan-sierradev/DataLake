@@ -109,6 +109,15 @@ iac-fmt:
 	terraform fmt -recursive infrastructure/
 
 # ─── Lambda Packaging ────────────────────────────────────────────────────────
+#
+# NOT byte-reproducible: pyproject.toml pins dependency *ranges*, not exact
+# versions, so two builds with no source change can still hash differently.
+# Always run 'make lambda-deploy' as a single command (builds once, uploads
+# that exact artifact, hashes it after) — never chain 'lambda-package' (copy
+# the printed hash) then 'lambda-upload' by hand, since 'lambda-upload'
+# depends on 'lambda-package' and will silently rebuild a second, possibly
+# different artifact before uploading it. Hit live during dev's first real
+# deployment (2026-07-09) — see infrastructure/CLAUDE.md for the incident.
 
 ARTIFACTS_BUCKET ?= edl-terraform-state-087972550871
 AWS_REGION       ?= us-east-1
@@ -150,12 +159,22 @@ lambda-deploy: lambda-upload
 	@HASH=$$(openssl dgst -sha256 -binary $(LAMBDA_ZIP) | openssl base64); \
 	cd infrastructure/environments/dev && \
 	terraform apply \
-		-target=module.lambda_pipeline \
+		-target=module.lambda_pipeline.aws_lambda_function.extraction_pipeline \
+		-target=module.transformation_lambda.aws_lambda_function.transformation_pipeline \
+		-target=module.entity_resolution_lambda.aws_lambda_function.entity_resolution_pipeline \
+		-target=module.analytics_publisher_lambda.aws_lambda_function.analytics_publisher \
+		-target=module.control_plane.aws_lambda_function.control_plane \
+		-target=module.secrets.aws_lambda_function.credential_expiry_notifier \
+		-target=module.orchestration.aws_lambda_function.pipeline_trigger \
+		-target=module.orchestration.aws_lambda_function.dlq_processor \
 		-var="lambda_package_s3_bucket=$(ARTIFACTS_BUCKET)" \
 		-var="lambda_package_s3_key=$(LAMBDA_S3_KEY)" \
 		-var="lambda_package_source_hash=$$HASH" \
-		-auto-approve
-	@echo "Lambda deployment complete."
+		-auto-approve && \
+	sed -i.bak "s|^lambda_package_source_hash.*|lambda_package_source_hash = \"$$HASH\"|" terraform.tfvars && \
+	rm -f terraform.tfvars.bak
+	@echo "Lambda deployment complete. terraform.tfvars updated with the deployed hash —"
+	@echo "a plain 'terraform apply' now matches what's actually running, no manual sync needed."
 
 # ─── Entity Config Seeder ────────────────────────────────────────────────────
 

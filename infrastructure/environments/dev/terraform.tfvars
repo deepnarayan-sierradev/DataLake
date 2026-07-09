@@ -11,9 +11,16 @@ alert_email = "" # Set to ops team email when ready
 # Lambda deployment package — produced by 'make lambda-package && make lambda-upload'
 lambda_package_s3_bucket   = "edl-terraform-state-087972550871"
 lambda_package_s3_key      = "lambda/extraction-pipeline.zip"
-lambda_package_source_hash = "DzNW3lgbfXlocSAAXNvwOWDa2Ih1F4sR7/ywU78xpSs="
+lambda_package_source_hash = "SPPJtp+9WUDLFZWSq4psfy7DgYh8HuAWeLhlHKcUFTw="
 
 # Pipeline stage Lambda ARNs (required by Step Functions orchestration module)
 # Populate after deploying each Lambda stage package.
 extraction_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:087972550871:function:EdlExtractionPipeline"
 # serving_store_loader_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:EdlServingStoreLoader"
+
+# Human/analyst principals needing to query Athena — see infrastructure/modules/glue/variables.tf
+analytics_reader_principals = [
+  "arn:aws:iam::087972550871:user/datalake-dev-user",
+  "arn:aws:iam::087972550871:role/aws-reserved/sso.amazonaws.com/us-west-1/AWSReservedSSO_AdministratorAccess_590681e1faa45613",
+  "arn:aws:iam::087972550871:role/service-role/AmazonSageMakerAdminIAMExecutionRole_1",
+]

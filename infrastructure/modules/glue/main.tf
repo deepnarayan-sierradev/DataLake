@@ -40,6 +40,36 @@ resource "aws_glue_catalog_database" "analytics" {
 }
 
 # ---------------------------------------------------------------------------
+# Lake Formation — explicit reader grants (see analytics_reader_principals)
+# IAM_ALLOWED_PRINCIPALS above doesn't satisfy Athena's GetUnfilteredTableMetadata
+# path, so human/analyst principals need an explicit grant to query anything.
+# ---------------------------------------------------------------------------
+
+resource "aws_lakeformation_permissions" "curated_readers" {
+  for_each = toset(var.analytics_reader_principals)
+
+  principal   = each.value
+  permissions = ["SELECT", "DESCRIBE"]
+
+  table {
+    database_name = aws_glue_catalog_database.curated.name
+    wildcard      = true
+  }
+}
+
+resource "aws_lakeformation_permissions" "analytics_readers" {
+  for_each = toset(var.analytics_reader_principals)
+
+  principal   = each.value
+  permissions = ["SELECT", "DESCRIBE"]
+
+  table {
+    database_name = aws_glue_catalog_database.analytics.name
+    wildcard      = true
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Glue resource policy — deny catalog access from outside the account
 # ---------------------------------------------------------------------------
 

@@ -16,7 +16,7 @@ design detail on items marked "open" below.
 
 ---
 
-## Implementation status (as of 2026-07-08)
+## Implementation status (as of 2026-07-08; deployment update added 2026-07-09)
 
 Phases 0–6 were implemented in a single pass on 2026-07-07; see
 `architecture/GAP_ANALYSIS_FINDINGS.md`'s "Implementation status" table for per-finding detail and
@@ -82,6 +82,20 @@ claims-path assumption in particular — see `ARCH-3` in the findings doc), and 
 and load-test items need to actually run. Nothing below has a fake or mocked verification standing
 in for that.
 
+**Update, 2026-07-09 — `dev` deployed:** the above was written before any real AWS deployment
+existed. `dev` has since been deployed (277 resources, all 8 Lambdas, the control plane, full
+pipeline — see `architecture/GAP_ANALYSIS_FINDINGS.md`'s `INFRA-1` through `INFRA-12` for what a
+real `terraform apply` and initial pipeline exercise found: three genuine deploy-blocking Terraform
+bugs, a `Makefile` gap that would have silently left 7 of 8 Lambdas stale after every future deploy,
+a Python-3.14-vs-3.13 runtime mismatch that broke every extraction invocation, and two pre-existing
+first-run/second-run data-correctness bugs — all fixed). This closes the "code-complete but never
+applied" gap this plan was written against, but does **not** close Phase 7: whether a real pipeline
+run has actually completed against this deployment with real source credentials is itself disputed
+between `architecture/GAP_ANALYSIS_FINDINGS.md`'s Phase 7 table and `docs/PLATFORM_STATUS.md` as of
+this writing — see that row for the specifics, not resolved here. The control-plane API's live JWT
+claims-path (`ARCH-3`) is unambiguously still unverified either way. Pilot tenant onboarding and load
+testing at scale (below) remain not started regardless of how the pipeline-run question resolves.
+
 ---
 
 ## Reconciliation with `architecture/IMPROVEMENT_PLAN.md`
@@ -94,7 +108,7 @@ Verified against the current code before writing this plan, so effort isn't dupl
 | §1.2 SaaS Control Plane API | Open | Not started — `ARCH-3` |
 | §1.3 Config-Driven Entity Type Registry | Open | Not started — `ARCH-2` |
 | §1.4 Config-Driven Survivorship Policy | **Open (resolved 2026-07-08)** | The "Verify" was answered: `survivorship_policy.py` is versioned/dataclass-based logic only — its *persistence* layer (`resolution_config_registry.py`) is global, not tenant-scoped. This was never built, not merely unverified. Tracked as `ARCH-10`, deferred alongside `ARCH-11`/`ARCH-12` (same registry-client design work, no live second tenant needs it yet) |
-| §1.5 Terraform-managed DynamoDB tables | Open | Not verified as started; carried into Phase 2 |
+| §1.5 Terraform-managed DynamoDB tables | **Done (confirmed 2026-07-09)** | All 5 tables (`watermark_repository`, `run_audit_log`, `entity_extraction_config`, `entity_type_registry`, `source_onboarding_registry`) are genuine `aws_dynamodb_table` resources with `lifecycle { prevent_destroy = true }` in `infrastructure/modules/metadata_persistence/main.tf` — confirmed directly in the Terraform source, not just by the `INFRA-7` doc correction (which independently found the same via `terraform state list` after a clean `dev` apply) |
 | §1.6 SQS Burst Buffer | **Done** | FIFO queue, `pipeline_trigger` Lambda, reserved concurrency, `Lambda.TooManyRequestsException` retry all confirmed in `infrastructure/modules/orchestration/main.tf` |
 | §2.1 Remove dead `_GATE_ORDER` | **Done** | Confirmed — single canonical `_GATE_ORDER` tuple, no dead variable |
 | §2.2 Per-connector params validation | **Done** | All four `*_params.py` already use Pydantic with `extra="forbid"` |
@@ -187,7 +201,7 @@ pass on 2026-07-08 after direct re-verification found the 2026-07-07 "done" mark
 | `ARCH-1` | Thread `tenant_code` through every tenant-owned resource's table keys and S3 paths | `watermark_repository.py`, `raw_layer_writer.py` (+ 4 adapters), `analytics_publisher_handler.py`, golden/canonical record publishers, `curated_utils.py`, `curated_accumulator.py` | ✅ Done — see `ARCH-1` finding for the full list; `configuration_repository.py`/`snapshot_repository.py` were already correct from the 2026-07-07 pass |
 | `ARCH-2` | Replace `entity_type_registry.py` hardcoded dicts with a DynamoDB-backed `EntityTypeRegistryClient` keyed on `(tenant_code, entity_id)`; seed current dicts as the `default` tenant | `entity_resolution/entity_type_registry.py`, `entity_resolution/entity_resolution_pipeline_handler.py` | ✅ Done |
 | §1.4 (verify/finish) | Confirm whether `survivorship_policy.py`'s existing versioned design needs an S3-backed, tenant-scoped registry client on top | `entity_resolution/survivorship_policy.py` | **Resolved, still open** — it does need one; tracked as `ARCH-10`, deferred (design-sized work, see findings doc) |
-| §1.5 (finish) | Migrate DynamoDB tables into Terraform-managed resources (import existing state), add tenant GSIs where the above items need them | `infrastructure/modules/metadata_persistence/main.tf` | Not re-verified in this pass — carries forward as open |
+| §1.5 (finish) | Migrate DynamoDB tables into Terraform-managed resources (import existing state), add tenant GSIs where the above items need them | `infrastructure/modules/metadata_persistence/main.tf` | ✅ Done (confirmed 2026-07-09) — all 5 tables are real Terraform resources; the tenant-GSI half of this item is still open where noted elsewhere (`ARCH-12`'s table has no tenant-keyed GSI at all, and `PERF-7`/`PERF-10` cover the query-cost and hot-partition angles of the GSIs that do exist) |
 
 **Exit criteria (met for the code-level guarantee):** A synthetic second tenant
 (`tenant_code=acme-test`) can run extraction → transformation → entity resolution → analytics with
@@ -288,7 +302,12 @@ duplicated style.
 
 **Exit criteria:** A new tenant can be onboarded, have an entity registered, and trigger
 a pipeline run entirely through the API, with zero engineer-run CLI commands, and the
-resulting run is fully isolated per Phases 1–2's guarantees.
+resulting run gets the same isolation Phases 1–2 actually deliver — key/prefix-level
+scoping on every guaranteed-collision resource, application-level guards on the two
+resources that are not (`entity-extraction-config`, `ARCH-12`), and no IAM-enforced
+boundary yet regardless (`SEC-2`, still open). "Isolated" here does not mean
+IAM-enforced; see the findings doc for the distinction before treating this as a
+security guarantee.
 
 **Backward compatibility:** Additive — `scripts/trigger_extraction.py` and friends
 continue to work for internal/break-glass use, per the original plan's explicit
@@ -310,10 +329,16 @@ guarantee.
 - **Runbook update:** ✅ DONE — `docs/PRODUCTION_INCIDENT_RUNBOOK.md` gained a "Suspected
   Cross-Tenant Data Incident" scenario covering which isolation mechanism applies to which
   resource, blast-radius triage commands, and the currently-missing real-time detection alarm.
+- **`dev` deployed (2026-07-09):** ✅ DONE — the live-deployment prerequisite this section was
+  gated on now exists (see the "Update, 2026-07-09" note above and `architecture/GAP_ANALYSIS_FINDINGS.md`'s
+  Phase 7 table for exactly what is and isn't verified against it).
 - **Pilot tenant:** ⬜ NOT STARTED — onboard one real (or realistic synthetic) second tenant end-to-end
   through the Phase 6 control plane, running in parallel with `tenant_code=default` for
-  at least one full week of scheduled runs with no cross-tenant incidents. Requires a live
-  deployment; not attempted in this pass.
+  at least one full week of scheduled runs with no cross-tenant incidents. A live deployment now
+  exists, and a single-tenant (`demo`) pipeline run has been verified end-to-end for two of five
+  sources (Salesforce, MySQL RDS — real data confirmed in Athena); what's still needed before a
+  pilot is a genuine second tenant and the control-plane's live JWT claims-path exercised for
+  real (see above).
 - **Load test at target scale:** ⬜ NOT STARTED — the volume/entity-count numbers used to justify this
   rollout (reference the same 80–100 entity target used in `architecture/IMPROVEMENT_PLAN.md`
   §1.6, multiplied by the initial tenant count).
