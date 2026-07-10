@@ -34,6 +34,12 @@ Isolation mechanisms covered:
     for another tenant.
   - Control-plane API: a run lookup for another tenant's run_id returns 404
     (not 403), so the API never confirms a foreign run's existence.
+  - FieldMappingRegistryClient / ResolutionConfigRegistry S3 prefix isolation
+    (ARCH-10/ARCH-11): field mapping rule sets and entity-resolution
+    match-rule/survivorship configs are now tenant-prefixed in S3, mirroring
+    SchemaSnapshotRepository. ResolutionConfigRegistry additionally gets a
+    regression test for its in-process cache key, since that registry
+    instance is reused across warm Lambda invocations for different tenants.
 
 Analytics-publisher and golden/canonical-record-publisher S3 path isolation
 (also fixed under ARCH-1) are covered in their own modules'
@@ -83,11 +89,22 @@ from connector_runtime.interfaces.connector_interface import ExtractionRecord
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType
 from contracts.identifier_policy import DEFAULT_TENANT_CODE
 from entity_resolution.entity_type_registry import EntityTypeRecord, EntityTypeRegistryClient
+from entity_resolution.resolution_config.resolution_config_registry import (
+    ResolutionConfigNotFoundError,
+    ResolutionConfigRegistry,
+)
 from orchestration.step_functions.extraction_retry_policy import ExtractionRetryPolicy
 from schema_management.snapshot_repository.snapshot_repository import (
     FieldSnapshot,
     SchemaSnapshot,
     SchemaSnapshotRepository,
+)
+from transformation.field_mapping.field_mapping_registry import (
+    FieldMappingRegistryClient,
+    FieldMappingRule,
+    FieldMappingRuleSet,
+    MappingRuleSetNotFoundError,
+    MappingTransformation,
 )
 from watermark_management.watermark_repository.watermark_repository import WatermarkRepository
 
@@ -483,6 +500,107 @@ class TestSchemaSnapshotRepositoryIsolation:
             "salesforce", "salesforce-account", tenant_code=_TENANT_B
         )
         assert loaded_b is None
+
+
+# ---------------------------------------------------------------------------
+# FieldMappingRegistryClient (S3 prefix isolation — ARCH-11)
+# ---------------------------------------------------------------------------
+
+
+class TestFieldMappingRegistryIsolation:
+    _BUCKET = "edl-curated-087972550871"
+
+    def _rule_set(self) -> FieldMappingRuleSet:
+        return FieldMappingRuleSet(
+            source_id="salesforce",
+            entity_id="salesforce-account",
+            mapping_version="v1",
+            rules=(
+                FieldMappingRule(
+                    source_fields=("Name",),
+                    canonical_field="account_name",
+                    transformation=MappingTransformation.RENAME,
+                    transformation_params={},
+                ),
+            ),
+        )
+
+    @mock_aws
+    def test_tenant_b_does_not_see_tenant_a_rule_set(self) -> None:
+        boto3.client("s3", region_name=_REGION).create_bucket(Bucket=self._BUCKET)
+        client = FieldMappingRegistryClient(s3_bucket=self._BUCKET, region_name=_REGION)
+        client.publish_rule_set(self._rule_set(), _TENANT_A)
+
+        loaded_a = client.load_rule_set("salesforce", "salesforce-account", _TENANT_A)
+        assert loaded_a.mapping_version == "v1"
+
+        with pytest.raises(MappingRuleSetNotFoundError):
+            client.load_rule_set("salesforce", "salesforce-account", _TENANT_B)
+
+
+# ---------------------------------------------------------------------------
+# ResolutionConfigRegistry (S3 prefix isolation + in-process cache isolation
+# — ARCH-10)
+# ---------------------------------------------------------------------------
+
+_ISOLATION_MATCH_RULES_FIXTURE = {
+    "entity_type": "company",
+    "rule_set_version": "v1",
+    "rules": [
+        {
+            "rule_id": "email-exact",
+            "strategy": "deterministic",
+            "fields": [{"field_name": "email_address", "normalise": True}],
+        }
+    ],
+}
+
+_ISOLATION_SURVIVORSHIP_FIXTURE = {
+    "entity_type": "company",
+    "policy_version": "v1",
+    "output_fields": ["email_address"],
+    "default_strategy": "first_non_null",
+    "attribute_rules": [],
+}
+
+
+class TestResolutionConfigRegistryIsolation:
+    _BUCKET = "edl-curated-087972550871"
+
+    def _publish_for(self, registry: ResolutionConfigRegistry, tenant_code: str) -> None:
+        registry.publish(
+            entity_type="company",
+            tenant_code=tenant_code,
+            match_rules_raw=_ISOLATION_MATCH_RULES_FIXTURE,
+            survivorship_raw=_ISOLATION_SURVIVORSHIP_FIXTURE,
+        )
+
+    @mock_aws
+    def test_tenant_b_does_not_see_tenant_a_config(self) -> None:
+        boto3.client("s3", region_name=_REGION).create_bucket(Bucket=self._BUCKET)
+        registry = ResolutionConfigRegistry(s3_bucket=self._BUCKET, region_name=_REGION)
+        self._publish_for(registry, _TENANT_A)
+
+        loaded_a = registry.load("company", _TENANT_A)
+        assert loaded_a.entity_type == "company"
+
+        with pytest.raises(ResolutionConfigNotFoundError):
+            registry.load("company", _TENANT_B)
+
+    @mock_aws
+    def test_warm_container_reuse_does_not_leak_cached_config_across_tenants(self) -> None:
+        """Regression: warm-container cache key must be tenant-scoped, not just the S3 key."""
+        boto3.client("s3", region_name=_REGION).create_bucket(Bucket=self._BUCKET)
+        registry = ResolutionConfigRegistry(s3_bucket=self._BUCKET, region_name=_REGION)
+        self._publish_for(registry, _TENANT_A)
+
+        config_a = registry.load("company", _TENANT_A)
+
+        with pytest.raises(ResolutionConfigNotFoundError):
+            registry.load("company", _TENANT_B)
+
+        # Tenant A's own cache entry is unaffected by tenant B's failed lookup.
+        assert registry.load("company", _TENANT_A) is config_a
 
 
 # ---------------------------------------------------------------------------

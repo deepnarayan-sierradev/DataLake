@@ -13,14 +13,17 @@ Usage:
     # Seed a single entity type only:
     python scripts/seed_entity_resolution_configs.py --environment dev --entity-type contract
 
+    # Seed for a specific tenant (default: "demo"):
+    python scripts/seed_entity_resolution_configs.py --environment dev --tenant-code acme-corp
+
 Prerequisite:
     AWS credentials configured (AWS_PROFILE, AWS_DEFAULT_REGION, or instance role).
     The S3 bucket must already exist (provisioned by the Terraform storage module).
 
-S3 layout written by this script:
-    s3://{bucket}/entity-resolution/{entity_type}/match_rules_{version}.json
-    s3://{bucket}/entity-resolution/{entity_type}/survivorship_{version}.json
-    s3://{bucket}/entity-resolution/{entity_type}/latest.json
+S3 layout written by this script (per-tenant):
+    s3://{bucket}/{tenant_code}/entity-resolution/{entity_type}/match_rules_{version}.json
+    s3://{bucket}/{tenant_code}/entity-resolution/{entity_type}/survivorship_{version}.json
+    s3://{bucket}/{tenant_code}/entity-resolution/{entity_type}/latest.json
 """
 
 from __future__ import annotations
@@ -33,6 +36,8 @@ from typing import Any
 
 import boto3
 import botocore.exceptions
+
+from contracts.identifier_policy import validate_tenant_code
 
 # Root of the repo — two levels up from scripts/
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -124,9 +129,11 @@ def _upload(
 def seed(
     environment: str,
     region: str,
+    tenant_code: str = "demo",
     entity_type_filter: str | None = None,
     dry_run: bool = False,
 ) -> None:
+    tenant_code = validate_tenant_code(tenant_code)
     bucket = _bucket_name(region)
     s3 = boto3.client("s3", region_name=region)
 
@@ -155,7 +162,7 @@ def seed(
     total_uploads = 0
 
     for entity_type, groups in sorted(configs.items()):
-        print(f"\nEntity type: {entity_type}")
+        print(f"\nEntity type: {entity_type}  (tenant: {tenant_code})")
 
         mr_versions: list[str] = []
         sv_versions: list[str] = []
@@ -169,7 +176,7 @@ def seed(
             except json.JSONDecodeError as exc:
                 print(f"  ERROR: {path} is not valid JSON: {exc}", file=sys.stderr)
                 sys.exit(1)
-            key = f"entity-resolution/{entity_type}/match_rules_{version}.json"
+            key = f"{tenant_code}/entity-resolution/{entity_type}/match_rules_{version}.json"
             _upload(s3, bucket, key, body, "application/json", dry_run)
             mr_versions.append(version)
             total_uploads += 1
@@ -182,7 +189,7 @@ def seed(
             except json.JSONDecodeError as exc:
                 print(f"  ERROR: {path} is not valid JSON: {exc}", file=sys.stderr)
                 sys.exit(1)
-            key = f"entity-resolution/{entity_type}/survivorship_{version}.json"
+            key = f"{tenant_code}/entity-resolution/{entity_type}/survivorship_{version}.json"
             _upload(s3, bucket, key, body, "application/json", dry_run)
             sv_versions.append(version)
             total_uploads += 1
@@ -194,7 +201,7 @@ def seed(
             "match_rules_version": latest_mr,
             "survivorship_version": latest_sv,
         }
-        latest_key = f"entity-resolution/{entity_type}/latest.json"
+        latest_key = f"{tenant_code}/entity-resolution/{entity_type}/latest.json"
         _upload(
             s3,
             bucket,
@@ -207,7 +214,8 @@ def seed(
         print(f"  latest pointer → match_rules={latest_mr}, survivorship={latest_sv}")
 
     print(
-        f"\nDone. {total_uploads} object(s) {'would be ' if dry_run else ''}uploaded to s3://{bucket}/entity-resolution/"
+        f"\nDone. {total_uploads} object(s) {'would be ' if dry_run else ''}uploaded to "
+        f"s3://{bucket}/{tenant_code}/entity-resolution/"
     )
 
 
@@ -217,6 +225,11 @@ def main() -> None:
     )
     parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"])
     parser.add_argument("--region", default="us-east-1")
+    parser.add_argument(
+        "--tenant-code",
+        default="demo",
+        help="Tenant to seed these configs for. Defaults to 'demo'.",
+    )
     parser.add_argument(
         "--entity-type",
         default=None,
@@ -232,6 +245,7 @@ def main() -> None:
     seed(
         environment=args.environment,
         region=args.region,
+        tenant_code=args.tenant_code,
         entity_type_filter=args.entity_type,
         dry_run=args.dry_run,
     )

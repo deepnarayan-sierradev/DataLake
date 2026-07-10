@@ -30,8 +30,11 @@ several cases, not just latent risk) despite the phase being marked complete. Al
 see `ARCH-1`, `ARCH-4`, and new findings `ARCH-6` through `ARCH-9` in the findings doc — with
 regression coverage in `tests/test_tenant_isolation.py` and each affected module's own test suite.
 Three lower-severity gaps found in the same sweep (`ARCH-10`–`ARCH-12`: survivorship/match-rule
-config, field mapping registry, and `ConfigurationRepositoryClient`'s DynamoDB key are not
-tenant-scoped) are deliberately deferred — see their entries in the findings doc for why.
+config, field mapping registry, and `ConfigurationRepositoryClient`'s DynamoDB key were not
+tenant-scoped) were deliberately deferred. `ARCH-10`/`ARCH-11` are now done (2026-07-10) —
+both registries are tenant-prefixed in S3, matching this plan's own `ARCH-1` pattern.
+`ARCH-12` remains deferred (separate DynamoDB-key fix, lower severity) — see the findings
+doc for why.
 
 **A second, independent adversarial audit (same day, 2026-07-08)** — five parallel review agents
 re-verified every `ARCH-1`/`ARCH-4`/`ARCH-6`–`ARCH-9` fix against the actual code (not the doc's own
@@ -107,7 +110,7 @@ Verified against the current code before writing this plan, so effort isn't dupl
 | §1.1 Multi-Tenancy Data Model | **Done (2026-07-08)** | Was marked "Partial" pending watermark/audit/raw-layer work; that work is now complete — see `ARCH-1`, `ARCH-4` in the findings doc for the full list of what was actually fixed on 2026-07-08 (watermark key, raw layer, analytics/golden/canonical publishers, curated lookups, schedule name, circuit breaker, SQS/SFN naming, DLQ replay) |
 | §1.2 SaaS Control Plane API | Open | Not started — `ARCH-3` |
 | §1.3 Config-Driven Entity Type Registry | Open | Not started — `ARCH-2` |
-| §1.4 Config-Driven Survivorship Policy | **Open (resolved 2026-07-08)** | The "Verify" was answered: `survivorship_policy.py` is versioned/dataclass-based logic only — its *persistence* layer (`resolution_config_registry.py`) is global, not tenant-scoped. This was never built, not merely unverified. Tracked as `ARCH-10`, deferred alongside `ARCH-11`/`ARCH-12` (same registry-client design work, no live second tenant needs it yet) |
+| §1.4 Config-Driven Survivorship Policy | **Done (2026-07-10)** | `resolution_config_registry.py`'s persistence layer is now tenant-scoped — `ResolutionConfigRegistry.load()`/`.publish()` require `tenant_code` and prefix S3 keys with `{tenant_code}/entity-resolution/...`. Tracked as `ARCH-10`, done — see the findings doc |
 | §1.5 Terraform-managed DynamoDB tables | **Done (confirmed 2026-07-09)** | All 5 tables (`watermark_repository`, `run_audit_log`, `entity_extraction_config`, `entity_type_registry`, `source_onboarding_registry`) are genuine `aws_dynamodb_table` resources with `lifecycle { prevent_destroy = true }` in `infrastructure/modules/metadata_persistence/main.tf` — confirmed directly in the Terraform source, not just by the `INFRA-7` doc correction (which independently found the same via `terraform state list` after a clean `dev` apply) |
 | §1.6 SQS Burst Buffer | **Done** | FIFO queue, `pipeline_trigger` Lambda, reserved concurrency, `Lambda.TooManyRequestsException` retry all confirmed in `infrastructure/modules/orchestration/main.tf` |
 | §2.1 Remove dead `_GATE_ORDER` | **Done** | Confirmed — single canonical `_GATE_ORDER` tuple, no dead variable |
@@ -200,7 +203,7 @@ pass on 2026-07-08 after direct re-verification found the 2026-07-07 "done" mark
 | `ARCH-4` | Require `tenant_code` in every pipeline stage's event contract; validate against `TENANT_CODE_PATTERN` | All four Lambda handlers (`extraction_pipeline_handler.py`, `entity_resolution_pipeline_handler.py`, `analytics_publisher_handler.py`, `transformation_pipeline_handler.py`) | ✅ Done — required + always format-validated in all four, not just extraction |
 | `ARCH-1` | Thread `tenant_code` through every tenant-owned resource's table keys and S3 paths | `watermark_repository.py`, `raw_layer_writer.py` (+ 4 adapters), `analytics_publisher_handler.py`, golden/canonical record publishers, `curated_utils.py`, `curated_accumulator.py` | ✅ Done — see `ARCH-1` finding for the full list; `configuration_repository.py`/`snapshot_repository.py` were already correct from the 2026-07-07 pass |
 | `ARCH-2` | Replace `entity_type_registry.py` hardcoded dicts with a DynamoDB-backed `EntityTypeRegistryClient` keyed on `(tenant_code, entity_id)`; seed current dicts as the `default` tenant | `entity_resolution/entity_type_registry.py`, `entity_resolution/entity_resolution_pipeline_handler.py` | ✅ Done |
-| §1.4 (verify/finish) | Confirm whether `survivorship_policy.py`'s existing versioned design needs an S3-backed, tenant-scoped registry client on top | `entity_resolution/survivorship_policy.py` | **Resolved, still open** — it does need one; tracked as `ARCH-10`, deferred (design-sized work, see findings doc) |
+| §1.4 (verify/finish) | Confirm whether `survivorship_policy.py`'s existing versioned design needs an S3-backed, tenant-scoped registry client on top | `entity_resolution/resolution_config/resolution_config_registry.py` | ✅ Done (2026-07-10) — `ResolutionConfigRegistry` is now tenant-scoped; tracked as `ARCH-10` |
 | §1.5 (finish) | Migrate DynamoDB tables into Terraform-managed resources (import existing state), add tenant GSIs where the above items need them | `infrastructure/modules/metadata_persistence/main.tf` | ✅ Done (confirmed 2026-07-09) — all 5 tables are real Terraform resources; the tenant-GSI half of this item is still open where noted elsewhere (`ARCH-12`'s table has no tenant-keyed GSI at all, and `PERF-7`/`PERF-10` cover the query-cost and hot-partition angles of the GSIs that do exist) |
 
 **Exit criteria (met for the code-level guarantee):** A synthetic second tenant

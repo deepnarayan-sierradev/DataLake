@@ -18,6 +18,7 @@ from transformation.field_mapping.field_mapping_registry import (
 
 _REGION = "us-east-1"
 _BUCKET = "test-mapping-bucket"
+_TENANT = "acme-corp"
 
 
 def _make_rule(
@@ -237,24 +238,32 @@ class TestFieldMappingRegistryClient:
 
     def test_publish_and_load_by_version(self):
         rs = self._sample_rule_set("2.0.0")
-        self.client.publish_rule_set(rs)
-        loaded = self.client.load_rule_set("salesforce", "salesforce-account", "2.0.0")
+        self.client.publish_rule_set(rs, _TENANT)
+        loaded = self.client.load_rule_set(
+            "salesforce", "salesforce-account", _TENANT, "2.0.0"
+        )
         assert loaded.mapping_version == "2.0.0"
         assert len(loaded.rules) == 1
 
     def test_publish_updates_latest_pointer(self):
         rs = self._sample_rule_set("3.0.0")
-        self.client.publish_rule_set(rs)
-        loaded = self.client.load_rule_set("salesforce", "salesforce-account", "latest")
+        self.client.publish_rule_set(rs, _TENANT)
+        loaded = self.client.load_rule_set(
+            "salesforce", "salesforce-account", _TENANT, "latest"
+        )
         assert loaded.mapping_version == "3.0.0"
 
     def test_load_nonexistent_raises(self):
         with pytest.raises(MappingRuleSetNotFoundError):
-            self.client.load_rule_set("salesforce", "salesforce-account", "99.0.0")
+            self.client.load_rule_set(
+                "salesforce", "salesforce-account", _TENANT, "99.0.0"
+            )
 
     def test_load_latest_without_pointer_raises(self):
         with pytest.raises(MappingRuleSetNotFoundError):
-            self.client.load_rule_set("unknown-source", "unknown-entity", "latest")
+            self.client.load_rule_set(
+                "unknown-source", "unknown-entity", _TENANT, "latest"
+            )
 
     def test_roundtrip_all_transformations(self):
         rules = [
@@ -271,7 +280,9 @@ class TestFieldMappingRegistryClient:
             ),
         ]
         rs = _make_rule_set(version="roundtrip", rules=rules)
-        self.client.publish_rule_set(rs)
-        loaded = self.client.load_rule_set("salesforce", "salesforce-account", "roundtrip")
+        self.client.publish_rule_set(rs, _TENANT)
+        loaded = self.client.load_rule_set(
+            "salesforce", "salesforce-account", _TENANT, "roundtrip"
+        )
         assert len(loaded.rules) == 4
         assert loaded.rules[0].transformation == MappingTransformation.CONCAT

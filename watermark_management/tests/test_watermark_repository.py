@@ -159,6 +159,7 @@ class TestInitialiseWatermark:
 class TestAdvanceWatermark:
     @mock_aws
     def test_advance_bumps_version_and_last_successful(self) -> None:
+        """last_successful advances to new_upper, not current.upper_watermark."""
         _create_table()
         repo = _repo()
         initial = repo.initialise_watermark(
@@ -171,7 +172,7 @@ class TestAdvanceWatermark:
             run_id="run-20260611-140000000000-aaaa0002",
         )
         assert advanced.version == 1
-        assert advanced.last_successful_watermark == initial.upper_watermark
+        assert advanced.last_successful_watermark == new_upper
         assert advanced.upper_watermark == new_upper
 
     @mock_aws

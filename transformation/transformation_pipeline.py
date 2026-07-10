@@ -201,13 +201,15 @@ class TransformationPipeline:
         rule_set: FieldMappingRuleSet | None = None
         try:
             rule_set = self._mapping_registry.load_rule_set(
-                ctx.source_id, ctx.entity_id, ctx.mapping_version
+                ctx.source_id, ctx.entity_id, ctx.tenant_code, ctx.mapping_version
             )
-        except MappingRuleSetNotFoundError:
+        except MappingRuleSetNotFoundError as exc:
             _logger.warning(
                 "no_mapping_rule_set_found_using_identity",
                 source_id=ctx.source_id,
                 entity_id=ctx.entity_id,
+                tenant_code=ctx.tenant_code,
+                detail=str(exc),
             )
 
         mapping_version = rule_set.mapping_version if rule_set else "identity"

@@ -103,6 +103,7 @@ class GoldenRecordPublisher:
         cls,
         registry: ResolutionConfigRegistry,
         entity_type: str,
+        tenant_code: str,
         analytics_s3_bucket: str,
         region_name: str,
         governance_s3_bucket: str | None = None,
@@ -127,12 +128,14 @@ class GoldenRecordPublisher:
             publisher = GoldenRecordPublisher.from_registry(
                 registry=registry,
                 entity_type="company",
+                tenant_code="demo",
                 analytics_s3_bucket="edl-analytics-087972550871",
                 region_name="us-east-1",
             )
         """
         config = registry.load(
             entity_type=entity_type,
+            tenant_code=tenant_code,
             match_rules_version=match_rules_version,
             survivorship_version=survivorship_version,
         )

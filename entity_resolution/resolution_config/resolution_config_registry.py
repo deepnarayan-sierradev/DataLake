@@ -7,12 +7,12 @@ the runtime objects consumed by GoldenRecordPublisher:
   match_rules_v1.json    → MatchRuleSet   (who is the same entity?)
   survivorship_v1.json   → SurvivorshipPolicy  (what does the output look like?)
 
-Config S3 paths:
-  s3://{bucket}/entity-resolution/{entity_type}/match_rules_{version}.json
-  s3://{bucket}/entity-resolution/{entity_type}/survivorship_{version}.json
+Config S3 paths (per-tenant):
+  s3://{bucket}/{tenant_code}/entity-resolution/{entity_type}/match_rules_{version}.json
+  s3://{bucket}/{tenant_code}/entity-resolution/{entity_type}/survivorship_{version}.json
 
-A "latest" pointer file per entity type:
-  s3://{bucket}/entity-resolution/{entity_type}/latest.json
+A "latest" pointer file per tenant + entity type:
+  s3://{bucket}/{tenant_code}/entity-resolution/{entity_type}/latest.json
   → { "match_rules_version": "v1", "survivorship_version": "v1" }
 
 This registry is the single source of truth for entity resolution configuration.
@@ -34,6 +34,7 @@ from typing import Any, Final
 
 import boto3
 
+from contracts.identifier_policy import validate_tenant_code
 from entity_resolution.matching_engine.match_rule_engine import (
     DeterministicMatchField,
     DeterministicMatchRule,
@@ -89,8 +90,12 @@ class ResolutionConfigRegistry:
         registry = ResolutionConfigRegistry(
             s3_bucket="edl-curated-087972550871", region_name="us-east-1"
         )
-        config = registry.load("company")           # loads latest version
-        config = registry.load("company", "v2")     # loads explicit version
+        config = registry.load("company", "demo")           # loads latest version
+        config = registry.load("company", "demo", "v2")     # loads explicit version
+
+    tenant_code is a per-call parameter, not constructor state — a single
+    registry instance is cached and reused across warm Lambda invocations for
+    different tenants, so the in-process cache below is also tenant-scoped.
     """
 
     def __init__(self, s3_bucket: str, region_name: str) -> None:
@@ -106,11 +111,12 @@ class ResolutionConfigRegistry:
     def load(
         self,
         entity_type: str,
+        tenant_code: str,
         match_rules_version: str = "latest",
         survivorship_version: str = "latest",
     ) -> ResolutionConfig:
         """
-        Load match rules + survivorship config for the given entity type.
+        Load match rules + survivorship config for the given tenant + entity type.
 
         Versions default to "latest".  Pass explicit version strings (e.g.
         "v2") to pin to a specific config.
@@ -119,16 +125,17 @@ class ResolutionConfigRegistry:
         Raises ResolutionConfigParseError when the JSON is malformed.
         """
         _validate_entity_type(entity_type)
+        tenant_code = validate_tenant_code(tenant_code)
 
         # Resolve "latest" pointers
         if match_rules_version == "latest" or survivorship_version == "latest":
-            pointer = self._load_latest_pointer(entity_type)
+            pointer = self._load_latest_pointer(entity_type, tenant_code)
             if match_rules_version == "latest":
                 match_rules_version = pointer.get("match_rules_version", "v1")
             if survivorship_version == "latest":
                 survivorship_version = pointer.get("survivorship_version", "v1")
 
-        cache_key = f"{entity_type}/{match_rules_version}/{survivorship_version}"
+        cache_key = f"{tenant_code}/{entity_type}/{match_rules_version}/{survivorship_version}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
@@ -136,10 +143,10 @@ class ResolutionConfigRegistry:
         _validate_version(survivorship_version)
 
         match_raw = self._load_json(
-            f"entity-resolution/{entity_type}/match_rules_{match_rules_version}.json"
+            f"{tenant_code}/entity-resolution/{entity_type}/match_rules_{match_rules_version}.json"
         )
         survivorship_raw = self._load_json(
-            f"entity-resolution/{entity_type}/survivorship_{survivorship_version}.json"
+            f"{tenant_code}/entity-resolution/{entity_type}/survivorship_{survivorship_version}.json"
         )
 
         rule_set = _parse_match_rule_set(match_raw)
@@ -153,6 +160,7 @@ class ResolutionConfigRegistry:
         self._cache[cache_key] = config
         _logger.info(
             "resolution_config_loaded",
+            tenant_code=tenant_code,
             entity_type=entity_type,
             match_rules_version=match_rules_version,
             survivorship_version=survivorship_version,
@@ -164,6 +172,7 @@ class ResolutionConfigRegistry:
     def publish(
         self,
         entity_type: str,
+        tenant_code: str,
         match_rules_raw: dict[str, Any],
         survivorship_raw: dict[str, Any],
     ) -> tuple[str, str]:
@@ -174,6 +183,7 @@ class ResolutionConfigRegistry:
         Used by onboarding scripts and CI pipelines.
         """
         _validate_entity_type(entity_type)
+        tenant_code = validate_tenant_code(tenant_code)
 
         mr_version = match_rules_raw.get("rule_set_version", "v1")
         sv_version = survivorship_raw.get("policy_version", "v1")
@@ -181,9 +191,9 @@ class ResolutionConfigRegistry:
         _validate_version(mr_version)
         _validate_version(sv_version)
 
-        mr_key = f"entity-resolution/{entity_type}/match_rules_{mr_version}.json"
-        sv_key = f"entity-resolution/{entity_type}/survivorship_{sv_version}.json"
-        ptr_key = f"entity-resolution/{entity_type}/latest.json"
+        mr_key = f"{tenant_code}/entity-resolution/{entity_type}/match_rules_{mr_version}.json"
+        sv_key = f"{tenant_code}/entity-resolution/{entity_type}/survivorship_{sv_version}.json"
+        ptr_key = f"{tenant_code}/entity-resolution/{entity_type}/latest.json"
 
         for key, body in [
             (mr_key, match_rules_raw),
@@ -197,11 +207,15 @@ class ResolutionConfigRegistry:
                 ContentType="application/json",
             )
 
-        # Invalidate cache for this entity type
-        self._cache = {k: v for k, v in self._cache.items() if not k.startswith(entity_type)}
+        # Trailing "/" avoids a false-positive match (e.g. "company" vs "company-extra").
+        cache_prefix = f"{tenant_code}/{entity_type}/"
+        self._cache = {
+            k: v for k, v in self._cache.items() if not k.startswith(cache_prefix)
+        }
 
         _logger.info(
             "resolution_config_published",
+            tenant_code=tenant_code,
             entity_type=entity_type,
             match_rules_version=mr_version,
             survivorship_version=sv_version,
@@ -225,8 +239,8 @@ class ResolutionConfigRegistry:
                 f"Failed to parse resolution config at {key!r}: {exc}"
             ) from exc
 
-    def _load_latest_pointer(self, entity_type: str) -> dict[str, str]:
-        key = f"entity-resolution/{entity_type}/latest.json"
+    def _load_latest_pointer(self, entity_type: str, tenant_code: str) -> dict[str, str]:
+        key = f"{tenant_code}/entity-resolution/{entity_type}/latest.json"
         try:
             return self._load_json(key)
         except ResolutionConfigNotFoundError:

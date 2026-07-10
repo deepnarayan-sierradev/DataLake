@@ -31,6 +31,7 @@ from typing import Any, Final
 import boto3
 from botocore.exceptions import ClientError
 
+from contracts.identifier_policy import validate_tenant_code
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -232,12 +233,15 @@ class FieldMappingRegistryClient:
     """
     S3-backed registry that loads and publishes FieldMappingRuleSet definitions.
 
-    Rule sets are stored at:
-      s3://{bucket}/field-mappings/{source_id}/{entity_id}/{mapping_version}.json
+    Rule sets are stored per-tenant at:
+      s3://{bucket}/{tenant_code}/field-mappings/{source_id}/{entity_id}/{mapping_version}.json
 
     A "latest" pointer file at:
-      s3://{bucket}/field-mappings/{source_id}/{entity_id}/latest.json
+      s3://{bucket}/{tenant_code}/field-mappings/{source_id}/{entity_id}/latest.json
     tracks the current active version.
+
+    tenant_code is a per-call parameter (not constructor state) so a single
+    client instance can safely serve multiple tenants across warm invocations.
     """
 
     def __init__(self, s3_bucket: str, region_name: str) -> None:
@@ -249,6 +253,7 @@ class FieldMappingRegistryClient:
         self,
         source_id: str,
         entity_id: str,
+        tenant_code: str,
         mapping_version: str = "latest",
     ) -> FieldMappingRuleSet:
         """
@@ -257,45 +262,57 @@ class FieldMappingRegistryClient:
         Raises MappingRuleSetNotFoundError if the object does not exist.
         Raises MappingRuleSetParseError if the JSON is malformed.
         """
-        if mapping_version == "latest":
-            mapping_version = self._resolve_latest_version(source_id, entity_id)
+        tenant_code = validate_tenant_code(tenant_code)
 
-        key = f"field-mappings/{source_id}/{entity_id}/{mapping_version}.json"
+        if mapping_version == "latest":
+            mapping_version = self._resolve_latest_version(source_id, entity_id, tenant_code)
+
+        key = f"{tenant_code}/field-mappings/{source_id}/{entity_id}/{mapping_version}.json"
 
         try:
             response = self._s3.get_object(Bucket=self._s3_bucket, Key=key)
             raw: dict[str, Any] = json.loads(response["Body"].read().decode("utf-8"))
         except self._s3.exceptions.NoSuchKey as exc:
-            raise MappingRuleSetNotFoundError(source_id, entity_id, mapping_version) from exc
+            raise MappingRuleSetNotFoundError(
+                source_id, entity_id, mapping_version, tenant_code
+            ) from exc
         except (json.JSONDecodeError, KeyError) as exc:
             raise MappingRuleSetParseError(f"Failed to parse mapping rule set: {exc}") from exc
 
         return _deserialise_rule_set(raw)
 
-    def _resolve_latest_version(self, source_id: str, entity_id: str) -> str:
-        pointer_key = f"field-mappings/{source_id}/{entity_id}/latest.json"
+    def _resolve_latest_version(self, source_id: str, entity_id: str, tenant_code: str) -> str:
+        pointer_key = f"{tenant_code}/field-mappings/{source_id}/{entity_id}/latest.json"
         try:
             response = self._s3.get_object(Bucket=self._s3_bucket, Key=pointer_key)
             pointer: dict[str, str] = json.loads(response["Body"].read().decode("utf-8"))
             return pointer["mapping_version"]
         except self._s3.exceptions.NoSuchKey:
-            raise MappingRuleSetNotFoundError(source_id, entity_id, "latest") from None
+            raise MappingRuleSetNotFoundError(
+                source_id, entity_id, "latest", tenant_code
+            ) from None
         except ClientError as exc:
             code = exc.response["Error"]["Code"]
             if code in ("NoSuchKey", "404"):
-                raise MappingRuleSetNotFoundError(source_id, entity_id, "latest") from exc
+                raise MappingRuleSetNotFoundError(
+                    source_id, entity_id, "latest", tenant_code
+                ) from exc
             raise  # access denied, throttling, network errors — propagate, do not hide
         except (json.JSONDecodeError, KeyError) as exc:
             # Malformed or incomplete pointer file — treat as not found.
-            raise MappingRuleSetNotFoundError(source_id, entity_id, "latest") from exc
+            raise MappingRuleSetNotFoundError(
+                source_id, entity_id, "latest", tenant_code
+            ) from exc
 
-    def publish_rule_set(self, rule_set: FieldMappingRuleSet) -> str:
+    def publish_rule_set(self, rule_set: FieldMappingRuleSet, tenant_code: str) -> str:
         """
         Persist a rule set to S3 and update the latest pointer.
         Returns the S3 key of the published rule set.
         """
+        tenant_code = validate_tenant_code(tenant_code)
+
         key = (
-            f"field-mappings/{rule_set.source_id}/{rule_set.entity_id}"
+            f"{tenant_code}/field-mappings/{rule_set.source_id}/{rule_set.entity_id}"
             f"/{rule_set.mapping_version}.json"
         )
         body = json.dumps(_serialise_rule_set(rule_set), indent=2).encode("utf-8")
@@ -304,7 +321,9 @@ class FieldMappingRegistryClient:
             Bucket=self._s3_bucket, Key=key, Body=body, ContentType="application/json"
         )
 
-        pointer_key = f"field-mappings/{rule_set.source_id}/{rule_set.entity_id}/latest.json"
+        pointer_key = (
+            f"{tenant_code}/field-mappings/{rule_set.source_id}/{rule_set.entity_id}/latest.json"
+        )
         self._s3.put_object(
             Bucket=self._s3_bucket,
             Key=pointer_key,
@@ -314,6 +333,7 @@ class FieldMappingRegistryClient:
 
         _logger.info(
             "field_mapping_rule_set_published",
+            tenant_code=tenant_code,
             source_id=rule_set.source_id,
             entity_id=rule_set.entity_id,
             mapping_version=rule_set.mapping_version,
@@ -364,8 +384,14 @@ def _deserialise_rule_set(raw: dict[str, Any]) -> FieldMappingRuleSet:
 
 
 class MappingRuleSetNotFoundError(Exception):
-    def __init__(self, source_id: str, entity_id: str, version: str) -> None:
-        super().__init__(f"No mapping rule set found for {source_id}/{entity_id}@{version}")
+    def __init__(self, source_id: str, entity_id: str, version: str, tenant_code: str) -> None:
+        super().__init__(
+            f"No mapping rule set found for tenant_code={tenant_code!r} "
+            f"{source_id}/{entity_id}@{version}. If this tenant was migrated from a "
+            "pre-tenant-scoping deployment, re-run scripts/seed_field_mappings.py "
+            f"--tenant-code {tenant_code} to publish its rule sets under the new "
+            "tenant-prefixed S3 path."
+        )
 
 
 class MappingRuleSetParseError(Exception):

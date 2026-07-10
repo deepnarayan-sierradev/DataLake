@@ -14,13 +14,17 @@ Usage:
     python scripts/seed_field_mappings.py \
         --environment dev --source-id salesforce --entity-id salesforce-account
 
+    # Publish for a specific tenant (default: "demo"):
+    python scripts/seed_field_mappings.py --environment dev --tenant-code acme-corp
+
 Prerequisite:
     AWS credentials configured (AWS_PROFILE, AWS_DEFAULT_REGION, or instance role).
     The S3 bucket must already exist (provisioned by the Terraform storage module).
 
-S3 layout written by this script:
-    s3://{bucket}/field-mappings/{source_id}/{entity_id}/{version}.json
-    s3://{bucket}/field-mappings/{source_id}/{entity_id}/latest.json  ← pointer to highest version
+S3 layout written by this script (per-tenant):
+    s3://{bucket}/{tenant_code}/field-mappings/{source_id}/{entity_id}/{version}.json
+    s3://{bucket}/{tenant_code}/field-mappings/{source_id}/{entity_id}/latest.json
+    ← pointer to highest version
 """
 
 from __future__ import annotations
@@ -32,6 +36,8 @@ from pathlib import Path
 from typing import Any
 
 import boto3
+
+from contracts.identifier_policy import validate_tenant_code
 
 # Root of the repo — two levels up from scripts/
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -101,10 +107,12 @@ def _resolve_latest_version(versions: list[str]) -> str:
 def seed(
     environment: str,
     region: str,
+    tenant_code: str = "demo",
     source_id: str | None = None,
     entity_id: str | None = None,
     dry_run: bool = False,
 ) -> None:
+    tenant_code = validate_tenant_code(tenant_code)
     bucket = _bucket_name(region)
     mapping_files = _collect_mapping_files(source_id, entity_id)
 
@@ -113,6 +121,7 @@ def seed(
         sys.exit(1)
 
     print(f"Target bucket : {bucket}  (region: {region})")
+    print(f"Tenant code   : {tenant_code}")
     print(f"Mappings dir  : {_MAPPINGS_DIR}")
     print(f"Files found   : {len(mapping_files)}\n")
 
@@ -123,11 +132,15 @@ def seed(
         for src, ent, ver, path in mapping_files:
             groups.setdefault((src, ent), []).append(ver)
             rel_path = path.relative_to(_REPO_ROOT)
-            print(f"  s3://{bucket}/field-mappings/{src}/{ent}/{ver}.json  ← {rel_path}")
+            print(
+                f"  s3://{bucket}/{tenant_code}/field-mappings/{src}/{ent}/{ver}.json  ← {rel_path}"
+            )
         print()
         for (src, ent), versions in groups.items():
             latest = _resolve_latest_version(versions)
-            print(f"  s3://{bucket}/field-mappings/{src}/{ent}/latest.json  → {latest}")
+            print(
+                f"  s3://{bucket}/{tenant_code}/field-mappings/{src}/{ent}/latest.json  → {latest}"
+            )
         return
 
     s3 = boto3.client("s3", region_name=region)
@@ -153,7 +166,7 @@ def seed(
             )
             sys.exit(1)
 
-        key = f"field-mappings/{src}/{ent}/{ver}.json"
+        key = f"{tenant_code}/field-mappings/{src}/{ent}/{ver}.json"
         s3.put_object(
             Bucket=bucket,
             Key=key,
@@ -166,7 +179,7 @@ def seed(
     # Update latest.json pointer for each source/entity to the highest version
     for (src, ent), versions in published_versions.items():
         latest = _resolve_latest_version(versions)
-        pointer_key = f"field-mappings/{src}/{ent}/latest.json"
+        pointer_key = f"{tenant_code}/field-mappings/{src}/{ent}/latest.json"
         s3.put_object(
             Bucket=bucket,
             Key=pointer_key,
@@ -183,7 +196,7 @@ def seed(
         "from transformation.field_mapping.field_mapping_registry import "
         "FieldMappingRegistryClient; "
         f"c = FieldMappingRegistryClient('{bucket}', '{region}'); "
-        "rs = c.load_rule_set('salesforce', 'salesforce-account'); "
+        f"rs = c.load_rule_set('salesforce', 'salesforce-account', '{tenant_code}'); "
         'print(rs)"'
     )
 
@@ -194,6 +207,11 @@ def main() -> None:
     )
     parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"])
     parser.add_argument("--region", default="us-east-1")
+    parser.add_argument(
+        "--tenant-code",
+        default="demo",
+        help="Tenant to publish these mappings for. Defaults to 'demo'.",
+    )
     parser.add_argument(
         "--source-id",
         default=None,
@@ -222,6 +240,7 @@ def main() -> None:
     seed(
         environment=args.environment,
         region=args.region,
+        tenant_code=args.tenant_code,
         source_id=args.source_id,
         entity_id=args.entity_id,
         dry_run=args.dry_run,

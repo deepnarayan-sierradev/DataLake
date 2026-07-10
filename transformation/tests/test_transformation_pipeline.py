@@ -115,7 +115,7 @@ class TestTransformationPipelineHappyPath:
                 ),
             ),
         )
-        self.registry_client.publish_rule_set(rule_set)
+        self.registry_client.publish_rule_set(rule_set, "demo")
 
         records = [{"Id": "001", "Name": "Acme Corp"}]
         _write_raw_parquet(self.s3, _RAW_BUCKET, "raw/mapped/", records)
@@ -538,7 +538,7 @@ class TestModuleLevelHelpers:
             ),
         )
         registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
-        registry_client.publish_rule_set(rule_set)
+        registry_client.publish_rule_set(rule_set, "demo")
 
         pipeline = _make_pipeline(registry_client)
         ctx = _make_ctx("raw/map-fail/")
@@ -636,7 +636,7 @@ class TestStreamingFastPath:
             ),
         )
         registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
-        registry_client.publish_rule_set(rule_set)
+        registry_client.publish_rule_set(rule_set, "demo")
 
         pipeline = _make_pipeline(registry_client)
         ctx = _make_ctx("raw/stream-fail/")
@@ -696,7 +696,7 @@ class TestAutoClassification:
             ),
         )
         registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
-        registry_client.publish_rule_set(rule_set)
+        registry_client.publish_rule_set(rule_set, "demo")
 
         records = [{"Email": "alice@example.com"}]
         _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/auto-mask/", records)
@@ -727,7 +727,7 @@ class TestAutoClassification:
             ),
         )
         registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
-        registry_client.publish_rule_set(rule_set)
+        registry_client.publish_rule_set(rule_set, "demo")
 
         records = [{"Id": "001"}]
         _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/auto-nomask/", records)
@@ -763,7 +763,7 @@ class TestAutoClassification:
             ),
         )
         registry_client = FieldMappingRegistryClient(_MAPPING_BUCKET, _REGION)
-        registry_client.publish_rule_set(rule_set)
+        registry_client.publish_rule_set(rule_set, "demo")
 
         records = [{"Email": "bob@example.com"}]
         _write_raw_parquet(streaming_s3, _RAW_BUCKET, "raw/explicit-mask/", records)

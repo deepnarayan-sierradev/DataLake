@@ -265,6 +265,7 @@ def _run_entity_resolution(
         publisher = GoldenRecordPublisher.from_registry(
             registry=_registry,
             entity_type=entity_type,
+            tenant_code=tenant_code,
             analytics_s3_bucket=analytics_s3_bucket,
             region_name=region_name,
             governance_s3_bucket=governance_s3_bucket,
@@ -273,9 +274,11 @@ def _run_entity_resolution(
         )
     except ResolutionConfigNotFoundError as exc:
         raise ResolutionConfigNotFoundError(
-            f"Resolution config not found for entity_type={entity_type!r}. "
-            "Upload match_rules and survivorship JSON files to S3 via "
-            "scripts/seed_entity_resolution_configs.py, then retry."
+            f"Resolution config not found for tenant_code={tenant_code!r} "
+            f"entity_type={entity_type!r}. If this tenant was migrated from a "
+            "pre-tenant-scoping deployment, re-run scripts/seed_entity_resolution_configs.py "
+            f"--tenant-code {tenant_code} to publish its match-rules/survivorship config "
+            "under the new tenant-prefixed S3 path, then retry."
         ) from exc
 
     # ── Run golden record publication ─────────────────────────────────────────

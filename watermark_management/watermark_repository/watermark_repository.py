@@ -226,16 +226,13 @@ class WatermarkRepository:
         """
         Advance the watermark to new_upper_watermark after a successful run.
 
-        Optimistic concurrency: the DynamoDB write succeeds only when the stored
-        version equals current.version.  If another process advanced the watermark
-        concurrently, WatermarkConcurrencyError is raised.
+        last_successful_watermark advances to new_upper_watermark, not
+        current.upper_watermark — the query bounds both sides, so
+        new_upper_watermark is this run's confirmed coverage.
 
-        The caller must NOT call this method on failed or partial runs.
-
-        Raises:
-            ValueError: new_upper_watermark is earlier than current.upper_watermark,
-                which would create a gap in incremental extraction coverage.
-            WatermarkConcurrencyError: stored version differs from current.version.
+        Optimistic concurrency: raises WatermarkConcurrencyError if another
+        process already advanced the stored version. Caller must not call
+        this on failed or partial runs.
         """
         if new_upper_watermark < current.upper_watermark:
             raise ValueError(
@@ -250,7 +247,7 @@ class WatermarkRepository:
             source_id=current.source_id,
             entity_id=current.entity_id,
             environment=current.environment,
-            last_successful_watermark=current.upper_watermark,
+            last_successful_watermark=new_upper_watermark,
             upper_watermark=new_upper_watermark,
             run_id=run_id,
             updated_at=now,
