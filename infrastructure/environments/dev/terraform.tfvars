@@ -11,7 +11,7 @@ alert_email = "" # Set to ops team email when ready
 # Lambda deployment package — produced by 'make lambda-package && make lambda-upload'
 lambda_package_s3_bucket   = "edl-terraform-state-087972550871"
 lambda_package_s3_key      = "lambda/extraction-pipeline.zip"
-lambda_package_source_hash = "SPPJtp+9WUDLFZWSq4psfy7DgYh8HuAWeLhlHKcUFTw="
+lambda_package_source_hash = "gQeht2IpFJ2F2l51l4/Ztiwn+vJNzB0vZVnENeu3Rgc="
 
 # Pipeline stage Lambda ARNs (required by Step Functions orchestration module)
 # Populate after deploying each Lambda stage package.
