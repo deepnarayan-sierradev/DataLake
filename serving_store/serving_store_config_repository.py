@@ -6,10 +6,10 @@ All records are Pydantic-validated before being returned.
 
 DynamoDB table: EdlServingStoreConfig
   PK: tenant_code (str)
-  SK: entity_id (str)
+  SK: entity_type (str)
 
 S3 path (when ConfigurationBackend.S3 is selected):
-  s3://{bucket}/{tenant_code}/serving-store/{entity_id}/config.json
+  s3://{bucket}/{tenant_code}/serving-store/{entity_type}/config.json
 
 Security:
   - DynamoDB/S3 reads use the injected boto3 session (IAM role — no credentials in code).
@@ -30,7 +30,7 @@ from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 from pydantic import ValidationError
 
-from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from contracts.identifier_policy import ENTITY_TYPE_PATTERN as _ENTITY_TYPE_PATTERN
 from contracts.identifier_policy import validate_tenant_code
 from contracts.serving_store_config_contract import ServingStoreLoadConfig
 from observability.structured_logger import get_platform_logger
@@ -86,22 +86,24 @@ class ServingStoreConfigRepositoryClient:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def load_config(self, tenant_code: str, entity_id: str) -> ServingStoreLoadConfig:
+    def load_config(self, tenant_code: str, entity_type: str) -> ServingStoreLoadConfig:
         """
-        Load and validate the serving store config record for tenant_code/entity_id.
+        Load and validate the serving store config record for tenant_code/entity_type.
 
         Raises:
-            ValueError: tenant_code or entity_id fails its identifier format.
+            ValueError: tenant_code or entity_type fails its identifier format.
             ServingStoreConfigNotFoundError: no record exists.
             ServingStoreConfigValidationError: stored record fails schema validation.
         """
         tenant_code = validate_tenant_code(tenant_code)
-        if not _STABLE_ID_PATTERN.match(entity_id):
-            raise ValueError(f"entity_id={entity_id!r} does not conform to the stable ID format.")
+        if not _ENTITY_TYPE_PATTERN.match(entity_type):
+            raise ValueError(
+                f"entity_type={entity_type!r} does not conform to the entity type format."
+            )
 
         if self._backend == ConfigurationBackend.DYNAMODB:
-            return self._load_from_dynamodb(tenant_code, entity_id)
-        return self._load_from_s3(tenant_code, entity_id)
+            return self._load_from_dynamodb(tenant_code, entity_type)
+        return self._load_from_s3(tenant_code, entity_type)
 
     def save_config(self, config: ServingStoreLoadConfig, *, overwrite: bool = False) -> None:
         """Persist a validated ServingStoreLoadConfig record (control-plane write path)."""
@@ -112,7 +114,7 @@ class ServingStoreConfigRepositoryClient:
         put_kwargs: dict[str, Any] = {"Item": item}
         if not overwrite:
             put_kwargs["ConditionExpression"] = (
-                "attribute_not_exists(tenant_code) AND attribute_not_exists(entity_id)"
+                "attribute_not_exists(tenant_code) AND attribute_not_exists(entity_type)"
             )
         try:
             self._table.put_item(**put_kwargs)
@@ -121,12 +123,12 @@ class ServingStoreConfigRepositoryClient:
             if error_code == "ConditionalCheckFailedException":
                 raise ServingStoreConfigAlreadyExistsError(
                     f"Serving store config already exists for tenant_code={config.tenant_code!r} "
-                    f"entity_id={config.entity_id!r}. Use overwrite=True to update."
+                    f"entity_type={config.entity_type!r}. Use overwrite=True to update."
                 ) from exc
             _logger.error(
                 "serving_store_config_save_dynamodb_error",
                 tenant_code=config.tenant_code,
-                entity_id=config.entity_id,
+                entity_type=config.entity_type,
                 error_code=error_code,
             )
             raise
@@ -153,12 +155,14 @@ class ServingStoreConfigRepositoryClient:
             for item in response.get("Items", []):
                 record: dict[str, Any] = dict(item)
                 try:
-                    configs.append(self._validate(tenant_code, str(item.get("entity_id")), record))
+                    configs.append(
+                        self._validate(tenant_code, str(item.get("entity_type")), record)
+                    )
                 except ServingStoreConfigValidationError:
                     _logger.warning(
                         "serving_store_config_list_skipped_invalid_record",
                         tenant_code=tenant_code,
-                        entity_id=item.get("entity_id"),
+                        entity_type=item.get("entity_type"),
                     )
             last_key = response.get("LastEvaluatedKey")
             if not last_key:
@@ -168,10 +172,10 @@ class ServingStoreConfigRepositoryClient:
 
     # ── DynamoDB backend ───────────────────────────────────────────────────────
 
-    def _load_from_dynamodb(self, tenant_code: str, entity_id: str) -> ServingStoreLoadConfig:
+    def _load_from_dynamodb(self, tenant_code: str, entity_type: str) -> ServingStoreLoadConfig:
         try:
             response = self._table.get_item(
-                Key={"tenant_code": tenant_code, "entity_id": entity_id},
+                Key={"tenant_code": tenant_code, "entity_type": entity_type},
                 ConsistentRead=True,
             )
         except ClientError as exc:
@@ -179,26 +183,26 @@ class ServingStoreConfigRepositoryClient:
             _logger.warning(
                 "serving_store_config_load_dynamodb_error",
                 tenant_code=tenant_code,
-                entity_id=entity_id,
+                entity_type=entity_type,
                 error_code=error_code,
             )
             raise ServingStoreConfigNotFoundError(
                 f"DynamoDB error loading serving store config for tenant_code={tenant_code!r} "
-                f"entity_id={entity_id!r}: {error_code}"
+                f"entity_type={entity_type!r}: {error_code}"
             ) from exc
 
         item = response.get("Item")
         if not item:
             raise ServingStoreConfigNotFoundError(
                 f"No serving store config found for tenant_code={tenant_code!r} "
-                f"entity_id={entity_id!r} in table {self._table_name!r}."
+                f"entity_type={entity_type!r} in table {self._table_name!r}."
             )
-        return self._validate(tenant_code, entity_id, dict(item))
+        return self._validate(tenant_code, entity_type, dict(item))
 
     # ── S3 backend ─────────────────────────────────────────────────────────────
 
-    def _load_from_s3(self, tenant_code: str, entity_id: str) -> ServingStoreLoadConfig:
-        s3_key = f"{tenant_code}/serving-store/{entity_id}/config.json"
+    def _load_from_s3(self, tenant_code: str, entity_type: str) -> ServingStoreLoadConfig:
+        s3_key = f"{tenant_code}/serving-store/{entity_type}/config.json"
         try:
             response = self._s3.get_object(Bucket=self._s3_bucket, Key=s3_key)
             raw: dict[str, Any] = json.loads(response["Body"].read().decode("utf-8"))
@@ -209,18 +213,19 @@ class ServingStoreConfigRepositoryClient:
                     f"No serving store config found at s3://{self._s3_bucket}/{s3_key}"
                 ) from exc
             raise
-        return self._validate(tenant_code, entity_id, raw)
+        return self._validate(tenant_code, entity_type, raw)
 
     # ── Validation ─────────────────────────────────────────────────────────────
 
     @staticmethod
     def _validate(
-        tenant_code: str, entity_id: str, record: dict[str, Any]
+        tenant_code: str, entity_type: str, record: dict[str, Any]
     ) -> ServingStoreLoadConfig:
         try:
             return ServingStoreLoadConfig(**record)
         except ValidationError as exc:
             raise ServingStoreConfigValidationError(
-                f"Serving store config for tenant_code={tenant_code!r} entity_id={entity_id!r} "
-                f"failed schema validation: {exc.error_count()} error(s)."
+                f"Serving store config for tenant_code={tenant_code!r} "
+                f"entity_type={entity_type!r} failed schema validation: {exc.error_count()} "
+                "error(s)."
             ) from exc

@@ -235,11 +235,11 @@ class TestServingStoreConfigRepositoryIsolation:
             TableName=self._TABLE,
             KeySchema=[
                 {"AttributeName": "tenant_code", "KeyType": "HASH"},
-                {"AttributeName": "entity_id", "KeyType": "RANGE"},
+                {"AttributeName": "entity_type", "KeyType": "RANGE"},
             ],
             AttributeDefinitions=[
                 {"AttributeName": "tenant_code", "AttributeType": "S"},
-                {"AttributeName": "entity_id", "AttributeType": "S"},
+                {"AttributeName": "entity_type", "AttributeType": "S"},
             ],
             BillingMode="PAY_PER_REQUEST",
         )
@@ -259,7 +259,7 @@ class TestServingStoreConfigRepositoryIsolation:
         client = ServingStoreConfigRepositoryClient(environment=_ENV, region_name=_REGION)
         config = ServingStoreLoadConfig(
             tenant_code=_TENANT_A,
-            entity_id="salesforce-account",
+            entity_type="company",
             target_engine=engine,
             table_name="salesforce_account",
             primary_keys=("account_id",),
@@ -268,24 +268,24 @@ class TestServingStoreConfigRepositoryIsolation:
         )
         client.save_config(config)
 
-        loaded = client.load_config(_TENANT_A, "salesforce-account")
+        loaded = client.load_config(_TENANT_A, "company")
         assert loaded.tenant_code == _TENANT_A
 
         # tenant_code is the DynamoDB partition key here — Tenant B's key literally
         # cannot address Tenant A's item, unlike the app-level guard above.
         with pytest.raises(ServingStoreConfigNotFoundError):
-            client.load_config(_TENANT_B, "salesforce-account")
+            client.load_config(_TENANT_B, "company")
 
     @mock_aws
     def test_list_configs_for_tenant_never_returns_another_tenants_records(self) -> None:
         self._create_table()
         client = ServingStoreConfigRepositoryClient(environment=_ENV, region_name=_REGION)
-        for tenant, entity in ((_TENANT_A, "salesforce-account"), (_TENANT_B, "netsuite-customer")):
+        for tenant, entity_type in ((_TENANT_A, "company"), (_TENANT_B, "person")):
             client.save_config(
                 ServingStoreLoadConfig(
                     tenant_code=tenant,
-                    entity_id=entity,
-                    table_name=entity.replace("-", "_"),
+                    entity_type=entity_type,
+                    table_name=entity_type,
                     primary_keys=("id",),
                     secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
                     region_name=_REGION,
@@ -293,7 +293,7 @@ class TestServingStoreConfigRepositoryIsolation:
             )
 
         tenant_a_configs = client.list_configs_for_tenant(_TENANT_A)
-        assert [c.entity_id for c in tenant_a_configs] == ["salesforce-account"]
+        assert [c.entity_type for c in tenant_a_configs] == ["company"]
 
 
 # ---------------------------------------------------------------------------

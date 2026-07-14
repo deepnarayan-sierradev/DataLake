@@ -43,9 +43,9 @@ touch `.github/workflows/*.yml`.
   regardless of session context. `dev`/`staging` apply is *not* blocked at the tool level, but
   still needs explicit sign-off per this repo's own safety norms — the hook is a backstop, not a
   substitute for asking.
-- **All 5 DynamoDB tables are Terraform-managed** (`module.metadata_persistence`:
+- **All 6 DynamoDB tables are Terraform-managed** (`module.metadata_persistence`:
   `entity_extraction_config`, `entity_type_registry`, `run_audit_log`, `source_onboarding_registry`,
-  `watermark_repository`) — real `aws_dynamodb_table` resources in
+  `watermark_repository`, `serving_store_config`) — real `aws_dynamodb_table` resources in
   `infrastructure/modules/metadata_persistence/main.tf`. Don't create any of them by hand.
 - **After any `terraform apply`**, `scripts/seed_schedules.py` must be re-run or no EventBridge
   cron triggers exist for the deployed pipelines (per the Makefile's own comment on the

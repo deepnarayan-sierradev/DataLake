@@ -260,7 +260,7 @@ resource "aws_dynamodb_table" "serving_store_config" {
   billing_mode = "PAY_PER_REQUEST"
 
   hash_key  = "tenant_code"
-  range_key = "entity_id"
+  range_key = "entity_type"
 
   attribute {
     name = "tenant_code"
@@ -268,7 +268,7 @@ resource "aws_dynamodb_table" "serving_store_config" {
   }
 
   attribute {
-    name = "entity_id"
+    name = "entity_type"
     type = "S"
   }
 

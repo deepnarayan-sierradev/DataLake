@@ -11,7 +11,10 @@ onboarded to a serving store.
 Step Functions input schema (Parameters block in LoadServingStore state):
   {
     "source_id":            str  — source_id from the triggering extraction run
-    "entity_id":             str  — entity_id from the triggering extraction run
+    "entity_id":             str  — source-level entity_id from the triggering extraction run
+                                    (logging/tracing context only — not used for the config lookup)
+    "entity_type":           str  — analytics-layer entity type (e.g. "company"), the actual
+                                    ServingStoreConfigRepositoryClient lookup key
     "environment":           str  — "dev" | "staging" | "prod"
     "run_id":                str  — run_id produced by the extraction stage
     "tenant_code":           str  — tenant identity for this run
@@ -38,7 +41,7 @@ Optional Lambda environment variables:
 
 Security (OWASP A01, A03, A09):
   - tenant_code, source_id, entity_id, run_id validated against stable
-    identifier regex before use.
+    identifier regex before use; entity_type validated against ENTITY_TYPE_PATTERN.
   - S3 bucket name sourced exclusively from Lambda env vars — never event input.
   - Serving database credentials never appear in this handler; they are
     resolved from Secrets Manager inside ServingStoreLoader.
@@ -63,6 +66,7 @@ import structlog
 import serving_store.loaders.mysql_rds_loader
 import serving_store.loaders.postgresql_loader
 import serving_store.loaders.sqlserver_loader  # noqa: F401
+from contracts.identifier_policy import ENTITY_TYPE_PATTERN as _ENTITY_TYPE_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
 from observability.lambda_utils import (
@@ -83,7 +87,15 @@ from serving_store.serving_store_config_repository import (
 _logger = get_platform_logger(__name__)
 
 _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
-    {"source_id", "entity_id", "environment", "run_id", "tenant_code", "analytics_s3_prefix"}
+    {
+        "source_id",
+        "entity_id",
+        "entity_type",
+        "environment",
+        "run_id",
+        "tenant_code",
+        "analytics_s3_prefix",
+    }
 )
 _KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
 _SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -99,6 +111,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     source_id: str = event["source_id"]
     entity_id: str = event["entity_id"]
+    entity_type: str = event["entity_type"]
     environment: str = event["environment"]
     run_id: str = event["run_id"]
     tenant_code: str = str(event["tenant_code"])
@@ -106,12 +119,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id, run_id=run_id)
     structlog.contextvars.bind_contextvars(
-        run_id=run_id, source_id=source_id, entity_id=entity_id, tenant_code=tenant_code
+        run_id=run_id,
+        source_id=source_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        tenant_code=tenant_code,
     )
 
     try:
         return _run_serving_store_load(
             entity_id=entity_id,
+            entity_type=entity_type,
             environment=environment,
             run_id=run_id,
             tenant_code=tenant_code,
@@ -122,6 +140,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         _logger.error(
             "serving_store_load_stage_failed",
             entity_id=entity_id,
+            entity_type=entity_type,
             run_id=run_id,
             environment=environment,
             error=str(exc),
@@ -134,6 +153,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 def _run_serving_store_load(
     entity_id: str,
+    entity_type: str,
     environment: str,
     run_id: str,
     tenant_code: str,
@@ -149,16 +169,22 @@ def _run_serving_store_load(
         environment=environment, region_name=region_name
     )
     try:
-        config = config_repo.load_config(tenant_code, entity_id)
+        config = config_repo.load_config(tenant_code, entity_type)
     except ServingStoreConfigNotFoundError:
         _logger.info(
-            "serving_store_load_skipped_no_config", entity_id=entity_id, tenant_code=tenant_code
+            "serving_store_load_skipped_no_config",
+            entity_id=entity_id,
+            entity_type=entity_type,
+            tenant_code=tenant_code,
         )
         return {"skipped": True, "reason": "no_config"}
 
     if not config.enabled:
         _logger.info(
-            "serving_store_load_skipped_disabled", entity_id=entity_id, tenant_code=tenant_code
+            "serving_store_load_skipped_disabled",
+            entity_id=entity_id,
+            entity_type=entity_type,
+            tenant_code=tenant_code,
         )
         return {"skipped": True, "reason": "disabled"}
 
@@ -239,6 +265,10 @@ def _validate_event(event: dict[str, Any]) -> None:
         value = str(event[field])
         if not _STABLE_ID_PATTERN.match(value):
             raise ValueError(f"Event field {field}={value!r} contains disallowed characters.")
+
+    entity_type = str(event["entity_type"])
+    if not _ENTITY_TYPE_PATTERN.match(entity_type):
+        raise ValueError(f"Event field entity_type={entity_type!r} contains disallowed characters.")
 
     environment = str(event["environment"])
     if environment not in _KNOWN_ENVIRONMENTS:

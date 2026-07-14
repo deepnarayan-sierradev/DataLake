@@ -31,7 +31,8 @@ locals {
     Resource = var.serving_store_loader_lambda_arn
     Parameters = {
       "source_id.$"           = "$.source_id"
-      "entity_id.$"           = "$.entity_id"
+      "entity_id.$"           = "$.entity_id"             # tracing/log context only
+      "entity_type.$"         = "$.analytics.entity_type" # actual config lookup key
       "environment.$"         = "$.environment"
       "run_id.$"              = "$.extraction.run_id"
       "analytics_s3_prefix.$" = "$.analytics.analytics_s3_prefix"

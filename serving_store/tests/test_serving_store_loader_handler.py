@@ -24,6 +24,7 @@ _SECRET_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:test"
 _BASE_EVENT: dict[str, Any] = {
     "source_id": "salesforce",
     "entity_id": "salesforce-account",
+    "entity_type": "company",
     "environment": "dev",
     "run_id": "run-ss-test-001",
     "tenant_code": "acme-corp",
@@ -36,11 +37,11 @@ def _create_config_table(dynamodb: Any) -> Any:
         TableName=_CONFIG_TABLE,
         KeySchema=[
             {"AttributeName": "tenant_code", "KeyType": "HASH"},
-            {"AttributeName": "entity_id", "KeyType": "RANGE"},
+            {"AttributeName": "entity_type", "KeyType": "RANGE"},
         ],
         AttributeDefinitions=[
             {"AttributeName": "tenant_code", "AttributeType": "S"},
-            {"AttributeName": "entity_id", "AttributeType": "S"},
+            {"AttributeName": "entity_type", "AttributeType": "S"},
         ],
         BillingMode="PAY_PER_REQUEST",
     )
@@ -73,6 +74,13 @@ class TestValidateEventFields:
 
     def test_valid_event_passes(self) -> None:
         _validate_event(dict(_BASE_EVENT))
+
+    def test_underscore_entity_type_accepted(self) -> None:
+        _validate_event({**_BASE_EVENT, "entity_type": "ap_bill"})
+
+    def test_invalid_entity_type_rejected(self) -> None:
+        with pytest.raises(ValueError, match="entity_type"):
+            _validate_event({**_BASE_EVENT, "entity_type": "Invalid Type"})
 
 
 class TestContextvarsAndErrorHandling:
@@ -111,6 +119,7 @@ class TestRunServingStoreLoad:
 
         result = handler_module._run_serving_store_load(
             entity_id="salesforce-account",
+            entity_type="company",
             environment="dev",
             run_id="run-1",
             tenant_code="acme-corp",
@@ -125,7 +134,7 @@ class TestRunServingStoreLoad:
         boto3.resource("dynamodb", region_name=_REGION).Table(_CONFIG_TABLE).put_item(
             Item={
                 "tenant_code": "acme-corp",
-                "entity_id": "salesforce-account",
+                "entity_type": "company",
                 "target_engine": "mysql_rds",
                 "table_name": "salesforce_account",
                 "primary_keys": ["account_id"],
@@ -137,6 +146,7 @@ class TestRunServingStoreLoad:
 
         result = handler_module._run_serving_store_load(
             entity_id="salesforce-account",
+            entity_type="company",
             environment="dev",
             run_id="run-1",
             tenant_code="acme-corp",
@@ -151,7 +161,7 @@ class TestRunServingStoreLoad:
         boto3.resource("dynamodb", region_name=_REGION).Table(_CONFIG_TABLE).put_item(
             Item={
                 "tenant_code": "acme-corp",
-                "entity_id": "salesforce-account",
+                "entity_type": "company",
                 "target_engine": "mysql_rds",
                 "table_name": "salesforce_account",
                 "primary_keys": ["account_id"],
@@ -192,6 +202,7 @@ class TestRunServingStoreLoad:
 
         result = handler_module._run_serving_store_load(
             entity_id="salesforce-account",
+            entity_type="company",
             environment="dev",
             run_id="run-1",
             tenant_code="acme-corp",

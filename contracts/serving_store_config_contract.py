@@ -17,7 +17,7 @@ from typing import Final
 
 from pydantic import BaseModel, Field, field_validator
 
-from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
+from contracts.identifier_policy import ENTITY_TYPE_PATTERN as _ENTITY_TYPE_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
 
 # Matches connector_runtime/adapters/mysql_rds/mysql_rds_params.py's table_name
@@ -40,8 +40,8 @@ class ServingStoreLoadConfig(BaseModel):
     model_config = {"frozen": True, "extra": "forbid"}
 
     tenant_code: str = Field(..., description="Tenant identifier slug (e.g. 'acme-corp').")
-    entity_id: str = Field(
-        ..., description="Stable entity identifier (e.g. 'salesforce-account')."
+    entity_type: str = Field(
+        ..., description="Analytics-layer entity type (e.g. 'company', 'ar_invoice')."
     )
     target_engine: ServingStoreEngine = Field(
         default=ServingStoreEngine.MYSQL_RDS, description="Target serving store engine."
@@ -71,11 +71,11 @@ class ServingStoreLoadConfig(BaseModel):
             raise ValueError(f"tenant_code {value!r} does not conform to the tenant code format.")
         return value
 
-    @field_validator("entity_id", mode="before")
+    @field_validator("entity_type", mode="before")
     @classmethod
-    def validate_entity_id(cls, value: str) -> str:
-        if not _STABLE_ID_PATTERN.match(value):
-            raise ValueError(f"entity_id {value!r} does not conform to the stable ID format.")
+    def validate_entity_type(cls, value: str) -> str:
+        if not _ENTITY_TYPE_PATTERN.match(value):
+            raise ValueError(f"entity_type {value!r} does not conform to the entity type format.")
         return value
 
     @field_validator("table_name", mode="before")

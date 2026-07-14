@@ -11,7 +11,7 @@ from contracts.serving_store_config_contract import ServingStoreEngine, ServingS
 def _base() -> dict[str, object]:
     return {
         "tenant_code": "acme-corp",
-        "entity_id": "salesforce-account",
+        "entity_type": "company",
         "table_name": "salesforce_account",
         "primary_keys": ("account_id",),
         "secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
@@ -60,9 +60,14 @@ class TestServingStoreLoadConfigValidation:
         with pytest.raises(ValidationError, match="tenant code format"):
             ServingStoreLoadConfig(**{**_base(), "tenant_code": "Not_Valid!"})
 
-    def test_invalid_entity_id_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="stable ID format"):
-            ServingStoreLoadConfig(**{**_base(), "entity_id": "Invalid Entity"})
+    def test_invalid_entity_type_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="entity type format"):
+            ServingStoreLoadConfig(**{**_base(), "entity_type": "Invalid Entity"})
+
+    @pytest.mark.parametrize("entity_type", ["ar_invoice", "ap_bill"])
+    def test_underscore_entity_type_accepted(self, entity_type: str) -> None:
+        config = ServingStoreLoadConfig(**{**_base(), "entity_type": entity_type})
+        assert config.entity_type == entity_type
 
     def test_unsafe_table_name_rejected(self) -> None:
         with pytest.raises(ValidationError, match="safe SQL identifier"):

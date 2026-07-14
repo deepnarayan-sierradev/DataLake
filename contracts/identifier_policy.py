@@ -1,13 +1,15 @@
 """
 Platform-wide identifier validation policy — single source of truth.
 
-All modules that validate source_id, entity_id, or run_id MUST import from
-here.  Never duplicate these constants — update here and the change propagates
+All modules that validate source_id, entity_id, entity_type, or run_id MUST import
+from here.  Never duplicate these constants — update here and the change propagates
 everywhere automatically.
 
 Design:
   - STABLE_ID_PATTERN: 2-64 chars, lowercase letters/digits/hyphens,
     must start with a letter.  Used for source_id and entity_id.
+  - ENTITY_TYPE_PATTERN: like STABLE_ID_PATTERN but also permits underscores
+    (real entity types like "ar_invoice"/"ap_bill" need them). Used for entity_type.
   - RUN_ID_PATTERN: same character set but up to 100 chars to accommodate
     the timestamp + UUID format (e.g. run-20260611-143022123456-a3f9c1d2).
   - SEQUENTIAL_INTEGER_PATTERN: detects bare integer run_ids, which are
@@ -31,6 +33,9 @@ from typing import Final
 # ---------------------------------------------------------------------------
 
 STABLE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}$")
+
+# Like STABLE_ID_PATTERN but also permits underscores (e.g. "ar_invoice", "ap_bill").
+ENTITY_TYPE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_\-]{1,63}$")
 
 # Tenant code format: lowercase letters, digits, hyphens; 2-48 characters; starts with a letter.
 # Examples: "acme-corp", "globex-eu", "demo".
