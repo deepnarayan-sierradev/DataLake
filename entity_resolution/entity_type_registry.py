@@ -181,6 +181,33 @@ class EntityTypeRegistryClient:
             return [(pair[0], pair[1]) for pair in item["contributing_sources"]]
         return ENTITY_TYPE_SOURCES.get(entity_type, [])
 
+    def deregister_entity_type(self, entity_id: str, tenant_code: str) -> None:
+        """
+        Remove a tenant's override for entity_id, reverting it to the
+        fallback constants. Deliberately only deletes the per-entity_id item
+        (SK "entity_id#{entity_id}") — mirrors register_entity_type's own
+        asymmetric dual-write, since the paired entity_type#{type} item may
+        still be in use by other entity_ids of that same entity_type for
+        this tenant.
+        """
+        tenant_code = validate_tenant_code(tenant_code)
+        try:
+            self._table.delete_item(
+                Key={"tenant_code": tenant_code, "sk": f"entity_id#{entity_id}"}
+            )
+        except ClientError as exc:
+            _logger.error(
+                "entity_type_deregistration_failed",
+                tenant_code=tenant_code,
+                entity_id=entity_id,
+                error=str(exc),
+            )
+            raise
+
+    def list_known_entity_types(self) -> list[str]:
+        """Return every entity_type known to the fallback constants, sorted."""
+        return sorted(ENTITY_TYPE_PK_FIELD)
+
     def register_entity_type(self, record: EntityTypeRecord, tenant_code: str) -> None:
         """
         Register (or update) an entity_id's type mapping for a tenant.

@@ -71,12 +71,6 @@ variable "extraction_pipeline_lambda_arn" {
   default     = ""
 }
 
-variable "serving_store_loader_lambda_arn" {
-  type        = string
-  description = "ARN of the deployed serving store loader Lambda function."
-  default     = ""
-}
-
 variable "analytics_reader_principals" {
   type        = list(string)
   description = "IAM principal ARNs granted Lake Formation SELECT+DESCRIBE on curated/analytics tables (see infrastructure/modules/glue/variables.tf)."

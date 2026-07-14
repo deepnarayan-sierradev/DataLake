@@ -8,7 +8,9 @@ two unless there's a documented reason not to.
 
 **Modules**: `analytics_publisher_lambda`, `control_plane`, `entity_resolution_lambda`, `glue`,
 `iam`, `kms`, `lambda_pipeline`, `metadata_persistence`, `networking`, `observability`,
-`orchestration`, `secrets`, `storage`, `transformation_lambda`.
+`orchestration`, `secrets`, `serving_store_database`, `serving_store_lambda`, `storage`,
+`transformation_lambda`. The two `serving_store_*` modules are wired into all three environments'
+`main.tf` but have not been `terraform apply`'d anywhere yet — see `docs/PLATFORM_STATUS.md`.
 
 ## Verify
 

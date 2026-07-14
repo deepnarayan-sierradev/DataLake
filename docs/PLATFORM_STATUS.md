@@ -1,18 +1,15 @@
 # Platform Status — Enterprise Data Lake
 
-**Last updated:** 2026-07-09
+**Last updated:** 2026-07-14
 **Prepared by:** Platform Engineering
 
-> **Multi-tenancy note:** `tenant_code` is now a first-class concept (default: `demo`, from
-> `contracts/identifier_policy.DEFAULT_TENANT_CODE`) and, as of today's pre-go-live fix pass, is
-> prefixed into S3 keys for **every** data-plane layer — raw, curated, golden/canonical, and
-> analytics — plus schema snapshots and the config repository's S3 backend. The **watermark
-> table**'s DynamoDB partition key is likewise now tenant-scoped (`tenant_scoped_key()` on
-> `source_id`, not just an application-level guard). See the S3 Key Patterns table below for
-> exact, per-layer paths. Two gaps remain **not** IAM-enforced yet at the key/prefix level:
-> `entity-extraction-config` (still an application-level `_enforce_tenant_match` guard — `ARCH-12`)
-> and the S3 bucket-policy tenant-prefix condition itself (`SEC-2`) — see
-> `architecture/GAP_ANALYSIS_FINDINGS.md` for both.
+> **Multi-tenancy note:** `tenant_code` is a first-class concept (default: `demo`, from
+> `contracts/identifier_policy.DEFAULT_TENANT_CODE`), prefixed into S3 keys for every data-plane
+> layer except the raw layer, and genuinely key-scoped in the watermark and entity-type-registry
+> DynamoDB tables. See `docs/PIPELINE_FLOW.md`'s canonical isolation-model table for the full
+> layer-by-layer picture, and `docs/KNOWN_GAPS_AND_ROADMAP.md` for what's still open (no IAM
+> enforcement anywhere, the raw-layer gap, shared Secrets Manager credentials, Glue/Athena's
+> wildcard grant).
 
 ---
 
@@ -97,7 +94,7 @@ Sage X3, and NetSuite are still empty shells — not reachable until real creden
 
 | Layer | Pattern |
 |---|---|
-| Raw | `s3://edl-raw-087972550871/{tenant_code}/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/data.parquet` — one hyphenated source segment (`salesforce`, `netsuite`, `mysql-rds`, `sage-intacct`, `sage-x3`); no `raw/` root segment (`connector_runtime/raw_layer_writer.py::RawLayerWriter._partition_path`, `ARCH-1`) |
+| Raw | `s3://edl-raw-087972550871/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/data.parquet` — one hyphenated source segment (`salesforce`, `netsuite`, `mysql-rds`, `sage-intacct`, `sage-x3`); no `raw/` root segment and **not tenant-prefixed** (`connector_runtime/raw_layer_writer.py::RawLayerWriter._partition_path`) — see `docs/KNOWN_GAPS_AND_ROADMAP.md` |
 | Curated | `s3://edl-curated-087972550871/{tenant_code}/curated/{domain}/{entity_id}/curated_date=YYYY-MM-DD/run_id={run_id}/data.parquet` |
 | Golden records | `s3://edl-analytics-087972550871/{tenant_code}/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet` |
 | Analytics | `s3://edl-analytics-087972550871/{tenant_code}/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet` |
@@ -106,17 +103,18 @@ Sage X3, and NetSuite are still empty shells — not reachable until real creden
 > `{tenant_code}` defaults to `demo` (`contracts/identifier_policy.DEFAULT_TENANT_CODE`) and is
 > always present in every pattern above — there is no unprefixed legacy mode left for any layer.
 > This is prefix-level isolation only, enforced by writer code, not yet backed by an S3
-> bucket-policy IAM condition (`SEC-2`, tracked follow-up) — don't treat it as a hard security
-> boundary until that lands.
+> bucket-policy IAM condition — don't treat it as a hard security boundary until that lands (see
+> `docs/KNOWN_GAPS_AND_ROADMAP.md`).
 
 > **Curated layer — SCD Type 1 merge:** For incremental entities with `primary_key_field` set, each curated partition holds the **full current state** of all records (not just the day's delta). This ensures entity resolution always sees complete data. Deleted records are retained as tombstones (`is_deleted=True`) rather than physically removed.
 
-> **Curated layer — Glue table naming (fixed 2026-07-08, `ARCH-19`):** The curated Glue table
+> **Curated layer — Glue table naming:** The curated Glue table
 > name is now tenant-scoped — `{tenant_code}_{entity_id}_{domain}_curated`
 > (`transformation/transformation_pipeline.py::_register_curated_catalog`, line ~751). Previously
 > the table name carried no tenant segment, so two tenants running the same `entity_id`/`domain`
 > registered the *same* Glue table and silently overwrote each other's `Location` — the second
-> tenant's transformation run would repoint the first tenant's Athena table at its own data. The
+> tenant's transformation run would repoint the first tenant's Athena table at its own data
+> (now fixed — table names are tenant-scoped). The
 > `curated_date` partition is now also registered per run via `glue_client.create_partition()`
 > (falling back to `update_partition()` on `AlreadyExistsException`) immediately after catalog
 > registration — previously the table declared `partition_keys=("curated_date",)` but no
@@ -183,7 +181,7 @@ All eight Lambdas are deployed from the **same zip** (via `var.lambda_package_s3
 
 | State Machine | Purpose |
 |---|---|
-| `EdlExtractionPipeline` | Full end-to-end pipeline: extraction → transformation → entity resolution → analytics → serving store (optional). Single state machine for all four stages. Now includes an `ExtractionCheckpointed` terminal `Succeed` state, reached via a `Catch` on `LambdaTimeoutWarning` — the extraction stage commits a partial watermark and exits cleanly rather than failing when it detects it's about to hit the Lambda timeout. **Automatic re-invocation from the checkpoint is not yet implemented** — a checkpointed run currently needs a manual re-trigger; see `architecture/GAP_ANALYSIS_FINDINGS.md`'s `PERF-5` entry. The `LoadServingStore` state (`infrastructure/modules/orchestration/main.tf`) is a conditional `Task`/`Pass` — a `Pass` (no-op) unless `serving_store_loader_lambda_arn` is set, which it isn't in any environment today; no Lambda handler exists yet for this stage. As of `ARCH-20` (2026-07-08), its `Task` branch now threads `"tenant_code.$" = "$.tenant_code"` through, and `transformation/serving_store_loader.py::ServingStoreLoader.load()` requires `tenant_code` and tenant-scopes its target MySQL table name (`{tenant_code}_{table_name}`) — latent, unexercised in any live deployment. |
+| `EdlExtractionPipeline` | Full end-to-end pipeline: extraction → transformation → entity resolution → analytics → serving store (optional). Single state machine for all four stages. Now includes an `ExtractionCheckpointed` terminal `Succeed` state, reached via a `Catch` on `LambdaTimeoutWarning` — the extraction stage commits a partial watermark and exits cleanly rather than failing when it detects it's about to hit the Lambda timeout. **Automatic re-invocation from the checkpoint is not yet implemented** — a checkpointed run currently needs a manual re-trigger (see `docs/KNOWN_GAPS_AND_ROADMAP.md`). The `LoadServingStore` state (`infrastructure/modules/orchestration/main.tf`) is a conditional `Task`/`Pass` — a `Pass` (no-op) unless `serving_store_loader_lambda_arn` is set. The `serving_store/` module (adapter+registry pattern, four engine loaders — MySQL RDS, PostgreSQL, SQL Server, Azure SQL — behind `ServingStoreLoaderRegistry`) and its Terraform (`infrastructure/modules/serving_store_database`, `infrastructure/modules/serving_store_lambda`) are code-complete and wire that ARN automatically in all three environments' `main.tf`, but none of it has been `terraform apply`'d anywhere, so `serving_store_loader_lambda_arn` still resolves empty today and the state still takes the `Pass` branch. The `Task` branch threads `"tenant_code.$" = "$.tenant_code"` through, and the loader's tenant isolation is now real — database-per-tenant (MySQL) or schema-per-tenant (PostgreSQL/SQL Server/Azure SQL), enforced at the database engine's own GRANT model — code-complete, unexercised in any live deployment. |
 
 ### EventBridge Scheduler
 
@@ -193,8 +191,8 @@ All eight Lambdas are deployed from the **same zip** (via `var.lambda_package_s3
 
 Per-entity extraction schedules (one per tenant/source/entity, created via
 `orchestration/event_bridge/extraction_schedule_client.py`) are named
-`{tenant_code}--{source_id}--{entity_id}` — double-hyphen throughout as of `ARCH-16`
-(2026-07-08). A single-hyphen delimiter between `tenant_code` and `source_id` previously let two
+`{tenant_code}--{source_id}--{entity_id}` — double-hyphen throughout, specifically because a
+single-hyphen delimiter between `tenant_code` and `source_id` would let two
 distinct tenants collide on one literal schedule name whenever either field itself contained a
 hyphen (e.g. `tenant="acme"`/`source="corp-salesforce"` vs. `tenant="acme-corp"`/`source="salesforce"`)
 — a silent cross-tenant schedule clobber, since `create_or_update_schedule()` is update-first. For
@@ -232,7 +230,7 @@ suffix, never a naive slice (`_build_schedule_name()`).
 
 > All five secrets above are now Terraform-managed (`infrastructure/modules/secrets/main.tf`),
 > including Sage's — each has a resource policy (`DenyAllOtherPrincipals`) restricting
-> `GetSecretValue` to the extraction runtime role only (`SEC-3`). `terraform apply` creates the
+> `GetSecretValue` to the extraction runtime role only. `terraform apply` creates the
 > empty secret **shells**; the actual credential values still need to be populated by hand via
 > `aws secretsmanager put-secret-value` — don't assume `terraform apply` alone makes a source live.
 >

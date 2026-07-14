@@ -19,12 +19,13 @@ locals {
 
   # Service log group definitions: name → retention
   log_groups = {
-    "connector-runtime"   = var.log_retention_days
-    "transformation"      = var.log_retention_days
-    "entity-resolution"   = var.log_retention_days
-    "analytics-publisher" = var.log_retention_days
-    "orchestration"       = var.log_retention_days
-    "schema-drift"        = var.log_retention_days
+    "connector-runtime"    = var.log_retention_days
+    "transformation"       = var.log_retention_days
+    "entity-resolution"    = var.log_retention_days
+    "analytics-publisher"  = var.log_retention_days
+    "serving-store-loader" = var.log_retention_days
+    "orchestration"        = var.log_retention_days
+    "schema-drift"         = var.log_retention_days
   }
 }
 
@@ -381,9 +382,23 @@ resource "aws_cloudwatch_dashboard" "serving_slo" {
         }
       },
       {
-        type   = "alarm"
+        type   = "metric"
         x      = 0
         y      = 6
+        width  = 12
+        height = 6
+        properties = {
+          title   = "Serving Store Records Skipped (unchanged since last run)"
+          region  = data.aws_region.current.name
+          period  = 300
+          stat    = "Sum"
+          metrics = [["EnterpriseDatalake", "RecordsSkipped", "Stage", "serving_store_load"]]
+        }
+      },
+      {
+        type   = "alarm"
+        x      = 0
+        y      = 12
         width  = 24
         height = 6
         properties = {

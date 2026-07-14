@@ -18,6 +18,8 @@ dependencies = [
     "requests>=2.32,<3.0",
     "pyarrow>=16.0,<19.0",
     "pymysql>=1.1,<2.0",
+    "psycopg[binary]>=3.1,<4.0",
+    "pymssql>=2.3,<3.0",
     "aws-xray-sdk>=2.14,<3.0",
     "duckdb>=0.10,<2.0",
 ]
@@ -48,6 +50,7 @@ packages = [
     "entity_resolution",
     "governance",
     "analytics_publisher",
+    "serving_store",
 ]
 
 # ---------------------------------------------------------------------------
@@ -99,6 +102,7 @@ known-first-party = [
     "entity_resolution",
     "governance",
     "analytics_publisher",
+    "serving_store",
 ]
 
 # ---------------------------------------------------------------------------
@@ -115,7 +119,7 @@ no_implicit_reexport = true
 pretty = true
 
 [[tool.mypy.overrides]]
-module = ["moto.*", "boto3.*", "botocore.*", "pyarrow.*", "pymysql.*", "requests_mock.*"]
+module = ["moto.*", "boto3.*", "botocore.*", "pyarrow.*", "pymysql.*", "pymssql.*", "requests_mock.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -143,6 +147,7 @@ module = [
     "entity_resolution.tests.*",
     "governance.tests.*",
     "analytics_publisher.tests.*",
+    "serving_store.tests.*",
 ]
 disallow_untyped_defs = false
 check_untyped_defs = false
@@ -175,6 +180,7 @@ testpaths = [
     "entity_resolution/tests",
     "governance/tests",
     "analytics_publisher/tests",
+    "serving_store/tests",
     "tests",
 ]
 addopts = "--cov --cov-report=term-missing --cov-fail-under=80 -v"
@@ -192,6 +198,7 @@ source = [
     "entity_resolution",
     "governance",
     "analytics_publisher",
+    "serving_store",
 ]
 
 [tool.coverage.report]

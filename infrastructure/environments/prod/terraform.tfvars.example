@@ -19,4 +19,3 @@ extraction_pipeline_lambda_arn     = "arn:aws:lambda:us-east-1:123456789012:func
 transformation_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:prod-transformation-pipeline"
 entity_resolution_lambda_arn       = "arn:aws:lambda:us-east-1:123456789012:function:prod-entity-resolution-pipeline"
 analytics_publisher_lambda_arn     = "arn:aws:lambda:us-east-1:123456789012:function:prod-analytics-layer-publisher"
-serving_store_loader_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:prod-serving-store-loader"

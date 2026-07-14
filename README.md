@@ -4,7 +4,7 @@ Metadata-driven, connector-based, multi-tenant-aware extraction platform built o
 
 **Status:** Dev deployed and pipeline verified live ✅ | Staging 🔲 | Production 🔲 — Salesforce and
 MySQL RDS are connected with real data flowing end-to-end in dev; Sage Intacct, Sage X3, and
-NetSuite are code-complete but not yet connected. See
+NetSuite are fully implemented but not yet connected (empty credential shells). See
 [docs/PLATFORM_STATUS.md](docs/PLATFORM_STATUS.md) for the current, detailed state.
 
 If you're using Claude Code or another AI coding agent on this repo, it reads root `CLAUDE.md`
@@ -18,26 +18,17 @@ form meant to survive across sessions.
 |---|---|---|
 | [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | Engineers | First-time setup, running tests, triggering pipelines, known gotchas |
 | [docs/PLATFORM_STATUS.md](docs/PLATFORM_STATUS.md) | Everyone | Current deployment state, live data, all AWS resource names |
-| [docs/PIPELINE_FLOW.md](docs/PIPELINE_FLOW.md) | Engineers, architects, on-call | Full pipeline architecture, stage-by-stage reference |
+| [docs/PIPELINE_FLOW.md](docs/PIPELINE_FLOW.md) | Engineers, architects, on-call | Full pipeline architecture, stage-by-stage reference, canonical tenant-isolation model |
+| [docs/KNOWN_GAPS_AND_ROADMAP.md](docs/KNOWN_GAPS_AND_ROADMAP.md) | Engineers, architects | What's missing, broken, or deferred — the single source for open work |
 | [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Platform engineers | Environment deployment (staging/prod), field mapping, AWS settings |
 | [docs/PRODUCTION_INCIDENT_RUNBOOK.md](docs/PRODUCTION_INCIDENT_RUNBOOK.md) | On-call engineers | Incident response, runbooks per failure scenario, including cross-tenant incidents |
 | [docs/GO_LIVE_READINESS_CHECKLIST.md](docs/GO_LIVE_READINESS_CHECKLIST.md) | Platform engineers, leadership | Go-live gate checklist |
-| [docs/SAGE_ERP_IMPLEMENTATION_PLAN.md](docs/SAGE_ERP_IMPLEMENTATION_PLAN.md) | Engineers | Sage Intacct/X3 connector implementation plan |
+| [docs/SAGE_ERP_IMPLEMENTATION_PLAN.md](docs/SAGE_ERP_IMPLEMENTATION_PLAN.md) | Engineers | Sage Intacct/X3 connector reference — open items, operational commands, new-product recipe |
 | [docs/COST_ANALYSIS_AND_ROI.md](docs/COST_ANALYSIS_AND_ROI.md) | Finance, leadership | AWS resource cost breakdown and ROI model |
 | [docs/FAQ_FOR_MANAGEMENT.md](docs/FAQ_FOR_MANAGEMENT.md) | Management | Common questions, plain-language answers |
-| [docs/LEADERSHIP_BRIEF.md](docs/LEADERSHIP_BRIEF.md) | CTO, CIO, VP, Finance | What was built, current status, ROI, roadmap |
 | [docs/EXECUTIVE_OVERVIEW.md](docs/EXECUTIVE_OVERVIEW.md) | Engineering & product leadership | Deep-dive functional walkthrough, compliance, security |
-| [docs/GLOSSARY_AND_TERMINOLOGY.md](docs/GLOSSARY_AND_TERMINOLOGY.md) | All | Term definitions |
-| [docs/PROJECT_NOTES_QA.md](docs/PROJECT_NOTES_QA.md) | Engineers | Working notes / Q&A log |
-| [Enterprise_Data_Lake_Platform_Full_Specification.md](Enterprise_Data_Lake_Platform_Full_Specification.md) | All | Full platform specification (source of truth) |
-
-### Architecture and multi-tenant rollout docs
-
-Read in this order — each supersedes the previous **for sequencing only, not design detail**:
-
-1. [architecture/IMPROVEMENT_PLAN.md](architecture/IMPROVEMENT_PLAN.md) — original prioritized gap list across 5 quality dimensions
-2. [architecture/GAP_ANALYSIS_FINDINGS.md](architecture/GAP_ANALYSIS_FINDINGS.md) — verified findings catalog with an implementation-status table
-3. [architecture/MULTI_TENANT_ROLLOUT_PLAN.md](architecture/MULTI_TENANT_ROLLOUT_PLAN.md) — phased rollout plan; current source of truth for what's done vs. deferred
+| [docs/GLOSSARY_AND_TERMINOLOGY.md](docs/GLOSSARY_AND_TERMINOLOGY.md) | All | Term definitions, canonical AWS-services reference table |
+| [DataLake_Configuration_Module_Requirements.md](DataLake_Configuration_Module_Requirements.md) | Architects | Requirements for a planned, separate self-service configuration service (not yet built) |
 
 ## Connector Credentials (AWS Secrets Manager)
 
@@ -53,86 +44,27 @@ distinct products (Intacct and X3) with separate credentials: `edl/sources/sage/
 
 | Source | Secret ID | Status | Entities | Required JSON keys |
 |---|---|---|---|---|
-| Salesforce | `edl/sources/salesforce/credentials` | 🟡 Code-complete, not connected | Account, Contact, Contract, Opportunity | `instance_url`, `client_id`, `client_secret` |
-| MySQL RDS | `edl/sources/mysql-rds/credentials` | 🟡 Code-complete, not connected | Contracts, ContractTerms | `host`, `port`, `username`, `password`, `database` |
+| Salesforce | `edl/sources/salesforce/credentials` | ✅ Connected, real data flowing | Account, Contact, Contract, Opportunity | `instance_url`, `client_id`, `client_secret` |
+| MySQL RDS | `edl/sources/mysql-rds/credentials` | ✅ Connected, real data flowing | Contracts, ContractTerms | `host`, `port`, `username`, `password`, `database` |
 | Sage Intacct | `edl/sources/sage/intacct/credentials` | 🟡 Code-complete, not connected | Customer, Vendor, AR Invoice, AP Bill | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
 | Sage X3 | `edl/sources/sage/x3/credentials` | 🟡 Code-complete, not connected | Customer, Supplier | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
 | NetSuite | `edl/sources/netsuite/credentials` | 🟡 Code-complete, not connected | Customer | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
 
 All five secrets above are Terraform-managed (`infrastructure/modules/secrets/main.tf` creates
-the empty secret shells with a resource policy restricting reads to the extraction runtime role)
-but none are populated in any environment yet — every source above is code-complete, not
-connected. See [docs/PLATFORM_STATUS.md](docs/PLATFORM_STATUS.md) for the current status and
+the empty secret shells with a resource policy restricting reads to the extraction runtime role).
+See [docs/PLATFORM_STATUS.md](docs/PLATFORM_STATUS.md) for the current status and
 [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) for `aws secretsmanager put-secret-value`
 examples.
 
-Salesforce Contract, Salesforce Opportunity, and MySQL RDS ContractTerms are newly added entities
-(field mapping and entity-resolution config exist under `config/field_mappings/` and
-`config/entity_resolution/`) — configured in `scripts/seed_entity_config.py` but not yet seeded to
-any environment's DynamoDB table.
-
 ## Development Setup
 
-Requires Python 3.14.6. See [Developer Setup](#developer-setup) below.
-
-### Prerequisites
-
-- macOS (Apple Silicon or Intel) / Linux
-- [pyenv](https://github.com/pyenv/pyenv) — manages the Python version
-- Xcode Command Line Tools: `xcode-select --install`
-
-### Developer Setup
+Full setup, prerequisites, and local verification commands live in
+[docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) — this is the canonical source; don't duplicate
+its steps elsewhere. Quick start:
 
 ```bash
-# 1. Install Python 3.14.6 via pyenv
 pyenv install 3.14.6
-
-# 2. Create and activate the virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# 3. Install the project and all dev dependencies
-pip install --upgrade pip hatchling
-pip install -e ".[dev]"
-
-# 4. Run the full test suite
+python -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip hatchling && pip install -e ".[dev]"
 pytest --cov --cov-fail-under=80
-
-# 5. Run linting and type checks
-ruff check .
-mypy -p connector_runtime -p transformation -p entity_resolution -p analytics_publisher \
-     -p orchestration -p observability -p watermark_management -p schema_management \
-     -p contracts -p governance
-# NOTE: bare `mypy .` fails for reasons unrelated to any given change — see the
-# caveat in "Running CI checks locally" below. Scope it as shown above instead.
-```
-
-### Running CI checks locally
-
-```bash
-# Lint
-ruff check . --output-format=github
-ruff format --check .
-
-# Type check — bare `mypy .` fails on a dist/lambda-build/typing_extensions.py shadow
-# conflict (present after `make lambda-package`) and a scripts/generate_presentation.py
-# vs. pptx/generate_presentation.py module-name collision. `make typecheck` has the same
-# problem since it also just runs bare `mypy .`. CI itself runs the scoped form below —
-# it currently reports 75 pre-existing type errors (tracked debt, not a regression to fix
-# incidentally; see architecture/GAP_ANALYSIS_FINDINGS.md, OBS-6).
-mypy -p connector_runtime -p transformation -p entity_resolution -p analytics_publisher \
-     -p orchestration -p observability -p watermark_management -p schema_management \
-     -p contracts -p governance
-
-# Tests with coverage
-pytest --cov --cov-report=term-missing --cov-fail-under=80
-
-# Security scan
-bandit -r . --exclude .venv,tests,dist -c pyproject.toml
-
-# Dependency CVE scan
-pip-audit
-
-# Naming standard — rejects helper/util/common/manager identifiers
-make banned-names
 ```

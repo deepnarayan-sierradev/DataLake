@@ -127,6 +127,30 @@ module "metadata_persistence" {
 }
 
 # ---------------------------------------------------------------------------
+# Serving Store — MySQL RDS
+# Master credential is AWS-managed (no password in Terraform state).
+# ---------------------------------------------------------------------------
+
+module "serving_store_database" {
+  source      = "../../modules/serving_store_database"
+  environment = local.environment
+  engine      = "mysql"
+
+  vpc_id     = module.networking.vpc_id
+  subnet_ids = module.networking.private_subnet_ids
+
+  storage_kms_key_arn = module.kms_database.key_arn
+  secrets_kms_key_arn = module.kms_secrets.key_arn
+
+  instance_class               = "db.t3.micro" # dev-sized; revisit before staging/prod
+  multi_az                     = false
+  deletion_protection          = false # dev only — staging/prod should set true
+  backup_retention_period_days = 1
+
+  tags = local.common_tags
+}
+
+# ---------------------------------------------------------------------------
 # Secrets
 # ---------------------------------------------------------------------------
 
@@ -167,6 +191,12 @@ module "iam" {
   entity_config_table_arn        = module.metadata_persistence.entity_extraction_config_table_arn
   entity_type_registry_table_arn = module.metadata_persistence.entity_type_registry_table_arn
   dlq_arn                        = module.metadata_persistence.extraction_failure_dlq_arn
+
+  serving_store_config_table_arn = module.metadata_persistence.serving_store_config_table_arn
+  serving_store_secret_arns = [
+    module.serving_store_database.master_user_secret_arn,
+    "arn:aws:secretsmanager:${local.aws_region}:${data.aws_caller_identity.current.account_id}:secret:edl/serving-store/*",
+  ]
 
   kms_key_arns_for_extraction = [
     module.kms_storage.key_arn,
@@ -364,6 +394,56 @@ module "analytics_publisher_lambda" {
   depends_on = [module.iam, module.storage, module.networking, module.glue]
 }
 
+module "serving_store_lambda" {
+  source      = "../../modules/serving_store_lambda"
+  environment = local.environment
+
+  kms_key_arn        = module.kms_logs.key_arn
+  execution_role_arn = module.iam.serving_store_loader_runtime_role_arn
+
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  analytics_s3_bucket_name  = module.storage.analytics_layer_bucket_id
+  governance_s3_bucket_name = ""
+
+  subnet_ids         = module.networking.private_subnet_ids
+  security_group_ids = []
+
+  cloudwatch_log_group_arn       = module.observability.log_group_arns["serving-store-loader"]
+  log_retention_days             = 30
+  memory_size_mb                 = 512
+  timeout_seconds                = 300
+  reserved_concurrent_executions = 10 # dev-sized; onboarded tenants are few at first
+
+  tags = local.common_tags
+
+  depends_on = [module.iam, module.storage, module.networking]
+}
+
+# Cross-module SG wiring for the serving store — kept out of both modules to
+# avoid a circular module dependency (each needs the other's SG id).
+resource "aws_security_group_rule" "serving_store_lambda_to_database" {
+  type                     = "egress"
+  from_port                = 3306
+  to_port                  = 3306
+  protocol                 = "tcp"
+  security_group_id        = module.serving_store_lambda.lambda_security_group_id
+  source_security_group_id = module.serving_store_database.security_group_id
+  description              = "MySQL egress from the serving store loader Lambda to its RDS instance."
+}
+
+resource "aws_security_group_rule" "serving_store_database_from_lambda" {
+  type                     = "ingress"
+  from_port                = 3306
+  to_port                  = 3306
+  protocol                 = "tcp"
+  security_group_id        = module.serving_store_database.security_group_id
+  source_security_group_id = module.serving_store_lambda.lambda_security_group_id
+  description              = "MySQL ingress to the serving store RDS instance from the loader Lambda only."
+}
+
 module "orchestration" {
   source      = "../../modules/orchestration"
   environment = local.environment
@@ -379,7 +459,7 @@ module "orchestration" {
   transformation_pipeline_lambda_arn = module.transformation_lambda.lambda_function_arn
   entity_resolution_lambda_arn       = module.entity_resolution_lambda.lambda_function_arn
   analytics_publisher_lambda_arn     = module.analytics_publisher_lambda.lambda_function_arn
-  serving_store_loader_lambda_arn    = var.serving_store_loader_lambda_arn
+  serving_store_loader_lambda_arn    = module.serving_store_lambda.lambda_function_arn
 
   # SQS burst buffer — pipeline trigger Lambda package (same zip as extraction pipeline)
   lambda_package_s3_bucket   = var.lambda_package_s3_bucket

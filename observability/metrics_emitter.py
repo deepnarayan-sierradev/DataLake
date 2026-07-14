@@ -4,6 +4,7 @@ CloudWatch metrics emitter for the Enterprise Data Lake platform.
 Emits the canonical metric set defined in the observability contract:
   - ExtractionDurationMs
   - RecordsExtracted
+  - RecordsSkipped
   - RecordsFailed
   - RetryCount
   - SchemaDriftCount
@@ -135,6 +136,24 @@ class CloudWatchMetricsEmitter:
         """Emit the count of records that failed extraction or validation."""
         self._put_metric(
             metric_name="RecordsFailed",
+            value=float(count),
+            unit="Count",
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, stage=stage, tenant_code=self._tenant_code
+            ),
+        )
+
+    def emit_records_skipped(
+        self,
+        source_id: str,
+        entity_id: str,
+        environment: str,
+        count: int,
+        stage: str | None = None,
+    ) -> None:
+        """Emit the count of records left unchanged (skipped, not an error) in a run."""
+        self._put_metric(
+            metric_name="RecordsSkipped",
             value=float(count),
             unit="Count",
             dimensions=self._build_dimensions(

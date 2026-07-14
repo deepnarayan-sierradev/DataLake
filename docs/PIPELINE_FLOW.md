@@ -1,8 +1,14 @@
 # Enterprise Data Lake — Full Pipeline Flow
 
-> **Spec version:** 2.1 | **Last updated:** 2026-07-09
+> **Last updated:** 2026-07-14
 
-> **Dev status:** All stages deployed and live. Data flowing end-to-end: Salesforce (Account, Contact) + MySQL RDS (Contracts) + Sage Intacct (Customer, Vendor, AR Invoice, AP Bill) + Sage X3 (Customer, Supplier). Entity resolution and analytics publisher both operational. NetSuite: code-complete (connector, metadata adapter, incremental query planner, auth client, and raw layer writer all implemented, matching the Salesforce/Sage connector shape) but not yet confirmed activated — entity config seeding and schedule-enable status were not independently verified for this document. `entity_resolution/entity_type_registry.py` and `config/entity_resolution/` / `config/field_mappings/` also now define four additional entity types not yet reflected anywhere else in this document's narrative text below — `opportunity` (Salesforce Opportunity), `sales-contract` (Salesforce Contract), `contract` and `contract-term` (MySQL RDS Contracts/ContractTerms). Their config JSON exists in-repo (some as uncommitted working-tree additions as of this writing) and their Python-side registration is real, but whether they have been seeded to a live environment and are actually running on a schedule was **not independently verified** for this document — treat them as code-complete/config-complete, not confirmed-live, the same caveat already applied to NetSuite above.
+> **Current status:** Salesforce, MySQL RDS, Sage Intacct, and Sage X3 connectors are fully
+> implemented; Salesforce and MySQL RDS have real credentials in dev and have run end-to-end.
+> NetSuite is fully implemented but its Secrets Manager credential is still an empty shell —
+> never invoked in dev. The serving store (Stage 16) is fully implemented but not yet deployed to
+> any environment. For exactly what's deployed and running where, see `docs/PLATFORM_STATUS.md` —
+> this document describes the pipeline's design and mechanics, not its current live/dormant status
+> per stage.
 
 ---
 
@@ -93,8 +99,10 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
                │
                ▼
 ┌─────────────────────────────────┐
-│  SERVING STORE (MySQL RDS)      │
-│  Operational APIs, Applications │
+│  SERVING STORE (MySQL/Postgres/ │
+│  SQL Server/Azure SQL) — coded, │
+│  not yet deployed. Operational  │
+│  APIs, Applications             │
 └─────────────────────────────────┘
 ```
 
@@ -107,21 +115,44 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 | **Raw** | Exact copy of source data, no transformation | `edl-raw-{account_id}` S3 | Parquet (large_utf8 columns) | Immutable — Object Lock GOVERNANCE |
 | **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked. For incremental entities with `primary_key_field` set, each partition holds the **full current state** (SCD Type 1 merge — not just the day's delta) | `edl-curated-{account_id}` S3 | Parquet (Snappy) | Full-load entities: append-only per run_id. Incremental entities with merge: full snapshot per run_id (overwrites previous state within the partition) |
 | **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Two distinct prefixes, both tenant-prefixed (`{tenant_code}/...`): `canonical/{entity_type}/` — golden/mastered records straight from entity resolution, one Parquet file per run under a `run_id=` partition; `analytics/{entity_type}/` — the same golden records with internal entity-resolution-only fields stripped, republished by the Analytics Layer Publish stage as the BI-facing dataset | `edl-analytics-{account_id}` S3 | Parquet (Snappy) | `canonical/`: append-only, one file per `run_id`. `analytics/`: **not** append-only — partitioned only by `analytics_date=`, no `run_id`, so a second run on the same UTC day overwrites the first run's file for that day |
-| **Serving Store** | Optional operational store for low-latency API and application reads | MySQL RDS (private VPC) | SQL rows | Upsert (REPLACE INTO) |
+| **Serving Store** | Optional operational store for low-latency API and application reads. Code-complete (`serving_store/` module, four engine adapters), not yet deployed in any environment | MySQL RDS, PostgreSQL, SQL Server, or Azure SQL (database/schema-per-tenant; private VPC for platform-provisioned engines, BYO-DB for Azure SQL) | SQL rows | Idempotent hash-diff upsert per engine (`_row_hash`/`_synced_at` columns) — first sync per tenant/entity is a full backfill |
 
-### Multi-tenancy
+### Multi-tenancy — the canonical isolation model
 
-Every stage is tenant-scoped via a `tenant_code` parameter — default `"demo"`, sourced from `contracts.identifier_policy.DEFAULT_TENANT_CODE` and validated on every call via `validate_tenant_code()` / `TENANT_CODE_PATTERN`. It threads through:
+Every stage is tenant-scoped via a `tenant_code` parameter — default `"demo"`, sourced from
+`contracts.identifier_policy.DEFAULT_TENANT_CODE` and validated on every call via
+`validate_tenant_code()` / `TENANT_CODE_PATTERN`. **This is the single canonical reference for how
+tenant isolation actually works, layer by layer** — every other doc in this repo that discusses
+tenant isolation (the incident runbook, the glossary, the developer guide) links here rather than
+re-deriving its own version.
 
-- **Configuration Load (Stage 3):** `ConfigurationRepositoryClient.load_config()` takes `tenant_code`; the S3 config key is `{tenant_code}/{source_id}/{entity_id}/config.json`, and the loaded record's own `tenant_code` field is cross-checked against the caller's.
-- **Watermark Update (Stage 11):** `WatermarkRepository.get_watermark()` and `initialise_watermark()` take `tenant_code` explicitly (default `demo`) and scope the DynamoDB partition key via `tenant_scoped_key()`; `advance_watermark()` does not take a separate `tenant_code` argument — it reuses the `tenant_code` already carried on the `WatermarkRecord` passed in. Watermark records carry `tenant_code` and mismatches are rejected.
-- **Schema Snapshot (Stage 8):** `SchemaSnapshotRepository` keys are tenant-prefixed (`{tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json`).
-- **Entity Resolution:** `EntityTypeRegistryClient` uses a single-table design keyed on `tenant_code` as the partition key. The entity resolution and analytics publisher Lambda handlers both treat `tenant_code` as a **required** Step Functions input field (ARCH-4) — `_validate_event()` in `entity_resolution/entity_resolution_pipeline_handler.py` and `analytics_publisher/analytics_publisher_handler.py` raise `ValueError` and fail the run closed if it is missing or fails `TENANT_CODE_PATTERN`, rather than silently defaulting to another tenant's identity. Both stages' S3 outputs are tenant-prefixed: `canonical/` (Stage 14) and `analytics/` (Stage 15) both write under `{tenant_code}/...`.
-- **Step Functions state machine:** `infrastructure/modules/orchestration/main.tf` passes `"tenant_code.$" = "$.tenant_code"` explicitly into the Transformation, Entity Resolution, and Analytics Publish task `Parameters`.
+| Layer | Isolation mechanism | Genuinely enforced, or app-level only? |
+|---|---|---|
+| S3 — raw layer | `{source}/{entity_id}/...` — **not tenant-prefixed today** | Not isolated — a real, open gap (see `docs/KNOWN_GAPS_AND_ROADMAP.md`) |
+| S3 — curated layer | `{tenant_code}/curated/{domain}/{entity_id}/...` | App-level (write-path convention); no S3 bucket-policy `Condition` enforces it yet |
+| S3 — analytics layer | `{tenant_code}/analytics/{entity_type}/...` and `{tenant_code}/canonical/{entity_type}/...` | App-level, same caveat |
+| S3 — schema snapshots | `{tenant_code}/{source_id}/{entity_id}/{schema_version}/...` | App-level, same caveat |
+| DynamoDB — `entity_type_registry` | Hash key is `tenant_code` itself | **Genuinely key-level isolated** |
+| DynamoDB — `watermark_repository` | Hash key is `tenant_scoped_key(tenant_code, source_id)` | **Genuinely key-level isolated** |
+| DynamoDB — `entity_extraction_config` | Key is `(source_id, entity_id)`; `tenant_code` is a plain attribute | App-level guard only (`_enforce_tenant_match`) — mismatches 409, not a silent leak |
+| DynamoDB — `run_audit_log` | Key is `(run_id, stage)`, not tenant-keyed | App-level guard only — reads for another tenant's `run_id` return 404, not 403 |
+| DynamoDB — `source_onboarding_registry` | Key is `source_id` only | Models sources, not per-tenant state — no tenant dimension by design |
+| Secrets Manager | One shared credential per connector type (`edl/sources/{source_id}/credentials`) | **Not isolated at all** — same secret across every tenant using that connector |
+| Control-plane API | `_authorize_path_tenant` cross-checks the path's `tenant_code` against the JWT claim | App-level only, fails closed (401/403) |
+| Glue / Athena | Two shared databases (`edl_curated`, `edl_analytics`); table names prefixed `{tenant_code}_{entity_type}` | **Not isolated at all** — naming convention only, no per-tenant database/LF-Tags/data-cell filters |
+| Serving store | Database-per-tenant (MySQL) / schema-per-tenant (Postgres, SQL Server, Azure SQL), enforced by the database engine's own GRANT model | **Genuinely isolated** at the credential level — see Stage 16 below for the separate network-reachability gap |
 
-**Known asymmetry:** the S3 **raw layer** partition scheme (Stage 7) is deliberately *not* tenant-prefixed today. This is a real, tracked gap — raw-layer tenant prefixing has not been implemented yet — not an oversight in this document.
+Where the state machine threads tenant identity through: `infrastructure/modules/orchestration/main.tf`
+passes `"tenant_code.$" = "$.tenant_code"` explicitly into the Transformation, Entity Resolution,
+Analytics Publish, and Serving Store Load task `Parameters`; both the entity resolution and
+analytics publisher Lambda handlers treat `tenant_code` as a **required** Step Functions input
+field — `_validate_event()` raises `ValueError` and fails the run closed if it's missing or
+malformed, rather than silently defaulting to another tenant's identity.
 
-Canonical references: `tests/test_tenant_isolation.py`; `docs/PRODUCTION_INCIDENT_RUNBOOK.md` → "Suspected Cross-Tenant Data Incident" (Scenario 8).
+For everything still open in this model (no IAM enforcement anywhere, Secrets Manager sharing,
+the raw-layer gap, Glue/Athena's wildcard grant), see `docs/KNOWN_GAPS_AND_ROADMAP.md`. Regression
+coverage: `tests/test_tenant_isolation.py`. Incident response: `docs/PRODUCTION_INCIDENT_RUNBOOK.md`
+→ "Suspected Cross-Tenant Data Incident."
 
 ---
 
@@ -156,7 +187,7 @@ Step Functions: START EXECUTION
   │  10. Emit TRANSFORMATION_TRIGGER stage event             │         │
   └──────────────────────┬──────────────────────────────────┘         │
                          │                                             │
-       LambdaTimeoutWarning raised? (PERF-5 mid-run checkpoint)        │
+       LambdaTimeoutWarning raised? (mid-run checkpoint)               │
                     │ yes → ExtractionCheckpointed (Succeed,           │
                     │        non-fatal). Partial watermark already     │
                     │        committed; remaining window NOT           │
@@ -215,11 +246,12 @@ Step Functions: START EXECUTION
                          ▼                                            │
   ┌─────────────────────────────────────────────────────────┐         │
   │  STAGE E — SERVING STORE LOAD (Lambda)                  │         │
+  │  code-complete, not yet deployed in any environment      │         │
   │                                                          │         │
   │  1. Read analytics Parquet from S3                       │         │
   │  2. Retrieve DB credentials from Secrets Manager         │         │
   │  3. CREATE TABLE IF NOT EXISTS (schema inferred)         │         │
-  │  4. REPLACE INTO (idempotent upsert)                     │         │
+  │  4. Engine-specific upsert via hash-diff (idempotent)     │         │
   │  5. Emit load metrics                                    │         │
   └──────────────────────┬──────────────────────────────────┘         │
                          │                                             │
@@ -275,13 +307,13 @@ Step Functions: START EXECUTION
 - Reads `is_publication_blocked` from transformation output — skips entity resolution and downstream if quality blocks publication
 - Retries transient Lambda errors with exponential backoff (3 attempts, 10s initial, 2× backoff)
 - Terminal failures route to a per-stage `Fail` state (`ExtractionFailed`, `TransformationFailed`, `EntityResolutionFailed`, `AnalyticsPublishFailed`) and enqueue to DLQ
-- The `ExecuteExtraction` state's `Catch` block matches `LambdaTimeoutWarning` (PERF-5 mid-run checkpoint) *before* the generic `States.ALL` catch-all — first match wins in ASL, so a checkpoint does **not** fall through to `ExtractionFailed`/the DLQ. It routes instead to a terminal `ExtractionCheckpointed` `Succeed` state: non-fatal, partial watermark already committed, remaining window not yet processed. Automatic resume from a checkpoint is **not yet implemented** (documented as a gap in `extraction_workflow.py`'s own module docstring, PERF-5) — it needs a manual re-trigger.
+- The `ExecuteExtraction` state's `Catch` block matches `LambdaTimeoutWarning` (a mid-run checkpoint) *before* the generic `States.ALL` catch-all — first match wins in ASL, so a checkpoint does **not** fall through to `ExtractionFailed`/the DLQ. It routes instead to a terminal `ExtractionCheckpointed` `Succeed` state: non-fatal, partial watermark already committed, remaining window not yet processed. Automatic resume from a checkpoint is **not yet implemented** (documented as a gap in `extraction_workflow.py`'s own module docstring) — it needs a manual re-trigger.
 - DLQ messages (`EdlExtractionFailureDlq`) are consumed by the `dlq_processor` Lambda, which writes a `RunStatus.FAILED` audit record, emits an SNS alert, and optionally auto-replays (`AUTO_REPLAY` env var, default `false`)
 
 **Branching logic:**
 
 ```
-Extraction raises LambdaTimeoutWarning (PERF-5 mid-run checkpoint)?
+Extraction raises LambdaTimeoutWarning (mid-run checkpoint)?
   └─ yes → ExtractionCheckpointed (Succeed, non-fatal) — partial watermark
            committed, remaining window NOT processed. Auto-resume NOT
            implemented (documented gap) — needs a manual re-trigger.
@@ -388,7 +420,7 @@ Any stage's Task fails after retries exhausted (States.ALL)?
 
 **Component:** `WatermarkRepository`  
 **Purpose:** Advances the watermark to `upper_watermark` of the completed extraction window. Uses optimistic concurrency (DynamoDB `ConditionExpression` on `version`) to prevent concurrent runs from corrupting state. `get_watermark()` / `advance_watermark()` both take a `tenant_code` parameter (default `demo`) — see [Multi-tenancy](#multi-tenancy).  
-**Critical rule:** Watermark advances on full success — but that is only half the invariant now. A mid-run **checkpoint** (`LambdaTimeoutWarning`, PERF-5 — see [Stage 2](#stage-2--step-functions-orchestration)) also commits a **partial** watermark advance plus a distinct `'{run_id}-partN'` audit record, even though the extraction did not fully complete. Any true *failure* (as opposed to a checkpoint) at any earlier stage leaves the watermark unchanged, enabling safe replay.
+**Critical rule:** Watermark advances on full success — but that is only half the invariant now. A mid-run **checkpoint** (`LambdaTimeoutWarning` — see [Stage 2](#stage-2--step-functions-orchestration)) also commits a **partial** watermark advance plus a distinct `'{run_id}-partN'` audit record, even though the extraction did not fully complete. Any true *failure* (as opposed to a checkpoint) at any earlier stage leaves the watermark unchanged, enabling safe replay.
 
 ---
 
@@ -466,7 +498,7 @@ s3://{curated-bucket}/entity-resolution/{entity_type}/latest.json  ← version p
 **Component:** `GoldenRecordPublisher` (`entity_resolution/canonical_record_publisher/canonical_record_publisher.py`), `GoldenRecordSurvivorshipPolicy`, `ResolutionConfigRegistry`  
 **Purpose:** Applies survivorship rules to each match cluster to produce one trusted record per real-world entity.
 
-**Known duplication (DUP-3, tracked, not yet cleaned up):** there are **two** near-identical implementations of this class — `entity_resolution/canonical_record_publisher/canonical_record_publisher.py` and `entity_resolution/golden_record_publisher/golden_record_publisher.py` — both defining a `GoldenRecordPublisher` class with the same `publish()` logic. `entity_resolution/entity_resolution_pipeline_handler.py` (the actual Step Functions Lambda handler) imports from **`canonical_record_publisher`** — that is the file on the live code path. `golden_record_publisher.py` is not wired into the Lambda handler; treat it as legacy/duplicate rather than a second production path. The shared logic both files used to duplicate (Parquet-list flattening, decision-audit serialisation, lineage emission) was since extracted into `entity_resolution/publishing_shared.py`, but the two top-level classes themselves were not yet consolidated.
+**Known duplication (tracked, not yet cleaned up):** there are **two** near-identical implementations of this class — `entity_resolution/canonical_record_publisher/canonical_record_publisher.py` and `entity_resolution/golden_record_publisher/golden_record_publisher.py` — both defining a `GoldenRecordPublisher` class with the same `publish()` logic. `entity_resolution/entity_resolution_pipeline_handler.py` (the actual Step Functions Lambda handler) imports from **`canonical_record_publisher`** — that is the file on the live code path. `golden_record_publisher.py` is not wired into the Lambda handler; treat it as legacy/duplicate rather than a second production path. The shared logic both files used to duplicate (Parquet-list flattening, decision-audit serialisation, lineage emission) was since extracted into `entity_resolution/publishing_shared.py`, but the two top-level classes themselves were not yet consolidated.
 
 **Survivorship strategies per field:**
 - `source_priority` — prefer the value from the highest-ranked source (e.g. `sage` > `netsuite` > `salesforce` for `credit_limit` in the `company` survivorship policy — see the concrete example in [§6](#6-entity-resolution-config-system))
@@ -500,7 +532,7 @@ publisher = GoldenRecordPublisher.from_registry(
 ```
 The registry resolves the `latest` version pointer, loads and caches both JSON configs, and constructs the publisher. No rule set or policy is ever hardcoded in the Lambda handler.
 
-**Key output:** Golden records with `golden_id`, `contributing_source_records`, `survivorship_version`, `match_run_id`, and only the fields declared in `output_fields`. Written to (tenant-prefixed, ARCH-1):
+**Key output:** Golden records with `golden_id`, `contributing_source_records`, `survivorship_version`, `match_run_id`, and only the fields declared in `output_fields`. Written to (tenant-prefixed):
 ```
 s3://{analytics-layer}/{tenant_code}/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet
 s3://{analytics-layer}/{tenant_code}/canonical/{entity_type}/match-decisions/{run_id}/decisions.json
@@ -516,7 +548,7 @@ s3://{analytics-layer}/{tenant_code}/canonical/{entity_type}/match-decisions/{ru
 
 **Fields stripped before the BI-facing write** (`_INTERNAL_FIELDS_TO_DROP`): `_record_id`, `_source_id`, `contributing_source_records`, `survivorship_version`, `match_run_id`, `field_provenance`. `golden_id` is deliberately **kept** — it is the stable join key across entity types.
 
-**Partition scheme (tenant-prefixed, ARCH-1):** `s3://{bucket}/{tenant_code}/analytics/{entity_type}/analytics_date={date}/data.parquet` — note there is **no `run_id` in this path**. Unlike every other layer in this pipeline, a second run for the same entity type on the same UTC day **overwrites** the prior run's file, because nothing in the key disambiguates them. This is a real behavioural asymmetry versus the `canonical/` layer (which does partition by `run_id`), not a documentation inconsistency — confirm against `analytics_publisher_handler.py`'s `analytics_prefix` construction before assuming otherwise.
+**Partition scheme (tenant-prefixed):** `s3://{bucket}/{tenant_code}/analytics/{entity_type}/analytics_date={date}/data.parquet` — note there is **no `run_id` in this path**. Unlike every other layer in this pipeline, a second run for the same entity type on the same UTC day **overwrites** the prior run's file, because nothing in the key disambiguates them. This is a real behavioural asymmetry versus the `canonical/` layer (which does partition by `run_id`), not a documentation inconsistency — confirm against `analytics_publisher_handler.py`'s `analytics_prefix` construction before assuming otherwise.
 
 **Glue Catalog:** one table per `(tenant_code, entity_type)`, named `{tenant_code_with_hyphens_as_underscores}_{entity_type}` (Glue/Athena table names only allow `[a-z0-9_]`), registered via `governance.data_catalog_registration.DataCatalogRegistrationClient`. The day's Hive partition (`analytics_date=`) is registered explicitly via `glue_client.create_partition()` / `update_partition()` so `MSCK REPAIR TABLE` is not required after every run. Catalog/partition registration failures are logged as warnings and do **not** fail the pipeline — the Parquet is already written and directly queryable via its S3 path even if cataloguing fails.  
 **Consumers:** Athena, QuickSight, ML feature stores, data science notebooks.
@@ -525,13 +557,17 @@ s3://{analytics-layer}/{tenant_code}/canonical/{entity_type}/match-decisions/{ru
 
 ### Stage 16 — Serving Store Load
 
-**Component:** `ServingStoreLoader`  
-**Purpose:** Loads analytics records into a MySQL RDS serving database for BI tools and applications.  
+**Status:** code-complete (ruff/mypy/tests/`terraform validate` clean in all three environments), **not yet deployed anywhere** — no `terraform apply` has been run for it, so no RDS instance, Lambda, or IAM role exists in any AWS account today. The Step Functions `LoadServingStore` state stays on its `Pass` branch until it is.  
+**Component:** `serving_store/serving_store_loader_handler.py`, dispatching to `serving_store/loaders/` via `ServingStoreLoaderRegistry` (`serving_store/registry.py`) — same adapter+registry pattern as `connector_runtime`'s source connectors. Each loader implements `serving_store/interfaces/loader_interface.py::ServingStoreLoaderInterface`.  
+**Engines:** `mysql_rds_loader.py`, `postgresql_loader.py`, `sqlserver_loader.py` (also serves `azure_sql` — same T-SQL dialect). Onboarding (which tenant/entity pairs load, into which engine) is config-driven via `serving_store/serving_store_config_repository.py::ServingStoreConfigRepositoryClient`, backed by a new `EdlServingStoreConfig` DynamoDB table.  
+**Purpose:** Loads analytics records into a relational serving database for BI tools and applications.  
 **Key properties:**
 - Table schema inferred from Parquet schema — no hardcoded DDL
-- `REPLACE INTO` — idempotent upsert, safe to re-run
+- Idempotent hash-diff incremental upsert — a `_row_hash`/`_synced_at` column pair; first sync per tenant/entity is an automatic full backfill, later runs only touch changed rows
 - All SQL parameterized — no string interpolation of column names or values
-- Credentials exclusively from Secrets Manager
+- Tenant isolation via the database engine's own GRANT model (not application-level filtering), since BI tools connect directly: one database per tenant for MySQL, one schema per tenant for PostgreSQL/SQL Server/Azure SQL
+- Two credential tiers per tenant in Secrets Manager: the loader's own writer credential, and a separate read-only reader credential (`edl/serving-store/{tenant_code}/{engine}/reader-credentials`) handed to the tenant's BI-tool connection
+- Azure SQL is always tenant-supplied (BYO-DB) — Azure resources are never platform-provisioned by this AWS-based Terraform
 
 ---
 
@@ -764,7 +800,7 @@ python scripts/seed_entity_resolution_configs.py --environment dev --entity-type
 | Breaking schema drift | `SCHEMA_MISMATCH` | No retry | Immediately |
 | Quality blocking violation | Quality blocker | No retry | Alert only, no DLQ |
 | Watermark concurrency conflict | Concurrency | No retry | Returns `PARTIAL_SUCCESS` |
-| Mid-run Lambda timeout (checkpoint) | `LambdaTimeoutWarning` (PERF-5, non-fatal) | N/A — routes to terminal `ExtractionCheckpointed` Succeed state, not a retry | No DLQ — partial watermark + `'{run_id}-partN'` audit record already committed; auto-resume not implemented, needs manual re-trigger |
+| Mid-run Lambda timeout (checkpoint) | `LambdaTimeoutWarning` (non-fatal) | N/A — routes to terminal `ExtractionCheckpointed` Succeed state, not a retry | No DLQ — partial watermark + `'{run_id}-partN'` audit record already committed; auto-resume not implemented, needs manual re-trigger |
 
 **DLQ processing:** Messages landing in `EdlExtractionFailureDlq` are consumed by the **`dlq_processor`** Lambda (`orchestration/dlq_processor/dlq_processor_handler.py`, SQS event source mapping with `batch_size=1`). It validates the message body (Pydantic), writes a `RunStatus.FAILED` audit record to the run audit log table, emits an SNS notification to the platform alerts topic (run_id, source_id, entity_id, failure_reason), and — only if `AUTO_REPLAY=true` (default `false`) — re-invokes the Step Functions state machine to replay the failed run. With auto-replay off (the default), an operator reviews the DLQ message and replays manually per the command below.
 
@@ -909,7 +945,7 @@ This section maps each pipeline stage to the exact tools, AWS services, Python l
 | Stage 13 — Entity Resolution | AWS Lambda; Amazon S3 (curated source read + analytics write) |
 | Stage 14 — Golden Record Publish | AWS Lambda; Amazon S3 (analytics layer `canonical/` prefix) |
 | Stage 15 — Analytics Layer Publish | AWS Lambda; Amazon S3 (analytics layer `analytics/` prefix, read from `canonical/`); AWS Glue Data Catalog (table + partition registration) |
-| Stage 16 — Serving Store Load | Amazon RDS MySQL 8 (private VPC); AWS Secrets Manager |
+| Stage 16 — Serving Store Load | Amazon RDS (MySQL, PostgreSQL, or SQL Server; private VPC) or tenant-supplied Azure SQL; AWS Secrets Manager — code-complete, not yet deployed in any environment |
 | DLQ Processing (failure path) | AWS Lambda (`dlq_processor`); Amazon SQS (`EdlExtractionFailureDlq`, event source mapping `batch_size=1`); Amazon DynamoDB (run audit log); Amazon SNS (platform alerts topic); AWS Step Functions (optional auto-replay) |
 | All stages | Amazon CloudWatch Logs; Amazon CloudWatch Metrics; AWS X-Ray; Amazon SQS (DLQ) |
 

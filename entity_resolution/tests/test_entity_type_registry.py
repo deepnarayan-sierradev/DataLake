@@ -158,3 +158,80 @@ class TestTenantRegistration:
     def test_constructor_requires_environment(self) -> None:
         with pytest.raises(ValueError, match="environment"):
             EntityTypeRegistryClient(environment="", region_name=_REGION)
+
+
+class TestDeregisterEntityType:
+    @mock_aws
+    def test_deregister_reverts_to_fallback(self) -> None:
+        _create_table()
+        client = _client()
+        client.register_entity_type(
+            EntityTypeRecord(
+                entity_id="salesforce-account",
+                entity_type="overridden_type",
+                pk_field="overridden_pk",
+                contributing_sources=(),
+            ),
+            tenant_code="acme-corp",
+        )
+        overridden = client.get_entity_type("salesforce-account", tenant_code="acme-corp")
+        assert overridden == "overridden_type"
+
+        client.deregister_entity_type("salesforce-account", tenant_code="acme-corp")
+
+        default_expected = ENTITY_ID_TO_TYPE["salesforce-account"]
+        reverted = client.get_entity_type("salesforce-account", tenant_code="acme-corp")
+        assert reverted == default_expected
+
+    @mock_aws
+    def test_deregister_unregistered_entity_id_is_a_no_op(self) -> None:
+        _create_table()
+        client = _client()
+        client.deregister_entity_type("never-registered", tenant_code="acme-corp")
+        assert client.get_entity_type("never-registered", tenant_code="acme-corp") is None
+
+    @mock_aws
+    def test_deregister_does_not_affect_other_tenants(self) -> None:
+        _create_table()
+        client = _client()
+        record = EntityTypeRecord(
+            entity_id="shared-entity-id",
+            entity_type="type_a",
+            pk_field="id_a",
+            contributing_sources=(),
+        )
+        client.register_entity_type(record, tenant_code="acme-corp")
+        client.register_entity_type(record, tenant_code="globex-eu")
+
+        client.deregister_entity_type("shared-entity-id", tenant_code="acme-corp")
+
+        assert client.get_entity_type("shared-entity-id", tenant_code="acme-corp") is None
+        assert client.get_entity_type("shared-entity-id", tenant_code="globex-eu") == "type_a"
+
+    @mock_aws
+    def test_deregister_leaves_entity_type_descriptor_item_intact(self) -> None:
+        _create_table()
+        client = _client()
+        client.register_entity_type(
+            EntityTypeRecord(
+                entity_id="acme-custom-entity",
+                entity_type="custom_widget",
+                pk_field="widget_id",
+                contributing_sources=(("acme-source", "acme-custom-entity"),),
+            ),
+            tenant_code="acme-corp",
+        )
+
+        client.deregister_entity_type("acme-custom-entity", tenant_code="acme-corp")
+
+        # The entity_id#{...} item is gone (falls back for lookups keyed by entity_id)...
+        assert client.get_entity_type("acme-custom-entity", tenant_code="acme-corp") is None
+        # ...but the entity_type#{...} descriptor item is untouched, since other
+        # entity_ids of "custom_widget" for this tenant may still depend on it.
+        assert client.get_pk_field("custom_widget", tenant_code="acme-corp") == "widget_id"
+
+
+class TestListKnownEntityTypes:
+    def test_returns_sorted_fallback_entity_types(self) -> None:
+        client = _client()
+        assert client.list_known_entity_types() == sorted(ENTITY_TYPE_PK_FIELD)

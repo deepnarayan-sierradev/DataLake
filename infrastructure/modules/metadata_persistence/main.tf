@@ -249,6 +249,51 @@ resource "aws_dynamodb_table" "entity_type_registry" {
 }
 
 # ---------------------------------------------------------------------------
+# Serving Store Config — DynamoDB
+# Which tenant/entity pairs load into a serving store, and into which engine.
+# Tenant-partitioned from creation (PK=tenant_code), unlike the legacy tables
+# above — no tenant_scoped_key() composite-key workaround needed here.
+# ---------------------------------------------------------------------------
+
+resource "aws_dynamodb_table" "serving_store_config" {
+  name         = "EdlServingStoreConfig"
+  billing_mode = "PAY_PER_REQUEST"
+
+  hash_key  = "tenant_code"
+  range_key = "entity_id"
+
+  attribute {
+    name = "tenant_code"
+    type = "S"
+  }
+
+  attribute {
+    name = "entity_id"
+    type = "S"
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = var.database_kms_key_arn
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  stream_enabled = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  tags = merge(local.common_tags, {
+    Name    = "EdlServingStoreConfig"
+    Purpose = "serving-store-config"
+  })
+}
+
+# ---------------------------------------------------------------------------
 # Dead-Letter Queue — SQS
 # Receives terminal pipeline failures for manual review and replay.
 # ---------------------------------------------------------------------------

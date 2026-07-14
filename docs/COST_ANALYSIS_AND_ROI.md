@@ -3,7 +3,7 @@
 **For:** Finance, Leadership, Procurement  
 **Document version:** 2.0 — revised 2026-07-09 to correct resource-count errors and remove
 unverified savings claims found in v1.0  
-**Date:** 2026-07-09 (originally 2026-06-29)
+**Last updated:** 2026-07-14 (cost figures last revised 2026-07-09; originally 2026-06-29)
 
 > **What's actually deployed today:** Only the `dev` AWS environment exists (rebuilt from scratch
 > 2026-07-09). Staging and Production have no AWS account and are not provisioned. Of five source
@@ -226,7 +226,7 @@ measured facts.
 - **Financial case is directionally positive but unvalidated:** ~103% projected Year 1 ROI; ~320%+ projected ongoing — both depend on savings that have not yet been measured against a live pilot tenant
 - **Current state:** Dev environment is deployed and verified end-to-end for 2 of 5 sources (Salesforce, MySQL RDS); staging and production are not yet provisioned (no AWS account for either); no pilot tenant has onboarded; no load test has been performed at target scale
 - **Recommended next step:** onboard one pilot tenant against the dev environment (or a newly provisioned staging environment) to replace the projected labor-savings and cost figures above with measured ones before committing to a company-wide rollout timeline
-- **Compliance posture:** automated PII masking and lineage recording are implemented and covered by tests; tenant-level IAM enforcement for two DynamoDB tables (`entity-extraction-config`, and the S3 bucket-policy tenant-prefix condition) is a tracked, deferred gap (`SEC-2`, `ARCH-12` in `architecture/GAP_ANALYSIS_FINDINGS.md`) — not yet closed
+- **Compliance posture:** automated PII masking and lineage recording are implemented and covered by tests; tenant-level IAM enforcement for the `entity-extraction-config` DynamoDB table and the S3 bucket-policy tenant-prefix condition is a tracked, deferred gap — not yet closed (see `docs/KNOWN_GAPS_AND_ROADMAP.md`)
 
 **Approved signatories:**
 - [ ] CFO / Finance Director
@@ -258,7 +258,7 @@ This section maps each AWS service to its cost driver and the optimisation alrea
 | **Amazon SQS** | Messages sent | DLQ only (low volume; triggered only on failures) | < $1 |
 | **Amazon VPC — Interface Endpoints** | Per-AZ hourly charge + data processed | **Corrected.** 5 interface endpoints enabled by default (Secrets Manager, CloudWatch Logs, CloudWatch Monitoring, Step Functions, KMS), each spanning 2 AZs; S3/DynamoDB use free Gateway endpoints; Glue endpoint is disabled by default. Rate assumed at AWS's standard $0.01/AZ-hour — confirm against the current AWS Pricing Calculator before treating as precise. | ~$73 |
 | **Amazon VPC / NAT Gateway** | Data processed + hourly charge | Already deployed in dev (`single_nat_gateway = true`), not optional — required because Salesforce/NetSuite/Sage are internet-reachable SaaS APIs, not PrivateLink endpoints. Figure is the base hourly charge only; excludes data-processing charges. | $45 |
-| **Amazon RDS MySQL** | Instance hours + storage | **Not part of this platform's Terraform footprint** — no `aws_db_instance` resource exists in `infrastructure/`. The MySQL RDS instance is the customer's own existing source database that the extraction connector reads from via Secrets Manager credentials; its hosting cost is not part of this platform's bill. The optional "serving store" load-back concept referenced elsewhere in project docs has no deployed Lambda in any environment today (`serving_store_loader_lambda_arn` is unset everywhere) — treat it as a future option, not a current cost. | Not applicable to this platform's cost |
+| **Amazon RDS MySQL** | Instance hours + storage | Two distinct things share this label. (1) The **extraction source**: the customer's own existing MySQL database that the extraction connector reads from via Secrets Manager credentials — not part of this platform's Terraform footprint; its hosting cost is not part of this platform's bill. (2) The optional **serving store** load-back: `infrastructure/modules/serving_store_database` (engine-parameterized; only its MySQL instantiation is wired in dev/staging/prod `main.tf` today — PostgreSQL/SQL Server are code-ready but not instantiated) plus `infrastructure/modules/serving_store_lambda` are now code-complete and `terraform validate`-clean, but have not been `terraform apply`'d in any environment — no RDS instance or Lambda actually exists yet, so it's still $0 today. Treat it as a near-term cost once deployed, not a current one. | Not applicable to this platform's cost today |
 
 **Key cost insight:** The Parquet format (Apache Parquet, Snappy compression) is the single biggest cost lever — a 5–10× reduction in S3 storage compared to raw JSON directly reduces S3 storage, data transfer, and Athena scan costs simultaneously.
 

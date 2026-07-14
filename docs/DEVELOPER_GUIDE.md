@@ -1,9 +1,10 @@
 # Developer Guide — Enterprise Data Lake Platform
 
 **Audience:** Engineers new to the codebase, or anyone setting up a fresh workstation
-**Last updated:** 2026-07-09
-**Status:** Dev infrastructure is deployed; no source credentials are populated and no pipeline
-has run yet in any environment (see `docs/PLATFORM_STATUS.md` for current detail)
+**Last updated:** 2026-07-14
+**Status:** Dev infrastructure is deployed; Salesforce and MySQL RDS have real credentials and
+have run end-to-end. Sage Intacct, Sage X3, and NetSuite are code-complete but still have empty
+credential shells (see `docs/PLATFORM_STATUS.md` for current detail).
 
 > If you're using Claude Code (or another AI coding agent) on this repo, read root `CLAUDE.md`
 > first — it captures the same setup/verification conventions as this guide plus non-obvious
@@ -54,14 +55,10 @@ DynamoDB config record (see §11).
 **Multi-tenancy:** the platform is multi-tenant-aware, not strictly single-tenant. Every entity
 config, watermark, schema snapshot, and entity-type lookup carries a `tenant_code` (default:
 `demo`, from `contracts/identifier_policy.DEFAULT_TENANT_CODE`). Isolation is **not yet uniform**:
-S3 keys for every layer (raw, curated, golden/canonical, analytics, schema-snapshots) and the
-`entity-type-registry` DynamoDB table are genuinely isolated (bucket prefix / partition key); as
-of the `ARCH-1` fix (2026-07-08), `watermark-repository`'s DynamoDB key is also genuinely
-tenant-scoped (`tenant_scoped_key()` on the partition key, not just a read-time check).
-`entity-extraction-config` remains isolated only by an application-level guard
-(`_enforce_tenant_match`, `ARCH-12`) — none of this is backed by an IAM-enforced boundary yet
-(`SEC-2`). See `docs/PRODUCTION_INCIDENT_RUNBOOK.md`'s "How tenant isolation actually works today"
-section and run `tests/test_tenant_isolation.py` before touching any repository class. A new
+See `docs/PIPELINE_FLOW.md`'s canonical "Multi-tenancy — the canonical isolation model" table
+for exactly which layers are genuinely key/prefix-isolated vs. application-level-guard-only vs.
+not isolated at all — don't assume uniformity across layers. Run `tests/test_tenant_isolation.py`
+before touching any repository class. A new
 Cognito-authenticated SaaS control-plane API (`connector_runtime/api/`) exists for self-service
 tenant provisioning and pipeline triggering — it's code-complete but not yet verified against a
 live AWS deployment (see §2 and `connector_runtime/CLAUDE.md`).
@@ -79,7 +76,7 @@ live AWS deployment (see §2 and `connector_runtime/CLAUDE.md`).
 | `entity_resolution/` | Cross-source entity matching; writes golden records to analytics layer. `entity_type_registry.py` now has a DynamoDB-backed `EntityTypeRegistryClient` (tenant-scoped) alongside the original hardcoded fallback dicts. `publishing_shared.py` holds logic shared between the golden/canonical record publishers. |
 | `analytics_publisher/` | Publishes partitioned analytics Parquet; registers Glue partitions; emits an end-to-end pipeline SLA metric |
 | `schema_management/` | Schema snapshot capture and drift detection (tenant-prefixed S3 keys) |
-| `watermark_management/` | Incremental extraction watermark read/write (tenant-scoped DynamoDB key via `tenant_scoped_key()`, `ARCH-1`) |
+| `watermark_management/` | Incremental extraction watermark read/write (tenant-scoped DynamoDB key via `tenant_scoped_key()`) |
 | `orchestration/` | Step Functions and EventBridge wiring. `pipeline_trigger/` (SQS FIFO → Step Functions, rate-limited) and `dlq_processor/` (DLQ → audit + alert + optional replay) are new dedicated Lambdas here, not just Terraform glue. |
 | `governance/` | Lineage records, data classification, retention enforcement |
 | `observability/` | Structured logging and CloudWatch metrics emission |
@@ -318,11 +315,10 @@ make banned-names                       # rejects helper/util/common/manager ide
 > and — once that's worked around — on a module-name collision between
 > `scripts/generate_presentation.py` and `pptx/generate_presentation.py`. `make typecheck` has the
 > exact same problem (it also just runs bare `mypy .`), so switching to the Makefile target doesn't
-> help. CI's `typecheck` job was fixed (2026-07-08) to run the exact scoped `-p` form shown above
-> instead of bare `mypy .`, so it no longer crashes — but that command currently surfaces **75
-> pre-existing type errors across 16 files**, tracked as follow-up remediation debt
-> (`architecture/GAP_ANALYSIS_FINDINGS.md`, `OBS-6`), not something to fix incidentally. The CI
-> type-check job will report red on this debt until it's separately remediated.
+> help. Use the scoped `-p` form shown above — it currently surfaces a number of pre-existing type
+> errors (re-run it to get the current count; see `docs/KNOWN_GAPS_AND_ROADMAP.md`), tracked as
+> follow-up remediation debt, not something to fix incidentally. The CI type-check job reports red
+> on this debt until it's separately remediated.
 
 ---
 
@@ -508,7 +504,7 @@ terraform apply -target=module.control_plane
 
 Or skip `-target` entirely and apply everything in one pass once `terraform validate` is clean —
 Terraform resolves the dependency graph itself; the staged order above is only needed when you
-want to control blast radius. See `infrastructure/CLAUDE.md` for the full 14-module list and
+want to control blast radius. See `infrastructure/CLAUDE.md` for the current full module list and
 `make iac-validate` / `make iac-scan` for the CI-equivalent local checks.
 
 > **Critical:** Run `terraform init` after adding any new module, even if the module directory already exists. Forgetting causes "Module not installed" error.
@@ -598,7 +594,7 @@ SQS FIFO queue ──► EdlPipelineTrigger Lambda (rate-limited) ──► Step
     │       Reads DynamoDB config (tenant_code-scoped) → fetches from source API
     │       Writes Parquet to: s3://edl-raw-087972550871/{tenant_code}/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/
     │         ({source} is one hyphenated segment: salesforce, netsuite, mysql-rds, sage-intacct, sage-x3)
-    │       Updates watermark in DynamoDB (tenant-scoped key, `ARCH-1`)
+    │       Updates watermark in DynamoDB (tenant-scoped key)
     │       If approaching the Lambda timeout mid-run: commits a partial watermark, emits a
     │       checkpoint audit record, and the state machine exits cleanly via the
     │       `ExtractionCheckpointed` terminal state instead of failing. Automatic resume from a
@@ -613,8 +609,8 @@ SQS FIFO queue ──► EdlPipelineTrigger Lambda (rate-limited) ──► Step
     │       primary_key_field → writes FULL current-state Parquet to curated
     │       (full-load entities: writes delta only, no merge)
     │       Writes to: s3://edl-curated-087972550871/{tenant_code}/curated/{domain}/{entity_id}/
-    │       Registers Glue table (tenant-scoped table name `{tenant_code}_{entity_id}_{domain}_curated`,
-    │         `ARCH-19`) and the run's `curated_date` partition
+    │       Registers Glue table (tenant-scoped table name `{tenant_code}_{entity_id}_{domain}_curated`)
+    │         and the run's `curated_date` partition
     │
     ├─ Step 3: EdlEntityResolutionPipeline Lambda
     │       Loads latest curated data from ALL sources per entity type — streamed via DuckDB
@@ -680,28 +676,28 @@ records.
 
 10. **`make lambda-package` is not byte-reproducible** (unpinned dependency ranges in `pyproject.toml`) — running it twice, or running `lambda-package` then `lambda-upload` as separate commands, can upload a different artifact than the one whose hash you copied. Always run `make lambda-deploy` as a single command, which updates all eight Lambda functions in one pass — see `infrastructure/CLAUDE.md`.
 
-6. **Salesforce `connector_params` must include `object_name`** — e.g. `{"object_name": "Account"}`. Missing this raises `ValueError` at runtime.
+11. **Salesforce `connector_params` must include `object_name`** — e.g. `{"object_name": "Account"}`. Missing this raises `ValueError` at runtime.
 
-7. **Field mapping `behavior` valid values** — `raise_error`, `use_default`, `drop_field`. The value `use_null` does not exist and causes a validation error.
+12. **Field mapping `behavior` valid values** — `raise_error`, `use_default`, `drop_field`. The value `use_null` does not exist and causes a validation error.
 
-8. **Glue domain name** — source ID `mysql-rds` becomes `mysql_rds` in Glue (dashes → underscores for catalog naming compliance).
+13. **Glue domain name** — source ID `mysql-rds` becomes `mysql_rds` in Glue (dashes → underscores for catalog naming compliance).
 
-9. **MySQL RDS is in `us-west-1`** — the platform is in `us-east-1`. Cross-region connectivity goes through NAT Gateway. NAT IP `3.208.252.220` must be whitelisted in the RDS security group.
+14. **MySQL RDS is in `us-west-1`** — the platform is in `us-east-1`. Cross-region connectivity goes through NAT Gateway. NAT IP `3.208.252.220` must be whitelisted in the RDS security group.
 
-10. **S3 Hive partition paths require `=` in prefix pattern** — paths like `extraction_date=2026-06-29` contain `=`. The `_SAFE_S3_PREFIX_PATTERN` regex must allow it.
+15. **S3 Hive partition paths require `=` in prefix pattern** — paths like `extraction_date=2026-06-29` contain `=`. The `_SAFE_S3_PREFIX_PATTERN` regex must allow it.
 
-11. **Salesforce Bulk API returns `""` for null fields** — treated as missing (becomes `None` via `use_default`). This is intentional. A genuine empty string in a Salesforce field will also be treated as missing.
+16. **Salesforce Bulk API returns `""` for null fields** — treated as missing (becomes `None` via `use_default`). This is intentional. A genuine empty string in a Salesforce field will also be treated as missing.
 
-12. **Sage `connector_params` must include `sage_product` and `object_path`** — e.g. `{"sage_product": "intacct", "object_path": "accounts-receivable/customer"}`. Missing either key raises `ValueError` at runtime. Valid `sage_product` values are `"intacct"` and `"x3"`.
+17. **Sage `connector_params` must include `sage_product` and `object_path`** — e.g. `{"sage_product": "intacct", "object_path": "accounts-receivable/customer"}`. Missing either key raises `ValueError` at runtime. Valid `sage_product` values are `"intacct"` and `"x3"`.
 
-13. **Sage X3 field names must be UPPERCASE** — e.g. `BPCNUM_0`, `MODDAT_0`. The X3 query engine validates against `^[A-Z][A-Z0-9_]{0,63}$`. Lowercase field names in `include_fields` are rejected with `X3QueryBuildError`.
+18. **Sage X3 field names must be UPPERCASE** — e.g. `BPCNUM_0`, `MODDAT_0`. The X3 query engine validates against `^[A-Z][A-Z0-9_]{0,63}$`. Lowercase field names in `include_fields` are rejected with `X3QueryBuildError`.
 
-14. **Sage Intacct incremental watermark field is `auditInfo.modifiedAt`** — dot-notation key returned flat in query responses. Set `watermark_field` to this exact string in the entity config.
+19. **Sage Intacct incremental watermark field is `auditInfo.modifiedAt`** — dot-notation key returned flat in query responses. Set `watermark_field` to this exact string in the entity config.
 
-15. **Sage uses per-product secret paths** — `edl/sources/sage/intacct/credentials` and `edl/sources/sage/x3/credentials` are separate Secrets Manager secrets. Intacct requires `token_url`, `client_id`, `client_secret`, `base_url`, `company_id`. X3 requires the same plus `folder` (the X3 company folder, e.g. `"SEED"`).
+20. **Sage uses per-product secret paths** — `edl/sources/sage/intacct/credentials` and `edl/sources/sage/x3/credentials` are separate Secrets Manager secrets. Intacct requires `token_url`, `client_id`, `client_secret`, `base_url`, `company_id`. X3 requires the same plus `folder` (the X3 company folder, e.g. `"SEED"`).
 
-16. **Sage X3 OData discriminant** — the X3 query engine embeds `"_x3_odata": true` in `query_text` JSON. `SageConnector.execute_extraction()` dispatches on this key to the OData GET path. Do not set this key manually in entity configs.
+21. **Sage X3 OData discriminant** — the X3 query engine embeds `"_x3_odata": true` in `query_text` JSON. `SageConnector.execute_extraction()` dispatches on this key to the OData GET path. Do not set this key manually in entity configs.
 
-17. **`primary_key_field` must be a flat canonical field name** — dotted paths like `"auditInfo.id"` are silently treated as missing because `record.get()` only does top-level dict lookup. Use the canonical field name after field mapping (e.g. `"Id"`, `"contact_id"`). Only set this field for incremental entities; `None` (default) leaves pipeline unchanged.
+22. **`primary_key_field` must be a flat canonical field name** — dotted paths like `"auditInfo.id"` are silently treated as missing because `record.get()` only does top-level dict lookup. Use the canonical field name after field mapping (e.g. `"Id"`, `"contact_id"`). Only set this field for incremental entities; `None` (default) leaves pipeline unchanged.
 
-18. **Tombstone soft-delete is the default** — `soft_delete_field=None` means deleted records are never physically removed from the curated or analytics layers. They persist with their source deletion flag (e.g. `is_deleted=True`). Always filter `WHERE is_deleted = false` (or equivalent) in analytics queries to see only active records. To physically remove records, set `soft_delete_field` to the canonical name of the deletion flag field.
+23. **Tombstone soft-delete is the default** — `soft_delete_field=None` means deleted records are never physically removed from the curated or analytics layers. They persist with their source deletion flag (e.g. `is_deleted=True`). Always filter `WHERE is_deleted = false` (or equivalent) in analytics queries to see only active records. To physically remove records, set `soft_delete_field` to the canonical name of the deletion flag field.

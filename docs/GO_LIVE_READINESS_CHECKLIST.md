@@ -2,18 +2,20 @@
 
 **For:** Project manager, platform engineering lead, operations  
 **Purpose:** Verify all systems are ready before production activation  
-**Last updated:** 2026-07-09
+**Last updated:** 2026-07-14
 
-> **Environment status (per `docs/PLATFORM_STATUS.md` and
-> `architecture/GAP_ANALYSIS_FINDINGS.md`'s Phase 7 table):**
-> **Dev** — infrastructure deployed (277 resources: all 8 Lambdas, Step Functions, the
-> control-plane API, DynamoDB, S3, SQS/EventBridge). Salesforce and MySQL RDS credentials are
-> populated, and the pipeline has run end-to-end — verified with real data (34 Salesforce
-> accounts, 36,023 MySQL contract rows) queryable in Athena. Sage Intacct, Sage X3, and NetSuite
-> credentials are still unpopulated, and the three newest entities (opportunity, contract,
-> contract-term) aren't seeded yet. The control-plane API's live JWT-claims behavior has not
-> been independently confirmed. Deployed infrastructure and one verified pipeline run for two of
-> five sources is not the same as full go-live readiness; don't read "Dev" as "done."
+> **Environment status (see `docs/PLATFORM_STATUS.md` for the full resource inventory and
+> `docs/KNOWN_GAPS_AND_ROADMAP.md` for every open gap referenced below):**
+> **Dev** — infrastructure deployed (all 8 Lambdas, Step Functions, the control-plane API,
+> DynamoDB, S3, SQS/EventBridge). Salesforce and MySQL RDS are fully connected with real data
+> flowing end-to-end (34 Salesforce accounts, 36,023 MySQL RDS contract rows, queryable in
+> Athena). Sage Intacct, Sage X3, and NetSuite are code-complete but still have empty Secrets
+> Manager credential shells — not connected anywhere. The serving store (`serving_store/` module)
+> is fully implemented and wired into every environment's Terraform, but has not been
+> `terraform apply`'d anywhere, so the pipeline's serving-store stage still no-ops. The
+> control-plane API's live JWT-claims behavior has not been independently confirmed. Deployed
+> infrastructure and one verified pipeline run for two of five sources is not the same as full
+> go-live readiness; don't read "Dev" as "done."
 > **Staging** — not provisioned. No AWS account or credentials exist yet; `terraform validate` is
 > clean, which only means the Terraform *would* apply cleanly, not that anything is running.
 > **Production** — not provisioned. Requires staging sign-off first per this repo's promotion
@@ -22,7 +24,9 @@
 > Nothing in the body of this checklist is pre-checked — every box below reflects what is
 > actually verified as of this update, which for nearly every item is "not yet." Use this
 > checklist when promoting to **staging**, then **prod** — check off each item per environment as
-> it is genuinely completed, not in advance of the work.
+> it is genuinely completed, not in advance of the work. For the exact deployment commands behind
+> any item below, see `docs/DEPLOYMENT_GUIDE.md`, which owns the step-by-step procedure; this
+> document only tracks whether each step is done and who signed off.
 
 ---
 
@@ -80,7 +84,7 @@
 ---
 
 ### Orchestration Schedules (EventBridge)
-- [ ] EventBridge Scheduler configured with initial 5 entities (Salesforce Account, Contact, Opportunity, NetSuite Customer, MySQL Orders)
+- [ ] EventBridge Scheduler configured with initial 5 entities (Salesforce Account, Contact, Opportunity, NetSuite Customer, MySQL RDS Contracts)
 - [ ] Each entity has exactly one schedule (no duplicates)
 - [ ] Schedule names follow `{source_id}--{entity_id}` convention
 - [ ] Schedule times staggered to avoid concurrent source API load (e.g., SF Account 02:00, SF Contact 02:15, NS Customer 03:00)
@@ -96,23 +100,23 @@
 ## Data Configuration
 
 ### Source Credentials (Secrets Manager)
-- [ ] Salesforce credentials stored: `prod/sources/salesforce/credentials`
+- [ ] Salesforce credentials stored: `edl/sources/salesforce/credentials`
   - [ ] `instance_url` verified (correct org)
   - [ ] `client_id` and `client_secret` valid
   - [ ] OAuth token scope includes Bulk API 2.0
-- [ ] NetSuite credentials stored: `prod/sources/netsuite/credentials`
+- [ ] NetSuite credentials stored: `edl/sources/netsuite/credentials`
   - [ ] `account_id` correct (not sandbox)
   - [ ] OAuth tokens valid
   - [ ] Timestamp format validated (ISO-8601)
-- [ ] MySQL RDS credentials stored: `prod/sources/mysql-rds/credentials`
+- [ ] MySQL RDS credentials stored: `edl/sources/mysql-rds/credentials`
   - [ ] `host` is prod database endpoint
   - [ ] `username` is read-only user
   - [ ] Network connectivity verified (MySQL from Lambda in VPC)
-- [ ] Sage Intacct credentials stored: `prod/sources/sage/intacct/credentials`
+- [ ] Sage Intacct credentials stored: `edl/sources/sage/intacct/credentials`
   - [ ] `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` all set
   - [ ] OAuth token endpoint reachable from Lambda VPC (outbound HTTPS)
   - [ ] Intacct API user has read-only query access to configured modules
-- [ ] Sage X3 credentials stored: `prod/sources/sage/x3/credentials`
+- [ ] Sage X3 credentials stored: `edl/sources/sage/x3/credentials`
   - [ ] `token_url`, `client_id`, `client_secret`, `base_url`, `folder` all set
   - [ ] X3 `folder` is the correct company folder name (e.g. `SEED` or `PROD`)
   - [ ] OData v4 endpoint reachable from Lambda VPC
@@ -134,7 +138,7 @@
   - [ ] `salesforce-contact` (incremental, SystemModstamp watermark, 1 day window)
   - [ ] `salesforce-opportunity` (incremental, CloseDate watermark, 1 day window)
   - [ ] `netsuite-customer` (incremental, dateCreated watermark, 1 day window)
-  - [ ] `mysql-orders` (incremental, updated_at watermark, 4 hour window)
+  - [ ] `mysql-rds-contracts` (incremental, `ModifiedOn` watermark — live with real data in dev, see status note above)
   - [ ] `sage-intacct-customer` (incremental, auditInfo.modifiedAt watermark, 1 day window)
   - [ ] `sage-intacct-vendor` (incremental, auditInfo.modifiedAt watermark, 1 day window)
   - [ ] `sage-intacct-arinvoice` (incremental, auditInfo.modifiedAt watermark, 1 day window)
@@ -161,9 +165,9 @@
   - [ ] Salesforce Contact mapping: source fields → canonical names
   - [ ] Salesforce Opportunity mapping: source fields → canonical names
   - [ ] NetSuite Customer mapping: source fields → canonical names
-  - [ ] MySQL Orders mapping: source fields → canonical names
+  - [ ] MySQL RDS Contracts mapping: source fields → canonical names
   - [ ] Sage Intacct / Sage X3 mappings (customer, supplier, and any other onboarded entities)
-- [ ] All mapping files stored in S3: `s3://prod-schema-snapshots/field_mappings/`
+- [ ] All mapping files stored in S3: `s3://edl-schema-snapshots-<ACCOUNT_ID>/field_mappings/`
 - [ ] Each mapping file versioned (v1.json)
 - [ ] All transformation Lambda has read permission to mapping bucket
 
@@ -174,7 +178,7 @@
 ---
 
 ### Data Classification & PII Policy (S3)
-- [ ] PII classification policy file created: `s3://prod-schema-snapshots/data_classification/classification_policy.json`
+- [ ] PII classification policy file created: `s3://edl-schema-snapshots-<ACCOUNT_ID>/data_classification/classification_policy.json`
 - [ ] Every field in every entity classified as: `PII`, `SENSITIVE`, `PUBLIC`, or `INTERNAL`
 - [ ] Masking strategy defined per field:
   - [ ] Email fields: MASK_EMAIL (mask domain, keep first char)
@@ -214,12 +218,12 @@
 ## Quality & Governance
 
 ### Quality Policy (S3)
-- [ ] Quality policy file created for each entity: `s3://prod-schema-snapshots/quality_policies/`
+- [ ] Quality policy file created for each entity: `s3://edl-schema-snapshots-<ACCOUNT_ID>/quality_policies/`
 - [ ] Salesforce Account: enforce not-null on `account_id`, name regex, account_type enum
 - [ ] Salesforce Contact: enforce not-null on `contact_id`, email regex, valid phone
 - [ ] Salesforce Opportunity: enforce not-null on `opp_id`, positive amount range
 - [ ] NetSuite Customer: enforce not-null on `customer_id`, email regex
-- [ ] MySQL Orders: enforce not-null on `order_id`, positive order_amount, valid status
+- [ ] MySQL RDS Contracts: enforce not-null on `contract_id`, positive contract value, valid status
 - [ ] All BLOCKING violations log to CloudWatch and trigger SNS alert
 - [ ] All WARNING violations logged but don't block publication
 
@@ -286,13 +290,13 @@
 
 ### Multi-Tenant / Control Plane Readiness
 
-> The control plane (`infrastructure/modules/control_plane/`: Cognito User Pool + API Gateway + JWT authorizer + `connector_runtime/api/control_plane_handler.py`) is already wired into `dev`, `staging`, and `prod` Terraform. Per `architecture/MULTI_TENANT_ROLLOUT_PLAN.md` it is **code-complete but not verified against a live AWS deployment** — pilot-tenant onboarding and load testing at scale have not been attempted. None of the items below may be skipped before a `terraform apply` that includes this module reaches production.
+> The control plane (`infrastructure/modules/control_plane/`: Cognito User Pool + API Gateway + JWT authorizer + `connector_runtime/api/control_plane_handler.py`) is already wired into `dev`, `staging`, and `prod` Terraform. It is **code-complete but not verified against a live AWS deployment** — pilot-tenant onboarding and load testing at scale have not been attempted (see `docs/KNOWN_GAPS_AND_ROADMAP.md` for the full detail on both, and on the tenant-isolation gaps referenced below). None of the items below may be skipped before a `terraform apply` that includes this module reaches production.
 
 - [ ] Control plane deployed and smoke-tested against a real (non-mocked) API Gateway deployment — specifically confirm which JWT claims path (`requestContext.authorizer.claims` for REST/HTTP API payload format 1.0 + Cognito authorizer, vs. `requestContext.authorizer.jwt.claims` for HTTP API payload format 2.0 + JWT authorizer) API Gateway actually populates for the deployed configuration. This is currently unverified in code — the handler (`control_plane_handler.py`) defensively checks both paths and fails closed if neither is present, but that is not the same as confirming the correct path is populated in a live deployment.
 - [ ] `tests/test_tenant_isolation.py` passing — covers S3 prefix isolation, DynamoDB app-level tenant guards, the entity-type-registry table, and the control-plane API's 404-not-403 run-lookup behavior
-- [ ] At least one pilot tenant onboarded end-to-end through the control plane, running in parallel with the `default` tenant for a full week with no cross-tenant incidents
-- [ ] Load test at target multi-tenant scale completed
-- [ ] Secrets Manager tenant-isolation gap acknowledged: credentials are still per-source-connector, not per-tenant (`SEC-2`/`SEC-6` in `architecture/MULTI_TENANT_ROLLOUT_PLAN.md`) — tracked as a known follow-up, not a blocker for a single/small number of tenants sharing infra
+- [ ] At least one pilot tenant onboarded end-to-end through the control plane, running in parallel with the `default` tenant for a full week with no cross-tenant incidents (not yet attempted — requires a real deployment exercise, tracked in `docs/KNOWN_GAPS_AND_ROADMAP.md`)
+- [ ] Load test at target multi-tenant scale completed (not yet attempted — see `docs/KNOWN_GAPS_AND_ROADMAP.md`)
+- [ ] Secrets Manager tenant-isolation gap acknowledged: credentials are still per-source-connector, not per-tenant, and no IAM-enforced tenant boundary exists yet for S3, Secrets Manager, or DynamoDB (see `docs/KNOWN_GAPS_AND_ROADMAP.md`'s security section) — tracked as a known follow-up, not a blocker for a single/small number of tenants sharing infra
 
 **Owner:** Platform Engineering + Security  
 **Timeline:** 1 day (plus 1 week pilot soak)  
@@ -320,7 +324,7 @@
 ### Dry-run Extraction (Dev Environment)
 - [ ] Extract Salesforce Account (first 100 records manually triggered) → verify raw Parquet in S3
 - [ ] Extract NetSuite Customer → verify raw Parquet in S3
-- [ ] Extract MySQL Orders → verify raw Parquet in S3
+- [ ] Extract MySQL RDS Contracts → verify raw Parquet in S3
 - [ ] Verify watermark advanced correctly (DynamoDB watermark table)
 - [ ] Verify schema snapshot created (S3 schema bucket)
 - [ ] Verify audit records written (DynamoDB audit-log table)
@@ -468,7 +472,7 @@ Verify that all required technologies are correctly configured before go-live.
       carried over from an earlier design note. If a future entity genuinely outgrows Lambda, that
       is new platform work, not a pre-go-live checklist item
 - [ ] **S3 buckets** — All 5 buckets created (`raw`, `curated`, `analytics`, `schema-snapshots`, `governance`); Object Lock confirmed on raw; SSE-KMS on all; TLS-only bucket policy applied
-- [ ] **DynamoDB tables** — All 5 tables created (`entity_extraction_config`, `watermark_repository`, `run_audit_log`, `entity_type_registry`, `source_onboarding_registry`); PITR enabled; KMS encryption confirmed; GSI names match code expectations. **Known scaling gap (`PERF-7`, `PERF-10`):** `entity_extraction_config` has no GSI at all and tenant-scoped listing (`list_configs_for_tenant`, the control-plane API's list-runs route) is implemented as a full table `Scan` with a filter — correct today, but cost/latency scale with total table size, not the calling tenant's slice. `watermark_repository`'s only GSI is hash-keyed on `environment` (a 3-value domain), so every watermark row in an environment lands in one GSI partition. Fine at today's scale; do not represent this row as "scales with tenant count" without the follow-up work tracked under those IDs
+- [ ] **DynamoDB tables** — All 5 tables created (`entity_extraction_config`, `watermark_repository`, `run_audit_log`, `entity_type_registry`, `source_onboarding_registry`); PITR enabled; KMS encryption confirmed; GSI names match code expectations. **Known scaling gap:** `entity_extraction_config` has no GSI at all and tenant-scoped listing (`list_configs_for_tenant`, the control-plane API's list-runs route) is implemented as a full table `Scan` with a filter — correct today, but cost/latency scale with total table size, not the calling tenant's slice. `watermark_repository`'s only GSI is hash-keyed on `environment` (a 3-value domain), so every watermark row in an environment lands in one GSI partition. Fine at today's scale; do not represent this row as "scales with tenant count" without the follow-up work tracked in `docs/KNOWN_GAPS_AND_ROADMAP.md`
 - [ ] **Secrets Manager** — 5 secrets created (`salesforce`, `netsuite`, `mysql-rds`, `sage/intacct`, `sage/x3`); initial values set; daily credential-expiry-check Lambda (`credential_expiry_notifier`) scheduled — automatic rotation not yet wired (`rotation_lambda_arn` unset everywhere)
 - [ ] **Glue Data Catalog** — Database `{env}_curated` created; IAM permissions allow `glue:CreateTable` and `glue:UpdateTable` from transformation role
 - [ ] **Athena** — Workgroup `{env}-analytics` created; output bucket set; per-query cost limit configured
@@ -489,11 +493,10 @@ Verify that all required technologies are correctly configured before go-live.
 - [ ] **GitHub Actions** — All 9 CI gate jobs pass on `main` branch (`lint`, `banned-names`,
       `typecheck`, `test`, `security-sast`, `dependency-scan`, `iac-security-scan`,
       `terraform-validate`, `secret-scan`); deploy workflow triggered and succeeded. **This item is
-      not currently true and should not be checked off:** per root `CLAUDE.md`, the `typecheck`
-      job — once fixed to stop crashing on a module-name collision — surfaces **75 pre-existing
-      type errors across 16 files** (tracked as `OBS-6` remediation debt) and reports red until
-      that debt is separately paid down. Confirm `typecheck` is actually green before treating this
-      row as done, don't assume it from the other 8 jobs passing
+      not currently true and should not be checked off:** the `typecheck` job surfaces a batch of
+      pre-existing type errors (exact count drifts — see `docs/KNOWN_GAPS_AND_ROADMAP.md`) and
+      reports red until that debt is separately paid down. Confirm `typecheck` is actually green
+      before treating this row as done, don't assume it from the other 8 jobs passing
 - [ ] **pre-commit hooks** — Installed in repository; baseline updated
 
 ### Source System Connectivity
@@ -501,12 +504,12 @@ Verify that all required technologies are correctly configured before go-live.
 - [ ] **Salesforce** — OAuth 2.0 client credentials tested; NAT Gateway IP added to Salesforce trusted IP allowlist; Bulk API 2.0 quota confirmed (API edition supports high-volume jobs)
 - [ ] **NetSuite** — OAuth 1.0a credentials tested; SuiteQL endpoint reachable from Lambda VPC; query timeout verified
 - [ ] **MySQL RDS** — Read-only credentials tested; VPC peering or PrivateLink to RDS established; `INFORMATION_SCHEMA` queries succeed
-- [ ] **Sage Intacct** — OAuth 2.0 client credentials tested (`prod/sources/sage/intacct/credentials`); Intacct REST API reachable from Lambda VPC; dry-run with `run_sage_connector_local.py --entity-id sage-intacct-customer --dry-run` passes
-- [ ] **Sage X3** — OAuth 2.0 client credentials tested (`prod/sources/sage/x3/credentials`); X3 OData v4 endpoint reachable from Lambda VPC; `folder` value confirmed; dry-run passes
+- [ ] **Sage Intacct** — OAuth 2.0 client credentials tested (`edl/sources/sage/intacct/credentials`); Intacct REST API reachable from Lambda VPC; dry-run with `run_sage_connector_local.py --entity-id sage-intacct-customer --dry-run` passes
+- [ ] **Sage X3** — OAuth 2.0 client credentials tested (`edl/sources/sage/x3/credentials`); X3 OData v4 endpoint reachable from Lambda VPC; `folder` value confirmed; dry-run passes
 
 ---
 
 **Prepared by:** Platform Engineering Lead  
-**Date:** 2026-06-17  
+**Date:** 2026-07-14  
 **Next review:** Post-go-live Day 7 (day 1 incident review; day 7 week 1 retrospective)
 

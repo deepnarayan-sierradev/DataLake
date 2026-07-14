@@ -2,7 +2,7 @@
 
 **For:** All stakeholders  
 **Purpose:** Define technical and business terms used throughout documentation  
-**Last updated:** 2026-07-09
+**Last updated:** 2026-07-14
 
 ---
 
@@ -144,16 +144,10 @@ equivalent S3 prefix — so two tenants' records can never collide or be read ac
 boundary by accident. This applies uniformly, including to the single-tenant default
 (`tenant_code = "demo"`) — there is no special "no tenant" case.
 
-**Isolation status (as of 2026-07-09)** — not every table is IAM-enforced yet:
-- Genuinely isolated at the key/prefix level: S3 object prefixes, the entity-type registry table,
-  and the watermark repository table.
-- Isolated only by an application-level guard, not yet by IAM/key structure: the
-  entity-extraction-config table (fails closed on a mismatch, so this is a 409 conflict risk on
-  onboarding, not a data-leak risk).
-- Connector credentials are **not tenant-scoped at all today** — every tenant using a given
-  source-connector type currently shares one Secrets Manager credential set. This is a tracked,
-  known gap (covered by a skipped placeholder test in `tests/test_tenant_isolation.py`), not an
-  oversight to silently patch over.
+**Isolation status:** not every layer is enforced the same way — see `docs/PIPELINE_FLOW.md`'s
+"Multi-tenancy — the canonical isolation model" table for the full, current, layer-by-layer
+picture (S3, each DynamoDB table, Secrets Manager, the control plane, Glue/Athena, and the serving
+store). Open gaps in that model are tracked in `docs/KNOWN_GAPS_AND_ROADMAP.md`.
 
 ---
 
@@ -383,11 +377,11 @@ is registered and queryable).
 ---
 
 ### Serving Store (Optional)
-**Purpose:** Operational database for APIs and apps requiring sub-second queries.
+**Purpose:** Operational database for APIs and apps requiring sub-second queries. Code-complete (`serving_store/` module), not yet deployed in any environment.
 
-- **Storage:** RDS (PostgreSQL), Redshift, or DynamoDB
+- **Storage:** MySQL RDS, PostgreSQL, SQL Server, or Azure SQL (tenant-supplied BYO-DB), one engine per tenant/entity via config-driven onboarding
 - **Data source:** Analytics layer (read-only)
-- **Load type:** REPLACE INTO (idempotent upsert)
+- **Load type:** Idempotent hash-diff incremental upsert (full backfill on first sync)
 - **Use cases:** Low-latency API responses, mobile app backends, real-time dashboards
 
 **Not used for:** Report generation (use Athena instead; cheaper, doesn't require database).
@@ -515,7 +509,7 @@ Quick-reference definitions for every tool and service used in the platform.
 | **Glue Catalog** | AWS Glue Data Catalog | Metadata registry for the analytics layer (live); a second `edl_curated` database and curated-layer registration code path also exist but aren't wired on in dev yet |
 | **DuckDB** | DuckDB | In-process SQL engine used for curated-layer merges inside the transformation Lambda |
 | **Athena** | Amazon Athena | Serverless SQL query engine over S3 Parquet files |
-| **RDS** | Amazon Relational Database Service (MySQL 8) | Serving store for operational apps and low-latency reads |
+| **RDS** | Amazon Relational Database Service (MySQL, PostgreSQL, SQL Server) | Serving store for operational apps and low-latency reads; Azure SQL is tenant-supplied BYO-DB |
 | **SQS** | Amazon Simple Queue Service | Dead-Letter Queue for failed pipeline runs; KMS-encrypted |
 | **CloudWatch** | Amazon CloudWatch | Logs, custom metrics, alarms, dashboards |
 | **X-Ray** | AWS X-Ray | Distributed tracing across all Lambda/service calls |
@@ -562,6 +556,6 @@ Quick-reference definitions for every tool and service used in the platform.
 
 ---
 
-**Last updated:** 2026-07-09  
+**Last updated:** 2026-07-14  
 **Owner:** Data Platform Team
 

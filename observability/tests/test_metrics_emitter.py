@@ -106,6 +106,19 @@ class TestFlushAndBuffering:
         assert len(emitter._pending) == 1
         assert emitter._pending[0]["MetricName"] == "RecordsFailed"
 
+    def test_emit_records_skipped_buffered(self) -> None:
+        emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
+        emitter.emit_records_skipped(
+            source_id="salesforce_account",
+            entity_id="salesforce_account",
+            environment="dev",
+            count=42,
+            stage="serving_store_load",
+        )
+        assert len(emitter._pending) == 1
+        assert emitter._pending[0]["MetricName"] == "RecordsSkipped"
+        assert emitter._pending[0]["Value"] == 42.0
+
     def test_flush_swallows_cloudwatch_error(self) -> None:
         """Flush failure must never propagate to the pipeline."""
         from unittest.mock import MagicMock

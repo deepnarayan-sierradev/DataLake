@@ -40,6 +40,12 @@ Isolation mechanisms covered:
     SchemaSnapshotRepository. ResolutionConfigRegistry additionally gets a
     regression test for its in-process cache key, since that registry
     instance is reused across warm Lambda invocations for different tenants.
+  - ServingStoreConfigRepositoryClient DynamoDB backend: genuinely
+    tenant-partitioned from creation (PK=tenant_code, not a composite
+    tenant_scoped_key() retrofit like EntityExtractionConfig above) — the
+    test below proves Tenant B's load_config/list_configs_for_tenant calls
+    can never see Tenant A's serving-store config, across every target
+    engine (MySQL, PostgreSQL, SQL Server, Azure SQL).
 
 Analytics-publisher and golden/canonical-record-publisher S3 path isolation
 (also fixed under ARCH-1) are covered in their own modules'
@@ -88,6 +94,7 @@ from connector_runtime.configuration_repository.configuration_repository import 
 from connector_runtime.interfaces.connector_interface import ExtractionRecord
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType
 from contracts.identifier_policy import DEFAULT_TENANT_CODE
+from contracts.serving_store_config_contract import ServingStoreEngine, ServingStoreLoadConfig
 from entity_resolution.entity_type_registry import EntityTypeRecord, EntityTypeRegistryClient
 from entity_resolution.resolution_config.resolution_config_registry import (
     ResolutionConfigNotFoundError,
@@ -98,6 +105,10 @@ from schema_management.snapshot_repository.snapshot_repository import (
     FieldSnapshot,
     SchemaSnapshot,
     SchemaSnapshotRepository,
+)
+from serving_store.serving_store_config_repository import (
+    ServingStoreConfigNotFoundError,
+    ServingStoreConfigRepositoryClient,
 )
 from transformation.field_mapping.field_mapping_registry import (
     FieldMappingRegistryClient,
@@ -209,6 +220,80 @@ class TestConfigurationRepositoryDynamoDbIsolation:
         # record.
         with pytest.raises(ConfigurationNotFoundError):
             client.load_config("salesforce", "salesforce-account", tenant_code=_TENANT_B)
+
+
+# ---------------------------------------------------------------------------
+# ServingStoreConfigRepositoryClient — DynamoDB backend (genuine partition isolation)
+# ---------------------------------------------------------------------------
+
+
+class TestServingStoreConfigRepositoryIsolation:
+    _TABLE = "EdlServingStoreConfig"
+
+    def _create_table(self) -> None:
+        boto3.resource("dynamodb", region_name=_REGION).create_table(
+            TableName=self._TABLE,
+            KeySchema=[
+                {"AttributeName": "tenant_code", "KeyType": "HASH"},
+                {"AttributeName": "entity_id", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "tenant_code", "AttributeType": "S"},
+                {"AttributeName": "entity_id", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+    @mock_aws
+    @pytest.mark.parametrize(
+        "engine",
+        [
+            ServingStoreEngine.MYSQL_RDS,
+            ServingStoreEngine.POSTGRESQL,
+            ServingStoreEngine.SQLSERVER,
+            ServingStoreEngine.AZURE_SQL,
+        ],
+    )
+    def test_tenant_b_cannot_read_tenant_a_config(self, engine: ServingStoreEngine) -> None:
+        self._create_table()
+        client = ServingStoreConfigRepositoryClient(environment=_ENV, region_name=_REGION)
+        config = ServingStoreLoadConfig(
+            tenant_code=_TENANT_A,
+            entity_id="salesforce-account",
+            target_engine=engine,
+            table_name="salesforce_account",
+            primary_keys=("account_id",),
+            secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
+            region_name=_REGION,
+        )
+        client.save_config(config)
+
+        loaded = client.load_config(_TENANT_A, "salesforce-account")
+        assert loaded.tenant_code == _TENANT_A
+
+        # tenant_code is the DynamoDB partition key here — Tenant B's key literally
+        # cannot address Tenant A's item, unlike the app-level guard above.
+        with pytest.raises(ServingStoreConfigNotFoundError):
+            client.load_config(_TENANT_B, "salesforce-account")
+
+    @mock_aws
+    def test_list_configs_for_tenant_never_returns_another_tenants_records(self) -> None:
+        self._create_table()
+        client = ServingStoreConfigRepositoryClient(environment=_ENV, region_name=_REGION)
+        for tenant, entity in ((_TENANT_A, "salesforce-account"), (_TENANT_B, "netsuite-customer")):
+            client.save_config(
+                ServingStoreLoadConfig(
+                    tenant_code=tenant,
+                    entity_id=entity,
+                    table_name=entity.replace("-", "_"),
+                    primary_keys=("id",),
+                    secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
+                    region_name=_REGION,
+                )
+            )
+
+        tenant_a_configs = client.list_configs_for_tenant(_TENANT_A)
+        assert [c.entity_id for c in tenant_a_configs] == ["salesforce-account"]
 
 
 # ---------------------------------------------------------------------------

@@ -53,6 +53,16 @@ output "extraction_failure_dlq_name" {
   value       = aws_sqs_queue.extraction_failure_dlq.name
 }
 
+output "serving_store_config_table_name" {
+  description = "Name of the serving store config DynamoDB table."
+  value       = aws_dynamodb_table.serving_store_config.name
+}
+
+output "serving_store_config_table_arn" {
+  description = "ARN of the serving store config DynamoDB table."
+  value       = aws_dynamodb_table.serving_store_config.arn
+}
+
 output "source_onboarding_registry_table_name" {
   description = "Name of the source onboarding registry DynamoDB table."
   value       = aws_dynamodb_table.source_onboarding_registry.name

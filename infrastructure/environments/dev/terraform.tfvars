@@ -16,7 +16,6 @@ lambda_package_source_hash = "gQeht2IpFJ2F2l51l4/Ztiwn+vJNzB0vZVnENeu3Rgc="
 # Pipeline stage Lambda ARNs (required by Step Functions orchestration module)
 # Populate after deploying each Lambda stage package.
 extraction_pipeline_lambda_arn = "arn:aws:lambda:us-east-1:087972550871:function:EdlExtractionPipeline"
-# serving_store_loader_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:EdlServingStoreLoader"
 
 # Human/analyst principals needing to query Athena — see infrastructure/modules/glue/variables.tf
 analytics_reader_principals = [

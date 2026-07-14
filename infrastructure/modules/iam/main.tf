@@ -603,6 +603,105 @@ resource "aws_iam_role_policy" "analytics_publisher_runtime" {
 }
 
 # ---------------------------------------------------------------------------
+# Serving Store Loader Role
+# Assumed by the serving store loader Lambda (LoadServingStore state).
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "serving_store_loader_runtime_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "serving_store_loader_runtime" {
+  name               = "EdlServingStoreLoaderRuntimeRole"
+  assume_role_policy = data.aws_iam_policy_document.serving_store_loader_runtime_assume_role.json
+  description        = "Role assumed by the serving store loader Lambda for relational BI-store loads."
+  tags               = local.common_tags
+}
+
+data "aws_iam_policy_document" "serving_store_loader_runtime_permissions" {
+  # Read analytics layer Parquet — the loader never writes to this bucket.
+  statement {
+    sid       = "ReadAnalyticsLayer"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:ListBucket"]
+    resources = [var.analytics_layer_bucket_arn, "${var.analytics_layer_bucket_arn}/*"]
+  }
+
+  # Serving store config — read-only; onboarding writes go through the control plane, not this role.
+  statement {
+    sid       = "ReadServingStoreConfig"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:Query"]
+    resources = [var.serving_store_config_table_arn]
+  }
+
+  # Writer credential(s) plus the edl/serving-store/* reader-credential prefix this
+  # role provisions per tenant (CreateSecret is scoped to that same name prefix —
+  # it can never create a secret named outside edl/serving-store/*, OWASP A05).
+  statement {
+    sid    = "ServingStoreCredentials"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:CreateSecret",
+      "secretsmanager:PutSecretValue",
+    ]
+    resources = var.serving_store_secret_arns
+  }
+
+  statement {
+    sid     = "WriteLambdaExecutionLogs"
+    effect  = "Allow"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlServingStoreLoader",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlServingStoreLoader:log-stream:*",
+    ]
+  }
+
+  statement {
+    sid       = "PutServingStoreMetrics"
+    effect    = "Allow"
+    actions   = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["EnterpriseDatalake"]
+    }
+  }
+
+  statement {
+    sid    = "VpcNetworkInterfaceAccess"
+    effect = "Allow"
+    actions = [
+      "ec2:CreateNetworkInterface",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DeleteNetworkInterface",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "serving_store_loader_runtime" {
+  name   = "EdlServingStoreLoaderRuntimePolicy"
+  role   = aws_iam_role.serving_store_loader_runtime.id
+  policy = data.aws_iam_policy_document.serving_store_loader_runtime_permissions.json
+}
+
+# ---------------------------------------------------------------------------
 # Transformation Job Role
 # Assumed by AWS Glue jobs for curated layer processing.
 # ---------------------------------------------------------------------------

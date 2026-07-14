@@ -1,19 +1,41 @@
 # Enterprise Data Lake Platform — Executive Overview
 
-**Version:** 2.1  
-**Date:** 2026-07-09  
+**Version:** 2.2  
+**Date:** 2026-07-14  
 **Classification:** Internal — Leadership Review  
-
-> **Current Status:** Only the Dev AWS environment is deployed (rebuilt from scratch on
-> 2026-07-09). Of five planned source connectors, two — Salesforce and MySQL RDS — have real
-> credentials and have run end-to-end: **34 Salesforce accounts** and **36,023 MySQL RDS
-> contract rows** are extracted, transformed, resolved, and queryable via Athena today. The
-> other three connectors (Sage Intacct, Sage X3, NetSuite) are code-complete but have no
-> credentials populated, so nothing has run for them yet. Staging and Production are not
-> deployed — no AWS account exists for either. See [PLATFORM_STATUS.md](PLATFORM_STATUS.md) for
-> the full current inventory.  
-> For a concise leadership-ready summary, see [LEADERSHIP_BRIEF.md](LEADERSHIP_BRIEF.md).
 **Audience:** Engineering leadership, product leadership, data governance, security, and finance stakeholders
+
+> **Current Status:** Only the Dev AWS environment is deployed. Of five planned source
+> connectors, two — Salesforce and MySQL RDS — have real credentials and have run end-to-end:
+> **34 Salesforce accounts** and **36,023 MySQL RDS contract rows** are extracted, transformed,
+> resolved, and queryable via Athena today. The other three connectors (Sage Intacct, Sage X3,
+> NetSuite) are code-complete but have no credentials populated, so nothing has run for them yet.
+> Staging and Production are not deployed — no AWS account exists for either. See
+> [PLATFORM_STATUS.md](PLATFORM_STATUS.md) for the full current inventory.
+
+---
+
+## TL;DR
+
+- **What this is:** one governed, metadata-driven pipeline that replaces per-team manual data
+  pulls from Salesforce, NetSuite, MySQL RDS, and Sage with automated extraction, PII masking,
+  entity resolution, and a full audit trail.
+- **Current status:** Dev is the only deployed environment. Salesforce and MySQL RDS are fully
+  connected with real data flowing end-to-end; Sage Intacct, Sage X3, and NetSuite are
+  code-complete but still have empty Secrets Manager credential shells. Staging and production
+  have no AWS account yet.
+- **Headline business outcome (projected):** roughly 103% Year 1 ROI and about $6,300/month in
+  eliminated manual-labor cost once all five sources are live and a pilot tenant is running —
+  this is a financial model to sanity-check the business case, not yet a measured result. See
+  [COST_ANALYSIS_AND_ROI.md](COST_ANALYSIS_AND_ROI.md) for the full breakdown.
+- **What's not ready yet:** the serving store (a relational database export that would let BI
+  tools like Power BI or Tableau query the platform directly) is fully built but not deployed to
+  any environment — and even once deployed, there is currently no secure network path for an
+  external BI tool to reach it. That is separate, not-yet-designed infrastructure work, not just
+  a deployment step.
+- **Where to look next:** [KNOWN_GAPS_AND_ROADMAP.md](KNOWN_GAPS_AND_ROADMAP.md) tracks every
+  open gap in plain language; [PLATFORM_STATUS.md](PLATFORM_STATUS.md) is the canonical
+  "what's deployed right now" reference.
 
 ---
 
@@ -27,10 +49,10 @@
 6. [Delta (Incremental) Sync — How We Stay Current](#6-delta-incremental-sync--how-we-stay-current)
 7. [Extraction Schedules (Cron Job Reference)](#7-extraction-schedules-cron-job-reference)
 8. [Least Privilege Access Model — Who Can Read What](#8-least-privilege-access-model--who-can-read-what)
-9. [Data Layers Explained](#9-data-layers-explained)
+9. [Data Layers — Summary](#9-data-layers--summary)
 10. [Data Quality and Governance](#10-data-quality-and-governance)
 11. [Security Architecture Summary](#11-security-architecture-summary)
-12. [Technology Stack and Tools](#12-technology-stack-and-tools)
+12. [Technology Stack — Summary](#12-technology-stack--summary)
 13. [Operational Resilience](#13-operational-resilience)
 14. [Scalability and Cost Profile](#14-scalability-and-cost-profile)
 15. [Adding New Data Sources — Zero Code Changes](#15-adding-new-data-sources--zero-code-changes)
@@ -163,8 +185,9 @@ Each step produces a machine-readable audit record. No step is skipped. No data 
                               │
                    ┌──────────▼──────────┐
                    │   SERVING STORE     │
-                   │  RDS / Redshift /   │  ← Powers low-latency APIs,
-                   │  DynamoDB           │    apps, and microservices.
+                   │  MySQL / Postgres / │  ← Would power low-latency APIs
+                   │  SQL Server         │    and apps. Code-complete, not
+                   │  (not yet deployed) │    yet deployed in any environment.
                    └─────────────────────┘
 ```
 
@@ -322,65 +345,35 @@ Each source has its own Secrets Manager secret:
 
 ---
 
-## 9. Data Layers Explained
+## 9. Data Layers — Summary
 
-### Raw Layer — The Source of Truth Archive
+The platform stores data in four progressively more refined layers — **Raw** (immutable,
+as-received archive), **Curated** (cleaned, standardised, PII-masked, queryable via Athena),
+**Analytics** (entity-resolved "golden records" optimised for BI and ML), and an optional
+**Serving Store** (a relational database export for applications that need low-latency reads
+rather than S3-backed SQL).
 
-**Purpose:** Store every record exactly as it came from the source system. Never modified. Never deleted (within retention window).
+Why layer it this way, in business terms: keeping an untouched raw copy means a bad
+transformation rule can always be replayed without going back to the source system; keeping
+curated and analytics separate means a business analyst gets one clean, consistent schema per
+entity regardless of which source system the data originated from.
 
-- Format: Apache Parquet (columnar, compressed — typically 5–10× smaller than JSON)
-- Partitioned by source → entity → extraction date
-- Immutable: old files are never overwritten; new files are added alongside
-- Retention: 7 years (S3 Object Lock, GOVERNANCE mode)
-- Access: extraction service role (write); transformation role (read)
-- **No PII masking** — raw data is as-received. Access is strictly controlled.
+Only two of the seven-plus configured Analytics-layer entity types have live data flowing into
+them today — `company` (Salesforce Account only so far) and `person` (Salesforce Contact) —
+since only Salesforce and MySQL RDS are connected. The rest are configured and waiting on their
+source connector or on seeding.
 
-**Why keep raw?** If a transformation rule was wrong, or a field mapping was incorrect, you can replay from raw without going back to the source system. This is the single most important recovery capability in the platform.
+The **Serving Store** is code-complete (`serving_store/` module: four engine adapters, Lambda
+handler, Terraform) but not yet deployed to any environment — nothing has been `terraform
+apply`'d, so its Step Functions stage still runs as a no-op everywhere, including Dev. Even once
+deployed, there is no VPN, PrivateLink, or bastion host anywhere in the network layer today, so
+an external BI tool (Power BI, Tableau) would have no way to reach it — that network path is
+still a design decision away, tracked in
+[KNOWN_GAPS_AND_ROADMAP.md](KNOWN_GAPS_AND_ROADMAP.md).
 
-### Curated Layer — The Trusted Business Layer
-
-**Purpose:** Clean, standardised, domain-aligned data ready for business use.
-
-- Source fields mapped to canonical names (e.g. `Account_Name__c` → `account_name`)
-- PII fields masked or tokenised per classification policy
-- Quality-checked records only (blocking violations prevent publication)
-- Registered in AWS Glue Data Catalog — immediately queryable via Athena
-- Retention: 3 years
-- Access: transformation role (write); analytics roles (read)
-
-**What "curated" means:** A business analyst querying `curated.customer` sees a clean, consistent schema regardless of which source system the data originated from.
-
-### Analytics Layer — The Consumption Layer
-
-**Purpose:** Optimised for BI tools, dashboards, and ML models.
-
-- Year/month/day partitioned for efficient time-range queries
-- Contains **curated domain datasets** and **canonical entity records** (entity-resolved golden records)
-- Several canonical entity types are defined in configuration today; only two have live data
-  flowing into them, since only Salesforce and MySQL RDS are connected:
-  - **`company`** — designed to merge Salesforce Account + NetSuite Customer + Sage Intacct
-    Customer + Sage X3 Customer into a single trusted company profile; **live today with
-    Salesforce Account data only** (34 records) — the other three sources aren't connected yet
-  - **`person`** — normalises Salesforce Contact into a canonical person record; **live**
-  - **`contract`**, **`supplier`**, **`ar_invoice`**, **`ap_bill`**, **`opportunity`**,
-    **`sales-contract`**, **`contract-term`** — configured, awaiting either seeding or
-    connection of their source system before any golden records are produced
-- Every golden record includes **5 system fields** beyond the business `output_fields` (count varies 14-20 by entity type): `golden_id`, `contributing_source_records`, `survivorship_version`, `match_run_id`, and `field_provenance`. See [PIPELINE_FLOW: Golden Record Publish](PIPELINE_FLOW.md#stage-14-golden-record-publish) for details.
-- Registered in Glue catalog; Athena workgroup configured per team
-- Retention: 1 year active; archival to Glacier after
-- Access: read-only for approved BI users and ML engineers (prefix-scoped)
-
-### Serving Store — The Application Layer
-
-**Purpose:** Powers operational applications and APIs that require low-latency reads and cannot query S3 directly.
-
-- Loaded from the analytics layer via upsert
-- Target: RDS (PostgreSQL), Redshift, or DynamoDB (depending on deployment profile)
-- Supports both full-replace and incremental-merge load modes
-- **Not the same as Athena reporting** — Athena is the query engine that runs SQL over the Analytics layer (S3 Parquet) for BI tools, dashboards, and ad-hoc analysis. Serving Store is the operational store for predictable sub-second API reads at high concurrency.
-- **Not yet active in any environment:** the Step Functions workflow has a conditional stage for
-  this, but no Serving Store Lambda handler has been built yet, so the stage currently runs as a
-  no-op in every environment, including Dev.
+For the full definition of each layer (retention periods, IAM roles, partitioning, formats) and
+the complete "AWS service → role in platform" reference, see
+[GLOSSARY_AND_TERMINOLOGY.md](GLOSSARY_AND_TERMINOLOGY.md#data-lake-layers-explained).
 
 ---
 
@@ -478,118 +471,27 @@ The platform is built security-first, with controls embedded at every layer:
   enforced by the application's writer/reader code today
 - Two gaps remain: the entity-extraction-config table is isolated only by an application-level
   guard, not a tenant-scoped key, and no S3 bucket-policy or IAM condition yet enforces the
-  tenant prefix as a hard boundary (tracked internally as `SEC-2`)
+  tenant prefix as a hard boundary
 - No second tenant has been onboarded yet, so this isolation model has not been exercised with
   real multi-tenant traffic
-- Do not represent tenant isolation as complete or IAM-enforced until `SEC-2` is closed
+- Do not represent tenant isolation as complete or IAM-enforced yet — see
+  [KNOWN_GAPS_AND_ROADMAP.md](KNOWN_GAPS_AND_ROADMAP.md) for the full, current list of isolation
+  gaps
 
 ---
 
-## 12. Technology Stack and Tools
+## 12. Technology Stack — Summary
 
-The platform is built exclusively on proven, production-grade technologies. Every component is version-pinned, security-scanned, and infrastructure-as-code managed.
+The platform is built exclusively on proven, production-grade AWS services — Lambda and Step
+Functions for compute and orchestration, S3 for all three data layers, DynamoDB for
+configuration/watermark/audit state, Glue and Athena for cataloguing and querying, and
+Secrets Manager/KMS/IAM for credentials, encryption, and access control. Every component is
+version-pinned, security-scanned (SAST, dependency CVE scanning, IaC scanning), and managed
+entirely as Terraform infrastructure-as-code, with an 8-stage CI gate on every change.
 
-### Cloud Platform
-
-| Layer | Technology | Notes |
-|---|---|---|
-| Cloud provider | **AWS (Amazon Web Services)** | All services; `us-east-1` default (configurable per environment) |
-| Infrastructure as Code | **Terraform** ≥ 1.8, < 2.0 | AWS Provider ~> 5.0; all infrastructure version-controlled |
-
-### Compute and Orchestration
-
-| Component | Technology | Notes |
-|---|---|---|
-| Pipeline orchestration | **AWS Step Functions** | Standard Workflow (staging/prod); Express Workflow (dev) |
-| Event scheduling | **Amazon EventBridge Scheduler** | Cron per entity; managed at runtime without deployment |
-| Extraction runtime (small/medium) | **AWS Lambda** (Python 3.14) | Up to 15-minute timeout; streaming memory model |
-| Extraction runtime (large volume) | **AWS ECS Fargate** | For datasets > 5 M records/day; no timeout limit |
-
-### Storage
-
-| Layer | Technology | Notes |
-|---|---|---|
-| Raw data | **Amazon S3** + S3 Object Lock (GOVERNANCE) | Immutable; 7-year retention; SSE-KMS encrypted |
-| Curated data | **Amazon S3** | Parquet (Snappy); append-only per `run_id` partition |
-| Analytics data | **Amazon S3** + S3 Intelligent-Tiering | Auto-moves to infrequent access after 90 days |
-| Schema snapshots | **Amazon S3** | Immutable JSON per run; SHA-256 fingerprinted |
-| Field mapping / entity resolution config | **Amazon S3** | Versioned JSON; latest-pointer pattern |
-| Watermark state | **Amazon DynamoDB** | Point-in-time recovery; optimistic concurrency |
-| Entity configuration | **Amazon DynamoDB** | `{env}-edl-entity-extraction-config`; KMS encrypted |
-| Run audit log | **Amazon DynamoDB** | TTL-enabled; GSI on source/entity/time |
-| Serving store | **Amazon RDS MySQL 8** | Private VPC; read-only for analytics consumers |
-
-### Data Format
-
-| Format | Used for |
-|---|---|
-| **Apache Parquet** (Snappy compression) | All data layer files (raw, curated, analytics) — typically 5–10× smaller than JSON |
-| **JSON** | Config files, schema snapshots, drift reports, quality reports, lineage records |
-
-### Source System Connectors
-
-| Source | API / Protocol | Notes |
-|---|---|---|
-| **Salesforce CRM** | Bulk API 2.0 (async, high-volume); Describe API for metadata | Handles millions of records without API timeouts |
-| **NetSuite ERP** | SuiteQL REST API; metadata endpoint | OAuth 1.0a; parameterised SuiteQL queries |
-| **MySQL RDS** | SQL via `pymysql`; `INFORMATION_SCHEMA` introspection | Read-only credentials; parameterised queries only |
-
-### Data Catalog and Query Engine
-
-| Component | Technology | Notes |
-|---|---|---|
-| Metadata catalog | **AWS Glue Data Catalog** | Registered after every curated write |
-| Ad-hoc SQL queries | **Amazon Athena** | Serverless; $5/TB scanned; partitioned datasets minimise scan cost |
-| BI tool connectivity | Athena ODBC/JDBC or RDS direct | Supports Tableau, Power BI, Looker, Metabase |
-
-### Security and Secrets
-
-| Concern | Technology | Notes |
-|---|---|---|
-| Credential storage | **AWS Secrets Manager** | One secret per source per environment; daily expiry-check alerting (auto-rotation planned, not yet implemented) |
-| Encryption at rest | **AWS KMS** (customer-managed CMK, SSE-KMS) | Applied to all S3 buckets, DynamoDB tables, and SQS queues |
-| Encryption in transit | **TLS 1.2+** | Mandatory; enforced via S3 bucket policy (`aws:SecureTransport`) |
-| Network isolation | **Amazon VPC** (private subnets) | No internet gateway; all AWS traffic via VPC Endpoints |
-| PII tokenisation | **HMAC-SHA256** (keyed) | Deterministic pseudonym preserving join-key usability |
-| Field fingerprinting | **SHA-256** | Schema snapshot identity and drift detection |
-| Access control | **AWS IAM** (least-privilege roles) | No wildcard `Action:*` or `Resource:*` anywhere |
-
-### Monitoring and Observability
-
-| Component | Technology | Notes |
-|---|---|---|
-| Structured logging | **structlog** ≥ 24.4 | JSON output; PII-scrubbing processor; forwarded to CloudWatch Logs |
-| Custom metrics | **Amazon CloudWatch** | Namespace: `EnterpriseDatalake`; 6 canonical metrics |
-| Alarms | **Amazon CloudWatch Alarms** | 4 platform alarms: extraction failures, breaking drift, watermark lag, activity absent |
-| Distributed tracing | **AWS X-Ray** | All Lambda and service-to-service calls instrumented |
-| Alerting | **Amazon SNS** | SNS topic → email / PagerDuty for on-call |
-| Dead-Letter Queue | **Amazon SQS** (KMS-encrypted) | 14-day retention; replay via `RunReplayController` |
-
-### Python Stack and Code Quality
-
-| Tool / Library | Version | Purpose |
-|---|---|---|
-| **Python** | 3.14.x (pyenv) | Runtime language for all Lambda/ECS task code |
-| **Pydantic** | ≥ 2.7 | Data model validation; frozen models; strict `extra='forbid'` |
-| **boto3** | Latest | AWS SDK — all AWS service calls |
-| **pyarrow** | Latest | Apache Parquet read/write |
-| **pymysql** | Latest | MySQL RDS connector |
-| **structlog** | ≥ 24.4 | Structured JSON logging with PII scrubbing |
-| **Ruff** | ≥ 0.5 | Linter (rules: E, W, F, I, N, S, B, C90, UP, ANN, T20, RUF) |
-| **mypy** | ≥ 1.10 | Static type checker (strict mode) |
-| **bandit** | ≥ 1.7 | Python SAST scanner (OWASP Top 10) |
-| **pip-audit** | ≥ 2.7 | Dependency CVE scanning |
-| **checkov** | Latest | Terraform IaC security scanner |
-| **pytest** | Latest | Tests; ≥ 80% coverage gate enforced in CI |
-| **moto** | ≥ 5.0 | AWS service mocking for unit tests |
-
-### CI/CD
-
-| Tool | Notes |
-|---|---|
-| **GitHub Actions** | 8-stage CI gate: lint → typecheck → test → SAST → CVE scan → IaC scan → Terraform validate → secret-scan |
-| SHA-pinned action references | All `uses:` entries pinned to commit SHA digest (no mutable `@v4` tags) |
-| **pre-commit hooks** | Ruff, detect-private-key, no-commit-to-branch, bandit, Terraform fmt/validate/checkov, detect-secrets |
+For the full "AWS service → role in platform" reference table, plus the Python library, CI/CD,
+and observability stack, see
+[GLOSSARY_AND_TERMINOLOGY.md](GLOSSARY_AND_TERMINOLOGY.md#technology-and-tools-glossary).
 
 ---
 
@@ -650,11 +552,24 @@ Parquet compression typically achieves 5–10× reduction vs raw JSON. Example: 
 | Raw JSON | ~20 GB / day | ~$0.46 / day |
 | Parquet (Snappy) | ~2.5 GB / day | ~$0.06 / day |
 
-The analytics layer moves to **S3 Intelligent-Tiering** after 30 days (auto moves to infrequent access after 90 days of no access).
+Storage costs step down further over time via S3 lifecycle rules (raw data moves to
+Infrequent Access at 90 days and Glacier at 365 days; curated data moves to Infrequent Access at
+180 days) — this is plain S3 lifecycle policy, not S3 Intelligent-Tiering, which is not
+configured anywhere in this platform today.
 
 ### Athena Query Cost
 
 Athena charges $5 per TB scanned. Year/month/day partitioning on the analytics layer means a typical dashboard query scans only the relevant partition — typically 1–10 GB rather than the full dataset.
+
+### Full Cost Model and ROI
+
+The figures above illustrate the platform's cost *shape* (compression ratio, partition-scoped
+query cost). For the complete, itemised AWS monthly cost estimate, staffing cost comparison, and
+ROI projection — all reconciled against the actual Terraform-defined resources — see
+[COST_ANALYSIS_AND_ROI.md](COST_ANALYSIS_AND_ROI.md). Headline projection: roughly
+**$770–$790/month** in AWS infrastructure once all five sources are connected and a pilot tenant
+is running, against an estimated **$8,000/month** manual-labor baseline — a financial model, not
+yet a measured result.
 
 ---
 
@@ -758,7 +673,8 @@ small number of manually-verified runs against two connected sources in Dev.
 | Verify control-plane API end-to-end | The Cognito-authenticated REST API (tenant provisioning, entity registration, pipeline trigger) is deployed in Dev, but a live login/JWT round-trip against the deployed API Gateway + Cognito pool has not yet been exercised |
 | Pilot tenant onboarding | Onboard one real second tenant and run it in parallel with the default tenant for roughly a week with no cross-tenant incidents — not yet started |
 | Load test at target scale | Synthetic load test across the target entity count and tenant count — not yet started |
-| Close remaining tenant-isolation gaps | `entity-extraction-config` tenant-key scoping and the S3 bucket-policy tenant-prefix condition (`SEC-2`) should land before pilot tenant traffic is trusted |
+| Close remaining tenant-isolation gaps | `entity-extraction-config` tenant-key scoping and the S3 bucket-policy tenant-prefix condition should land before pilot tenant traffic is trusted — see [KNOWN_GAPS_AND_ROADMAP.md](KNOWN_GAPS_AND_ROADMAP.md) for the full list |
+| Design and build a serving-store network path | The serving store itself is code-complete but not deployed, and even once deployed there is no VPN/PrivateLink/bastion for an external BI tool to reach it — needs a design decision (e.g. AWS Client VPN with per-tenant certificates) before it is usable by Power BI/Tableau |
 | Staging deployment | Requires its own AWS account/credentials; `terraform validate` is already clean for `staging`, so this is provisioning work, not code work |
 | Production deployment | Gated on staging sign-off per this repo's promotion policy; no AWS account exists for production yet |
 

@@ -17,10 +17,11 @@ stays focused on repo-wide conventions.
 - `docs/DEVELOPER_GUIDE.md` — module map, Terraform workflow, known gotchas
 - `docs/PLATFORM_STATUS.md` — canonical resource names (S3 buckets, DynamoDB tables, Lambda
   functions, Glue tables) per environment — check here before guessing a name
-- Read in this order, each superseding the previous **for sequencing only, not design detail**:
-  `architecture/IMPROVEMENT_PLAN.md` → `architecture/GAP_ANALYSIS_FINDINGS.md` →
-  `architecture/MULTI_TENANT_ROLLOUT_PLAN.md`. The findings doc's "Implementation status" table
-  is the current source of truth for what's done vs. partial vs. deferred.
+- `docs/PIPELINE_FLOW.md` — canonical pipeline architecture and the tenant-isolation model
+  (which layers are genuinely key/prefix-isolated vs. application-level-guard-only vs. not
+  isolated at all) — the single source other docs link to instead of re-deriving it
+- `docs/KNOWN_GAPS_AND_ROADMAP.md` — the current source of truth for what's missing, broken, or
+  deferred, plain language, re-verified against the code, no ID scheme
 - `.github/pull_request_template.md` — the actual quality bar (CI gates, security checklist,
   naming standard) — follow it when preparing a PR description
 - `.github/CODEOWNERS` — path-based review ownership
@@ -48,16 +49,14 @@ you touched, e.g. `.venv/bin/mypy connector_runtime/foo.py connector_runtime/tes
 Per-package invocation (`mypy -p some_package`) also surfaces pre-existing, out-of-scope
 `no-untyped-def`/`no-untyped-call` warnings in test fixtures across the whole suite (untyped
 `monkeypatch`/fixture params) — treat those as known debt, not something to fix incidentally.
-As of 2026-07-08, `.github/workflows/ci.yml`'s `typecheck` job was itself fixed to stop running
-bare `mypy .` (which crashed on the same duplicate-module collision) and now runs the exact scoped
-form: `mypy -p connector_runtime -p transformation -p entity_resolution -p analytics_publisher
--p orchestration -p observability -p watermark_management -p schema_management -p contracts
--p governance`. Once unblocked, that command surfaces **71 pre-existing type errors across 15
-files** as of 2026-07-09 (re-confirm the count before quoting it elsewhere — it drifts as
-incidental fixes land in touched files) — tracked as follow-up remediation debt
-(`architecture/GAP_ANALYSIS_FINDINGS.md`, `OBS-6`), not something to fix incidentally per the
-untyped-test-fixture warning above. The CI type-check job will report red on this debt until
-it's separately remediated.
+`.github/workflows/ci.yml`'s `typecheck` job runs the exact scoped form: `mypy -p connector_runtime
+-p transformation -p entity_resolution -p analytics_publisher -p orchestration -p observability
+-p watermark_management -p schema_management -p contracts -p governance`. That command currently
+surfaces a number of pre-existing type errors (re-run it to get the current count — it drifts as
+incidental fixes land in touched files) — tracked as follow-up remediation debt in
+`docs/KNOWN_GAPS_AND_ROADMAP.md`, not something to fix incidentally per the untyped-test-fixture
+warning above. The CI type-check job will report red on this debt until it's separately
+remediated.
 
 For Terraform: `cd infrastructure/environments/<env> && terraform init -backend=false &&
 terraform validate`. All three environments (`dev`, `staging`, `prod`) validate cleanly as of
@@ -82,17 +81,13 @@ just assert it.
 - **`tenant_code` is always prefixed**, including the default tenant (`"demo"`) — no
   special-casing. Established in every repository class (`ConfigurationRepositoryClient`,
   `WatermarkRepository`, `SchemaSnapshotRepository`, `EntityTypeRegistryClient`).
-- **Not everything `tenant_code` touches is IAM-enforced yet**: S3 prefixes, the
-  `entity-type-registry` table, and (as of the `ARCH-1` fix, 2026-07-08) `watermark-repository`
-  are genuinely isolated at the key/prefix level (`tenant_scoped_key()` on the DynamoDB partition
-  key, or an S3 prefix an IAM bucket-policy condition could enforce). `entity-extraction-config`
-  is still only isolated by an application-level guard (`_enforce_tenant_match`) — see `ARCH-12`
-  in the findings doc, deliberately deferred (manifests as a 409-on-onboarding-conflict, not a
-  data leak, since the guard fails closed on read). Neither of these is IAM-enforced yet
-  regardless (`SEC-2`, tracked follow-up). Run `tests/test_tenant_isolation.py` before touching
-  any repository class — it's the single regression test covering every isolation mechanism, and
-  the one place a Secrets-Manager isolation gap is deliberately tracked via a skipped placeholder
-  rather than a fake pass.
+- **Not everything `tenant_code` touches is isolated the same way** — see
+  `docs/PIPELINE_FLOW.md`'s canonical isolation-model table for the current, layer-by-layer truth
+  (S3, each DynamoDB table, Secrets Manager, the control plane, Glue/Athena, the serving store).
+  Nothing is IAM-enforced yet anywhere (tracked in `docs/KNOWN_GAPS_AND_ROADMAP.md`). Run
+  `tests/test_tenant_isolation.py` before touching any repository class — it's the single
+  regression test covering every isolation mechanism, and the one place a Secrets-Manager
+  isolation gap is deliberately tracked via a skipped placeholder rather than a fake pass.
 - **`extra="forbid"`** is used specifically on config/params/API-boundary Pydantic models
   (`EntityExtractionConfig`, the `*_params.py` connector models, `connector_runtime/api/models.py`)
   — not universal; don't assume every model has it.
@@ -103,8 +98,8 @@ just assert it.
   → `structlog.contextvars.bind_contextvars(run_id=..., tenant_code=..., ...)` → delegate to a
   private `_run_<thing>(...)` function → `try/except` logs a structured error event and re-raises
   → `finally: clear_contextvars()`. Skipping the `finally` leaks stale context into the next
-  invocation on a warm container — this was a real bug (`OBS-1`). Never trust bucket/table names
-  from the event payload; read them via `require_env(...)` from `observability.lambda_utils`.
+  invocation on a warm container — this was a real, previously-fixed bug. Never trust bucket/table
+  names from the event payload; read them via `require_env(...)` from `observability.lambda_utils`.
 - Every domain module owns its own `<module>/tests/`, registered in `pyproject.toml`'s
   `testpaths` (and `[tool.coverage.run].source`, and `known-first-party` for isort) — if you add
   a new module with tests, register it in all three or it silently never runs in CI. This exact

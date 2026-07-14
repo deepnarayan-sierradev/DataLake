@@ -2,7 +2,7 @@
 
 **For:** On-call engineers, operations team, support  
 **Purpose:** Quick response guide for common incidents  
-**Last updated:** 2026-07-09
+**Last updated:** 2026-07-14
 
 > **Lambda functions:** `EdlExtractionPipeline` · `EdlTransformationPipeline` · `EdlEntityResolutionPipeline` · `EdlAnalyticsLayerPublisher`  
 > **Key buckets (prod):** `edl-raw-<PROD_ACCOUNT_ID>` · `edl-curated-<PROD_ACCOUNT_ID>` · `edl-analytics-<PROD_ACCOUNT_ID>` · `edl-schema-snapshots-<PROD_ACCOUNT_ID>`  
@@ -10,22 +10,11 @@
 
 > ### Current environment reality — read before paging anyone
 >
-> **There is no production environment today.** Per [PLATFORM_STATUS.md](PLATFORM_STATUS.md):
-> `dev` is the only deployed environment (all 8 Lambdas, Step Functions, the control-plane API,
-> DynamoDB, S3, SQS/EventBridge are provisioned). Salesforce and MySQL RDS credentials are
-> populated and the pipeline has run end-to-end with real data confirmed in Athena. Sage
-> Intacct, Sage X3, and NetSuite credentials are still unpopulated, and the control-plane API's
-> live JWT-claims behavior has not yet been independently confirmed. `staging` and `prod` are
-> **not provisioned** — no
-> AWS account or credentials exist for either yet, and `terraform validate` passing for those
-> environments is not the same as anything being deployed there. Confirm current status against
-> `docs/PLATFORM_STATUS.md` before treating any step below as something you can run against a
-> live `prod` today.
->
-> Every `<PROD_ACCOUNT_ID>` placeholder, `edl-*-<PROD_ACCOUNT_ID>` bucket name, and
-> `"environment":"prod"` payload below describes the target shape once `prod` exists. Until then,
-> treat this runbook as the procedure template — substitute `dev`'s real bucket/table names and
-> account ID from `docs/PLATFORM_STATUS.md` when actually running a command.
+> No production environment exists yet — only `dev` is deployed (Salesforce and MySQL RDS have
+> run end-to-end with real data). See [PLATFORM_STATUS.md](PLATFORM_STATUS.md) for current,
+> authoritative environment status before treating any step below as something you can run
+> against a live `prod` today; until `prod` exists, substitute `dev`'s real bucket/table names and
+> account ID when actually running a command.
 >
 > `terraform apply`/`destroy` against `infrastructure/environments/prod` and `git push --force`
 > are hard-blocked at the tool level in Claude Code sessions (`.claude/settings.json`), regardless
@@ -361,10 +350,11 @@ aws lambda invoke \
 
 ```bash
 # Get latest extraction run for the entity.
-# NOTE: as of the ARCH-1 fix, EdlWatermarkRepository's "source_id" key
-# attribute stores tenant_scoped_key(tenant_code, source_id), i.e.
-# "{tenant_code}#{source_id}" (contracts/identifier_policy.py) — NOT the bare
-# source_id. For the default tenant that's "demo#salesforce", not
+# NOTE: EdlWatermarkRepository's "source_id" key attribute stores
+# tenant_scoped_key(tenant_code, source_id), i.e. "{tenant_code}#{source_id}"
+# (contracts/identifier_policy.py) — NOT the bare source_id. This is
+# genuinely key-level tenant isolation (see docs/PIPELINE_FLOW.md's canonical
+# isolation table). For the default tenant that's "demo#salesforce", not
 # "salesforce". Querying with the bare source_id returns zero items, which
 # looks identical to "no watermark yet" — confirm the tenant_code from the
 # alert/run_id before assuming this is a fresh entity.
@@ -658,40 +648,51 @@ aws sns subscribe \
 
 **Alert name:** Manual escalation (no dedicated alarm yet — see "Detection gap" below)
 **Severity:** Critical
-**Typical root cause:** A regression in an application-level tenant guard (see "How tenant isolation
-actually works" below), a misconfigured control-plane request, or a manual/ad-hoc AWS CLI operation
-that bypassed the platform's own code paths.
+**Typical root cause:** A regression in an application-level tenant guard, a misconfigured
+control-plane request, a wildcard Lake Formation grant reaching another tenant's data, or a
+manual/ad-hoc AWS CLI operation that bypassed the platform's own code paths.
 
-### How tenant isolation actually works today
+### Which layer leaked — check the canonical table first
 
-Before triaging, know which layer is actually enforcing isolation for the resource involved —
-they are not uniform:
+Tenant isolation is not uniform across layers — some are genuinely key/prefix-enforced, some are
+application-level guards only, and some (Secrets Manager, Glue/Athena) aren't isolated at all
+today. **Don't re-derive this from memory** — check
+[`docs/PIPELINE_FLOW.md`'s "Multi-tenancy — the canonical isolation model"](PIPELINE_FLOW.md#multi-tenancy--the-canonical-isolation-model)
+for the current, authoritative layer-by-layer table before triaging. Every open gap behind these
+mechanisms (no IAM enforcement anywhere, shared Secrets Manager credentials, the raw-layer S3 gap,
+the `entity-extraction-config` key-level gap, etc.) is tracked in detail in
+[`docs/KNOWN_GAPS_AND_ROADMAP.md`](KNOWN_GAPS_AND_ROADMAP.md).
 
-| Layer | Mechanism | Enforcement point |
-|---|---|---|
-| S3 (raw, curated, schema snapshots, analytics, entity-config-if-S3-backend) | Key is always prefixed `{tenant_code}/...` | Genuinely enforceable via an S3 bucket-policy condition on the key prefix (not yet turned on in IAM — tracked as `SEC-2` follow-up) |
-| DynamoDB: `watermark-repository` | Table is keyed on `(source_id, entity_id)`, but the `source_id` key attribute value is `tenant_scoped_key(tenant_code, source_id)` (`"{tenant_code}#{source_id}"`) as of the `ARCH-1` fix (2026-07-08) | Genuinely key-level isolation — a different tenant's `get_item`/`put_item` targets a different key entirely, not a post-read comparison. Not yet IAM-enforced (`SEC-2`), but a real code regression here means the *key* changed, not just a missing check |
-| DynamoDB: `entity-extraction-config` | Table is keyed on `(source_id, entity_id)` — **not** tenant-partitioned | Application-level guard only: `ConfigurationRepositoryClient._enforce_tenant_match` (`ARCH-12`, tracked deferred follow-up) |
-| DynamoDB: `entity-type-registry` | Table is keyed on `(tenant_code, sk)` — genuinely tenant-partitioned | DynamoDB key structure itself |
-| Control-plane API (`connector_runtime/api/control_plane_handler.py`) | Every tenant-scoped route cross-checks the path's `{tenant_code}` against the authenticated Cognito claim | `_authorize_path_tenant` — fails closed (401) if claims are absent, 403 if mismatched, and a run lookup for another tenant's `run_id` returns 404 (never 403), so the API never confirms a foreign run's existence |
-| Secrets Manager | **Not tenant-scoped today** — credentials are provisioned per source-connector, not per tenant | None — this is a known gap, not yet applicable until multiple tenants share one source-connector type with different credentials |
+Two of those gaps come up often enough in practice to flag explicitly:
 
-An automated regression test for every mechanism above except Secrets Manager lives in
-`tests/test_tenant_isolation.py` — this is the single place to check whether isolation itself has a
-known, tested gap before assuming a live incident is novel.
+- **Glue/Athena is a wildcard grant, not per-tenant isolation.** Three IAM principals configured
+  in dev's `terraform.tfvars` (`analytics_reader_principals`) hold a Lake Formation
+  `SELECT`+`DESCRIBE` grant with `wildcard = true` across the whole shared `edl_curated`/
+  `edl_analytics` database — meaning each of those principals can already query every tenant's
+  tables, not just one. A "cross-tenant Athena query" report may not be a regression at all — check
+  whether it's this grant working exactly as configured before assuming a code bug.
+- **The serving store's isolation is solid but currently unreachable from outside the VPC** (no
+  VPN/PrivateLink/bastion exists yet). That's a network-reachability gap, not a data leak — if the
+  report is actually "a tenant can't connect their BI tool" rather than "a tenant saw another
+  tenant's data," see Scenario 9 below instead of triaging it here.
+
+An automated regression test for every key/prefix-level and application-guard mechanism (all except
+Secrets Manager and Glue/Athena) lives in `tests/test_tenant_isolation.py` — this is the single
+place to check whether isolation itself has a known, tested gap before assuming a live incident is
+novel.
 
 ### Step 1: Establish Blast Radius (5 min)
 
 1. **Identify the tenant_code(s) involved.** Every structured log line, DynamoDB item, and S3 key
    under the mechanisms above carries `tenant_code`. Pull the specific `run_id` or record from the
    alert/report and read its `tenant_code` field directly — do not infer it from context.
-2. **Determine which layer leaked.** Cross-reference against the table above. A leak in
-   `entity-extraction-config` is an application-code regression in `_enforce_tenant_match`, not an
-   IAM failure — IAM was never enforcing it. A leak in S3, `watermark-repository`, or the
-   `entity-type-registry` table means the key/prefix isolation mechanism itself failed (a code
-   regression that changed how the key is built, not a missing check on top of an already-shared
-   key) — treat this as more severe than a config-table leak, since there's no secondary guard
-   behind it.
+2. **Determine which layer leaked.** Cross-reference against the canonical table in
+   `docs/PIPELINE_FLOW.md`. A leak in `entity-extraction-config` is an application-code regression
+   in `_enforce_tenant_match`, not an IAM failure — IAM was never enforcing it. A leak in S3,
+   `watermark-repository`, or the `entity-type-registry` table means the key/prefix isolation
+   mechanism itself failed (a code regression that changed how the key is built, not a missing
+   check on top of an already-shared key) — treat this as more severe than a config-table leak,
+   since there's no secondary guard behind it.
 3. **Scope the affected record set:**
 
 ```bash
@@ -743,9 +744,9 @@ verification.
 - [ ] Re-run the full isolation test suite plus `terraform plan` for the affected IAM module before
       the next deploy
 - [ ] If the leak was in `entity-extraction-config` (the one table still on an application-level
-      guard, not key-level isolation), escalate the underlying `ARCH-12`/`SEC-2` partitioning work —
-      an application bug is the second line of defense, not the first, and there currently is no
-      first line for that table
+      guard, not key-level isolation), escalate the underlying tenant-key partitioning work tracked
+      in `docs/KNOWN_GAPS_AND_ROADMAP.md` — an application bug is the second line of defense, not
+      the first, and there currently is no first line for that table
 
 ### Detection gap
 
@@ -756,9 +757,54 @@ Adding a real-time detection mechanism (e.g., a metric filter on the `curated_pr
 structured log events, which already fire when `find_latest_curated_prefix`'s path-traversal guard
 rejects an unsafe prefix, or on `ConfigurationRepositoryClient`'s `_enforce_tenant_match` rejection
 path for `entity-extraction-config`) is tracked as follow-up observability work, not yet
-implemented. Note `watermark-repository` no longer has an equivalent mismatch log event to filter
-on — as of the `ARCH-1` fix, a cross-tenant watermark read simply misses the key entirely (a normal
-"no prior watermark" `get_item` miss), which is indistinguishable in logs from a genuine first run.
+implemented. Note `watermark-repository` has no equivalent mismatch log event to filter on — since
+its key is already tenant-scoped, a cross-tenant watermark read simply misses the key entirely (a
+normal "no prior watermark" `get_item` miss), which is indistinguishable in logs from a genuine
+first run.
+
+---
+
+## SCENARIO 9: Tenant Reports Their BI Tool Cannot Connect to the Serving Store
+
+**Alert name:** Support ticket / manual report (no dedicated alarm)  
+**Severity:** Medium  
+**Typical root cause:** A known, currently-unresolved network-reachability gap — not a credential
+or tenant-isolation bug. Read Step 0 before spending time elsewhere.
+
+### Step 0: Rule out the known gap first (2 min)
+
+The serving store's per-tenant database/schema and credential isolation is implemented correctly,
+but the RDS instance (`infrastructure/modules/serving_store_database/main.tf`) is
+`publicly_accessible = false`, sits in private subnets, and its security group only allows inbound
+traffic from the loader Lambda's own security group. There is no VPN, PrivateLink, or bastion host
+anywhere in `infrastructure/modules/networking/` yet — so no external Power BI/Tableau connection
+can reach the database today, for any tenant, regardless of credentials. There is also no
+script/API yet to hand a tenant its reader credential once connectivity exists. Full detail and
+candidate fix options (Client VPN, PrivateLink, site-to-site) are in
+[`docs/KNOWN_GAPS_AND_ROADMAP.md`](KNOWN_GAPS_AND_ROADMAP.md).
+
+Confirm the serving store is even deployed in this environment before going further — see current
+status in [`docs/PLATFORM_STATUS.md`](PLATFORM_STATUS.md) (code-complete as of 2026-07-11, not yet
+applied anywhere as of this writing):
+
+```bash
+terraform -chdir=infrastructure/environments/<env> state list | grep serving_store
+```
+
+If the instance exists and the tenant is reporting a connection timeout (not an authentication
+failure), this is almost certainly the network-reachability gap above. Escalate to the platform
+lead for a VPN/PrivateLink design decision — don't spend the response-time budget debugging
+database credentials for a problem that's actually "there is no network path."
+
+### Step 1: Notification
+
+- [ ] If the root cause is the network-reachability gap: tell the tenant this is a known platform
+      limitation being tracked (`docs/KNOWN_GAPS_AND_ROADMAP.md`), not a bug specific to their
+      account, and route the timeline question to the platform lead rather than promising a fix
+      date
+- [ ] If it turns out to be a genuine credential/auth issue instead: document and resolve as a
+      normal support ticket, and note in the incident tracker that Step 0's known-gap check was
+      ruled out first
 
 ---
 
@@ -774,6 +820,7 @@ on — as of the `ARCH-1` fix, a cross-tenant watermark read simply misses the k
 | Network/VPC issue | AWS support + infrastructure team | Immediate |
 | Secrets rotation failed | Security team + AWS support | Immediate |
 | Suspected cross-tenant data incident | Security team + Chief Data Officer + affected tenants' account owners | Immediate |
+| Tenant BI tool cannot reach serving store | Platform engineering lead | Immediate triage (likely a known network-reachability gap, not an emergency once confirmed) |
 
 ---
 
@@ -792,7 +839,7 @@ After every production incident:
 
 ---
 
-**Last updated:** 2026-07-09  
+**Last updated:** 2026-07-14  
 **Owner:** Platform Engineering Lead  
 **Review cycle:** Monthly (or after major incident) — and again the moment `staging`/`prod` are
 actually provisioned, since large parts of this runbook are currently written against a
@@ -824,8 +871,9 @@ Quick reference for tools and AWS services used during incident investigation an
 ```bash
 # Check current watermark for a source/entity.
 # The "source_id" key attribute is tenant-scoped ("{tenant_code}#{source_id}",
-# e.g. "demo#salesforce" for the default tenant) as of the ARCH-1 fix — not
-# the bare source_id. See the note in Scenario 4 above.
+# e.g. "demo#salesforce" for the default tenant) — not the bare source_id.
+# See the note in Scenario 4 above and docs/PIPELINE_FLOW.md's canonical
+# isolation table.
 aws dynamodb get-item \
   --table-name EdlWatermarkRepository \
   --key '{"source_id":{"S":"demo#salesforce"},"entity_id":{"S":"salesforce-account"}}'

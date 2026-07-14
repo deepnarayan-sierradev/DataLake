@@ -19,8 +19,9 @@ prompt. This file is the reference if you're doing it by hand or reviewing someo
 - **Query building**: `connector_runtime/query_builders/incremental_query_builder.py::build_incremental_select()`
   is the shared SQL-text builder for Salesforce SOQL / NetSuite SuiteQL / MySQL. **Do not force a
   non-SQL source through this** — Sage's Intacct/X3 engines build JSON/OData request bodies and
-  are intentionally left separate; each carries a "DUP-4 scope note" docstring explaining why. If
-  your new source is JSON/OData/GraphQL, follow Sage's pattern instead, don't bend the SQL builder.
+  are intentionally left separate; each carries a docstring explaining why forcing them through
+  the shared SQL builder would be a leaky abstraction. If your new source is JSON/OData/GraphQL,
+  follow Sage's pattern instead, don't bend the SQL builder.
 - **Error taxonomy**: mark connector-specific exceptions as `TransientConnectorError` or
   `DeterministicConnectorError` (both in `connector_interface.py`) so `classify_extraction_error()`
   can collapse `isinstance` branches into one check. Leave genuinely ambiguous exceptions unmarked
