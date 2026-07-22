@@ -544,7 +544,7 @@ Eight Lambda functions are deployed, all from the same zip (different handler en
 | `EdlDlqProcessor` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` |
 | `EdlCredentialExpiryNotifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` |
 
-> **The serving-store stage is code-complete but not yet deployed anywhere.** The `serving_store/` module and its Terraform (`infrastructure/modules/serving_store_database`, `infrastructure/modules/serving_store_lambda`) exist and `serving_store_loader_lambda_arn` wires automatically from `module.serving_store_lambda.lambda_function_arn` in all three environments' `main.tf`, same pattern as transformation/entity-resolution/analytics-publisher — but none of it has been `terraform apply`'d anywhere. There is no `EdlServingStoreLoader` function running today, and the Step Functions state machine substitutes a `Pass` state for that stage. Do not add this Lambda to deploy/verify checklists until it's actually applied.
+> **The serving-store stage is code-complete but not yet deployed anywhere.** The `serving_store/` module (five engine adapters — MySQL, PostgreSQL, SQL Server, Azure SQL, Redshift) and its Terraform (`infrastructure/modules/serving_store_database`, `infrastructure/modules/serving_store_redshift`, `infrastructure/modules/serving_store_lambda`) exist and `serving_store_loader_lambda_arn` wires automatically from `module.serving_store_lambda.lambda_function_arn` in all three environments' `main.tf`, same pattern as transformation/entity-resolution/analytics-publisher — but none of it has been `terraform apply`'d anywhere (the `serving_store_redshift` module is written and validate-clean but not instantiated in any environment). There is no `EdlServingStoreLoader` function running today, and the Step Functions state machine substitutes a `Pass` state for that stage. Do not add this Lambda to deploy/verify checklists until it's actually applied.
 
 See [Section 11.J — Control Plane API](#j-control-plane-api-cognito--api-gateway) below for `EdlControlPlane` detail.
 
@@ -1644,6 +1644,7 @@ Complete authoritative version reference for all tools used in deployment.
 | **EventBridge Scheduler (credential check)** | `EdlCredentialExpiryCheck` (rate: 1 day) | `infrastructure/modules/secrets/` |
 | **Cognito + API Gateway (control plane)** | User pool `EdlControlPlane`; HTTP API fronting `EdlControlPlane` Lambda | `infrastructure/modules/control_plane/` — see [Section 11.J](#j-control-plane-api-cognito--api-gateway) |
 | **RDS MySQL** (serving store; code-complete, not yet applied in any environment) | `EdlServingStore` | `infrastructure/modules/serving_store_database` (engine=mysql) + `infrastructure/modules/serving_store_lambda` |
+| **Redshift Serverless** (serving store, BI-scale engine; code-complete, module written but not instantiated in any environment) | `edl-serving-store-redshift-{env}` | `infrastructure/modules/serving_store_redshift` (namespace + workgroup + COPY IAM role) — instantiate only when a tenant needs the Redshift engine; the loader Lambda role then also needs `redshift-serverless:GetCredentials` on the workgroup |
 
 ### Data Format Specifications
 

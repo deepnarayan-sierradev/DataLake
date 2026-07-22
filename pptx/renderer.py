@@ -52,21 +52,23 @@ def _render_callout(s, callout, cal_y: float):
     if not callout:
         return
     if isinstance(callout, str):
-        _box(s, CX, cal_y, CW, Inches(0.46), fill=DEEP_BLUE)
+        _box(s, CX, cal_y, CW, Inches(0.54), fill=DEEP_BLUE)
         _t(s, callout,
-           CX + Inches(0.15), cal_y + Inches(0.08), CW - Inches(0.25), Inches(0.34),
+           CX + Inches(0.15), cal_y + Inches(0.06), CW - Inches(0.25), Inches(0.44),
            sz=Pt(13), bold=True, color=WHITE, align=PP_ALIGN.CENTER, font=FH)
     elif isinstance(callout, dict):
         parts  = callout.get("parts", [])
         bg     = resolve_color(callout.get("background", "light_bg"))
-        cal_h  = Inches(max(0.12 + len(parts) * 0.36, 0.5))
+        # 0.46" per part gives ~2 lines of headroom at this font size/width, so a part
+        # that wraps once still stays inside its own coloured/background band.
+        cal_h  = Inches(max(0.12 + len(parts) * 0.46, 0.5))
         _box(s, CX, cal_y, CW, cal_h, fill=bg)
         for pi, part in enumerate(parts):
-            py = cal_y + Inches(0.1) + pi * Inches(0.36)
+            py = cal_y + Inches(0.1) + pi * Inches(0.46)
             c  = resolve_color(part.get("color", "text"))
             b  = bool(part.get("bold", False))
             _t(s, str(part.get("text", "")),
-               CX + Inches(0.15), py, CW - Inches(0.25), Inches(0.32),
+               CX + Inches(0.15), py, CW - Inches(0.25), Inches(0.42),
                sz=Pt(13) if b else Pt(12), bold=b, color=c, font=FH if b else FB)
 
 
@@ -84,12 +86,12 @@ def render_title(prs, sd: dict):
         _t(s, desc, CX, Inches(2.58), Inches(9.8), Inches(0.9),
            sz=Pt(16), color=TEXT, font=FB)
     for i, badge in enumerate(sd.get("badges", [])):
-        bx = CX + i * Inches(3.0)
-        _box(s, bx, Inches(3.75), Inches(2.75), Inches(0.46),
+        bx = CX + i * Inches(3.15)
+        _box(s, bx, Inches(3.75), Inches(2.95), Inches(0.52),
              fill=resolve_color(badge.get("color", "deep_blue")))
-        _t(s, badge.get("label", ""), bx + Inches(0.1), Inches(3.79),
-           Inches(2.55), Inches(0.38),
-           sz=Pt(13), bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+        _t(s, badge.get("label", ""), bx + Inches(0.1), Inches(3.80),
+           Inches(2.75), Inches(0.44),
+           sz=Pt(12.5), bold=True, color=WHITE, align=PP_ALIGN.CENTER)
     _sd_footer(s, sd)
 
 
@@ -177,7 +179,7 @@ def render_cards(prs, sd: dict):
     elif has_below:
         card_bottom = Inches(5.08)
     elif has_fstrip:
-        card_bottom = Inches(7.0)
+        card_bottom = Inches(6.55)
     else:
         card_bottom = Inches(7.1)
     card_h = card_bottom - BY
@@ -221,30 +223,30 @@ def render_cards(prs, sd: dict):
            card_bottom - body_y - Inches(0.2),
            sz=Pt(12) if n <= 4 else Pt(11), color=body_c, font=FB)
 
-    # Stats strip
+    # Stats strip  (must end at/before ~7.02" so it never touches the footer at 7.10")
     if has_stats:
         strip_items = sd["stats_strip"].get("items", [])
         bg          = resolve_color(sd["stats_strip"].get("background", "deep_blue"))
-        _box(s, CX, Inches(6.5), CW, Inches(0.68), fill=bg)
+        _box(s, CX, Inches(6.44), CW, Inches(0.58), fill=bg)
         sw = CW / len(strip_items) if strip_items else CW
         for i, it in enumerate(strip_items):
             ix = CX + i * sw
             _t(s, str(it.get("value", "")),
-               ix + Inches(0.05), Inches(6.53), sw - Inches(0.08), Inches(0.35),
+               ix + Inches(0.05), Inches(6.47), sw - Inches(0.08), Inches(0.3),
                sz=Pt(16), bold=True,
                color=resolve_color(it.get("value_color", "white")),
                align=PP_ALIGN.CENTER, font=FH)
             _t(s, str(it.get("label", "")),
-               ix + Inches(0.05), Inches(6.87), sw - Inches(0.08), Inches(0.28),
+               ix + Inches(0.05), Inches(6.78), sw - Inches(0.08), Inches(0.22),
                sz=Pt(11),
                color=resolve_color(it.get("label_color", "#CCDDFF")),
                align=PP_ALIGN.CENTER, font=FB)
 
-    # Footer strip
+    # Footer strip  (same 7.02" ceiling as the stats strip above)
     if has_fstrip:
-        _box(s, CX, Inches(7.02), CW, Inches(0.38), fill=DEEP_BLUE)
+        _box(s, CX, Inches(6.62), CW, Inches(0.38), fill=DEEP_BLUE)
         _t(s, sd["footer_strip"],
-           CX + Inches(0.15), Inches(7.08), CW - Inches(0.25), Inches(0.28),
+           CX + Inches(0.15), Inches(6.68), CW - Inches(0.25), Inches(0.26),
            sz=Pt(12), bold=True, color=WHITE, align=PP_ALIGN.CENTER, font=FH)
 
     # Below-card bullets
@@ -317,7 +319,7 @@ def render_table(prs, sd: dict):
                 cal_h = Inches(0.54)
             elif isinstance(callout, dict):
                 np = len(callout.get("parts", []))
-                cal_h = Inches(max(0.12 + np * 0.36, 0.5))
+                cal_h = Inches(max(0.12 + np * 0.46, 0.5))
         pairs_y = cal_y + cal_h + Inches(0.1)
         for i, pair in enumerate(pairs):
             bx = CX + i * Inches(2.5)
@@ -457,7 +459,7 @@ def render_flow(prs, sd: dict):
        sz=Pt(12), color=TEXT, font=FB)
 
     if bullets := sd.get("bullets"):
-        _blt(s, bullets, CX, BY + Inches(4.15), AVAIL, Inches(1.2),
+        _blt(s, bullets, CX, BY + Inches(4.15), AVAIL, Inches(1.1),
              sz=Pt(12), color=TEXT)
 
     _sd_footer(s, sd)
@@ -508,10 +510,10 @@ def render_split(prs, sd: dict):
 
     if has_fstrip:
         fstrip_y = BY + blt_h + Inches(0.1)
-        _box(s, CX, fstrip_y, CW, Inches(0.46), fill=DEEP_BLUE)
+        _box(s, CX, fstrip_y, CW, Inches(0.52), fill=DEEP_BLUE)
         _t(s, sd["footer_strip"],
-           CX + Inches(0.15), fstrip_y + Inches(0.08), CW - Inches(0.25), Inches(0.34),
-           sz=Pt(14), bold=True, color=WHITE, align=PP_ALIGN.CENTER, font=FH)
+           CX + Inches(0.15), fstrip_y + Inches(0.06), CW - Inches(0.25), Inches(0.42),
+           sz=Pt(13), bold=True, color=WHITE, align=PP_ALIGN.CENTER, font=FH)
 
     _sd_footer(s, sd)
 

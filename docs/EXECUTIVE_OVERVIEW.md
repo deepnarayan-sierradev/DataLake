@@ -363,7 +363,8 @@ them today — `company` (Salesforce Account only so far) and `person` (Salesfor
 since only Salesforce and MySQL RDS are connected. The rest are configured and waiting on their
 source connector or on seeding.
 
-The **Serving Store** is code-complete (`serving_store/` module: four engine adapters, Lambda
+The **Serving Store** is code-complete (`serving_store/` module: five engine adapters — MySQL,
+PostgreSQL, SQL Server, Azure SQL, and Amazon Redshift — Lambda
 handler, Terraform) but not yet deployed to any environment — nothing has been `terraform
 apply`'d, so its Step Functions stage still runs as a no-op everywhere, including Dev. Even once
 deployed, there is no VPN, PrivateLink, or bastion host anywhere in the network layer today, so

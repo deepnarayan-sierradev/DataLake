@@ -379,9 +379,9 @@ is registered and queryable).
 ### Serving Store (Optional)
 **Purpose:** Operational database for APIs and apps requiring sub-second queries. Code-complete (`serving_store/` module), not yet deployed in any environment.
 
-- **Storage:** MySQL RDS, PostgreSQL, SQL Server, or Azure SQL (tenant-supplied BYO-DB), one engine per tenant/entity via config-driven onboarding
+- **Storage:** MySQL RDS, PostgreSQL, SQL Server, Azure SQL (tenant-supplied BYO-DB), or Amazon Redshift Serverless, one engine per tenant/entity via config-driven onboarding
 - **Data source:** Analytics layer (read-only)
-- **Load type:** Idempotent hash-diff incremental upsert (full backfill on first sync)
+- **Load type:** RDS engines — idempotent hash-diff row upsert (full backfill on first sync). Redshift — set-based `COPY` from analytics Parquet in S3 → staging → `MERGE`, with an IAM-auth writer (no writer password)
 - **Use cases:** Low-latency API responses, mobile app backends, real-time dashboards
 
 **Not used for:** Report generation (use Athena instead; cheaper, doesn't require database).
@@ -510,6 +510,7 @@ Quick-reference definitions for every tool and service used in the platform.
 | **DuckDB** | DuckDB | In-process SQL engine used for curated-layer merges inside the transformation Lambda |
 | **Athena** | Amazon Athena | Serverless SQL query engine over S3 Parquet files |
 | **RDS** | Amazon Relational Database Service (MySQL, PostgreSQL, SQL Server) | Serving store for operational apps and low-latency reads; Azure SQL is tenant-supplied BYO-DB |
+| **Redshift** | Amazon Redshift Serverless (columnar MPP data warehouse) | Serving-store engine for BI-scale analytics; loaded set-based via S3 `COPY`, writer authenticates via IAM |
 | **SQS** | Amazon Simple Queue Service | Dead-Letter Queue for failed pipeline runs; KMS-encrypted |
 | **CloudWatch** | Amazon CloudWatch | Logs, custom metrics, alarms, dashboards |
 | **X-Ray** | AWS X-Ray | Distributed tracing across all Lambda/service calls |

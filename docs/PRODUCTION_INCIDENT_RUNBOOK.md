@@ -773,12 +773,14 @@ or tenant-isolation bug. Read Step 0 before spending time elsewhere.
 
 ### Step 0: Rule out the known gap first (2 min)
 
-The serving store's per-tenant database/schema and credential isolation is implemented correctly,
-but the RDS instance (`infrastructure/modules/serving_store_database/main.tf`) is
-`publicly_accessible = false`, sits in private subnets, and its security group only allows inbound
+The serving store's per-tenant database/schema and credential isolation is implemented correctly
+(one database per tenant for MySQL; one schema per tenant for PostgreSQL/SQL Server/Azure SQL/Redshift),
+but the RDS instance (`infrastructure/modules/serving_store_database/main.tf`) — and, for the
+Redshift engine, the Redshift Serverless workgroup (`infrastructure/modules/serving_store_redshift/main.tf`) —
+is `publicly_accessible = false`, sits in private subnets, and its security group only allows inbound
 traffic from the loader Lambda's own security group. There is no VPN, PrivateLink, or bastion host
 anywhere in `infrastructure/modules/networking/` yet — so no external Power BI/Tableau connection
-can reach the database today, for any tenant, regardless of credentials. There is also no
+can reach the database today, for any tenant, on any engine, regardless of credentials. There is also no
 script/API yet to hand a tenant its reader credential once connectivity exists. Full detail and
 candidate fix options (Client VPN, PrivateLink, site-to-site) are in
 [`docs/KNOWN_GAPS_AND_ROADMAP.md`](KNOWN_GAPS_AND_ROADMAP.md).

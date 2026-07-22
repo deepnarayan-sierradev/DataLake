@@ -56,15 +56,18 @@ fix plus a companion GSI.
 ### 4. Serving store has no network path for BI tools to reach it
 
 The serving store's per-tenant credential isolation is implemented correctly — one MySQL database
-per tenant, one schema per tenant for PostgreSQL/SQL Server/Azure SQL, a dedicated read-only
-reader role scoped to only that tenant's container. But the RDS instance itself
+per tenant, one schema per tenant for PostgreSQL/SQL Server/Azure SQL/Redshift, a dedicated
+read-only reader role scoped to only that tenant's container. But the RDS instance itself
 (`infrastructure/modules/serving_store_database/main.tf`) is `publicly_accessible = false`, sits in
 private subnets only, and its security group's only inbound rule is from the loader Lambda's own
 security group. There is no VPN, PrivateLink, or bastion anywhere in
 `infrastructure/modules/networking/` — so as designed today, an external Power BI or Tableau
 connection cannot reach the database at all, independent of whether the serving store's Terraform
 has even been applied yet (see `docs/PLATFORM_STATUS.md`). There's also no script or API to hand a
-tenant its auto-created reader credential once it exists.
+tenant its auto-created reader credential once it exists. **The same gap applies to the new
+Redshift Serverless engine** (`infrastructure/modules/serving_store_redshift/main.tf`,
+`publicly_accessible = false`, enhanced VPC routing, ingress only from the loader Lambda's SG) —
+its credential/GRANT isolation is correct, but no BI-reachable network path exists for it either.
 
 **Needs a design decision** among: (a) **AWS Client VPN** with per-tenant client
 certificates, paired with each tenant running Power BI's On-premises Data Gateway or Tableau

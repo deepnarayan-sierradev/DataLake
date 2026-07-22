@@ -1,8 +1,16 @@
 # Enterprise Data Lake Platform — Presentation Content
 # Run: python ./pptx/generate_presentation.py
 # All colour values accept either a named colour (e.g. deep_blue) or a hex string (e.g. '#156082')
+#
+# Rewritten 2026-07-14 against docs/PLATFORM_STATUS.md, docs/PIPELINE_FLOW.md,
+# docs/KNOWN_GAPS_AND_ROADMAP.md, docs/EXECUTIVE_OVERVIEW.md, docs/FAQ_FOR_MANAGEMENT.md,
+# docs/COST_ANALYSIS_AND_ROI.md, and docs/GLOSSARY_AND_TERMINOLOGY.md — not the prior deck.
+# Two corrections vs. the previous version: (1) only 2 of 5 connectors are actually live today
+# (Salesforce + MySQL RDS — Sage Intacct, Sage X3, NetSuite are code-complete but have no
+# credentials yet), and (2) the Serving Store is a fully built, tested feature (5 database
+# engines) that was previously missing from this deck entirely, not a "someday" roadmap item.
 
-output: Enterprise_Data_Lake_Platform_v2.pptx
+output: Enterprise_Data_Lake_Platform_v3.pptx
 
 slides:
 
@@ -10,13 +18,13 @@ slides:
   - type: title
     title: "Enterprise Data Lake Platform"
     tagline: "Automated  ·  Metadata-Driven  ·  Multi-Tenant  ·  Cloud-Native  ·  Governed"
-    description: "A unified, multi-tenant platform connecting Salesforce CRM, MySQL RDS, Sage ERP, and NetSuite ERP\ninto a single trusted, analytics-ready data foundation — built on AWS."
+    description: "A unified, multi-tenant platform connecting Salesforce CRM, MySQL RDS, Sage Intacct, Sage X3, and NetSuite ERP\ninto a single trusted, analytics-ready data foundation, with a governed path to BI tools — built on AWS."
     badges:
       - label: "Dev  ✅  Live"
         color: green_ok
-      - label: "Staging  🔲  Next"
+      - label: "Staging  🔲  Not Live"
         color: amber
-      - label: "Production  🔲  Planned"
+      - label: "Production  🔲  Not Live"
         color: red
     footer: "Platform Engineering  ·  July 2026"
 
@@ -43,12 +51,12 @@ slides:
       - ["Sage Intacct/X3", "AR/AP invoices, vendors",       "Finance",          "Disconnected from CRM"]
       - ["NetSuite ERP",    "Customers, transactions",       "Finance, Ops",     "Siloed from CRM & Sage data"]
       - ["All systems",     "Credentials stored in scripts", "Engineering",      "Security risk, no rotation"]
-      - ["All systems",     "Same customer = 4 records",     "Analytics",        "No single source of truth"]
+      - ["All systems",     "Same customer = multiple records", "Analytics",     "No single source of truth"]
     callout: "Result: stale data  ·  no audit trail  ·  no single source of truth  ·  weeks to onboard any new data source"
     pairs:
       - before: "24–72 hr delay"
         after:  "1–4 hr automated"
-      - before: "4 disconnected views"
+      - before: "Disconnected views"
         after:  "1 golden record"
       - before: "No audit trail"
         after:  "Full lineage"
@@ -59,44 +67,47 @@ slides:
   # ── Slide 3 — Solution Overview (cards + stats strip) ────────────────────
   - type: cards
     title: "What We Built"
-    subtitle: "A fully automated, metadata-driven, multi-tenant data lake on AWS"
+    subtitle: "A fully automated, metadata-driven, multi-tenant data lake on AWS — now with a BI-ready serving store"
     cards:
       - title: "Multi-Source\nConnectors"
         color: deep_blue
-        body: "Salesforce  ·  MySQL RDS\nSage Intacct  ·  Sage X3  ·  NetSuite\nOAuth 2.0 / REST / JWT / TBA"
-      - title: "4-Stage\nPipeline"
+        body: "Salesforce  ·  MySQL RDS\nSage Intacct  ·  Sage X3  ·  NetSuite\n2 live today, 3 code-complete"
+      - title: "5-Stage\nPipeline"
         color: sky
-        body: "Extract  →  Transform\n→  Resolve  →  Publish\nAWS Step Functions"
+        body: "Extract  →  Transform\n→  Resolve  →  Publish  →  Serve\nAWS Step Functions, 16 documented stages"
       - title: "Entity\nResolution"
         color: purple
-        body: "One golden record per\ncustomer across all\nsource systems"
+        body: "One golden record per\ncustomer — company & person\nlive today, more types ready"
       - title: "Governed\nAnalytics"
         color: orange
         body: "SQL via Athena\nPII masking  ·  Lineage\nQuality report per run"
       - title: "Multi-Tenant\nSaaS Platform"
         color: green
-        body: "Every layer isolated\nby tenant_code  ·  self-service\nonboarding API"
+        body: "Every layer tenant-scoped\nSelf-service onboarding API\nIAM-level isolation still open"
+      - title: "Serving\nStore"
+        color: amber
+        body: "5 database engines\nMySQL · Postgres · SQL Server / Azure · Redshift\nCode-complete, $0 AWS cost today"
     stats_strip:
       background: deep_blue
       items:
-        - value: "5 sources"
-          label: connected
+        - value: "2 of 5"
+          label: sources live today
           value_color: white
           label_color: "#CCDDFF"
-        - value: "35,971+"
-          label: records live
+        - value: "36,023+"
+          label: MySQL records live
           value_color: white
           label_color: "#CCDDFF"
-        - value: "0 code"
-          label: to add a source
+        - value: "16 stages"
+          label: documented pipeline
           value_color: white
           label_color: "#CCDDFF"
-        - value: "< 4 hrs"
-          label: end-to-end
+        - value: "1,600"
+          label: automated tests passing
           value_color: white
           label_color: "#CCDDFF"
-        - value: "~$469/mo"
-          label: AWS cost
+        - value: "~$770–790/mo"
+          label: AWS cost (projected)
           value_color: white
           label_color: "#CCDDFF"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
@@ -104,29 +115,33 @@ slides:
   # ── Slide 4 — Architecture ────────────────────────────────────────────────
   - type: architecture
     title: "Architecture Overview"
-    subtitle: "Event-driven  ·  Serverless  ·  Tenant-isolated data layers"
+    subtitle: "Event-driven  ·  Serverless  ·  16 documented pipeline stages  ·  Tenant isolation maturing layer by layer"
     rows:
       - label: "SOURCE SYSTEMS"
-        description: "Salesforce CRM  ·  MySQL RDS  ·  Sage Intacct  ·  Sage X3  ·  NetSuite ERP"
+        description: "Salesforce · MySQL RDS · Sage Intacct · Sage X3 · NetSuite ERP  (2 of 5 live)"
         color: lite_blue
         border_color: deep_blue
       - label: "ORCHESTRATION"
-        description: "Amazon EventBridge Scheduler  →  AWS Step Functions state machine  ·  DynamoDB (config, watermark, audit log)"
+        description: "EventBridge Scheduler → Step Functions  ·  DynamoDB (config, watermark, audit, serving-store)"
         color: lite_purple
         border_color: purple
     layers:
       - label: "RAW LAYER  (S3)"
-        description: "Immutable, append-only\nParquet + S3 Object Lock\nTenant-scoped, Hive-partitioned\nSchema snapshots + drift reports"
+        description: "Immutable, append-only\nParquet + S3 Object Lock\nHive-partitioned by source/entity\nNot yet tenant-prefixed (open gap)"
         color: lite_green
         border_color: green
       - label: "CURATED LAYER  (S3)"
-        description: "Field-mapped (v1.json)\nQuality-evaluated\nPII masked (always-on) · SCD Type 1\nTenant-scoped canonical keys"
+        description: "Field-mapped (v1.json)\nQuality-evaluated\nPII masked (always-on) · SCD Type 1\nTenant-scoped write paths"
         color: lite_purple
         border_color: purple
       - label: "ANALYTICS LAYER  (S3 + Glue)"
-        description: "Golden records\nAthena-queryable tables\nTenant-scoped, partitioned by date\nLake Formation access control"
+        description: "Golden records\nAthena-queryable, tenant-prefixed tables\nShared Glue databases — isolated by\nnaming convention today, not by access control"
         color: lite_orange
         border_color: orange
+      - label: "SERVING STORE  (RDS)"
+        description: "Golden records mirrored to a\nrelational DB for BI tools\nMySQL · Postgres · SQL Server / Azure · Redshift\nCode-complete, not yet deployed"
+        color: "#FFF3D6"
+        border_color: amber
     lambdas:
       - label: "Lambda 1\nExtraction"
         color: deep_blue
@@ -136,34 +151,36 @@ slides:
         color: green
       - label: "Lambda 4\nAnalytics Publisher"
         color: orange
+      - label: "Lambda 5\nServing Store Load"
+        color: amber
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
-  # ── Slide 5 — Multi-Tenant Isolation (NEW) ────────────────────────────────
+  # ── Slide 5 — Multi-Tenant Isolation ──────────────────────────────────────
   - type: bullets
     title: "Multi-Tenant Isolation"
-    subtitle: "Every customer's data, kept apart — tenant_code threads through every layer, queue, and schedule"
+    subtitle: "Every customer's data, kept apart — honestly scored layer by layer, not just claimed"
     left:
-      heading: "What This Means for Customers"
+      heading: "What's Genuinely Isolated Today"
       heading_color: deep_blue
       items:
-        - "Each customer (tenant) gets its own data path in every layer — raw, curated, and golden records"
-        - "One tenant's pipeline failure, retry, or schedule can never touch another tenant's data or runs"
-        - "A missing or malformed tenant ID now fails the request — it never silently falls back to shared data"
-        - "Entity types, watermarks, and run history are tracked per tenant, not shared globally"
+        - "Watermark and entity-type-registry records are isolated at the DynamoDB key level, not just by convention"
+        - "A missing or malformed tenant ID fails the request outright — never a silent shared-tenant fallback"
+        - "Curated and analytics S3 write paths, and the control-plane API, are tenant-scoped in every code path"
         - "The default tenant (\"demo\") uses the exact same isolation path as any future customer — no special-casing"
+        - "Serving-store BI access is isolated at the database-engine level: one database (MySQL) or schema (Postgres/SQL Server/Azure SQL/Redshift) per tenant, with its own read-only credential"
     right:
-      heading: "Hardened in This Release"
+      heading: "Honest Status — Not Yet Production-Grade"
       heading_color: orange
       items:
-        - "Fixed: shared watermark keys, S3 write paths, and Glue catalog names that could let two tenants overwrite each other's data"
-        - "Fixed: schedule names, circuit-breaker keys, and queue/execution IDs that could cross-contaminate between tenants"
-        - "Fixed: PII masking now applies even to sources with no explicit field-mapping rules — no bypass by omission"
-        - "Added: an automated cross-tenant isolation test suite, run in CI on every change"
-        - "Open item: isolation is enforced by application logic today, not yet backed by IAM — the top remaining item before scaling to many tenants"
-    code_block: "Isolation now covers: S3 raw/curated/analytics prefixes · DynamoDB watermark & entity-type keys · schedules · circuit breakers · queues"
+        - "Raw-layer S3 objects and Secrets Manager credentials are not tenant-isolated at all yet"
+        - "Glue/Athena analytics tables sit in two shared databases — isolated by table-naming convention only, no per-tenant databases or access filters"
+        - "No IAM policy anywhere ties a principal to only its own tenant's data — the platform's single largest remaining security gap"
+        - "Tenant provisioning has no admin-level authorization check yet — any authenticated caller can create a tenant"
+        - "Full layer-by-layer isolation table and every open gap are tracked in the platform's roadmap doc — see the Known Gaps slide"
+    code_block: "Key-level isolated: watermark & entity-type registries. Convention-isolated: curated/analytics S3, Glue tables. Engine-isolated: serving-store DBs/schemas. Not isolated: raw S3, Secrets Manager."
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
-  # ── Slide 6 — Self-Service Control Plane (NEW) ────────────────────────────
+  # ── Slide 6 — Self-Service Control Plane ──────────────────────────────────
   - type: split
     title: "Self-Service Control Plane"
     subtitle: "From engineer-run scripts to a secured, self-service REST API"
@@ -175,7 +192,8 @@ slides:
         - "Now: a REST API provisions a tenant, registers entities, and triggers pipeline runs — no engineer required"
         - "Secured behind Amazon Cognito with JWT authentication; every call is authenticated and tenant-scoped"
         - "Runs on the same serverless stack (Lambda + API Gateway) as the rest of the pipeline"
-        - "Code-complete and test-covered; not yet exercised against a live deployment — the next step before onboarding a real second customer"
+        - "Code-complete and test-covered; a real login/token round-trip against the deployed Cognito pool has not yet been exercised end-to-end"
+        - "Open gap: no admin-only check on tenant creation yet — the next hardening step before opening this up broadly"
     right:
       title: "Example: Onboard a New Customer"
       title_color: deep_blue
@@ -199,34 +217,35 @@ slides:
   # ── Slide 7 — Data Sources (cards with footer strip) ─────────────────────
   - type: cards
     title: "Data Source Connectors"
-    subtitle: "Pluggable adapter pattern — add a new source without changing the pipeline"
+    subtitle: "Pluggable adapter pattern — 2 live today, 3 ready the moment credentials land"
     cards:
       - label: "Salesforce CRM"
         color: deep_blue
         active: true
         show_icon: true
-        body: "OAuth 2.0 client_credentials\nBulk API 2.0 (async CSV)\nEntities: Account, Contact\nWatermark: SystemModstamp"
+        body: "Live — 34 accounts flowing\nOAuth 2.0 client_credentials, Bulk API 2.0\nEntities: Account, Contact\nOpportunity & Contract mapped, not seeded"
       - label: "MySQL RDS"
         color: green
         active: true
         show_icon: true
-        body: "AWS Secrets Manager creds\nVPC + NAT Gateway\nEntity: Contracts (incremental)\nWatermark: ModifiedOn"
+        body: "Live — 36,023 contract rows\nAWS Secrets Manager creds, VPC + NAT\nEntity: Contracts (incremental)\nContractTerms mapped, not seeded"
       - label: "Sage Intacct"
         color: purple
-        active: true
+        active: false
         show_icon: true
-        body: "REST API, OAuth 2.0\nEntities: Customer, Vendor,\nAR Invoice, AP Bill\nWatermark: auditInfo.modifiedAt"
+        body: "Code-complete, awaiting credentials\nREST API, OAuth 2.0\nEntities: Customer, Vendor,\nAR Invoice, AP Bill"
       - label: "Sage X3"
         color: orange
-        active: true
+        active: false
         show_icon: true
-        body: "REST API, OAuth 2.0\nEntities: Customer, Supplier\nSame SageConnector adapter\nWatermark incremental"
+        body: "Code-complete, awaiting credentials\nREST API, OAuth 2.0\nSame SageConnector adapter\nEntities: Customer, Supplier"
       - label: "NetSuite ERP"
         color: amber
-        active: true
+        active: false
         show_icon: true
-        body: "OAuth 1.0a TBA (HMAC-SHA256)\nSuiteQL incremental extraction\nEntity: Customer (any record type)\nSafe pagination up to 100K rows/run"
-    footer_strip: "All connectors implement ExtractionConnector  ·  3 methods to register a new source"
+        body: "Code-complete, awaiting credentials\nOAuth 1.0a TBA (HMAC-SHA256)\nSuiteQL, entity: Customer\nPagination-safe up to 100K rows/run"
+    footer_strip: "All 5 connectors implement one ExtractionConnector interface — 3 methods to register a new source"
+    footer: "Enterprise Data Lake Platform  ·  July 2026"
 
   # ── Slide 8 — Extraction (two-column bullets + code block) ───────────────
   - type: bullets
@@ -254,7 +273,7 @@ slides:
         - "S3 Object Lock on raw layer — immutable audit trail"
         - "IAM least-privilege scoped to exact S3 prefixes"
         - "Run audit log entry written to DynamoDB per run"
-    code_block: "S3 path:  s3://edl-raw-087972550871/{tenant_code}/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id=.../data.parquet"
+    code_block: "S3 path:  s3://edl-raw-087972550871/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id=.../data.parquet  (not yet tenant-prefixed)"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
   # ── Slide 9 — Transformation (two-column bullets + code block) ───────────
@@ -308,13 +327,13 @@ slides:
     output:
       label: "🏆  GOLDEN RECORD  —  company entity"
       color: orange
-      description: "entity_id  ·  account_name  ·  annual_revenue (Salesforce preferred)  ·  credit_limit (Sage preferred)  ·  outstanding_balance  ·  is_active\nSurvivorship policy: configurable field-level source preference per entity type"
+      description: "entity_id  ·  account_name  ·  annual_revenue (Salesforce preferred)  ·  credit_limit (Sage preferred)  ·  outstanding_balance  ·  is_active\nSurvivorship strategies: source_priority · most_recent · longest · first_non_null (configurable per field)"
     bullets:
-      - "Blocking + fuzzy name matching — configurable per entity type"
-      - "Survivorship: preferred source per field (Salesforce → is_active; Sage → credit_limit)"
-      - "Streams curated records via DuckDB rather than loading them all into memory"
-      - "Entity types: company  ·  person  ·  contract  —  extensible via config"
-      - "Output → s3://edl-analytics-087972550871/{tenant_code}/canonical/{entity_type}/golden_date={date}/"
+      - "Blocking + fuzzy name matching, configurable per entity type"
+      - "Survivorship: preferred source per field — e.g. Salesforce → is_active, Sage → credit_limit"
+      - "Streams curated records via DuckDB — no in-memory full load"
+      - "9 entity types defined; only company & person are live today (Salesforce only)"
+      - "Output → s3://edl-analytics-.../{tenant_code}/canonical/{entity_type}/golden_date={date}/"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
   # ── Slide 11 — Analytics Publisher (split) ───────────────────────────────
@@ -329,7 +348,7 @@ slides:
         - "Writes partitioned Parquet: analytics_date=YYYY-MM-DD"
         - "Registers Glue Data Catalog table (edl_analytics)"
         - "Adds Hive partition for the run's analytics_date"
-        - "Grants Lake Formation permissions to analytics users"
+        - "Grants Lake Formation permissions to analytics users — today a wildcard across all tenants, hardening tracked as an open gap"
         - "Emits an end-to-end pipeline SLA metric — extraction start to analytics-ready"
     right:
       title: "Query in Amazon Athena"
@@ -338,26 +357,67 @@ slides:
       code: |
         -- All companies
         SELECT * FROM edl_analytics.company
-          WHERE analytics_date='2026-07-02';
+          WHERE analytics_date='2026-07-14';
 
         -- Active contracts only
         SELECT COUNT(*) FROM edl_analytics.contract
-          WHERE analytics_date='2026-07-02'
+          WHERE analytics_date='2026-07-14'
           AND is_deleted = false;
 
         -- Cross-entity join
         SELECT c.account_name, COUNT(k.contract_id)
         FROM edl_analytics.company c
         JOIN edl_analytics.contract k
-          ON c.account_id = k.tenant_id
+          ON c.account_id = k.account_id
         GROUP BY c.account_name;
-    footer_strip: "Live today (dev):  34 companies  ·  49 persons  ·  35,971 contracts  — queryable via Athena right now"
+    footer_strip: "Live today (dev): 34 Salesforce accounts  ·  36,023 MySQL contract rows — queryable via Athena now"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
-  # ── Slide 12 — Governance (cards with below bullets) ─────────────────────
+  # ── Slide 12 — Serving Store (NEW) ────────────────────────────────────────
+  - type: cards
+    title: "Pipeline Stage 5 — Serving Store"
+    subtitle: "Golden records, mirrored into a relational database — built for direct Power BI / Tableau connections"
+    cards:
+      - title: "MySQL RDS"
+        color: deep_blue
+        active: true
+        show_icon: true
+        body: "Reference engine\nDatabase-per-tenant isolation\nAWS-managed master credential"
+      - title: "PostgreSQL"
+        color: green
+        active: true
+        show_icon: true
+        body: "Schema-per-tenant isolation\npsycopg driver\nALTER DEFAULT PRIVILEGES covers future tables"
+      - title: "SQL Server / Azure SQL"
+        color: purple
+        active: true
+        show_icon: true
+        body: "Schema-per-tenant isolation\npymssql driver — no native ODBC layer needed\nMERGE-based upsert, 500-row batches"
+      - title: "Amazon Redshift"
+        color: orange
+        active: true
+        show_icon: true
+        body: "Schema-per-tenant isolation\nMPP warehouse — bulk S3 COPY → MERGE\nIAM-auth writer (no stored password)\nBuilt for BI at millions-of-rows scale"
+      - title: "Hash-Diff\nIncremental Sync"
+        color: amber
+        active: true
+        show_icon: true
+        body: "Every row gets a SHA-256 hash\nOnly changed rows are rewritten\nFirst sync per tenant = automatic full backfill"
+    below_bullets:
+      heading: "Status & Isolation Model — Read This Before Demoing It"
+      heading_color: charcoal
+      items:
+        - "Code-complete and fully tested — lint, types, tests, and terraform validate all pass cleanly"
+        - "Zero dollars spent today — no RDS instance, Lambda, or credential exists in AWS yet"
+        - "Isolation is engine-enforced: one database or schema per tenant — not an app-level filter, since BI tools connect directly"
+        - "Each tenant gets its own read-only reader credential, separate from the writer credential"
+        - "Open gap: no network path yet for BI tools to reach the database — needs a Client VPN, new infrastructure work"
+    footer: "Enterprise Data Lake Platform  ·  July 2026"
+
+  # ── Slide 13 — Governance (cards with below bullets) ─────────────────────
   - type: cards
     title: "Data Governance & Security"
-    subtitle: "Compliance built into the pipeline — not bolted on afterwards"
+    subtitle: "Compliance built into the pipeline — with real, tracked gaps on the path to full tenant isolation"
     cards:
       - title: "PII Masking"
         color: deep_blue
@@ -372,18 +432,18 @@ slides:
         color: orange
         body: "Configurable per classification tier\nRaw: S3 Object Lock (immutable)\nCurated/analytics: policy-enforced\nDev: 30-day; Prod: 365-day logs"
     below_bullets:
-      heading: "Security Controls"
+      heading: "Security Controls — and Their Honest Limits"
       heading_color: charcoal
       items:
-        - "All credentials via AWS Secrets Manager — never in code or logs"
-        - "IAM least-privilege: roles scoped to exact S3 prefixes and DynamoDB tables"
-        - "Only designated Lambda role can write to each S3 layer"
+        - "All credentials via AWS Secrets Manager — never in code or logs (shared per connector type, not per-tenant yet)"
+        - "IAM least-privilege scoped to exact S3/DynamoDB paths — no policy yet enforces tenant-only access (largest open gap)"
         - "Missing or malformed tenant IDs fail the request — never a silent shared-tenant default (OWASP A01)"
         - "All event inputs validated with regex (OWASP A03 injection prevention)"
         - "No record field values ever logged — counts/IDs only (OWASP A09)"
+        - "No external security or compliance audit (SOC 2, GDPR, HIPAA) has been performed against this platform yet"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
-  # ── Slide 13 — Observability (features) ──────────────────────────────────
+  # ── Slide 14 — Observability (features) ──────────────────────────────────
   - type: features
     title: "Observability & Reliability"
     subtitle: "Every run is measurable, traceable, and self-healing"
@@ -400,7 +460,7 @@ slides:
         - title: "Schema Drift Alerts"
           body: "Drift report to S3; CloudWatch alarm on breaking change"
         - title: "Credential Rotation Watchdog"
-          body: "Daily check across all 5 source secrets; alerts via SNS if overdue"
+          body: "Daily check across all connected source secrets; alerts via SNS if overdue"
     right:
       title: "Reliability"
       title_color: orange
@@ -417,7 +477,7 @@ slides:
           body: "Re-running same pipeline = identical output — safe to replay"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
-  # ── Slide 14 — Infrastructure (two-column bullets) ───────────────────────
+  # ── Slide 15 — Infrastructure (two-column bullets) ───────────────────────
   - type: bullets
     title: "Infrastructure & DevOps"
     subtitle: "Terraform-managed  ·  Environment-parity  ·  One Lambda zip for all functions"
@@ -426,9 +486,9 @@ slides:
       heading_color: deep_blue
       items:
         - "Terraform ≥ 1.8 — full infrastructure as code"
-        - "Modules: iam · storage · networking · lambda · orchestration · control plane"
+        - "Modules: iam · storage · networking · lambda · orchestration · control plane · serving-store database & lambda"
         - "Remote state: S3 + DynamoDB lock (single-writer safety)"
-        - "3 environments: dev / staging / prod — all now terraform validate cleanly"
+        - "Dev: applied & live  ·  Staging/Prod: terraform validates cleanly, not yet provisioned"
         - "New env: init → apply iam → apply lambdas → apply orchestration"
         - "One Lambda zip serves all 8 functions (different handlers)"
         - "Build: make lambda-package  →  Upload: make lambda-upload"
@@ -437,55 +497,80 @@ slides:
       heading_color: orange
       items:
         - "Python 3.14, hatchling build system, pyproject.toml"
-        - "Tests: pytest + moto (AWS mocks) — 1,522 passing, 96%+ coverage"
-        - "Lint: ruff  ·  Types: mypy (scoped)  ·  Security: bandit + detect-secrets"
-        - "Banned generic identifiers (helper/util/manager) blocked in CI"
-        - "Coverage gate: 80% — enforced in CI"
+        - "Tests: pytest + moto (AWS mocks) — 1,600 passing, 1 deliberate skip, 80% coverage gate enforced"
+        - "Lint: ruff — zero violations repo-wide  ·  Security: bandit + detect-secrets"
+        - "Types: mypy (scoped) — 72 known pre-existing errors tracked as separate debt, not blocking merges"
+        - "Banned generic identifiers (helper/util/manager/common) blocked in CI"
         - "Local dry-run scripts — test connectivity, no S3 write"
         - "CI: lint → banned-names → type-check → test → security scan"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
-  # ── Slide 15 — Live Data (metrics + table) ───────────────────────────────
+  # ── Slide 16 — Live Data (metrics + table) ───────────────────────────────
   - type: metrics
     title: "Live Data — Dev Environment"
     subtitle: "Real business data flowing end-to-end  ·  as of July 2026"
     metrics:
-      - value: "35,971+"
-        label: "Contracts\n(MySQL RDS)"
+      - value: "36,023"
+        label: "Contract rows\n(MySQL RDS)"
         color: green_ok
       - value: "34"
         label: "Companies\n(Salesforce)"
         color: deep_blue
-      - value: "49"
-        label: "Persons\n(Salesforce)"
+      - value: "Live"
+        label: "Persons\n(Salesforce, count TBD)"
         color: sky
-      - value: "4"
+      - value: "2 of 5"
         label: "Sources\nconnected"
         color: purple
       - value: "< 4 hrs"
         label: "End-to-end\nlatency"
         color: orange
-      - value: "0"
-        label: "Mapping\nfailures"
+      - value: "9 types"
+        label: "Entity types\ndefined (2 live)"
         color: green_lite
     table:
       headers: ["Entity", "Load type", "Records", "Athena table", "Status"]
       widths:  [2.65, 1.75, 1.5, 2.8, 0.68]
       row_height: 0.36
       rows:
-        - ["MySQL — Contracts",     "Incremental (SCD1)", "35,971", "edl_analytics.contract",         "✅"]
-        - ["Salesforce Account",    "Full load",          "34",     "edl_analytics.company",           "✅"]
-        - ["Salesforce Contact",    "Incremental",        "49",     "edl_analytics.person",            "✅"]
-        - ["Sage Intacct Customer", "Incremental",        "Live",   "edl_analytics.company (merged)",  "✅"]
-        - ["Sage Intacct Vendor",   "Incremental",        "Live",   "Curated layer",                       "✅"]
-        - ["NetSuite — Customer",   "Incremental (SCD1)", "Built",  "edl_analytics.company (ready)",   "🔲"]
+        - ["MySQL — Contracts",       "Incremental (SCD1)", "36,023",        "edl_analytics.contract",         "✅"]
+        - ["Salesforce Account",      "Full load",          "34",            "edl_analytics.company",          "✅"]
+        - ["Salesforce Contact",      "Incremental",        "Live",          "edl_analytics.person",           "✅"]
+        - ["Sage Intacct & Sage X3",  "Incremental",        "Not connected", "—",                              "🔲"]
+        - ["NetSuite — Customer",     "Incremental (SCD1)", "Not connected", "edl_analytics.company (ready)",  "🔲"]
+        - ["Serving Store (5 engines)","Hash-diff / S3 COPY","Not deployed",  "—",                              "🔲"]
     note: "Athena workgroup: EdlAnalytics  ·  Database: edl_analytics  ·  Account: 087972550871 / us-east-1"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
-  # ── Slide 16 — Business Outcomes & ROI (table) ───────────────────────────
+  # ── Slide 17 — Known Gaps (NEW) ───────────────────────────────────────────
+  - type: table
+    title: "Known Gaps — What's Not Done Yet"
+    subtitle: "Tracked openly and ordered by severity — none of these block current dev usage"
+    row_height: 0.55
+    columns:
+      - header: "Gap"
+        color: charcoal
+        width: 3.1
+      - header: "Why It Matters"
+        color: charcoal
+        width: 4.0
+      - header: "Plan"
+        color: charcoal
+        width: 3.0
+    rows:
+      - ["No IAM-level tenant boundary",       "Isolation is convention-based in places — the single largest security gap", "Design before a 2nd paying tenant"]
+      - ["Serving store has no BI network path","No VPN/PrivateLink exists — BI tools can't reach the database yet",         "Client VPN + per-tenant certs (recommended)"]
+      - ["Glue/Athena grants span all tenants", "Wildcard Lake Formation grant — 3 admin roles can query every tenant",     "Per-tenant databases or LF data-cell filters"]
+      - ["Secrets Manager shared per connector","One credential per source type, not per tenant",                           "Fine at 1 tenant; needed before 2nd"]
+      - ["No admin check on tenant creation",   "Any authenticated caller can create a tenant today",                       "Add admin-only authorization claim"]
+      - ["No external compliance audit",        "No SOC 2 / GDPR / HIPAA review performed yet",                            "Not started — needed before regulated data"]
+    callout: "20 gaps tracked in total (10 security, 10 performance) — full detail in the roadmap doc"
+    footer: "Enterprise Data Lake Platform  ·  July 2026"
+
+  # ── Slide 18 — Business Outcomes & ROI (table) ───────────────────────────
   - type: table
     title: "Business Outcomes & ROI"
-    subtitle: "Measurable improvements delivered — compared to before the platform"
+    subtitle: "Projected improvements vs. before the platform — validated against real dev pipeline behaviour, not yet a live paying tenant"
     row_height: 0.42
     columns:
       - header: "Metric"
@@ -499,40 +584,40 @@ slides:
         width: 3.75
     rows:
       - ["Time to data availability", "24–72 hours (manual)",              "1–4 hours (automated)"]
-      - ["Customer identity",         "3 disconnected views per system",   "Single golden record"]
+      - ["Customer identity",         "Multiple disconnected views",       "Single golden record"]
       - ["PII in analytics",          "Uncontrolled",                      "Masked at pipeline level, always-on"]
       - ["Audit trail",               "None",                              "Full lineage: source→golden"]
       - ["New source onboarding",     "2–4 weeks (code + deploy)",         "2–3 days (config only)"]
-      - ["New customer onboarding",   "Shared environment, no isolation",  "Self-service API, tenant-isolated"]
+      - ["New customer onboarding",   "Shared environment, no isolation",  "Self-service API, tenant path isolated"]
       - ["Credential security",       "Scripts + shared .env files",       "AWS Secrets Manager"]
     callout:
       background: "#F0F4F8"
       parts:
-        - text: "AWS Infrastructure: ~$469/month  ·  vs. Fivetran SaaS: $3,000–$5,000/month per source"
+        - text: "AWS infrastructure: ~$770–790/month (projected) vs. ~$36,000/year for a comparable 5-source SaaS platform"
           bold: false
           color: text
-        - text: "Payback: < 1 month  ·  Plus 40–60 hrs/month avoided labour cost"
+        - text: "Year 1 TCO: ~$42,260 (setup + ops + AWS) vs. ~$330,000/year for a 2-engineer in-house build"
           bold: false
           color: muted
-        - text: "10× cost saving vs. SaaS — with full ownership and control"
+        - text: "Projected ROI: ~103% Year 1, ~322% Year 2+ — not yet measured against a live paying tenant"
           bold: true
           color: orange
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
-  # ── Slide 17 — Tech Stack (cards, 6 narrow) ───────────────────────────────
+  # ── Slide 19 — Tech Stack (cards, 6 narrow) ───────────────────────────────
   - type: cards
     title: "Technology Stack"
     subtitle: "Purpose-built on proven AWS-native services and open standards"
     cards:
       - title: "Runtime"
         color: deep_blue
-        body: "Python 3.14 — AWS Lambda\nPyArrow — Parquet I/O\nDuckDB — streaming reads\nPydantic — config validation"
+        body: "Python 3.14 — AWS Lambda\nPyArrow — Parquet I/O · DuckDB — streaming reads\nPydantic — config validation\npsycopg · pymssql · redshift-connector — serving-store drivers"
       - title: "Orchestration"
         color: sky
         body: "AWS Step Functions\nAmazon EventBridge\nAWS Lambda (8 fn, 1 zip)"
       - title: "Storage"
         color: purple
-        body: "Amazon S3 (3 data layers)\nAmazon DynamoDB (4 tables)\nAWS Glue Data Catalog"
+        body: "Amazon S3 (3 data layers)\nAmazon DynamoDB (6 tables)\nAWS Glue Data Catalog\nServing store: MySQL/Postgres/SQL Server (RDS) · Redshift"
       - title: "Analytics"
         color: "#C05510"
         body: "Amazon Athena (SQL queries)\nAWS Lake Formation\nApache Parquet (columnar)"
@@ -544,66 +629,64 @@ slides:
         body: "Terraform ≥ 1.8 (IaC)\npytest + moto (testing)\nruff + mypy + bandit + detect-secrets\nGitHub Actions CI"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
-  # ── Slide 18 — Roadmap (swimlanes) ───────────────────────────────────────
+  # ── Slide 20 — Roadmap (swimlanes) ───────────────────────────────────────
   - type: swimlanes
     title: "What's Next — Roadmap"
-    subtitle: "Dev is live and hardened  ·  Staging and Production are the immediate priorities"
+    subtitle: "Dev is live and hardened for 2 sources  ·  BI-network design and staging are the immediate priorities"
     lanes:
       - title: "Now — Dev ✅"
         color: green_ok
         items:
-          - "All 4 Lambda stages live & tested"
-          - "4 sources live: Salesforce, MySQL, Sage"
-          - "NetSuite connector code-complete"
-          - "Multi-tenant isolation hardened & tested"
+          - "Salesforce + MySQL RDS live end-to-end"
+          - "Entity resolution: company & person golden records live"
           - "Self-service control plane code-complete"
-          - "35,971+ records in analytics layer"
-          - "Entity resolution: golden records live"
-      - title: "Next — Staging"
+          - "Serving store code-complete across 5 database engines (incl. Amazon Redshift)"
+          - "1,600 tests passing, 80% coverage gate, ruff clean"
+          - "Multi-tenant isolation hardened at the data-key level"
+      - title: "Next — Near-Term"
         color: amber
         items:
-          - "Terraform now validates cleanly — apply it"
-          - "Provision staging DynamoDB tables"
-          - "Upload Lambda zip to staging bucket"
-          - "Deploy control plane, verify JWT claims path"
-          - "Seed entity configs to staging"
-          - "End-to-end smoke test + sign-off"
-      - title: "Soon — Production"
+          - "Design & build a BI network path for the serving store (Client VPN)"
+          - "Activate Sage Intacct, Sage X3, and NetSuite credentials"
+          - "Scope per-tenant Glue/Athena access controls"
+          - "Exercise the control-plane API against a real Cognito login"
+          - "Provision staging environment (terraform apply)"
+      - title: "Soon — Staging & Prod"
         color: deep_blue
         items:
-          - "Prod infrastructure provisioning"
-          - "Pilot tenant onboarding (1 week, live traffic)"
-          - "Load test at target scale"
-          - "365-day log retention (in HCL already)"
+          - "Staging: provision infra, seed configs, smoke test"
+          - "Production: infra provisioning"
+          - "Pilot tenant onboarding + load test at target scale"
+          - "365-day log retention (already in HCL)"
           - "Credential rotation policy enabled"
-          - "Go-live readiness checklist"
-      - title: "Backlog"
+          - "Go-live readiness checklist sign-off"
+      - title: "Backlog — Hardening"
         color: orange
         items:
-          - "IAM-enforced tenant isolation (beyond app-level)"
-          - "Tenant-scope field-mapping & survivorship configs"
-          - "NetSuite — activate credentials & go live"
-          - "Automatic resume from a checkpointed timeout"
-          - "Sage X3 entity resolution"
-          - "Serving store loader (write-back)"
+          - "IAM-enforced tenant isolation (the single biggest security gap)"
+          - "Per-tenant Secrets Manager credentials"
+          - "Admin-only authorization for tenant provisioning"
+          - "External security/compliance audit (SOC 2, GDPR, HIPAA)"
+          - "Fix known config errors (NetSuite record_type, supplier match-rule keys)"
+          - "Serving-store reader-credential distribution/rotation mechanism"
     footer: "Enterprise Data Lake Platform  ·  July 2026"
 
-  # ── Slide 19 — Closing (checklist) ───────────────────────────────────────
+  # ── Slide 21 — Closing (checklist) ───────────────────────────────────────
   - type: checklist
     title: "A Platform Built\nfor the Long Term"
     items:
       - text: "Automated, end-to-end pipeline — running in the dev environment today"
         color: deep_blue
-      - text: "Five source connectors — four live, NetSuite code-complete and pagination-safe"
+      - text: "Five source connectors on one adapter pattern — two live, three ready the moment credentials land"
         color: orange
       - text: "Entity resolution delivering one golden record per customer, streamed at scale"
         color: green_ok
-      - text: "Multi-tenant isolation built in — every layer separated by tenant, regression-tested"
+      - text: "Multi-tenant isolation hardened at the data-key level — IAM-level enforcement is the next milestone"
         color: sky
       - text: "Self-service control plane ready to onboard the next customer via API, not scripts"
         color: deep_blue
-      - text: "Queryable in standard SQL via Amazon Athena — no exports, no waiting"
+      - text: "Serving store built and tested across five database engines (incl. Amazon Redshift) — a network design away from going live"
         color: orange
-      - text: "10× lower cost than SaaS alternatives — with full ownership and control"
+      - text: "Every open gap tracked and documented — queryable today in standard SQL via Amazon Athena"
         color: green_ok
     footer: "Enterprise Data Lake Platform  ·  Platform Engineering  ·  July 2026"

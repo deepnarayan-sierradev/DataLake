@@ -32,6 +32,7 @@ class ServingStoreEngine(StrEnum):
     POSTGRESQL = "postgresql"
     SQLSERVER = "sqlserver"
     AZURE_SQL = "azure_sql"  # always BYO-DB — cannot be provisioned on AWS
+    REDSHIFT = "redshift"  # columnar MPP warehouse; writer uses IAM auth, loads via S3 COPY
 
 
 class ServingStoreLoadConfig(BaseModel):
@@ -58,8 +59,8 @@ class ServingStoreLoadConfig(BaseModel):
         default=None,
         description=(
             "Fixed top-level database to connect to before creating/using the tenant "
-            "schema (PostgreSQL/SQL Server/Azure SQL only — ignored for MySQL, where "
-            "tenant_code is itself the database). None uses the engine adapter's default."
+            "schema (PostgreSQL/SQL Server/Azure SQL/Redshift only — ignored for MySQL, "
+            "where tenant_code is itself the database). None uses the engine adapter's default."
         ),
     )
     enabled: bool = Field(default=True, description="Whether this entity loads on each run.")

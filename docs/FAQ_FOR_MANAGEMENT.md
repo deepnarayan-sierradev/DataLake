@@ -128,7 +128,7 @@ crashes.
 |---|---|---|
 | Nightly / periodic reports | Depends on schedule cadence (design supports hourly-or-slower refresh) | Analytics layer |
 | BI dashboards | Same as above | Athena on analytics layer (no separate query engine to license) |
-| App operational data | Sub-second, in principle | A "serving store" load-back to MySQL/PostgreSQL/SQL Server/Azure SQL is code-complete (adapters, Lambda handler, Terraform module) but **not yet deployed in any environment** |
+| App operational data | Sub-second, in principle | A "serving store" load-back to MySQL/PostgreSQL/SQL Server/Azure SQL/Amazon Redshift is code-complete (adapters, Lambda handler, Terraform module) but **not yet deployed in any environment** |
 | Real-time operational events | Not supported | This platform isn't designed for sub-second event streaming (would need Kafka/Kinesis-style tooling) |
 
 No latency figures above have been measured against a real reporting workload yet — dev has only
@@ -415,7 +415,7 @@ Full control-by-control mapping and audit-evidence locations: `docs/EXECUTIVE_OV
 
 **A:** One option exists today, one is code-complete but not yet deployed:
 1. **Amazon Athena** — connect Tableau / Power BI / Looker via ODBC or JDBC driver; queries run directly against S3 Parquet; no separate database server. This is the only connection path that actually works today.
-2. **"Serving store"** (MySQL RDS, PostgreSQL, SQL Server, or tenant-supplied Azure SQL) — intended for dashboards needing sub-second response times, with a per-tenant read-only reader credential handed to the BI tool. The loader code, Lambda handler, and Terraform module are all code-complete, but **none of it has been deployed in any environment**. Treat this as a near-term option, not something to demo today.
+2. **"Serving store"** (MySQL RDS, PostgreSQL, SQL Server, tenant-supplied Azure SQL, or Amazon Redshift for BI-scale analytics) — intended for dashboards needing sub-second response times, with a per-tenant read-only reader credential handed to the BI tool. The loader code, Lambda handler, and Terraform module are all code-complete, but **none of it has been deployed in any environment**. Treat this as a near-term option, not something to demo today.
 
 ---
 
