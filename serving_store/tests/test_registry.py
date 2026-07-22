@@ -55,11 +55,21 @@ class TestServingStoreLoaderRegistry:
     def test_real_engines_are_registered_via_module_import(self):
         import serving_store.loaders.mysql_rds_loader
         import serving_store.loaders.postgresql_loader
+        import serving_store.loaders.redshift_loader
         import serving_store.loaders.sqlserver_loader  # noqa: F401
         from serving_store.registry import serving_store_registry
 
-        for engine_id in ("mysql_rds", "postgresql", "sqlserver", "azure_sql"):
+        for engine_id in ("mysql_rds", "postgresql", "sqlserver", "azure_sql", "redshift"):
             loader = serving_store_registry.resolve(
                 engine_id, secret_arn="arn:x", region_name="us-east-1"
             )
             assert isinstance(loader, ServingStoreLoaderInterface)
+
+    def test_redshift_advertises_s3_bulk_load(self):
+        import serving_store.loaders.redshift_loader  # noqa: F401
+        from serving_store.registry import serving_store_registry
+
+        loader = serving_store_registry.resolve(
+            "redshift", secret_arn="arn:x", region_name="us-east-1"
+        )
+        assert loader.supports_s3_bulk_load is True

@@ -177,6 +177,8 @@ class TestRunServingStoreLoad:
         captured: dict[str, Any] = {}
 
         class _FakeLoader:
+            supports_s3_bulk_load = False
+
             def __init__(self, **kwargs: Any) -> None:
                 captured["init_kwargs"] = kwargs
 
@@ -217,3 +219,64 @@ class TestRunServingStoreLoad:
         assert captured["primary_keys"] == ("account_id",)
         assert len(captured["batches"]) == 1
         assert len(captured["batches"][0]) == 2
+
+    def test_s3_bulk_engine_uses_load_from_s3_not_batches(self, monkeypatch) -> None:
+        monkeypatch.setenv("AWS_REGION", _REGION)
+        monkeypatch.setenv("ANALYTICS_S3_BUCKET", _BUCKET)
+        boto3.resource("dynamodb", region_name=_REGION).Table(_CONFIG_TABLE).put_item(
+            Item={
+                "tenant_code": "acme-corp",
+                "entity_type": "company",
+                "target_engine": "redshift",
+                "table_name": "salesforce_account",
+                "primary_keys": ["account_id"],
+                "secret_arn": _SECRET_ARN,
+                "region_name": _REGION,
+                "enabled": True,
+            }
+        )
+
+        captured: dict[str, Any] = {}
+
+        class _FakeS3Loader:
+            supports_s3_bulk_load = True
+
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def load_from_s3(self, bucket, prefix, table_name, primary_keys, tenant_code, **kwargs):
+                captured["bucket"] = bucket
+                captured["prefix"] = prefix
+                captured["table_name"] = table_name
+                return ServingStoreLoadResult(
+                    database_name="acme_corp",
+                    table_name=table_name,
+                    records_loaded=7,
+                    records_skipped=1,
+                    started_at="2026-07-22T00:00:00+00:00",
+                    completed_at="2026-07-22T00:00:01+00:00",
+                )
+
+            def load_batches(self, *args, **kwargs):  # pragma: no cover - must not be called
+                raise AssertionError("load_batches must not be called for an S3-bulk engine")
+
+        monkeypatch.setattr(
+            handler_module.serving_store_registry,
+            "resolve",
+            lambda _engine, **kw: _FakeS3Loader(**kw),
+        )
+
+        result = handler_module._run_serving_store_load(
+            entity_id="salesforce-account",
+            entity_type="company",
+            environment="dev",
+            run_id="run-1",
+            tenant_code="acme-corp",
+            analytics_s3_prefix="acme-corp/analytics/company/",
+            context=None,
+        )
+
+        assert result["records_loaded"] == 7
+        assert result["records_skipped"] == 1
+        assert captured["bucket"] == _BUCKET
+        assert captured["table_name"] == "salesforce_account"

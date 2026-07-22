@@ -65,6 +65,7 @@ import structlog
 # connector_runtime/extraction_pipeline_handler.py's adapter-import convention.
 import serving_store.loaders.mysql_rds_loader
 import serving_store.loaders.postgresql_loader
+import serving_store.loaders.redshift_loader
 import serving_store.loaders.sqlserver_loader  # noqa: F401
 from contracts.identifier_policy import ENTITY_TYPE_PATTERN as _ENTITY_TYPE_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
@@ -199,26 +200,40 @@ def _run_serving_store_load(
         governance_s3_bucket=governance_s3_bucket,
     )
 
-    def _batches() -> Iterator[list[dict[str, Any]]]:
-        for batch in _iter_parquet_batches(s3, analytics_s3_bucket, analytics_s3_prefix):
-            try:
-                check_lambda_timeout_periodic(
-                    context, min_remaining_ms=30_000, operation_name="serving_store_load"
-                )
-            except RuntimeError as exc:
-                raise TransientServingError(str(exc)) from exc
-            yield batch
+    if loader.supports_s3_bulk_load:
+        # Columnar/MPP engines (Redshift) load set-based via COPY straight from S3 —
+        # row batches are never materialised in the Lambda.
+        result = loader.load_from_s3(
+            analytics_s3_bucket,
+            analytics_s3_prefix,
+            config.table_name,
+            config.primary_keys,
+            tenant_code,
+            run_id=run_id,
+            connection_database=config.connection_database,
+        )
+    else:
 
-    result = loader.load_batches(
-        _batches(),
-        config.table_name,
-        config.primary_keys,
-        tenant_code,
-        run_id=run_id,
-        analytics_s3_bucket=analytics_s3_bucket,
-        analytics_s3_prefix=analytics_s3_prefix,
-        connection_database=config.connection_database,
-    )
+        def _batches() -> Iterator[list[dict[str, Any]]]:
+            for batch in _iter_parquet_batches(s3, analytics_s3_bucket, analytics_s3_prefix):
+                try:
+                    check_lambda_timeout_periodic(
+                        context, min_remaining_ms=30_000, operation_name="serving_store_load"
+                    )
+                except RuntimeError as exc:
+                    raise TransientServingError(str(exc)) from exc
+                yield batch
+
+        result = loader.load_batches(
+            _batches(),
+            config.table_name,
+            config.primary_keys,
+            tenant_code,
+            run_id=run_id,
+            analytics_s3_bucket=analytics_s3_bucket,
+            analytics_s3_prefix=analytics_s3_prefix,
+            connection_database=config.connection_database,
+        )
     metrics_emitter.flush()
 
     return {

@@ -84,6 +84,8 @@ class ServingStoreLoaderInterface(abc.ABC):
     #: Default connection database for platform-provisioned Postgres/SQL Server instances
     #: (irrelevant for MySQL, where tenant_code is itself the connection database).
     default_connection_database: str = "edl_serving"
+    #: Whether this engine loads directly from S3 (COPY) instead of Python row batches.
+    supports_s3_bulk_load: bool = False
 
     def __init__(
         self,
@@ -162,15 +164,7 @@ class ServingStoreLoaderInterface(abc.ABC):
             ServingStoreError on connection, DDL, or DML failure.
             ValueError on invalid tenant_code, table_name, or primary_keys.
         """
-        validate_tenant_code(tenant_code)
-        container_name = tenant_code.replace("-", "_")
-        if not SAFE_CONTAINER_PATTERN.match(container_name):
-            raise ValueError(f"Invalid tenant container name: {container_name!r}")
-        if not SAFE_CONTAINER_PATTERN.match(table_name):
-            raise ValueError(f"Invalid table name: {table_name!r}")
-        for pk in primary_keys:
-            if not SAFE_COLUMN_PATTERN.match(pk):
-                raise ServingStoreError(f"Unsafe primary key name rejected: {pk!r}")
+        container_name = self._validate_and_resolve_container(table_name, primary_keys, tenant_code)
 
         started_at = datetime.now(UTC).isoformat()
         total_loaded, total_skipped = self._run_session(
@@ -181,6 +175,44 @@ class ServingStoreLoaderInterface(abc.ABC):
             container_name,
             connection_database or self.default_connection_database,
         )
+        return self._finalize_load(
+            container_name=container_name,
+            table_name=table_name,
+            total_loaded=total_loaded,
+            total_skipped=total_skipped,
+            started_at=started_at,
+            run_id=run_id,
+            analytics_s3_bucket=analytics_s3_bucket,
+            analytics_s3_prefix=analytics_s3_prefix,
+        )
+
+    def load_from_s3(
+        self,
+        analytics_s3_bucket: str,
+        analytics_s3_prefix: str,
+        table_name: str,
+        primary_keys: tuple[str, ...],
+        tenant_code: str,
+        run_id: str | None = None,
+        connection_database: str | None = None,
+    ) -> ServingStoreLoadResult:
+        """Bulk-load analytics Parquet straight from S3 (only if supports_s3_bulk_load)."""
+        raise ServingStoreError(
+            f"{type(self).__name__} does not support S3 bulk load; use load_batches()."
+        )
+
+    def _finalize_load(
+        self,
+        container_name: str,
+        table_name: str,
+        total_loaded: int,
+        total_skipped: int,
+        started_at: str,
+        run_id: str | None,
+        analytics_s3_bucket: str | None,
+        analytics_s3_prefix: str | None,
+    ) -> ServingStoreLoadResult:
+        """Shared post-load bookkeeping (log, metrics, lineage, result) for every load path."""
         completed_at = datetime.now(UTC).isoformat()
 
         _logger.info(
@@ -237,6 +269,21 @@ class ServingStoreLoaderInterface(abc.ABC):
             started_at=started_at,
             completed_at=completed_at,
         )
+
+    def _validate_and_resolve_container(
+        self, table_name: str, primary_keys: tuple[str, ...], tenant_code: str
+    ) -> str:
+        """Validate identifiers (OWASP A03) and derive the tenant container name."""
+        validate_tenant_code(tenant_code)
+        container_name = tenant_code.replace("-", "_")
+        if not SAFE_CONTAINER_PATTERN.match(container_name):
+            raise ValueError(f"Invalid tenant container name: {container_name!r}")
+        if not SAFE_CONTAINER_PATTERN.match(table_name):
+            raise ValueError(f"Invalid table name: {table_name!r}")
+        for pk in primary_keys:
+            if not SAFE_COLUMN_PATTERN.match(pk):
+                raise ServingStoreError(f"Unsafe primary key name rejected: {pk!r}")
+        return container_name
 
     def _run_session(
         self,

@@ -252,6 +252,7 @@ class TestServingStoreConfigRepositoryIsolation:
             ServingStoreEngine.POSTGRESQL,
             ServingStoreEngine.SQLSERVER,
             ServingStoreEngine.AZURE_SQL,
+            ServingStoreEngine.REDSHIFT,
         ],
     )
     def test_tenant_b_cannot_read_tenant_a_config(self, engine: ServingStoreEngine) -> None:

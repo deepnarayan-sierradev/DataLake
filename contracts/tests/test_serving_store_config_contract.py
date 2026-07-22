@@ -35,8 +35,13 @@ class TestServingStoreLoadConfigValidConstruction:
         assert config.connection_database is None
 
     @pytest.mark.parametrize(
-        "engine", [ServingStoreEngine.POSTGRESQL, ServingStoreEngine.SQLSERVER,
-                   ServingStoreEngine.AZURE_SQL]
+        "engine",
+        [
+            ServingStoreEngine.POSTGRESQL,
+            ServingStoreEngine.SQLSERVER,
+            ServingStoreEngine.AZURE_SQL,
+            ServingStoreEngine.REDSHIFT,
+        ],
     )
     def test_non_mysql_engines_accept_connection_database(self, engine) -> None:
         config = ServingStoreLoadConfig(

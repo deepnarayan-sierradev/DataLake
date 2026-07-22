@@ -100,9 +100,9 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
                ▼
 ┌─────────────────────────────────┐
 │  SERVING STORE (MySQL/Postgres/ │
-│  SQL Server/Azure SQL) — coded, │
-│  not yet deployed. Operational  │
-│  APIs, Applications             │
+│  SQL Server/Azure SQL/Redshift) │
+│  — coded, not yet deployed.     │
+│  Operational APIs / BI          │
 └─────────────────────────────────┘
 ```
 
@@ -115,7 +115,7 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 | **Raw** | Exact copy of source data, no transformation | `edl-raw-{account_id}` S3 | Parquet (large_utf8 columns) | Immutable — Object Lock GOVERNANCE |
 | **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked. For incremental entities with `primary_key_field` set, each partition holds the **full current state** (SCD Type 1 merge — not just the day's delta) | `edl-curated-{account_id}` S3 | Parquet (Snappy) | Full-load entities: append-only per run_id. Incremental entities with merge: full snapshot per run_id (overwrites previous state within the partition) |
 | **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Two distinct prefixes, both tenant-prefixed (`{tenant_code}/...`): `canonical/{entity_type}/` — golden/mastered records straight from entity resolution, one Parquet file per run under a `run_id=` partition; `analytics/{entity_type}/` — the same golden records with internal entity-resolution-only fields stripped, republished by the Analytics Layer Publish stage as the BI-facing dataset | `edl-analytics-{account_id}` S3 | Parquet (Snappy) | `canonical/`: append-only, one file per `run_id`. `analytics/`: **not** append-only — partitioned only by `analytics_date=`, no `run_id`, so a second run on the same UTC day overwrites the first run's file for that day |
-| **Serving Store** | Optional operational store for low-latency API and application reads. Code-complete (`serving_store/` module, four engine adapters), not yet deployed in any environment | MySQL RDS, PostgreSQL, SQL Server, or Azure SQL (database/schema-per-tenant; private VPC for platform-provisioned engines, BYO-DB for Azure SQL) | SQL rows | Idempotent hash-diff upsert per engine (`_row_hash`/`_synced_at` columns) — first sync per tenant/entity is a full backfill |
+| **Serving Store** | Optional operational store for low-latency API and application reads (and BI-scale analytics via Redshift). Code-complete (`serving_store/` module, five engine adapters), not yet deployed in any environment | MySQL RDS, PostgreSQL, SQL Server, Azure SQL, or Amazon Redshift Serverless (database/schema-per-tenant; private VPC for platform-provisioned engines, BYO-DB for Azure SQL) | SQL rows | RDS engines: idempotent hash-diff row upsert (`_row_hash`/`_synced_at`). Redshift: set-based `COPY` from analytics Parquet in S3 → staging → `MERGE` (idiomatic for a columnar MPP warehouse at millions-of-rows scale). First sync per tenant/entity is a full backfill either way |
 
 ### Multi-tenancy — the canonical isolation model
 
@@ -140,7 +140,7 @@ re-deriving its own version.
 | Secrets Manager | One shared credential per connector type (`edl/sources/{source_id}/credentials`) | **Not isolated at all** — same secret across every tenant using that connector |
 | Control-plane API | `_authorize_path_tenant` cross-checks the path's `tenant_code` against the JWT claim | App-level only, fails closed (401/403) |
 | Glue / Athena | Two shared databases (`edl_curated`, `edl_analytics`); table names prefixed `{tenant_code}_{entity_type}` | **Not isolated at all** — naming convention only, no per-tenant database/LF-Tags/data-cell filters |
-| Serving store | Database-per-tenant (MySQL) / schema-per-tenant (Postgres, SQL Server, Azure SQL), enforced by the database engine's own GRANT model | **Genuinely isolated** at the credential level — see Stage 16 below for the separate network-reachability gap |
+| Serving store | Database-per-tenant (MySQL) / schema-per-tenant (Postgres, SQL Server, Azure SQL, Redshift), enforced by the database engine's own GRANT model | **Genuinely isolated** at the credential level — see Stage 16 below for the separate network-reachability gap |
 
 Where the state machine threads tenant identity through: `infrastructure/modules/orchestration/main.tf`
 passes `"tenant_code.$" = "$.tenant_code"` explicitly into the Transformation, Entity Resolution,
@@ -559,15 +559,16 @@ s3://{analytics-layer}/{tenant_code}/canonical/{entity_type}/match-decisions/{ru
 
 **Status:** code-complete (ruff/mypy/tests/`terraform validate` clean in all three environments), **not yet deployed anywhere** — no `terraform apply` has been run for it, so no RDS instance, Lambda, or IAM role exists in any AWS account today. The Step Functions `LoadServingStore` state stays on its `Pass` branch until it is.  
 **Component:** `serving_store/serving_store_loader_handler.py`, dispatching to `serving_store/loaders/` via `ServingStoreLoaderRegistry` (`serving_store/registry.py`) — same adapter+registry pattern as `connector_runtime`'s source connectors. Each loader implements `serving_store/interfaces/loader_interface.py::ServingStoreLoaderInterface`.  
-**Engines:** `mysql_rds_loader.py`, `postgresql_loader.py`, `sqlserver_loader.py` (also serves `azure_sql` — same T-SQL dialect). Onboarding (which tenant/entity_type pairs load, into which engine) is config-driven via `serving_store/serving_store_config_repository.py::ServingStoreConfigRepositoryClient`, backed by a new `EdlServingStoreConfig` DynamoDB table keyed by `tenant_code` + `entity_type` — the analytics-layer entity type (e.g. `company`), not a source-level `entity_id`, since one entity_type's analytics dataset can be fed by several contributing sources (e.g. `salesforce-account` + `netsuite-customer` both feed `company`).  
+**Engines:** `mysql_rds_loader.py`, `postgresql_loader.py`, `sqlserver_loader.py` (also serves `azure_sql` — same T-SQL dialect), and `redshift_loader.py` (Amazon Redshift Serverless — the one engine that loads set-based via S3 `COPY` rather than row upserts, and whose writer authenticates via IAM; it advertises `supports_s3_bulk_load` so the handler routes it through `load_from_s3()`). Onboarding (which tenant/entity_type pairs load, into which engine) is config-driven via `serving_store/serving_store_config_repository.py::ServingStoreConfigRepositoryClient`, backed by a new `EdlServingStoreConfig` DynamoDB table keyed by `tenant_code` + `entity_type` — the analytics-layer entity type (e.g. `company`), not a source-level `entity_id`, since one entity_type's analytics dataset can be fed by several contributing sources (e.g. `salesforce-account` + `netsuite-customer` both feed `company`).  
 **Purpose:** Loads analytics records into a relational serving database for BI tools and applications.  
 **Key properties:**
 - Table schema inferred from Parquet schema — no hardcoded DDL
-- Idempotent hash-diff incremental upsert — a `_row_hash`/`_synced_at` column pair; first sync per tenant/entity is an automatic full backfill, later runs only touch changed rows
-- All SQL parameterized — no string interpolation of column names or values
-- Tenant isolation via the database engine's own GRANT model (not application-level filtering), since BI tools connect directly: one database per tenant for MySQL, one schema per tenant for PostgreSQL/SQL Server/Azure SQL
-- Two credential tiers per tenant in Secrets Manager: the loader's own writer credential, and a separate read-only reader credential (`edl/serving-store/{tenant_code}/{engine}/reader-credentials`) handed to the tenant's BI-tool connection
+- Idempotent incremental sync via a `_row_hash`/`_synced_at` column pair; first sync per tenant/entity is an automatic full backfill, later runs only touch changed rows. RDS engines diff row-by-row in the Lambda; **Redshift** diffs set-based in SQL after a bulk `COPY` (see below)
+- All SQL parameterized — no string interpolation of column names or values; identifiers validated against safe-identifier regexes
+- Tenant isolation via the database engine's own GRANT model (not application-level filtering), since BI tools connect directly: one database per tenant for MySQL, one schema per tenant for PostgreSQL/SQL Server/Azure SQL/Redshift
+- Two credential tiers per tenant in Secrets Manager: the loader's own writer credential, and a separate read-only reader credential (`edl/serving-store/{tenant_code}/{engine}/reader-credentials`) handed to the tenant's BI-tool connection. **Redshift** has no writer *password* at all — the writer authenticates via IAM (`redshift-serverless:GetCredentials`); only the reader is a native user+password
 - Azure SQL is always tenant-supplied (BYO-DB) — Azure resources are never platform-provisioned by this AWS-based Terraform
+- **Redshift** is a columnar MPP warehouse (provisioned as Redshift Serverless), so its adapter does not do row upserts: it `COPY`s the analytics Parquet straight from S3 into a per-tenant staging table, then runs a set-based `MERGE` into the target — the idiomatic, high-throughput path for millions of rows (`supports_s3_bulk_load` seam; the handler prefers it over the row-batch path)
 
 ---
 
@@ -945,7 +946,7 @@ This section maps each pipeline stage to the exact tools, AWS services, Python l
 | Stage 13 — Entity Resolution | AWS Lambda; Amazon S3 (curated source read + analytics write) |
 | Stage 14 — Golden Record Publish | AWS Lambda; Amazon S3 (analytics layer `canonical/` prefix) |
 | Stage 15 — Analytics Layer Publish | AWS Lambda; Amazon S3 (analytics layer `analytics/` prefix, read from `canonical/`); AWS Glue Data Catalog (table + partition registration) |
-| Stage 16 — Serving Store Load | Amazon RDS (MySQL, PostgreSQL, or SQL Server; private VPC) or tenant-supplied Azure SQL; AWS Secrets Manager — code-complete, not yet deployed in any environment |
+| Stage 16 — Serving Store Load | Amazon RDS (MySQL, PostgreSQL, or SQL Server; private VPC), Amazon Redshift Serverless (S3 `COPY` + IAM-auth writer), or tenant-supplied Azure SQL; AWS Secrets Manager — code-complete, not yet deployed in any environment |
 | DLQ Processing (failure path) | AWS Lambda (`dlq_processor`); Amazon SQS (`EdlExtractionFailureDlq`, event source mapping `batch_size=1`); Amazon DynamoDB (run audit log); Amazon SNS (platform alerts topic); AWS Step Functions (optional auto-replay) |
 | All stages | Amazon CloudWatch Logs; Amazon CloudWatch Metrics; AWS X-Ray; Amazon SQS (DLQ) |
 
