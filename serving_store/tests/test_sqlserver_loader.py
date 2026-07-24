@@ -11,6 +11,7 @@ from moto import mock_aws
 
 from serving_store.interfaces.loader_interface import compute_row_hash
 from serving_store.loaders.sqlserver_loader import ServingStoreError, SqlServerLoader
+from serving_store.registry import serving_store_registry
 
 _REGION = "us-east-1"
 _SECRET_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-db-creds"
@@ -58,6 +59,17 @@ def _make_connection(fetchall_return: list | None = None, **exists_flags):
     mock_cursor.__exit__ = MagicMock(return_value=False)
     mock_cursor.fetchall.return_value = fetchall_return or []
     mock_cursor.fetchone.side_effect = _fetchone_sequence(**exists_flags)
+    mock_conn.cursor.return_value = mock_cursor
+    return mock_conn, mock_cursor
+
+
+def _make_bootstrap_connection(db_exists: bool = False):
+    """A master-connection mock whose single fetchone answers the sys.databases check."""
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+    mock_cursor.__exit__ = MagicMock(return_value=False)
+    mock_cursor.fetchone.side_effect = [{"exists": 1} if db_exists else None]
     mock_conn.cursor.return_value = mock_cursor
     return mock_conn, mock_cursor
 
@@ -139,6 +151,32 @@ class TestSqlServerLoader:
         executed_sql = " ".join(str(c.args[0]) for c in mock_cursor.execute.call_args_list)
         assert "CREATE LOGIN" not in executed_sql
         assert "CREATE USER" not in executed_sql
+
+    def test_platform_sqlserver_bootstraps_connection_database(self):
+        # Resolved via the registry so engine_id == "sqlserver" (platform-provisioned).
+        admin_conn, admin_cursor = _make_bootstrap_connection(db_exists=False)
+        main_conn, _ = _make_connection()
+        loader = serving_store_registry.resolve(
+            "sqlserver", secret_arn=_SECRET_ARN, region_name=_REGION
+        )
+
+        with patch("pymssql.connect", side_effect=[admin_conn, main_conn]):
+            loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
+
+        admin_sql = " ".join(str(c.args[0]) for c in admin_cursor.execute.call_args_list)
+        assert "CREATE DATABASE [edl_serving]" in admin_sql
+
+    def test_azure_sql_skips_connection_database_bootstrap(self):
+        # engine_id == "azure_sql" is always BYO-DB — bootstrap must never connect to master.
+        main_conn, _ = _make_connection()
+        loader = serving_store_registry.resolve(
+            "azure_sql", secret_arn=_SECRET_ARN, region_name=_REGION
+        )
+
+        with patch("pymssql.connect", return_value=main_conn) as connect_mock:
+            loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
+
+        assert all(c.kwargs.get("database") != "master" for c in connect_mock.call_args_list)
 
     def test_second_load_skips_unchanged_rows_via_merge(self):
         records = _make_records()

@@ -195,6 +195,8 @@ def _run_serving_store_load(
         metrics_emitter=metrics_emitter,
         environment=environment,
         governance_s3_bucket=governance_s3_bucket,
+        db_host=config.db_host,
+        db_port=config.db_port,
     )
 
     if loader.supports_s3_bulk_load:

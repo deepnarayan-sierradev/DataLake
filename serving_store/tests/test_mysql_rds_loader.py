@@ -48,6 +48,47 @@ def _make_connection(rowcount: int, fetchall_return: list | None = None):
     return mock_conn, mock_cursor
 
 
+_HOSTLESS_SECRET_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-managed"
+
+
+def _make_hostless_creds():
+    """An AWS-managed RDS master secret — only username/password, no host/port."""
+    return json.dumps({"username": "edl_serving_admin", "password": "dbpass"})
+
+
+@mock_aws
+class TestServingStoreLoaderEndpointInjection:
+    def setup_method(self, method=None):
+        sm = boto3.client("secretsmanager", region_name=_REGION)
+        sm.create_secret(Name=_HOSTLESS_SECRET_ARN, SecretString=_make_hostless_creds())
+
+    def test_endpoint_injected_when_secret_omits_host(self):
+        mock_conn, _ = _make_connection(rowcount=2)
+        loader = ServingStoreLoader(
+            _HOSTLESS_SECRET_ARN,
+            _REGION,
+            db_host="edl-serving-store-mysql-dev.example.rds.amazonaws.com",
+            db_port=3306,
+        )
+
+        with patch("pymysql.connect", return_value=mock_conn) as connect_mock:
+            loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
+
+        assert (
+            connect_mock.call_args.kwargs["host"]
+            == "edl-serving-store-mysql-dev.example.rds.amazonaws.com"
+        )
+        assert connect_mock.call_args.kwargs["port"] == 3306
+
+    def test_missing_host_and_no_db_host_fails(self):
+        mock_conn, _ = _make_connection(rowcount=2)
+        loader = ServingStoreLoader(_HOSTLESS_SECRET_ARN, _REGION)  # no db_host supplied
+
+        with patch("pymysql.connect", return_value=mock_conn):
+            with pytest.raises(ServingStoreError):
+                loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
+
+
 @mock_aws
 class TestServingStoreLoaderSecretRetrieval:
     def setup_method(self, method=None):

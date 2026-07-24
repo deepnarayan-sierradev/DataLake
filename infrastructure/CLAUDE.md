@@ -9,8 +9,11 @@ two unless there's a documented reason not to.
 **Modules**: `analytics_publisher_lambda`, `control_plane`, `entity_resolution_lambda`, `glue`,
 `iam`, `kms`, `lambda_pipeline`, `metadata_persistence`, `networking`, `observability`,
 `orchestration`, `secrets`, `serving_store_database`, `serving_store_lambda`, `storage`,
-`transformation_lambda`. The two `serving_store_*` modules are wired into all three environments'
-`main.tf` but have not been `terraform apply`'d anywhere yet — see `docs/PLATFORM_STATUS.md`.
+`transformation_lambda`. The `serving_store_*` modules are wired into all three environments'
+`main.tf` and have been `terraform apply`'d **in dev** (2026-07-24: `edl-serving-store-mysql-dev`
+RDS + `EdlServingStoreLoader` Lambda + `EdlServingStoreConfig` table); staging/prod remain
+un-applied. The dev instance is empty until a tenant/entity is onboarded via
+`scripts/seed_serving_store_config.py` — see `docs/PLATFORM_STATUS.md`.
 
 ## Verify
 

@@ -87,6 +87,12 @@ variable "kms_key_arns_for_credential_expiry_notifier" {
   description = "KMS key ARNs the credential expiry notifier role is allowed to use (decrypts its own Lambda environment variables)."
 }
 
+variable "kms_key_arns_for_serving_store" {
+  type        = list(string)
+  description = "KMS key ARNs the serving store loader role may use to decrypt the (CMK-encrypted) writer credential secret."
+  default     = []
+}
+
 variable "dlq_arn" {
   type        = string
   description = "ARN of the dead-letter SQS queue for failed extraction runs."

@@ -211,6 +211,7 @@ module "iam" {
     module.kms_database.key_arn,
   ]
   kms_key_arns_for_credential_expiry_notifier = [module.kms_logs.key_arn]
+  kms_key_arns_for_serving_store              = [module.kms_secrets.key_arn]
 
   github_org                  = var.github_org
   github_repo                 = var.github_repo

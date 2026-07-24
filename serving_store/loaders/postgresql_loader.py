@@ -26,6 +26,7 @@ from typing import Any, Final
 from serving_store.interfaces.loader_interface import (
     RESERVED_COLUMNS,
     SAFE_COLUMN_PATTERN,
+    SAFE_CONTAINER_PATTERN,
     ServingStoreError,
     ServingStoreLoaderInterface,
     ServingStoreLoadResult,
@@ -51,6 +52,32 @@ class PostgreSqlLoader(ServingStoreLoaderInterface):
     max_identifier_length = 63  # Postgres identifier length limit
     default_port = 5432
     default_connection_database = "edl_serving"
+
+    def _ensure_connection_database(
+        self, credentials: dict[str, str], connection_database: str
+    ) -> None:
+        """Bootstrap connection_database from the always-present `postgres` admin DB."""
+        import psycopg
+
+        if not SAFE_CONTAINER_PATTERN.match(connection_database):
+            raise ServingStoreError(f"Unsafe connection database rejected: {connection_database!r}")
+        admin = psycopg.connect(
+            host=credentials["host"],
+            port=int(credentials.get("port", self.default_port)),
+            user=credentials["username"],
+            password=credentials["password"],
+            dbname="postgres",
+            sslmode="require",
+            connect_timeout=10,
+            autocommit=True,  # CREATE DATABASE cannot run inside a transaction block
+        )
+        try:
+            with admin.cursor() as cur:
+                cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (connection_database,))
+                if cur.fetchone() is None:
+                    cur.execute(f'CREATE DATABASE "{connection_database}"')
+        finally:
+            admin.close()
 
     def _connect(self, credentials: dict[str, str], connection_database: str) -> Any:
         """Open a psycopg connection with TLS enforced (OWASP A02)."""

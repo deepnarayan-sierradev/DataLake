@@ -69,7 +69,9 @@ class ServingStoreLoaderRegistry:
                 f"No serving store loader registered for engine_id '{engine_id}'. "
                 f"Registered engines: {registered}."
             )
-        return self._registry[engine_id](**kwargs)
+        loader = self._registry[engine_id](**kwargs)
+        loader.engine_id = engine_id
+        return loader
 
 
 serving_store_registry = ServingStoreLoaderRegistry()

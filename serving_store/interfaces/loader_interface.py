@@ -86,6 +86,9 @@ class ServingStoreLoaderInterface(abc.ABC):
     default_connection_database: str = "edl_serving"
     #: Whether this engine loads directly from S3 (COPY) instead of Python row batches.
     supports_s3_bulk_load: bool = False
+    #: The registry engine_id this loader was resolved as; set by the registry so an
+    #: adapter shared across engines (SQL Server / Azure SQL) can tell them apart.
+    engine_id: str = ""
 
     def __init__(
         self,
@@ -94,12 +97,16 @@ class ServingStoreLoaderInterface(abc.ABC):
         metrics_emitter: CloudWatchMetricsEmitter | None = None,
         environment: str = "dev",
         governance_s3_bucket: str | None = None,
+        db_host: str | None = None,
+        db_port: int | None = None,
     ) -> None:
         self._secret_arn = secret_arn
         self._region_name = region_name
         self._metrics_emitter = metrics_emitter
         self._environment = environment
         self._governance_s3_bucket = governance_s3_bucket
+        self._db_host = db_host
+        self._db_port = db_port
         self._sm: Any = boto3.client("secretsmanager", region_name=region_name)
 
     # ── Public API (shared across every engine) ──────────────────────────────
@@ -297,7 +304,10 @@ class ServingStoreLoaderInterface(abc.ABC):
         """Open one connection, load every batch through it, and close it."""
         credentials = self._retrieve_credentials()
         try:
+            self._ensure_connection_database(credentials, connection_database)
             connection = self._connect(credentials, connection_database)
+        except ServingStoreError:
+            raise
         except Exception as exc:
             raise ServingStoreError(f"Failed to connect to database: {exc}") from exc
 
@@ -365,13 +375,23 @@ class ServingStoreLoaderInterface(abc.ABC):
     # ── Credentials (shared — Secrets Manager access is identical per engine) ─
 
     def _retrieve_credentials(self) -> dict[str, str]:
-        """Fetch writer DB credentials from Secrets Manager."""
+        """Fetch writer DB credentials from Secrets Manager, then inject the endpoint.
+
+        An AWS-managed RDS master secret carries only username/password — no host/port.
+        The DB endpoint is infrastructure (not a rotating credential), so it is supplied
+        via the config record (`db_host`/`db_port`) and injected here only when the secret
+        does not already carry a host (e.g. the Redshift custom secret does).
+        """
         try:
             response = self._sm.get_secret_value(SecretId=self._secret_arn)
             creds: dict[str, str] = json.loads(response["SecretString"])
-            return creds
         except Exception as exc:
             raise ServingStoreError("Failed to retrieve database credentials") from exc
+        if "host" not in creds and self._db_host:
+            creds["host"] = self._db_host
+        if "port" not in creds and self._db_port is not None:
+            creds["port"] = str(self._db_port)
+        return creds
 
     def _get_or_create_reader_password(
         self,
@@ -396,6 +416,17 @@ class ServingStoreLoaderInterface(abc.ABC):
             }
             self._sm.create_secret(Name=secret_name, SecretString=json.dumps(payload))
             return password
+
+    def _ensure_connection_database(  # noqa: B027 — intentional no-op default, not abstract
+        self, credentials: dict[str, str], connection_database: str
+    ) -> None:
+        """Create the fixed connection database before _connect, if the engine needs it.
+
+        No-op by default: MySQL connects with no default database and creates the tenant
+        database itself; Redshift Serverless always has a default database. Postgres/SQL
+        Server override this — a freshly provisioned RDS instance has no `edl_serving`
+        database, so `CREATE SCHEMA` on connect would otherwise fail (OWASP A05).
+        """
 
     # ── Abstract: genuine per-engine SQL-dialect differences only ────────────
 

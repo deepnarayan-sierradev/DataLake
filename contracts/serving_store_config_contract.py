@@ -24,6 +24,9 @@ from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATT
 # pattern — same boundary-validation convention, config-contract layer.
 _SQL_IDENTIFIER_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 
+# DB endpoint hostname (RDS/Redshift endpoint) — letters, digits, dots, hyphens only.
+_DB_HOST_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,254}$")
+
 
 class ServingStoreEngine(StrEnum):
     """Target relational database engine for a serving store load."""
@@ -55,6 +58,21 @@ class ServingStoreLoadConfig(BaseModel):
     )
     secret_arn: str = Field(..., description="Secrets Manager ARN for the writer credential.")
     region_name: str = Field(..., description="AWS region of the target database.")
+    db_host: str | None = Field(
+        default=None,
+        description=(
+            "Serving DB endpoint host. Required for engines whose writer secret carries only "
+            "username/password (e.g. an AWS-managed RDS master secret, which omits host/port) — "
+            "the loader injects it when the secret has no host. Leave None when the secret "
+            "already carries host (e.g. the Redshift custom secret)."
+        ),
+    )
+    db_port: int | None = Field(
+        default=None,
+        ge=1,
+        le=65535,
+        description="Serving DB port; defaults to the engine adapter's standard port when None.",
+    )
     connection_database: str | None = Field(
         default=None,
         description=(
@@ -99,4 +117,11 @@ class ServingStoreLoadConfig(BaseModel):
     def validate_connection_database(cls, value: str | None) -> str | None:
         if value is not None and not _SQL_IDENTIFIER_PATTERN.match(value):
             raise ValueError(f"connection_database {value!r} is not a safe SQL identifier.")
+        return value
+
+    @field_validator("db_host", mode="before")
+    @classmethod
+    def validate_db_host(cls, value: str | None) -> str | None:
+        if value is not None and not _DB_HOST_PATTERN.match(value):
+            raise ValueError(f"db_host {value!r} is not a valid hostname.")
         return value

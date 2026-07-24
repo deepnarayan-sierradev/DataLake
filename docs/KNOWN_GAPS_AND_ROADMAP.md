@@ -62,9 +62,12 @@ read-only reader role scoped to only that tenant's container. But the RDS instan
 private subnets only, and its security group's only inbound rule is from the loader Lambda's own
 security group. There is no VPN, PrivateLink, or bastion anywhere in
 `infrastructure/modules/networking/` — so as designed today, an external Power BI or Tableau
-connection cannot reach the database at all, independent of whether the serving store's Terraform
-has even been applied yet (see `docs/PLATFORM_STATUS.md`). There's also no script or API to hand a
-tenant its auto-created reader credential once it exists. **The same gap applies to the new
+connection cannot reach the database at all. As of 2026-07-24 the serving store's Terraform **has
+been applied in dev** (`edl-serving-store-mysql-dev`), so this is now a live gap, not a hypothetical
+one — though the dev instance is still empty (no tenant onboarded, see `docs/PLATFORM_STATUS.md`),
+so nothing needs to reach it yet. Onboarding a tenant/entity is now a first-class command
+(`scripts/seed_serving_store_config.py`), but there is still no script or API to hand a tenant its
+auto-created reader credential once the loader provisions it. **The same gap applies to the new
 Redshift Serverless engine** (`infrastructure/modules/serving_store_redshift/main.tf`,
 `publicly_accessible = false`, enhanced VPC routing, ingress only from the loader Lambda's SG) —
 its credential/GRANT isolation is correct, but no BI-reachable network path exists for it either.
@@ -78,8 +81,8 @@ already run this; (c) AWS PrivateLink (NLB + VPC endpoint service) — good add-
 tenants, doesn't by itself help a laptop-based BI Desktop connection; (d) a publicly reachable
 instance/proxy gated by per-tenant IP allowlists — fastest to build but widens the attack surface
 and is fragile against BI vendors' dynamic cloud egress IPs. This is new infrastructure work, not a
-config change, and should be sequenced alongside actually deploying the serving store's existing
-Terraform, not before it.
+config change; the serving store's Terraform is now deployed in dev, so this network path is the
+next blocker before any BI tool can consume the serving store.
 
 ### 5. Glue/Athena analyst access is a wildcard grant across every tenant's data
 

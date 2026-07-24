@@ -32,6 +32,7 @@ from typing import Any, Final
 from serving_store.interfaces.loader_interface import (
     RESERVED_COLUMNS,
     SAFE_COLUMN_PATTERN,
+    SAFE_CONTAINER_PATTERN,
     ServingStoreError,
     ServingStoreLoaderInterface,
     ServingStoreLoadResult,
@@ -60,6 +61,38 @@ class SqlServerLoader(ServingStoreLoaderInterface):
     max_identifier_length = 128  # SQL Server identifier length limit
     default_port = 1433
     default_connection_database = "edl_serving"
+
+    def _ensure_connection_database(
+        self, credentials: dict[str, str], connection_database: str
+    ) -> None:
+        """Bootstrap connection_database from `master`, platform-provisioned RDS only.
+
+        Azure SQL is always BYO-DB — its database already exists and `master`-level
+        CREATE DATABASE is unavailable — so it (and direct unit instantiation) is skipped.
+        """
+        if self.engine_id != "sqlserver":
+            return
+        import pymssql
+
+        if not SAFE_CONTAINER_PATTERN.match(connection_database):
+            raise ServingStoreError(f"Unsafe connection database rejected: {connection_database!r}")
+        admin = pymssql.connect(
+            server=credentials["host"],
+            port=str(credentials.get("port", self.default_port)),
+            user=credentials["username"],
+            password=credentials["password"],
+            database="master",
+            login_timeout=10,
+            as_dict=True,
+            autocommit=True,  # CREATE DATABASE cannot run inside a transaction block
+        )
+        try:
+            with admin.cursor() as cur:
+                cur.execute("SELECT 1 FROM sys.databases WHERE name = %s", (connection_database,))
+                if cur.fetchone() is None:
+                    cur.execute(f"CREATE DATABASE [{connection_database}]")
+        finally:
+            admin.close()
 
     def _connect(self, credentials: dict[str, str], connection_database: str) -> Any:
         """Open a pymssql connection. Azure SQL/RDS SQL Server both mandate TLS on the

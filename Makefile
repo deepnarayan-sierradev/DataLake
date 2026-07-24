@@ -1,7 +1,7 @@
 .PHONY: install lint format typecheck test banned-names security-scan audit \
         iac-validate iac-scan iac-fmt-check iac-fmt \
         lambda-package lambda-upload lambda-deploy \
-        seed-entity-config seed-schedules clean help
+        seed-entity-config seed-serving-store-config seed-schedules clean help
 
 # ─── Help ────────────────────────────────────────────────────────────────────
 help:
@@ -23,6 +23,7 @@ help:
 	@echo "  lambda-deploy       Package + upload + terraform apply (Lambda only)"
 	@echo ""
 	@echo "  seed-entity-config  Write entity config records to DynamoDB (dev)"
+	@echo "  seed-serving-store-config  Onboard tenant/entity pairs to the serving store (dev)"
 	@echo "  seed-schedules      Create/sync EventBridge Scheduler schedules from DynamoDB (dev)"
 	@echo "                      REQUIRED after every terraform apply — without it no cron triggers exist"
 	@echo ""
@@ -186,6 +187,15 @@ seed-entity-config:
 		--environment dev \
 		--region $(AWS_REGION)
 	@echo "Entity config seed complete. Run 'make seed-schedules' to sync EventBridge schedules."
+
+# Onboard tenant/entity pairs to the serving store (populates EdlServingStoreConfig).
+# Without this, the LoadServingStore stage skips every run and the serving RDS stays empty.
+seed-serving-store-config:
+	@echo "Writing serving store config records to DynamoDB (dev)..."
+	python scripts/seed_serving_store_config.py \
+		--environment dev \
+		--region $(AWS_REGION)
+	@echo "Serving store config seed complete."
 
 # Sync EventBridge Scheduler schedules from DynamoDB entity config.
 # Must be run after every terraform apply (creates the schedule group)

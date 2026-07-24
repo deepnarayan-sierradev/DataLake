@@ -661,6 +661,19 @@ data "aws_iam_policy_document" "serving_store_loader_runtime_permissions" {
     resources = var.serving_store_secret_arns
   }
 
+  # KMS — decrypt the CMK-encrypted writer credential secret (the AWS-managed RDS
+  # master secret is encrypted with the secrets KMS key). Without this, GetSecretValue
+  # fails with an AccessDenied on kms:Decrypt. Empty list → no statement emitted.
+  dynamic "statement" {
+    for_each = length(var.kms_key_arns_for_serving_store) > 0 ? [1] : []
+    content {
+      sid       = "ServingStoreKmsDecrypt"
+      effect    = "Allow"
+      actions   = ["kms:Decrypt", "kms:DescribeKey"]
+      resources = var.kms_key_arns_for_serving_store
+    }
+  }
+
   statement {
     sid     = "WriteLambdaExecutionLogs"
     effect  = "Allow"

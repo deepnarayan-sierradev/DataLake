@@ -159,6 +159,7 @@ module "iam" {
   kms_key_arns_for_extraction                 = [module.kms_storage.key_arn, module.kms_secrets.key_arn, module.kms_database.key_arn]
   kms_key_arns_for_transformation             = [module.kms_storage.key_arn, module.kms_database.key_arn]
   kms_key_arns_for_credential_expiry_notifier = [module.kms_logs.key_arn]
+  kms_key_arns_for_serving_store              = [module.kms_secrets.key_arn]
   github_org                                  = var.github_org
   github_repo                                 = var.github_repo
   cicd_deployment_policy_arns                 = var.cicd_deployment_policy_arns
