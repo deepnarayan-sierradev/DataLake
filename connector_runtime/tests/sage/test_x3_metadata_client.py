@@ -432,3 +432,39 @@ class TestFieldModeFiltering:
         )
         field_names = {f.name for f in contract.fields}
         assert field_names == {"BPCNUM_0", "BPCNAM_0"}
+
+
+class TestAuthenticatesBeforeReadingBaseUrl:
+    """Regression: base_url must be read only after build_auth_headers() authenticates."""
+
+    def test_discover_fields_authenticates_before_base_url(self) -> None:
+        class _LazyAuth:
+            def __init__(self) -> None:
+                self._authenticated = False
+
+            @property
+            def base_url(self) -> str:
+                if not self._authenticated:
+                    raise RuntimeError("base_url unavailable before auth")
+                return _BASE_URL
+
+            def build_auth_headers(self) -> dict[str, str]:
+                self._authenticated = True
+                return {"Authorization": "Bearer test-token", "Accept": "application/json"}
+
+        http = MagicMock(spec=SageHttpClient)
+        http.get.return_value = {"value": [_SAMPLE_BPCUSTOMER_RECORD]}
+        client = X3MetadataClient(
+            auth_client=_LazyAuth(),  # type: ignore[arg-type]
+            http_client=http,
+            object_path=_ENDPOINT_CUSTOMER,
+        )
+        contract = client.discover_fields(
+            source_id=_SOURCE_ID,
+            entity_id=_ENTITY_ID_CUSTOMER,
+            object_path=_ENDPOINT_CUSTOMER,
+            field_mode=FieldMode.ALL,
+            include_fields=[],
+            exclude_fields=[],
+        )
+        assert contract.fields

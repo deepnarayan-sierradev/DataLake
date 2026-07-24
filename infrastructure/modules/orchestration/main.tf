@@ -62,6 +62,50 @@ locals {
     local._serving_store_pass_json
   )
 
+  # BuildTwin stage: active when a twin builder ARN is provided, otherwise a Pass.
+  # Both branches continue to LoadServingStore; a twin-build failure is caught and
+  # skipped so this additive stage can never fail the core pipeline.
+  twin_build_enabled = var.twin_build_lambda_arn != ""
+  _build_twin_task_json = jsonencode({
+    Type     = "Task"
+    Resource = var.twin_build_lambda_arn
+    Parameters = {
+      "source_id.$"   = "$.source_id"
+      "entity_id.$"   = "$.entity_id"
+      "environment.$" = "$.environment"
+      "run_id.$"      = "$.extraction.run_id"
+      "tenant_code.$" = "$.tenant_code"
+    }
+    ResultPath = "$.twin"
+    Retry = [
+      {
+        ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"]
+        IntervalSeconds = 20
+        MaxAttempts     = 3
+        BackoffRate     = 2.0
+        JitterStrategy  = "FULL"
+      }
+    ]
+    Catch = [
+      {
+        ErrorEquals = ["States.ALL"]
+        Next        = "LoadServingStore"
+        ResultPath  = "$.twin_error"
+      }
+    ]
+    Next = "LoadServingStore"
+  })
+  _build_twin_pass_json = jsonencode({
+    Type    = "Pass"
+    Comment = "Twin builder not yet deployed. Pipeline continues to the serving store stage."
+    Next    = "LoadServingStore"
+  })
+  build_twin_state = jsondecode(
+    local.twin_build_enabled ?
+    local._build_twin_task_json :
+    local._build_twin_pass_json
+  )
+
   # Step Functions state machine name
   state_machine_name = "EdlExtractionPipeline"
 
@@ -385,10 +429,13 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
             ResultPath  = "$.error"
           }
         ]
-        Next = "LoadServingStore"
+        Next = "BuildTwin"
       }
 
-      # ── Stage E: Serving Store Load (conditional — Pass if no ARN) ────────────
+      # ── Stage E: Build Twin (conditional — Pass if no ARN; failure is caught) ─
+      BuildTwin = local.build_twin_state
+
+      # ── Stage F: Serving Store Load (conditional — Pass if no ARN) ────────────
       LoadServingStore = local.load_serving_store_state
 
       # ── Failure terminal states ─────────────────────────────────────────────

@@ -70,7 +70,7 @@ class TestConfigurationRepositoryDynamoDB:
     def test_load_config_success(self) -> None:
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         table = _create_dynamodb_table(dynamodb)
-        table.put_item(Item=_VALID_RECORD)
+        table.put_item(Item={**_VALID_RECORD, "source_id": "demo#salesforce"})
 
         client = ConfigurationRepositoryClient(
             environment=_ENV, region_name=_REGION, backend=ConfigurationBackend.DYNAMODB
@@ -106,7 +106,7 @@ class TestConfigurationRepositoryDynamoDB:
             "target_raw_s3_prefix": "s3://raw/salesforce/account/",
             "schema_snapshot_s3_prefix": "s3://schema-snapshots/salesforce/account/",
         }
-        table.put_item(Item=invalid)
+        table.put_item(Item={**invalid, "source_id": "demo#salesforce"})
 
         client = ConfigurationRepositoryClient(
             environment=_ENV, region_name=_REGION, backend=ConfigurationBackend.DYNAMODB
@@ -119,7 +119,8 @@ class TestConfigurationRepositoryDynamoDB:
         """A record with the default tenant_code is visible under the default tenant."""
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         table = _create_dynamodb_table(dynamodb)
-        table.put_item(Item=_VALID_RECORD)  # tenant_code defaults to "demo"
+        # tenant_code defaults to "demo"; PK is the scoped composite.
+        table.put_item(Item={**_VALID_RECORD, "source_id": "demo#salesforce"})
 
         client = ConfigurationRepositoryClient(
             environment=_ENV, region_name=_REGION, backend=ConfigurationBackend.DYNAMODB
@@ -132,7 +133,7 @@ class TestConfigurationRepositoryDynamoDB:
         """SEC-2 app-level guard: a record belonging to another tenant is invisible."""
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         table = _create_dynamodb_table(dynamodb)
-        record = {**_VALID_RECORD, "tenant_code": "acme-corp"}
+        record = {**_VALID_RECORD, "tenant_code": "acme-corp", "source_id": "acme-corp#salesforce"}
         table.put_item(Item=record)
 
         client = ConfigurationRepositoryClient(
@@ -140,6 +141,35 @@ class TestConfigurationRepositoryDynamoDB:
         )
         with pytest.raises(ConfigurationNotFoundError):
             client.load_config("salesforce", "salesforce-account", tenant_code="globex-eu")
+
+    @mock_aws
+    def test_two_tenants_same_source_entity_do_not_collide(self) -> None:
+        """FR-F0.8b: tenant-scoped PK — two tenants configuring the same source/entity coexist."""
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        _create_dynamodb_table(dynamodb)
+        client = ConfigurationRepositoryClient(
+            environment=_ENV, region_name=_REGION, backend=ConfigurationBackend.DYNAMODB
+        )
+        client.save_config(EntityExtractionConfig(**{**_VALID_RECORD, "tenant_code": "acme-corp"}))
+        client.save_config(EntityExtractionConfig(**{**_VALID_RECORD, "tenant_code": "globex-eu"}))
+
+        acme = client.load_config("salesforce", "salesforce-account", tenant_code="acme-corp")
+        globex = client.load_config("salesforce", "salesforce-account", tenant_code="globex-eu")
+        assert acme.tenant_code == "acme-corp"
+        assert acme.source_id == "salesforce"
+        assert globex.tenant_code == "globex-eu"
+
+    @mock_aws
+    def test_list_configs_restores_plain_source_id(self) -> None:
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        _create_dynamodb_table(dynamodb)
+        client = ConfigurationRepositoryClient(
+            environment=_ENV, region_name=_REGION, backend=ConfigurationBackend.DYNAMODB
+        )
+        client.save_config(EntityExtractionConfig(**_VALID_RECORD))
+        configs = client.list_configs_for_tenant("demo")
+        assert len(configs) == 1
+        assert configs[0].source_id == "salesforce"
 
     def test_load_config_invalid_tenant_code_raises(self) -> None:
         client = ConfigurationRepositoryClient(

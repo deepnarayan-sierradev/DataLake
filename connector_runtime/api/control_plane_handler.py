@@ -55,7 +55,10 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, Final
 
@@ -64,6 +67,8 @@ from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 from pydantic import ValidationError as PydanticValidationError
 
+import processing_engine.engines.duckdb_engine  # noqa: F401  (registers "duckdb")
+from analytics_publisher.analytics_location import latest_partition_uri
 from connector_runtime.api.errors import (
     ApiError,
     AuthenticationError,
@@ -72,16 +77,42 @@ from connector_runtime.api.errors import (
     NotFoundError,
     ValidationFailedError,
 )
-from connector_runtime.api.models import PipelineTriggerRequest, TenantProvisionRequest
+from connector_runtime.api.models import (
+    PipelineTriggerRequest,
+    SavedQueryCreateBody,
+    SemanticQueryBody,
+    TenantProvisionRequest,
+)
 from connector_runtime.configuration_repository.configuration_repository import (
     ConfigurationAlreadyExistsError,
     ConfigurationBackend,
     ConfigurationRepositoryClient,
 )
 from contracts.entity_configuration_contract import EntityExtractionConfig
-from contracts.identifier_policy import RUN_ID_PATTERN, validate_run_id, validate_tenant_code
+from contracts.identifier_policy import (
+    ENTITY_TYPE_PATTERN,
+    RUN_ID_PATTERN,
+    STABLE_ID_PATTERN,
+    validate_run_id,
+    validate_tenant_code,
+)
+from knowledge.twin_repository import TwinNotFoundError, TwinRepository
 from observability.lambda_utils import require_env
 from observability.structured_logger import get_platform_logger
+from processing_engine.registry import set_based_engine_registry
+from semantic.query_compiler import (
+    AccessDeniedError,
+    SemanticQueryError,
+    SemanticQueryRequest,
+)
+from semantic.saved_query import SavedQuery
+from semantic.saved_query_repository import SavedQueryNotFoundError, SavedQueryRepository
+from semantic.semantic_model import SemanticModel
+from semantic.semantic_model_repository import (
+    SemanticModelNotFoundError,
+    SemanticModelRepository,
+)
+from semantic.semantic_query_service import SemanticQueryService
 
 _logger = get_platform_logger(__name__)
 
@@ -195,6 +226,8 @@ def _json_default(value: Any) -> Any:
     """
     if isinstance(value, Decimal):
         return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
@@ -539,8 +572,276 @@ def _handle_list_runs(event: dict[str, Any], path_tenant_code: str) -> dict[str,
 
 
 # ---------------------------------------------------------------------------
+# Intelligence layer — twins, semantic queries, saved queries
+# ---------------------------------------------------------------------------
+
+_SAFE_GOLDEN_ID: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,255}$")
+_MAX_TWINS_LISTED: Final[int] = 200
+
+
+def _twin_repository() -> TwinRepository:
+    return TwinRepository(region_name=_region())
+
+
+def _saved_query_repository() -> SavedQueryRepository:
+    return SavedQueryRepository(region_name=_region())
+
+
+def _semantic_model_repository() -> SemanticModelRepository:
+    return SemanticModelRepository(region_name=_region())
+
+
+def _authenticated_user(event: dict[str, Any]) -> str:
+    claims = _extract_claims(event) or {}
+    return str(
+        claims.get("sub") or claims.get("email") or claims.get("cognito:username") or "unknown"
+    )
+
+
+def _granted_access_tags(event: dict[str, Any]) -> frozenset[str]:
+    # OWASP A01: data-level access tags come from verified authorizer claims, never the body.
+    claims = _extract_claims(event) or {}
+    raw = str(claims.get("custom:access_tags") or claims.get("access_tags") or "")
+    return frozenset(tag.strip() for tag in raw.split(",") if tag.strip())
+
+
+def _twin_to_dict(twin: Any) -> dict[str, Any]:
+    return {
+        "entity_type": twin.entity_type,
+        "golden_id": twin.golden_id,
+        "lifecycle_stage": twin.lifecycle_stage,
+        "rollups": twin.rollups,
+        "edges": [
+            {
+                "relationship_type": edge.relationship_type,
+                "to_entity_type": edge.to_entity_type,
+                "to_golden_id": edge.to_golden_id,
+            }
+            for edge in twin.edges
+        ],
+    }
+
+
+def _saved_query_to_dict(saved_query: Any) -> dict[str, Any]:
+    return {
+        "query_id": saved_query.query_id,
+        "name": saved_query.name,
+        "entity": saved_query.entity,
+        "metrics": list(saved_query.metrics),
+        "dimensions": list(saved_query.dimensions),
+        "created_by": saved_query.created_by,
+    }
+
+
+def _load_active_model(tenant_code: str) -> SemanticModel:
+    try:
+        return _semantic_model_repository().load_active(tenant_code)
+    except SemanticModelNotFoundError as exc:
+        raise NotFoundError("No active semantic model is published for this tenant.") from exc
+
+
+def _semantic_query_service(
+    event: dict[str, Any], tenant_code: str, model: SemanticModel
+) -> SemanticQueryService:
+    region = _region()
+    analytics_bucket = require_env("ANALYTICS_S3_BUCKET")
+    s3 = boto3.client("s3", region_name=region)
+    engine = set_based_engine_registry.build("duckdb", region_name=region)
+
+    def _resolve_entity_uri(entity_name: str) -> str:
+        entity = model.entity(entity_name)
+        uri = latest_partition_uri(s3, analytics_bucket, tenant_code, entity.entity_type)
+        if uri is None:
+            raise NotFoundError(f"No analytics data is available for entity {entity_name!r}.")
+        return uri
+
+    return SemanticQueryService(
+        model=model,
+        engine=engine,
+        entity_uri_resolver=_resolve_entity_uri,
+        granted_access_tags=_granted_access_tags(event),
+    )
+
+
+def _run_query(service: SemanticQueryService, request: SemanticQueryRequest) -> dict[str, Any]:
+    try:
+        result = service.run(request)
+    except AccessDeniedError as exc:
+        raise AuthorizationError(str(exc)) from exc
+    except SemanticQueryError as exc:
+        raise ValidationFailedError(str(exc)) from exc
+    return {"sql": result.sql, "rows": result.rows, "row_count": len(result.rows)}
+
+
+def _handle_get_twin(
+    event: dict[str, Any], path_tenant_code: str, entity_type: str, golden_id: str
+) -> dict[str, Any]:
+    """GET /tenants/{tenant_code}/twins/{entity_type}/{golden_id} — one twin."""
+    tenant_code = _authorize_path_tenant(event, path_tenant_code)
+    if not ENTITY_TYPE_PATTERN.match(entity_type):
+        raise ValidationFailedError(f"entity_type {entity_type!r} is not valid.")
+    if not _SAFE_GOLDEN_ID.match(golden_id):
+        raise ValidationFailedError(f"golden_id {golden_id!r} is not valid.")
+    try:
+        twin = _twin_repository().get_twin(tenant_code, entity_type, golden_id)
+    except TwinNotFoundError as exc:
+        raise NotFoundError(str(exc)) from exc
+    return _response(200, {"tenant_code": tenant_code, **_twin_to_dict(twin)})
+
+
+def _handle_list_twins(
+    event: dict[str, Any], path_tenant_code: str, entity_type: str
+) -> dict[str, Any]:
+    """GET /tenants/{tenant_code}/twins/{entity_type} — twins for an entity type (capped)."""
+    tenant_code = _authorize_path_tenant(event, path_tenant_code)
+    if not ENTITY_TYPE_PATTERN.match(entity_type):
+        raise ValidationFailedError(f"entity_type {entity_type!r} is not valid.")
+    twins = _twin_repository().list_twins(tenant_code, entity_type)[:_MAX_TWINS_LISTED]
+    return _response(
+        200,
+        {
+            "tenant_code": tenant_code,
+            "entity_type": entity_type,
+            "twins": [_twin_to_dict(twin) for twin in twins],
+            "count": len(twins),
+        },
+    )
+
+
+def _handle_run_semantic_query(event: dict[str, Any], path_tenant_code: str) -> dict[str, Any]:
+    """POST /tenants/{tenant_code}/semantic/query — run a structured semantic query."""
+    tenant_code = _authorize_path_tenant(event, path_tenant_code)
+    body_dict = _parse_json_body(event)
+    try:
+        body = SemanticQueryBody.model_validate(body_dict)
+    except PydanticValidationError as exc:
+        raise ValidationFailedError(
+            f"Request body failed validation: {exc.error_count()} error(s)."
+        ) from exc
+    model = _load_active_model(tenant_code)
+    service = _semantic_query_service(event, tenant_code, model)
+    payload = _run_query(
+        service,
+        SemanticQueryRequest(
+            entity=body.entity, metrics=tuple(body.metrics), dimensions=tuple(body.dimensions)
+        ),
+    )
+    return _response(200, {"tenant_code": tenant_code, **payload})
+
+
+def _handle_create_saved_query(event: dict[str, Any], path_tenant_code: str) -> dict[str, Any]:
+    """POST /tenants/{tenant_code}/saved-queries — create a reusable saved query."""
+    tenant_code = _authorize_path_tenant(event, path_tenant_code)
+    body_dict = _parse_json_body(event)
+    try:
+        body = SavedQueryCreateBody.model_validate(body_dict)
+        saved_query = SavedQuery(
+            query_id=body.query_id,
+            name=body.name,
+            entity=body.entity,
+            metrics=tuple(body.metrics),
+            dimensions=tuple(body.dimensions),
+            created_by=_authenticated_user(event),
+        )
+    except PydanticValidationError as exc:
+        raise ValidationFailedError(
+            f"Saved query failed validation: {exc.error_count()} error(s)."
+        ) from exc
+    _saved_query_repository().save(tenant_code, saved_query)
+    _logger.info("saved_query_created", tenant_code=tenant_code, query_id=saved_query.query_id)
+    return _response(
+        201,
+        {"tenant_code": tenant_code, "query_id": saved_query.query_id, "name": saved_query.name},
+    )
+
+
+def _handle_list_saved_queries(event: dict[str, Any], path_tenant_code: str) -> dict[str, Any]:
+    """GET /tenants/{tenant_code}/saved-queries — list saved queries."""
+    tenant_code = _authorize_path_tenant(event, path_tenant_code)
+    saved = _saved_query_repository().list_for_tenant(tenant_code)
+    return _response(
+        200,
+        {
+            "tenant_code": tenant_code,
+            "saved_queries": [_saved_query_to_dict(query) for query in saved],
+            "count": len(saved),
+        },
+    )
+
+
+def _handle_get_saved_query(
+    event: dict[str, Any], path_tenant_code: str, query_id: str
+) -> dict[str, Any]:
+    """GET /tenants/{tenant_code}/saved-queries/{query_id} — one saved query."""
+    tenant_code = _authorize_path_tenant(event, path_tenant_code)
+    if not STABLE_ID_PATTERN.match(query_id):
+        raise ValidationFailedError(f"query_id {query_id!r} is not valid.")
+    try:
+        saved_query = _saved_query_repository().get(tenant_code, query_id)
+    except SavedQueryNotFoundError as exc:
+        raise NotFoundError(str(exc)) from exc
+    return _response(200, {"tenant_code": tenant_code, **_saved_query_to_dict(saved_query)})
+
+
+def _handle_run_saved_query(
+    event: dict[str, Any], path_tenant_code: str, query_id: str
+) -> dict[str, Any]:
+    """POST /tenants/{tenant_code}/saved-queries/{query_id}/run — run a saved query."""
+    tenant_code = _authorize_path_tenant(event, path_tenant_code)
+    if not STABLE_ID_PATTERN.match(query_id):
+        raise ValidationFailedError(f"query_id {query_id!r} is not valid.")
+    try:
+        saved_query = _saved_query_repository().get(tenant_code, query_id)
+    except SavedQueryNotFoundError as exc:
+        raise NotFoundError(str(exc)) from exc
+    model = _load_active_model(tenant_code)
+    service = _semantic_query_service(event, tenant_code, model)
+    payload = _run_query(service, saved_query.to_request())
+    return _response(200, {"tenant_code": tenant_code, "query_id": query_id, **payload})
+
+
+# ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Route:
+    method: str
+    length: int
+    resource: str
+    tail: str | None
+    handler: Callable[[dict[str, Any], list[str]], dict[str, Any]]
+
+    def matches(self, method: str, segments: list[str]) -> bool:
+        return (
+            method == self.method
+            and len(segments) == self.length
+            and segments[0] == "tenants"
+            and segments[2] == self.resource
+            and (self.tail is None or segments[-1] == self.tail)
+        )
+
+
+# Intelligence-layer routes kept in a table so _route stays within the complexity gate.
+_INTELLIGENCE_ROUTES: tuple[_Route, ...] = (
+    _Route("GET", 5, "twins", None, lambda e, s: _handle_get_twin(e, s[1], s[3], s[4])),
+    _Route("GET", 4, "twins", None, lambda e, s: _handle_list_twins(e, s[1], s[3])),
+    _Route("POST", 4, "semantic", "query", lambda e, s: _handle_run_semantic_query(e, s[1])),
+    _Route("GET", 3, "saved-queries", None, lambda e, s: _handle_list_saved_queries(e, s[1])),
+    _Route("POST", 3, "saved-queries", None, lambda e, s: _handle_create_saved_query(e, s[1])),
+    _Route("GET", 4, "saved-queries", None, lambda e, s: _handle_get_saved_query(e, s[1], s[3])),
+    _Route("POST", 5, "saved-queries", "run", lambda e, s: _handle_run_saved_query(e, s[1], s[3])),
+)
+
+
+def _route_intelligence_layer(
+    event: dict[str, Any], method: str, segments: list[str]
+) -> dict[str, Any] | None:
+    for route in _INTELLIGENCE_ROUTES:
+        if route.matches(method, segments):
+            return route.handler(event, segments)
+    return None
 
 
 def _route(event: dict[str, Any]) -> dict[str, Any]:
@@ -581,6 +882,10 @@ def _route(event: dict[str, Any]) -> dict[str, Any]:
         and method == "GET"
     ):
         return _handle_list_runs(event, segments[1])
+
+    intelligence_response = _route_intelligence_layer(event, method, segments)
+    if intelligence_response is not None:
+        return intelligence_response
 
     raise NotFoundError(f"No route matches {method} {path!r}.")
 

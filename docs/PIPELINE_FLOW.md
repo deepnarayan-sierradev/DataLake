@@ -128,7 +128,7 @@ re-deriving its own version.
 
 | Layer | Isolation mechanism | Genuinely enforced, or app-level only? |
 |---|---|---|
-| S3 — raw layer | `{source}/{entity_id}/...` — **not tenant-prefixed today** | Not isolated — a real, open gap (see `docs/KNOWN_GAPS_AND_ROADMAP.md`) |
+| S3 — raw layer | `{tenant_code}/{source}/{entity_id}/...` (`RawLayerWriter._partition_path`, ARCH-1) | App-level (write-path convention); no S3 bucket-policy `Condition` enforces it yet — same caveat as curated/analytics |
 | S3 — curated layer | `{tenant_code}/curated/{domain}/{entity_id}/...` | App-level (write-path convention); no S3 bucket-policy `Condition` enforces it yet |
 | S3 — analytics layer | `{tenant_code}/analytics/{entity_type}/...` and `{tenant_code}/canonical/{entity_type}/...` | App-level, same caveat |
 | S3 — schema snapshots | `{tenant_code}/{source_id}/{entity_id}/{schema_version}/...` | App-level, same caveat |
@@ -149,8 +149,9 @@ analytics publisher Lambda handlers treat `tenant_code` as a **required** Step F
 field — `_validate_event()` raises `ValueError` and fails the run closed if it's missing or
 malformed, rather than silently defaulting to another tenant's identity.
 
-For everything still open in this model (no IAM enforcement anywhere, Secrets Manager sharing,
-the raw-layer gap, Glue/Athena's wildcard grant), see `docs/KNOWN_GAPS_AND_ROADMAP.md`. Regression
+For everything still open in this model (no IAM enforcement anywhere — S3 prefixing is write-path
+convention, not a bucket-policy boundary; Secrets Manager sharing; Glue/Athena's wildcard grant),
+see `docs/KNOWN_GAPS_AND_ROADMAP.md`. Regression
 coverage: `tests/test_tenant_isolation.py`. Incident response: `docs/PRODUCTION_INCIDENT_RUNBOOK.md`
 → "Suspected Cross-Tenant Data Incident."
 
@@ -377,7 +378,7 @@ Any stage's Task fails after retries exhausted (States.ALL)?
 
 **Component:** `SalesforceBulkQueryJobController` (Bulk API 2.0), `NetSuiteConnector` (SuiteQL REST), `MySqlRdsConnector` (pymysql), `SageConnector` (Strategy pattern — dispatches to Intacct JSON-POST or X3 OData v4 GET based on `connector_params.sage_product`)  
 **Purpose:** Executes the extraction query, streams records, writes raw Parquet to S3.  
-**S3 partition scheme:** `s3://{bucket}/{source}/{entity_id}/extraction_date={YYYY-MM-DD}/run_id={run_id}/data.parquet` — **not tenant-prefixed** today; this is a real, tracked gap (see [Multi-tenancy](#multi-tenancy)), not an oversight.  
+**S3 partition scheme:** `s3://{bucket}/{tenant_code}/{source}/{entity_id}/extraction_date={YYYY-MM-DD}/run_id={run_id}/data.parquet` — tenant-prefixed at the write path (`RawLayerWriter._partition_path`, ARCH-1); app-level convention, not yet IAM/bucket-policy-enforced (see [Multi-tenancy](#multi-tenancy)).  
 **Key properties:**
 - All column values stored as `large_utf8` strings — no type loss, max compatibility
 - Records written in chunks (50,000 per file for large volumes)

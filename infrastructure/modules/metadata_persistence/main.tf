@@ -402,3 +402,133 @@ resource "aws_dynamodb_table" "source_onboarding_registry" {
 
   tags = local.common_tags
 }
+
+# ---------------------------------------------------------------------------
+# Twin Index — DynamoDB (Knowledge Layer / FR-1.3)
+# One item per digital-twin instance: edges, lifecycle stage, rollups.
+# Tenant-partitioned from creation (PK = tenant_code); SK = entity_type#golden_id.
+# ---------------------------------------------------------------------------
+
+resource "aws_dynamodb_table" "twin_index" {
+  name         = "EdlTwinIndex"
+  billing_mode = "PAY_PER_REQUEST"
+
+  hash_key  = "tenant_code"
+  range_key = "sk"
+
+  attribute {
+    name = "tenant_code"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = var.database_kms_key_arn
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  stream_enabled = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  tags = merge(local.common_tags, {
+    Name    = "EdlTwinIndex"
+    Purpose = "digital-twin-index"
+  })
+}
+
+# ---------------------------------------------------------------------------
+# Semantic Model — DynamoDB (Semantic Layer / FR-2.1)
+# Versioned governed models per tenant; SK = model_version, plus a "latest" pointer.
+# ---------------------------------------------------------------------------
+
+resource "aws_dynamodb_table" "semantic_model" {
+  name         = "EdlSemanticModel"
+  billing_mode = "PAY_PER_REQUEST"
+
+  hash_key  = "tenant_code"
+  range_key = "model_version"
+
+  attribute {
+    name = "tenant_code"
+    type = "S"
+  }
+
+  attribute {
+    name = "model_version"
+    type = "S"
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = var.database_kms_key_arn
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  stream_enabled = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  tags = merge(local.common_tags, {
+    Name    = "EdlSemanticModel"
+    Purpose = "semantic-model"
+  })
+}
+
+# ---------------------------------------------------------------------------
+# Saved Query — DynamoDB (Semantic Layer / FR-3.4)
+# Named, reusable semantic queries powering dashboards and re-run.
+# ---------------------------------------------------------------------------
+
+resource "aws_dynamodb_table" "saved_query" {
+  name         = "EdlSavedQuery"
+  billing_mode = "PAY_PER_REQUEST"
+
+  hash_key  = "tenant_code"
+  range_key = "query_id"
+
+  attribute {
+    name = "tenant_code"
+    type = "S"
+  }
+
+  attribute {
+    name = "query_id"
+    type = "S"
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = var.database_kms_key_arn
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  stream_enabled = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  tags = merge(local.common_tags, {
+    Name    = "EdlSavedQuery"
+    Purpose = "saved-query"
+  })
+}

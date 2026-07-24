@@ -1,8 +1,7 @@
 """
 Shared publishing helpers for the entity-resolution golden/canonical publishers.
 
-Consolidates logic that was previously duplicated verbatim between
-``canonical_record_publisher`` and ``golden_record_publisher`` (finding DUP-3):
+Consolidates logic shared by the canonical record publisher (finding DUP-3):
 
   - :func:`flatten_list_fields`      — Parquet-compatibility flattening of list
                                         columns to JSON strings.

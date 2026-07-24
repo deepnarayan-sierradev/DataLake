@@ -37,7 +37,6 @@ from typing import Any, Final
 import boto3
 import pyarrow as pa
 import pyarrow.parquet as pq
-import redshift_connector
 
 from serving_store.interfaces.loader_interface import (
     RESERVED_COLUMNS,
@@ -232,6 +231,8 @@ class RedshiftLoader(ServingStoreLoaderInterface):
 
     def _connect(self, credentials: dict[str, str], connection_database: str) -> Any:
         """Open a redshift_connector connection with IAM auth and TLS (OWASP A02, A07)."""
+        import redshift_connector
+
         return redshift_connector.connect(
             iam=True,
             is_serverless=True,

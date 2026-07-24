@@ -36,6 +36,8 @@ import sys
 
 import boto3
 
+from contracts.identifier_policy import tenant_scoped_key
+
 # extraction_window_days is capped at 365 (contracts/entity_configuration_contract.py)
 # and only ever applies to FULL loads and to an entity's steady-state incremental
 # runs where a watermark already exists. An entity's first-ever incremental run
@@ -488,6 +490,9 @@ def seed(environment: str, region: str, dry_run: bool = False, tenant_code: str 
     for rec in records:
         # DynamoDB does not have a native None type; omit None fields.
         item: dict[str, object] = {k: v for k, v in rec.items() if v is not None}
+        # PK is the tenant-scoped composite (ARCH-1/ARCH-03), matching
+        # ConfigurationRepositoryClient so the extraction pipeline reads it back.
+        item["source_id"] = tenant_scoped_key(str(rec["tenant_code"]), str(rec["source_id"]))
         table.put_item(Item=item)  # type: ignore[arg-type]
         print(f"  Written: {rec['source_id']} / {rec['entity_id']}")
 

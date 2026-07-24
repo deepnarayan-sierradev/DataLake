@@ -72,3 +72,33 @@ output "source_onboarding_registry_table_arn" {
   description = "ARN of the source onboarding registry DynamoDB table."
   value       = aws_dynamodb_table.source_onboarding_registry.arn
 }
+
+output "twin_index_table_name" {
+  description = "Name of the twin index DynamoDB table."
+  value       = aws_dynamodb_table.twin_index.name
+}
+
+output "twin_index_table_arn" {
+  description = "ARN of the twin index DynamoDB table."
+  value       = aws_dynamodb_table.twin_index.arn
+}
+
+output "semantic_model_table_name" {
+  description = "Name of the semantic model DynamoDB table."
+  value       = aws_dynamodb_table.semantic_model.name
+}
+
+output "semantic_model_table_arn" {
+  description = "ARN of the semantic model DynamoDB table."
+  value       = aws_dynamodb_table.semantic_model.arn
+}
+
+output "saved_query_table_name" {
+  description = "Name of the saved query DynamoDB table."
+  value       = aws_dynamodb_table.saved_query.name
+}
+
+output "saved_query_table_arn" {
+  description = "ARN of the saved query DynamoDB table."
+  value       = aws_dynamodb_table.saved_query.arn
+}

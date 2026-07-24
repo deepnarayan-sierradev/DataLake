@@ -63,7 +63,7 @@ resource "aws_db_subnet_group" "serving_store" {
 
 resource "aws_security_group" "serving_store_database" {
   name        = "${local.identifier}-sg"
-  description = "Serving store RDS (${var.engine}). Ingress wired by the caller from the loader Lambda's SG."
+  description = "Serving store RDS (${var.engine}). Ingress wired by the caller from the loader Lambda SG."
   vpc_id      = var.vpc_id
 
   tags = merge(local.common_tags, { Name = "${local.identifier}-sg" })

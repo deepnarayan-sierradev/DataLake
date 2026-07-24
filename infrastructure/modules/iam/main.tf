@@ -702,6 +702,106 @@ resource "aws_iam_role_policy" "serving_store_loader_runtime" {
 }
 
 # ---------------------------------------------------------------------------
+# Twin Builder Runtime Role (BuildTwin Step Functions stage)
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "twin_build_runtime_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "twin_build_runtime" {
+  name               = "EdlTwinBuilderRuntimeRole"
+  assume_role_policy = data.aws_iam_policy_document.twin_build_runtime_assume_role.json
+  description        = "Role assumed by the twin builder Lambda to read analytics golden records and write the twin index."
+  tags               = local.common_tags
+}
+
+data "aws_iam_policy_document" "twin_build_runtime_permissions" {
+  # Read analytics golden records; write intermediate edge Parquet back to the same bucket.
+  statement {
+    sid       = "ReadAnalyticsLayer"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:ListBucket"]
+    resources = [var.analytics_layer_bucket_arn, "${var.analytics_layer_bucket_arn}/*"]
+  }
+
+  statement {
+    sid       = "WriteRelationshipEdges"
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["${var.analytics_layer_bucket_arn}/*"]
+  }
+
+  # Relationship-rules config lives alongside the entity-resolution config in the curated bucket.
+  statement {
+    sid       = "ReadRelationshipRulesConfig"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:ListBucket"]
+    resources = [var.curated_layer_bucket_arn, "${var.curated_layer_bucket_arn}/*"]
+  }
+
+  # Write the twin index; read the entity-type registry to resolve entity_id → entity_type.
+  statement {
+    sid       = "WriteTwinIndex"
+    effect    = "Allow"
+    actions   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query"]
+    resources = [var.twin_index_table_arn]
+  }
+
+  statement {
+    sid       = "ReadEntityTypeRegistry"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:Query"]
+    resources = [var.entity_type_registry_table_arn]
+  }
+
+  statement {
+    sid       = "KmsDecrypt"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    resources = var.kms_key_arns_for_transformation
+  }
+
+  statement {
+    sid     = "WriteLambdaExecutionLogs"
+    effect  = "Allow"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlTwinBuilder",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlTwinBuilder:log-stream:*",
+    ]
+  }
+
+  statement {
+    sid    = "XRayTracing"
+    effect = "Allow"
+    actions = [
+      "xray:PutTraceSegments", "xray:PutTelemetryRecords",
+      "xray:GetSamplingRules", "xray:GetSamplingTargets",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "twin_build_runtime" {
+  name   = "EdlTwinBuilderRuntimePolicy"
+  role   = aws_iam_role.twin_build_runtime.id
+  policy = data.aws_iam_policy_document.twin_build_runtime_permissions.json
+}
+
+# ---------------------------------------------------------------------------
 # Transformation Job Role
 # Assumed by AWS Glue jobs for curated layer processing.
 # ---------------------------------------------------------------------------
@@ -867,6 +967,8 @@ data "aws_iam_policy_document" "orchestration_sfn_permissions" {
       "arn:aws:lambda:${local.region}:${local.account_id}:function:EdlTransformationPipeline",
       "arn:aws:lambda:${local.region}:${local.account_id}:function:EdlEntityResolutionPipeline",
       "arn:aws:lambda:${local.region}:${local.account_id}:function:EdlAnalyticsLayerPublisher",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:EdlTwinBuilder",
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:EdlServingStoreLoader",
     ]
   }
 
@@ -1349,6 +1451,36 @@ data "aws_iam_policy_document" "control_plane_permissions" {
     effect    = "Allow"
     actions   = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan"]
     resources = [var.run_audit_log_table_arn]
+  }
+
+  # Intelligence layer: read twins and semantic models; read/write saved queries.
+  statement {
+    sid       = "ReadTwinIndex"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:Query"]
+    resources = [var.twin_index_table_arn]
+  }
+
+  statement {
+    sid       = "ReadSemanticModel"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:Query"]
+    resources = [var.semantic_model_table_arn]
+  }
+
+  statement {
+    sid       = "ReadWriteSavedQuery"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Query"]
+    resources = [var.saved_query_table_arn]
+  }
+
+  # Read analytics golden records to execute semantic queries.
+  statement {
+    sid       = "ReadAnalyticsLayer"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:ListBucket"]
+    resources = [var.analytics_layer_bucket_arn, "${var.analytics_layer_bucket_arn}/*"]
   }
 
   # Enqueue to the same SQS FIFO queue pipeline_trigger_handler.py consumes —

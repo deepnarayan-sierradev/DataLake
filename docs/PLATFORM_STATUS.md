@@ -4,12 +4,12 @@
 **Prepared by:** Platform Engineering
 
 > **Multi-tenancy note:** `tenant_code` is a first-class concept (default: `demo`, from
-> `contracts/identifier_policy.DEFAULT_TENANT_CODE`), prefixed into S3 keys for every data-plane
-> layer except the raw layer, and genuinely key-scoped in the watermark and entity-type-registry
-> DynamoDB tables. See `docs/PIPELINE_FLOW.md`'s canonical isolation-model table for the full
-> layer-by-layer picture, and `docs/KNOWN_GAPS_AND_ROADMAP.md` for what's still open (no IAM
-> enforcement anywhere, the raw-layer gap, shared Secrets Manager credentials, Glue/Athena's
-> wildcard grant).
+> `contracts/identifier_policy.DEFAULT_TENANT_CODE`), prefixed into S3 keys for **every** data-plane
+> layer (raw, curated, analytics, schema snapshots), and genuinely key-scoped in the watermark and
+> entity-type-registry DynamoDB tables. See `docs/PIPELINE_FLOW.md`'s canonical isolation-model table
+> for the full layer-by-layer picture, and `docs/KNOWN_GAPS_AND_ROADMAP.md` for what's still open (no
+> IAM enforcement anywhere — S3 prefixing is write-path convention, not a bucket-policy boundary —
+> shared Secrets Manager credentials, Glue/Athena's wildcard grant).
 
 ---
 
@@ -94,7 +94,7 @@ Sage X3, and NetSuite are still empty shells — not reachable until real creden
 
 | Layer | Pattern |
 |---|---|
-| Raw | `s3://edl-raw-087972550871/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/data.parquet` — one hyphenated source segment (`salesforce`, `netsuite`, `mysql-rds`, `sage-intacct`, `sage-x3`); no `raw/` root segment and **not tenant-prefixed** (`connector_runtime/raw_layer_writer.py::RawLayerWriter._partition_path`) — see `docs/KNOWN_GAPS_AND_ROADMAP.md` |
+| Raw | `s3://edl-raw-087972550871/{tenant_code}/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/data.parquet` — tenant-prefixed root segment (ARCH-1), then one hyphenated source segment (`salesforce`, `netsuite`, `mysql-rds`, `sage-intacct`, `sage-x3`); no `raw/` root segment (`connector_runtime/raw_layer_writer.py::RawLayerWriter._partition_path`). App-level convention, not yet IAM/bucket-policy-enforced |
 | Curated | `s3://edl-curated-087972550871/{tenant_code}/curated/{domain}/{entity_id}/curated_date=YYYY-MM-DD/run_id={run_id}/data.parquet` |
 | Golden records | `s3://edl-analytics-087972550871/{tenant_code}/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet` |
 | Analytics | `s3://edl-analytics-087972550871/{tenant_code}/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet` |

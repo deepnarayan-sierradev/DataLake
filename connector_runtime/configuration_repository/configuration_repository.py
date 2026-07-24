@@ -6,7 +6,9 @@ All records are Pydantic-validated before being returned — invalid configurati
 are rejected before the connector runtime starts.
 
 DynamoDB table: EdlEntityExtractionConfig
-  PK: source_id (str)
+  PK: source_id (str) — stores tenant_scoped_key(tenant_code, source_id) (ARCH-1/ARCH-03),
+      e.g. "demo#salesforce", so two tenants configuring the same source_id/entity_id
+      never collide on the same item. The plain source_id is restored on read.
   SK: entity_id (str)
 
 S3 path (when ConfigurationBackend.S3 is selected):
@@ -30,7 +32,12 @@ from botocore.exceptions import ClientError
 from pydantic import ValidationError
 
 from contracts.entity_configuration_contract import EntityExtractionConfig
-from contracts.identifier_policy import DEFAULT_TENANT_CODE, validate_tenant_code
+from contracts.identifier_policy import (
+    DEFAULT_TENANT_CODE,
+    strip_tenant_prefix,
+    tenant_scoped_key,
+    validate_tenant_code,
+)
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from observability.structured_logger import get_platform_logger
 
@@ -130,7 +137,7 @@ class ConfigurationRepositoryClient:
             )
         tenant_code = validate_tenant_code(tenant_code)
         if self._backend == ConfigurationBackend.DYNAMODB:
-            config = self._load_from_dynamodb(source_id, entity_id)
+            config = self._load_from_dynamodb(source_id, entity_id, tenant_code)
         else:
             config = self._load_from_s3(source_id, entity_id, tenant_code)
         self._enforce_tenant_match(config, tenant_code)
@@ -160,6 +167,10 @@ class ConfigurationRepositoryClient:
             raise NotImplementedError("save_config is only implemented for the DynamoDB backend.")
 
         item = config.model_dump(mode="json")
+        # ARCH-1/ARCH-03: the PK is the tenant-scoped composite; the plain source_id
+        # is recovered on read (from the caller's argument, or by stripping the
+        # tenant prefix in list_configs_for_tenant).
+        item["source_id"] = tenant_scoped_key(config.tenant_code, config.source_id)
         put_kwargs: dict[str, Any] = {"Item": item}
         if not overwrite:
             put_kwargs["ConditionExpression"] = (
@@ -216,6 +227,10 @@ class ConfigurationRepositoryClient:
             response = self._table.scan(**scan_kwargs)
             for item in response.get("Items", []):
                 record: dict[str, Any] = dict(item)
+                # Restore the plain source_id from the tenant-scoped PK ("demo#salesforce").
+                record["source_id"] = strip_tenant_prefix(
+                    tenant_code, str(record.get("source_id", ""))
+                )
                 try:
                     configs.append(EntityExtractionConfig(**record))
                 except ValidationError:
@@ -232,10 +247,13 @@ class ConfigurationRepositoryClient:
 
     # ── DynamoDB backend ───────────────────────────────────────────────────────
 
-    def _load_from_dynamodb(self, source_id: str, entity_id: str) -> EntityExtractionConfig:
+    def _load_from_dynamodb(
+        self, source_id: str, entity_id: str, tenant_code: str
+    ) -> EntityExtractionConfig:
+        scoped_source_id = tenant_scoped_key(tenant_code, source_id)
         try:
             response = self._table.get_item(
-                Key={"source_id": source_id, "entity_id": entity_id},
+                Key={"source_id": scoped_source_id, "entity_id": entity_id},
                 ConsistentRead=True,
             )
         except ClientError as exc:
@@ -258,7 +276,10 @@ class ConfigurationRepositoryClient:
                 f"entity_id={entity_id!r} in table {self._table_name!r}."
             )
 
-        return self._validate(source_id, entity_id, dict(item))
+        # The stored "source_id" attribute is the tenant-scoped composite key value;
+        # restore the plain source_id before constructing the model.
+        record = {**dict(item), "source_id": source_id}
+        return self._validate(source_id, entity_id, record)
 
     # ── S3 backend ─────────────────────────────────────────────────────────────
 

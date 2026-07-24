@@ -288,9 +288,7 @@ class FieldMappingRegistryClient:
             pointer: dict[str, str] = json.loads(response["Body"].read().decode("utf-8"))
             return pointer["mapping_version"]
         except self._s3.exceptions.NoSuchKey:
-            raise MappingRuleSetNotFoundError(
-                source_id, entity_id, "latest", tenant_code
-            ) from None
+            raise MappingRuleSetNotFoundError(source_id, entity_id, "latest", tenant_code) from None
         except ClientError as exc:
             code = exc.response["Error"]["Code"]
             if code in ("NoSuchKey", "404"):
@@ -300,9 +298,7 @@ class FieldMappingRegistryClient:
             raise  # access denied, throttling, network errors — propagate, do not hide
         except (json.JSONDecodeError, KeyError) as exc:
             # Malformed or incomplete pointer file — treat as not found.
-            raise MappingRuleSetNotFoundError(
-                source_id, entity_id, "latest", tenant_code
-            ) from exc
+            raise MappingRuleSetNotFoundError(source_id, entity_id, "latest", tenant_code) from exc
 
     def publish_rule_set(self, rule_set: FieldMappingRuleSet, tenant_code: str) -> str:
         """

@@ -85,7 +85,7 @@ class TestRedshiftLoaderS3Path:
     def _run(self, conn):
         loader = RedshiftLoader(_SECRET_ARN, _REGION)
         with patch(
-            "serving_store.loaders.redshift_loader.redshift_connector.connect",
+            "redshift_connector.connect",
             return_value=conn,
         ):
             return loader.load_from_s3(
@@ -163,7 +163,7 @@ class TestRedshiftLoaderS3Path:
         conn, _ = _make_connection()
         with (
             patch(
-                "serving_store.loaders.redshift_loader.redshift_connector.connect",
+                "redshift_connector.connect",
                 return_value=conn,
             ),
             pytest.raises(ServingStoreError, match="No Parquet objects"),

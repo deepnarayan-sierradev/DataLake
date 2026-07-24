@@ -54,13 +54,13 @@ Security (OWASP A03, A07, A09):
 from __future__ import annotations
 
 import os
-import re
 import time
 from typing import Any, Final
 
 import boto3
 import structlog
 
+from contracts.identifier_policy import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN
 from entity_resolution.canonical_record_publisher.canonical_record_publisher import (
@@ -94,11 +94,6 @@ _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
 )
 _KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
 # Matches curated S3 prefixes produced by the transformation stage.
-# Allows letters, digits, hyphens, underscores, slashes, and equals signs
-# (needed for Hive partition paths like curated_date=2026-06-29).
-_SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[a-zA-Z0-9][a-zA-Z0-9\-_/=\.]{0,511}$"
-)
 
 # ---------------------------------------------------------------------------
 # Module-level singleton (warm invocation cache)

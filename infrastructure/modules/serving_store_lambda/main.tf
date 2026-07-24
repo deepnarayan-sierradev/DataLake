@@ -67,6 +67,8 @@ resource "aws_security_group" "serving_store_lambda" {
 
   lifecycle {
     create_before_destroy = true
+    # 3306 egress is wired by the caller as a standalone rule; don't reconcile it away.
+    ignore_changes = [egress]
   }
 }
 

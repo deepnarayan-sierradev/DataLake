@@ -22,6 +22,9 @@ stays focused on repo-wide conventions.
   isolated at all) — the single source other docs link to instead of re-deriving it
 - `docs/KNOWN_GAPS_AND_ROADMAP.md` — the current source of truth for what's missing, broken, or
   deferred, plain language, re-verified against the code, no ID scheme
+- `docs/PLATFORM_EVOLUTION_PROGRESS.md` — **session handoff** for the in-progress twin/semantic/
+  agent/dashboards work on branch `feat/platform-evolution-phase0` (uncommitted); read it first if
+  continuing that effort. Its requirements + assessment companion is `docs/PLATFORM_EVOLUTION_SPEC.md`.
 - `.github/pull_request_template.md` — the actual quality bar (CI gates, security checklist,
   naming standard) — follow it when preparing a PR description
 - `.github/CODEOWNERS` — path-based review ownership

@@ -24,12 +24,19 @@ locals {
   # for_each key to an API Gateway v2 route_key ("METHOD /path"), matching
   # the endpoints implemented in connector_runtime/api/control_plane_handler.py.
   routes = {
-    create_tenant    = "POST /tenants"
-    list_entities    = "GET /tenants/{tenant_code}/entities"
-    create_entity    = "POST /tenants/{tenant_code}/entities"
-    trigger_pipeline = "POST /tenants/{tenant_code}/pipelines/trigger"
-    get_run          = "GET /tenants/{tenant_code}/runs/{run_id}"
-    list_runs        = "GET /tenants/{tenant_code}/runs"
+    create_tenant      = "POST /tenants"
+    list_entities      = "GET /tenants/{tenant_code}/entities"
+    create_entity      = "POST /tenants/{tenant_code}/entities"
+    trigger_pipeline   = "POST /tenants/{tenant_code}/pipelines/trigger"
+    get_run            = "GET /tenants/{tenant_code}/runs/{run_id}"
+    list_runs          = "GET /tenants/{tenant_code}/runs"
+    list_twins         = "GET /tenants/{tenant_code}/twins/{entity_type}"
+    get_twin           = "GET /tenants/{tenant_code}/twins/{entity_type}/{golden_id}"
+    run_semantic_query = "POST /tenants/{tenant_code}/semantic/query"
+    list_saved_queries = "GET /tenants/{tenant_code}/saved-queries"
+    create_saved_query = "POST /tenants/{tenant_code}/saved-queries"
+    get_saved_query    = "GET /tenants/{tenant_code}/saved-queries/{query_id}"
+    run_saved_query    = "POST /tenants/{tenant_code}/saved-queries/{query_id}/run"
   }
 }
 
@@ -224,6 +231,10 @@ resource "aws_lambda_function" "control_plane" {
       ENTITY_CONFIG_TABLE        = var.entity_config_table_name
       ENTITY_TYPE_REGISTRY_TABLE = var.entity_type_registry_table_name
       AUDIT_LOG_TABLE            = var.run_audit_log_table_name
+      ANALYTICS_S3_BUCKET        = var.analytics_s3_bucket_name
+      TWIN_INDEX_TABLE           = var.twin_index_table_name
+      SEMANTIC_MODEL_TABLE       = var.semantic_model_table_name
+      SAVED_QUERY_TABLE          = var.saved_query_table_name
       # AWS_REGION is a reserved Lambda environment variable injected
       # automatically by the runtime — Lambda rejects CreateFunction/
       # UpdateFunctionConfiguration if it's set explicitly here.

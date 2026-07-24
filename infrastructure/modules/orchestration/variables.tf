@@ -43,6 +43,12 @@ variable "serving_store_loader_lambda_arn" {
   default     = ""
 }
 
+variable "twin_build_lambda_arn" {
+  description = "ARN of the twin builder Lambda invoked by the BuildTwin stage. Leave empty to skip the stage (a Pass that continues to the serving-store stage)."
+  type        = string
+  default     = ""
+}
+
 variable "state_machine_type" {
   description = "Step Functions state machine type. Use STANDARD for staging/prod (execution history, longer timeouts). Use EXPRESS for dev (lower cost)."
   type        = string

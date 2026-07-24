@@ -46,7 +46,6 @@ Security (OWASP A03, A07, A09):
 from __future__ import annotations
 
 import io
-import re
 import time
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -56,6 +55,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import structlog
 
+from contracts.identifier_policy import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN
 from entity_resolution.entity_type_registry import EntityTypeRegistryClient
@@ -109,9 +109,6 @@ _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
     }
 )
 _KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
-_SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[a-zA-Z0-9][a-zA-Z0-9\-_/=\.]{0,511}$"
-)
 
 # PyArrow type → Glue/Athena column type string
 _ARROW_TO_GLUE_TYPE: Final[dict[str, str]] = {

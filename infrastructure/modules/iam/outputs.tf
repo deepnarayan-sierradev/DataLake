@@ -28,6 +28,11 @@ output "serving_store_loader_runtime_role_arn" {
   value       = aws_iam_role.serving_store_loader_runtime.arn
 }
 
+output "twin_build_runtime_role_arn" {
+  description = "ARN of the twin builder runtime IAM role (assumed by the twin builder Lambda)."
+  value       = aws_iam_role.twin_build_runtime.arn
+}
+
 output "transformation_job_role_arn" {
   description = "ARN of the transformation job IAM role (assumed by Glue jobs)."
   value       = aws_iam_role.transformation_job.arn

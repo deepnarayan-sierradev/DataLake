@@ -68,6 +68,26 @@ variable "run_audit_log_table_name" {
   type        = string
 }
 
+variable "analytics_s3_bucket_name" {
+  description = "Analytics layer S3 bucket. Passed as ANALYTICS_S3_BUCKET so semantic queries can read golden records."
+  type        = string
+}
+
+variable "twin_index_table_name" {
+  description = "Name of the twin index DynamoDB table."
+  type        = string
+}
+
+variable "semantic_model_table_name" {
+  description = "Name of the semantic model DynamoDB table."
+  type        = string
+}
+
+variable "saved_query_table_name" {
+  description = "Name of the saved query DynamoDB table."
+  type        = string
+}
+
 variable "cognito_password_minimum_length" {
   description = "Minimum password length enforced by the control-plane Cognito User Pool."
   type        = number

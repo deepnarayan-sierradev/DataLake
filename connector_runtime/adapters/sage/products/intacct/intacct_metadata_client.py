@@ -217,10 +217,10 @@ class IntacctMetadataClient:
         if self._cached_fields is not None:
             return self._cached_fields
 
-        # Build the models URL: {base_url}/objects/{object_path}
+        # build_auth_headers() authenticates first, which populates auth.base_url.
+        headers = self._auth.build_auth_headers()
         # object_path is validated in __init__ — safe to interpolate.
         models_url = f"{self._auth.base_url}/objects/{self._object_path}"
-        headers = self._auth.build_auth_headers()
 
         try:
             response_body = self._http.get(url=models_url, headers=headers)

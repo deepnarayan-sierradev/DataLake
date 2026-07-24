@@ -282,9 +282,10 @@ class X3MetadataClient:
         if self._cached_fields is not None:
             return self._cached_fields
 
+        # build_auth_headers() authenticates first, which populates auth.base_url.
+        headers = self._auth.build_auth_headers()
         # Build sampling URL: {base_url}/{endpoint}?$top=1
         sample_url = f"{self._auth.base_url}/{self._endpoint}"
-        headers = self._auth.build_auth_headers()
 
         try:
             response_body = self._http.get(

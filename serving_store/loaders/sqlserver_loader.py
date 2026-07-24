@@ -29,8 +29,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Final
 
-import pymssql
-
 from serving_store.interfaces.loader_interface import (
     RESERVED_COLUMNS,
     SAFE_COLUMN_PATTERN,
@@ -66,6 +64,8 @@ class SqlServerLoader(ServingStoreLoaderInterface):
     def _connect(self, credentials: dict[str, str], connection_database: str) -> Any:
         """Open a pymssql connection. Azure SQL/RDS SQL Server both mandate TLS on the
         endpoint itself; FreeTDS negotiates encryption automatically against them."""
+        import pymssql
+
         return pymssql.connect(
             server=credentials["host"],
             port=str(credentials.get("port", self.default_port)),
@@ -197,9 +197,7 @@ class SqlServerLoader(ServingStoreLoaderInterface):
         )
         row_placeholder = "(" + ", ".join(["%s"] * len(all_columns)) + ")"
         now = datetime.now(UTC).isoformat()
-        rows = [
-            (*(record.get(c) for c in columns), row_hash, now) for record, row_hash in changed
-        ]
+        rows = [(*(record.get(c) for c in columns), row_hash, now) for record, row_hash in changed]
 
         total = 0
         with connection.cursor() as cur:

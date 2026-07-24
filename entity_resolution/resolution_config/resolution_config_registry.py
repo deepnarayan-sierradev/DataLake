@@ -209,9 +209,7 @@ class ResolutionConfigRegistry:
 
         # Trailing "/" avoids a false-positive match (e.g. "company" vs "company-extra").
         cache_prefix = f"{tenant_code}/{entity_type}/"
-        self._cache = {
-            k: v for k, v in self._cache.items() if not k.startswith(cache_prefix)
-        }
+        self._cache = {k: v for k, v in self._cache.items() if not k.startswith(cache_prefix)}
 
         _logger.info(
             "resolution_config_published",
