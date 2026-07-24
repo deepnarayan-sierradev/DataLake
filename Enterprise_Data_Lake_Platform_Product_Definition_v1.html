@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Enterprise Data Lake Platform — High-Level Product Definition</title>
+<style>
+  :root {
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+
+    --ground:   #eef1f7;
+    --panel:    #ffffff;
+    --panel-2:  #f6f8fc;
+    --ink:      #0f1b33;
+    --body:     #35435e;
+    --muted:    #6b7a99;
+    --line:     #e2e8f2;
+    --line-2:   #d5deec;
+
+    --primary:  #1e40af;
+    --primary-2:#2f5bd6;
+    --primary-3:#3b82f6;
+    --accent:   #d97706;
+    --good:     #15803d;
+    --hold:     #b45309;
+
+    /* sequential blue ramp for the four data strata (raw -> serving) */
+    --l1:#93c5fd; --l2:#60a5fa; --l3:#3b82f6; --l4:#1e40af;
+
+    --header-bg:#0f1b33;
+    --header-fg:#c8d3ea;
+
+    --shadow: 0 1px 2px rgba(15,27,51,.06), 0 8px 28px rgba(15,27,51,.06);
+    --radius: 12px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#070c17; --panel:#0f172a; --panel-2:#111c33;
+      --ink:#eef2fb; --body:#b6c2da; --muted:#8595b4;
+      --line:#20304c; --line-2:#2a3d5e;
+      --primary:#3b82f6; --primary-2:#5b8def; --primary-3:#7ca8f5;
+      --accent:#f59e0b;
+      --header-bg:#060a13; --header-fg:#aebbd6;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground:#eef1f7; --panel:#ffffff; --panel-2:#f6f8fc;
+    --ink:#0f1b33; --body:#35435e; --muted:#6b7a99; --line:#e2e8f2; --line-2:#d5deec;
+    --primary:#1e40af; --primary-2:#2f5bd6; --primary-3:#3b82f6; --accent:#d97706;
+    --header-bg:#0f1b33; --header-fg:#c8d3ea;
+  }
+  :root[data-theme="dark"] {
+    --ground:#070c17; --panel:#0f172a; --panel-2:#111c33;
+    --ink:#eef2fb; --body:#b6c2da; --muted:#8595b4; --line:#20304c; --line-2:#2a3d5e;
+    --primary:#3b82f6; --primary-2:#5b8def; --primary-3:#7ca8f5; --accent:#f59e0b;
+    --header-bg:#060a13; --header-fg:#aebbd6;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--ground); color: var(--body);
+    font-family: var(--font-sans); line-height: 1.55;
+    font-size: 15px; letter-spacing: .002em;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .doc { max-width: 1060px; margin: 0 auto; padding: 32px 20px 64px; }
+
+  /* ---- Page shell ---- */
+  .page {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin: 0 0 30px;
+    overflow: hidden;
+  }
+  .page__bar {
+    display: flex; justify-content: space-between; align-items: center; gap: 16px;
+    background: var(--header-bg); color: var(--header-fg);
+    padding: 11px 26px; font-size: 10.5px; font-weight: 700;
+    letter-spacing: .22em; text-transform: uppercase;
+  }
+  .page__bar .r { color: #7f8fb0; font-weight: 600; }
+  .page__body { padding: 30px 34px 36px; }
+
+  /* ---- Type ---- */
+  .eyebrow {
+    font-size: 11px; font-weight: 800; letter-spacing: .26em; text-transform: uppercase;
+    color: var(--primary); margin: 0 0 10px;
+  }
+  h1.title {
+    font-size: 40px; line-height: 1.03; font-weight: 800; letter-spacing: -.02em;
+    color: var(--ink); margin: 0; text-wrap: balance;
+  }
+  h2.section {
+    font-size: 25px; font-weight: 800; letter-spacing: -.015em; color: var(--ink);
+    margin: 0 0 6px; text-wrap: balance;
+  }
+  .lede { font-size: 15.5px; color: var(--body); max-width: 66ch; margin: 8px 0 0; }
+  .kicker-lede { font-size: 14px; color: var(--muted); max-width: 74ch; margin: 4px 0 0; }
+  p { margin: 0 0 12px; }
+  .mono { font-family: var(--font-mono); font-size: .86em; color: var(--primary-2); }
+  :root[data-theme="dark"] .mono, @media (prefers-color-scheme: dark){ .mono{ color: var(--primary-3);} }
+  strong { color: var(--ink); font-weight: 700; }
+
+  .divider { height:1px; background: var(--line); border:0; margin: 26px 0; }
+
+  /* ---- Vision block ---- */
+  .vision { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; flex-wrap:wrap; }
+  .badge-draft {
+    flex: none; align-self:flex-start;
+    border:1.5px solid var(--primary); color: var(--primary);
+    font-size:11px; font-weight:800; letter-spacing:.18em; text-transform:uppercase;
+    padding:7px 12px; border-radius:6px; white-space:nowrap;
+  }
+
+  /* ---- Backbone facets ---- */
+  .backbone-head { display:flex; align-items:center; gap:14px; margin: 0 0 4px; }
+  .bb-mark {
+    width:44px; height:44px; flex:none; border-radius:10px;
+    background: linear-gradient(150deg, var(--primary), var(--primary-3));
+    color:#fff; display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:20px; box-shadow: 0 4px 12px rgba(30,64,175,.28);
+  }
+  .facets { display:grid; grid-template-columns: repeat(4, 1fr); gap:14px; margin-top:18px; }
+  .facet {
+    background: var(--panel-2); border:1px solid var(--line);
+    border-radius:10px; padding:15px 15px 16px; position:relative;
+  }
+  .facet .n { font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--primary); letter-spacing:.05em; }
+  .facet h4 { margin:6px 0 5px; font-size:14px; color:var(--ink); font-weight:800; letter-spacing:-.01em; }
+  .facet p { margin:0; font-size:12.5px; color:var(--muted); line-height:1.45; }
+
+  /* ---- Self-service callout ---- */
+  .callout {
+    display:flex; gap:16px; align-items:flex-start;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border:1px solid var(--line-2); border-left:4px solid var(--primary);
+    border-radius:10px; padding:16px 18px; margin-top:22px;
+  }
+  .callout .ico {
+    width:38px;height:38px;flex:none;border-radius:9px;background:var(--primary);
+    color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;letter-spacing:.02em;
+  }
+  .callout h4 { margin:0 0 3px; font-size:15px; color:var(--ink); font-weight:800; }
+  .callout p { margin:0; font-size:13px; color:var(--body); }
+
+  /* ---- Lifecycle flow ---- */
+  .flow-wrap { margin-top:26px; }
+  .flow-label { font-size:11px; font-weight:800; letter-spacing:.24em; text-transform:uppercase; color:var(--muted); margin-bottom:12px; }
+  .flow { display:flex; align-items:stretch; gap:0; overflow-x:auto; padding-bottom:4px; }
+  .step { flex:1 1 0; min-width:104px; text-align:center; position:relative; padding:0 6px; }
+  .step .dot {
+    width:34px;height:34px;margin:0 auto 8px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px;
+    background:var(--primary-2);
+  }
+  .step:nth-child(1) .dot{background:#64748b;}
+  .step:nth-child(3) .dot{background:var(--l1);}
+  .step:nth-child(5) .dot{background:var(--l2);}
+  .step:nth-child(7) .dot{background:var(--l3);}
+  .step:nth-child(9) .dot{background:var(--l4);}
+  .step h5 { margin:0 0 2px; font-size:12.5px; color:var(--ink); font-weight:800; }
+  .step p { margin:0; font-size:11px; color:var(--muted); line-height:1.35; }
+  .arrow { flex:0 0 20px; display:flex; align-items:flex-start; justify-content:center; padding-top:9px; color:var(--line-2); font-weight:800; }
+  .arrow svg{width:18px;height:18px;}
+  .flow-foot { font-size:12px; color:var(--muted); margin-top:14px; border-top:1px dashed var(--line-2); padding-top:12px; }
+
+  /* ---- Module model ---- */
+  .mod-backbone {
+    display:flex; gap:16px; align-items:center;
+    background: linear-gradient(120deg, rgba(30,64,175,.10), rgba(59,130,246,.05));
+    border:1px solid var(--line-2); border-radius:11px; padding:16px 18px; margin:20px 0 18px;
+  }
+  .mod-backbone .tag {
+    width:46px;height:46px;flex:none;border-radius:11px;background:var(--ink);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;
+  }
+  .mod-backbone h4{margin:0 0 3px;font-size:15.5px;color:var(--ink);font-weight:800;}
+  .mod-backbone p{margin:0;font-size:12.5px;color:var(--body);}
+  .mod-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:13px; }
+  .mod {
+    display:flex; gap:13px; background:var(--panel-2); border:1px solid var(--line);
+    border-radius:10px; padding:14px 15px;
+  }
+  .mod .lt {
+    width:32px;height:32px;flex:none;border-radius:8px;
+    background:var(--panel); border:1.5px solid var(--primary); color:var(--primary);
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;
+  }
+  .mod h4 { margin:1px 0 4px; font-size:13.5px; color:var(--ink); font-weight:800; letter-spacing:-.01em; }
+  .mod p { margin:0; font-size:12px; color:var(--muted); line-height:1.44; }
+  .principle-note { font-size:12.5px; color:var(--muted); margin-top:20px; border-top:1px dashed var(--line-2); padding-top:13px; }
+  .principle-note strong{color:var(--ink);}
+
+  /* ---- Architecture ---- */
+  .arch { display:grid; grid-template-columns: 1fr 1.35fr 1fr; gap:14px; margin-top:22px; align-items:stretch; }
+  .arch-col { background:var(--panel-2); border:1px solid var(--line); border-radius:11px; padding:15px 15px 16px; }
+  .arch-col.mid { background: linear-gradient(180deg, rgba(30,64,175,.07), var(--panel-2)); border-color:var(--line-2); }
+  .arch-col h5 { margin:0 0 12px; font-size:10.5px; font-weight:800; letter-spacing:.18em; text-transform:uppercase; color:var(--primary); }
+  .arch-col.mid h5{ color:var(--primary-2); }
+  .node {
+    display:flex; gap:10px; align-items:flex-start; background:var(--panel);
+    border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin-bottom:8px;
+  }
+  .node:last-child{margin-bottom:0;}
+  .node .k { font-size:9px;font-weight:800;letter-spacing:.02em;color:#fff;background:var(--primary-2);
+    border-radius:5px; padding:3px 5px; flex:none; min-width:26px; text-align:center; margin-top:1px;}
+  .node .k.aws{ background:var(--accent); }
+  .node .k.dl{ background:var(--ink); }
+  .node b { display:block; font-size:12.5px; color:var(--ink); font-weight:700; }
+  .node span { font-size:11px; color:var(--muted); line-height:1.35; display:block; }
+  .arch-flowline { text-align:center; color:var(--muted); font-size:11px; letter-spacing:.1em; margin:6px 0 0; text-transform:uppercase; font-weight:700;}
+
+  .cplane {
+    margin-top:14px; display:flex; gap:14px; align-items:center;
+    background: linear-gradient(120deg, var(--ink), #1c2c4c); color:#dfe7f7;
+    border-radius:11px; padding:15px 18px;
+  }
+  .cplane .ico{width:42px;height:42px;flex:none;border-radius:10px;background:rgba(255,255,255,.12);
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;color:#fff;}
+  .cplane h5{margin:0 0 3px;font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:#9db4e6;font-weight:800;}
+  .cplane p{margin:0;font-size:12.5px;color:#cdd8ee;}
+  .cplane b{color:#fff;}
+
+  /* ---- Design principles ---- */
+  .principles { display:grid; grid-template-columns:repeat(6,1fr); gap:11px; margin-top:24px; }
+  .pr { text-align:left; }
+  .pr .h { font-size:12.5px; font-weight:800; color:var(--ink); letter-spacing:-.01em; margin-bottom:2px; }
+  .pr .s { font-size:11px; color:var(--muted); line-height:1.35; }
+  .pr .bar { height:3px; width:26px; border-radius:2px; background:var(--primary); margin-bottom:8px; }
+
+  /* ---- Status page ---- */
+  .stat-row { display:grid; grid-template-columns: repeat(6,1fr); gap:12px; margin:22px 0 6px; }
+  .stat { background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:13px 12px; text-align:center; }
+  .stat .num { font-size:26px; font-weight:800; color:var(--primary); letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+  .stat .lbl { font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; font-weight:700; margin-top:2px; }
+
+  table.src { width:100%; border-collapse:collapse; margin:20px 0 6px; font-size:12.5px; }
+  table.src th { text-align:left; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+    padding:8px 10px; border-bottom:2px solid var(--line-2); font-weight:800; }
+  table.src td { padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--body); }
+  table.src tr:last-child td{border-bottom:0;}
+  table.src td b{color:var(--ink);}
+  .pill { display:inline-block; font-size:10px; font-weight:800; letter-spacing:.03em; padding:3px 8px; border-radius:20px; white-space:nowrap; }
+  .pill.live { background:rgba(21,128,61,.12); color:var(--good); }
+  .pill.ready{ background:rgba(180,83,9,.13); color:var(--hold); }
+  .pill.plan { background:rgba(107,122,153,.15); color:var(--muted); }
+  :root[data-theme="dark"] .pill.live,@media(prefers-color-scheme:dark){.pill.live{background:rgba(34,197,94,.15);color:#4ade80;}}
+
+  .strata { display:grid; grid-template-columns:repeat(4,1fr); gap:0; margin-top:22px; border-radius:10px; overflow:hidden; border:1px solid var(--line-2); }
+  .stratum { padding:14px 15px; color:#fff; }
+  .stratum:nth-child(1){background:var(--l1);} .stratum:nth-child(2){background:var(--l2);}
+  .stratum:nth-child(3){background:var(--l3);} .stratum:nth-child(4){background:var(--l4);}
+  .stratum h5{margin:0 0 4px;font-size:13px;font-weight:800;letter-spacing:.02em;}
+  .stratum p{margin:0;font-size:11px;line-height:1.4;color:rgba(255,255,255,.9);}
+  .stratum:nth-child(1) h5,.stratum:nth-child(1) p,.stratum:nth-child(2) h5{color:#0f1b33;}
+  .stratum:nth-child(1) p{color:rgba(15,27,51,.72);}
+
+  .note { font-size:11.5px; color:var(--muted); margin-top:20px; border-top:1px dashed var(--line-2); padding-top:13px; }
+
+  footer.docfoot { text-align:center; color:var(--muted); font-size:11px; padding:6px 0 0; letter-spacing:.02em; }
+
+  .med { font-weight:600; color:var(--muted); }
+
+  /* ---- Planned AI module card (full width) ---- */
+  .mod--planned {
+    border-style:dashed; border-color:var(--primary-2);
+    background: linear-gradient(120deg, rgba(30,64,175,.08), rgba(59,130,246,.03));
+    margin-top:13px;
+  }
+  .mod--planned .lt { background:var(--primary); color:#fff; border-color:var(--primary); font-size:12px; }
+  .tag-plan {
+    display:inline-block; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--primary-2); border:1px solid var(--primary-2); border-radius:20px; padding:2px 7px; margin-left:7px; vertical-align:middle;
+  }
+
+  /* ---- Roadmap / plan ---- */
+  .plan { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:12px; }
+  .plan-card { background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:13px 15px; }
+  .plan-card.accent { border-color:var(--primary-2); background:linear-gradient(180deg, rgba(30,64,175,.09), var(--panel-2)); }
+  .plan-card .ph { font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--primary); margin-bottom:8px; }
+  .plan-card ul { margin:0; padding-left:16px; }
+  .plan-card li { font-size:11.5px; color:var(--body); line-height:1.42; margin-bottom:5px; }
+  .plan-card li:last-child { margin-bottom:0; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 860px) {
+    .facets{grid-template-columns:repeat(2,1fr);}
+    .mod-grid{grid-template-columns:1fr;}
+    .arch{grid-template-columns:1fr;}
+    .principles{grid-template-columns:repeat(2,1fr);}
+    .stat-row{grid-template-columns:repeat(3,1fr);}
+    .strata{grid-template-columns:1fr 1fr;}
+    .plan{grid-template-columns:1fr;}
+    h1.title{font-size:32px;}
+  }
+
+  /* ---- Print: one panel per sheet, single uniform scale that preserves the on-screen layout ---- */
+  @media print {
+    :root{ --ground:#fff; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html, body { background:#fff; }
+    .doc{ max-width:none; margin:0; padding:0; }
+
+    /* Each panel renders at its true on-screen design width (1020px) on an oversized sheet
+       of Letter aspect; the whole PDF is then down-scaled uniformly to Letter, so it is
+       proportionally identical to the HTML — no per-page zoom, no font shrinking, no distortion. */
+    .page{
+      width:1020px; margin:40px auto;
+      border:1px solid var(--line-2); border-radius:16px;
+      box-shadow:none; overflow:hidden;
+      break-inside:avoid; page-break-inside:avoid;
+      break-after:page; page-break-after:always;
+    }
+    .page:last-of-type{ break-after:auto; page-break-after:auto; }
+
+    /* never split a card, band, row or table across a sheet */
+    .mod-backbone, .mod, .mod-grid, .facet, .facets, .callout, .flow, .flow-wrap,
+    .arch, .arch-col, .cplane, .principles, .pr, .strata, .stratum, .plan, .plan-card,
+    .stat-row, .stat, table.src, .backbone-head, .vision {
+      break-inside:avoid; page-break-inside:avoid;
+    }
+
+    /* print viewport trips the mobile breakpoint — force the desktop multi-column grids
+       so the PDF layout matches the on-screen HTML exactly */
+    .facets{ grid-template-columns:repeat(4,1fr); }
+    .mod-grid{ grid-template-columns:repeat(2,1fr); }
+    .arch{ grid-template-columns:1fr 1.35fr 1fr; }
+    .principles{ grid-template-columns:repeat(6,1fr); }
+    .stat-row{ grid-template-columns:repeat(6,1fr); }
+    .strata{ grid-template-columns:repeat(4,1fr); }
+    .plan{ grid-template-columns:repeat(3,1fr); }
+
+    /* the 7-step flow fills the panel width without a scrollbar */
+    .flow{ overflow:visible; }
+    .step{ min-width:0; }
+
+    a{ color:inherit; text-decoration:none; }
+    footer.docfoot{ display:none; }
+    /* oversized sheet, Letter aspect ratio (8.5:11); fitz down-scales the PDF to Letter */
+    @page{ size:10.88in 14.08in; margin:0; }
+  }
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <!-- ============ PAGE 1 — VISION + BACKBONE ============ -->
+  <section class="page">
+    <div class="page__bar"><span>Enterprise Data Lake Platform</span><span class="r">High-Level Product Definition</span></div>
+    <div class="page__body">
+
+      <p class="eyebrow">Product Vision</p>
+      <div class="vision">
+        <div style="flex:1 1 420px;">
+          <h1 class="title">Enterprise Data&nbsp;Lake Platform</h1>
+          <p class="lede">A governed, metadata-driven pipeline that turns siloed source systems into one
+          trusted, entity-resolved analytics foundation — connected into a <strong>digital twin</strong>, exposed
+          through a governed <strong>semantic layer</strong>, and paired with a self-service control plane that
+          lets each tenant configure it without engineering.</p>
+        </div>
+        <span class="badge-draft">Draft&nbsp;V1</span>
+      </div>
+
+      <hr class="divider" />
+
+      <p class="eyebrow">The Backbone</p>
+      <div class="backbone-head">
+        <div class="bb-mark">DL</div>
+        <div>
+          <h2 class="section">The Governed Pipeline</h2>
+        </div>
+      </div>
+      <p class="kicker-lede">One metadata-driven backbone carries every record from source system to trusted
+      analytics — extraction, quality, resolution, the digital twin, a semantic layer and serving — tenant-scoped
+      and fully audited from end to end.</p>
+
+      <div class="facets">
+        <div class="facet">
+          <div class="n">01</div>
+          <h4>Metadata &amp; configuration</h4>
+          <p>Connectors, entities, field mappings and tenant config live as versioned data. New sources onboard by configuration, not code.</p>
+        </div>
+        <div class="facet">
+          <div class="n">02</div>
+          <h4>Ingestion lifecycle</h4>
+          <p>Scheduled extraction, watermark-based delta sync, an immutable raw layer and schema-drift detection on every run.</p>
+        </div>
+        <div class="facet">
+          <div class="n">03</div>
+          <h4>Trust &amp; governance</h4>
+          <p>Data-quality gates, PII masking, lineage, retention and legal hold, behind a six-gate source-onboarding workflow.</p>
+        </div>
+        <div class="facet">
+          <div class="n">04</div>
+          <h4>Twin, semantics &amp; serving</h4>
+          <p>Golden records connected into a digital twin, exposed through a governed semantic layer, and delivered to a multi-engine serving store.</p>
+        </div>
+      </div>
+
+      <div class="callout">
+        <div class="ico">SS</div>
+        <div>
+          <h4>Self-Service Configuration</h4>
+          <p>Tenant users configure connectors, mappings, resolution rules, schedules and serving stores through a
+          permission-gated web console — with draft/publish, dry-run validation and maker-checker approval. Engineering
+          is no longer in the loop for onboarding.</p>
+        </div>
+      </div>
+
+      <div class="flow-wrap">
+        <div class="flow-label">From Source to Insight — the record lifecycle</div>
+        <div class="flow">
+          <div class="step"><div class="dot">1</div><h5>Source</h5><p>CRM, ERP &amp; transactional systems</p></div>
+          <div class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          <div class="step"><div class="dot">2</div><h5>Extract</h5><p>Watermark delta sync</p></div>
+          <div class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          <div class="step"><div class="dot">3</div><h5>Raw <span class="med">(Bronze)</span></h5><p>Immutable, as-received</p></div>
+          <div class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          <div class="step"><div class="dot">4</div><h5>Curated <span class="med">(Silver)</span></h5><p>Mapped, quality-checked, masked</p></div>
+          <div class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          <div class="step"><div class="dot">5</div><h5>Analytics <span class="med">(Gold)</span></h5><p>Entity-resolved golden records</p></div>
+          <div class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          <div class="step"><div class="dot">6</div><h5>Digital Twin</h5><p>Entity + relationships + lifecycle</p></div>
+          <div class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+          <div class="step"><div class="dot">7</div><h5>Serving</h5><p>BI, apps &amp; semantic queries</p></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ PAGE 2 — MODULAR PRODUCT MODEL ============ -->
+  <section class="page">
+    <div class="page__bar"><span>Enterprise Data Lake Platform</span><span class="r">High-Level Product Definition</span></div>
+    <div class="page__body">
+
+      <p class="eyebrow">Modular Product Model</p>
+      <h2 class="section">Composable modules on one pipeline</h2>
+      <p class="kicker-lede">Each module is an independently deployable part of the same metadata-driven platform —
+      sharing one tenant model, one versioned configuration system and one audit trail.</p>
+
+      <div class="mod-backbone">
+        <div class="tag">CR</div>
+        <div>
+          <h4>Connector Runtime &amp; Orchestration Backbone</h4>
+          <p>Adapter-and-registry source connectors (Salesforce, MySQL RDS, NetSuite, Sage Intacct, Sage X3) driven by
+          EventBridge&nbsp;&rarr;&nbsp;SQS&nbsp;FIFO&nbsp;&rarr;&nbsp;Step&nbsp;Functions&nbsp;&rarr;&nbsp;Lambda, with watermark delta sync and an immutable raw layer.</p>
+        </div>
+      </div>
+
+      <div class="mod-grid">
+        <div class="mod"><div class="lt">T</div><div>
+          <h4>Transformation &amp; Data Quality</h4>
+          <p>Versioned field mapping, type-casting, PII masking, quality gates (null/range/pattern/enum) and SCD&nbsp;Type-1 merge.</p></div></div>
+
+        <div class="mod"><div class="lt">R</div><div>
+          <h4>Entity Resolution &amp; Golden Records</h4>
+          <p>Deterministic and probabilistic matching with config-driven survivorship, field provenance and stable golden IDs.</p></div></div>
+
+        <div class="mod"><div class="lt">S</div><div>
+          <h4>Serving Store</h4>
+          <p>Five engines — MySQL, PostgreSQL, SQL&nbsp;Server, Azure&nbsp;SQL, Redshift — with idempotent upsert and per-tenant isolation.</p></div></div>
+
+        <div class="mod"><div class="lt">G</div><div>
+          <h4>Governance &amp; Observability</h4>
+          <p>Six-gate onboarding, classification, lineage, retention and legal hold; structured logs, metrics, tracing and a DLQ with replay.</p></div></div>
+
+        <div class="mod"><div class="lt">C</div><div>
+          <h4>Control Plane &amp; Console</h4>
+          <p>Cognito/JWT API plus a self-service React console — draft/publish, dry-run validation, maker-checker approval and monitoring.</p></div></div>
+
+        <div class="mod"><div class="lt">TW</div><div>
+          <h4>Digital Twin</h4>
+          <p>Connects golden records into one entity with its relationships, lifecycle and rollups — a 360° view per company, contract and supplier.</p></div></div>
+
+        <div class="mod"><div class="lt">SM</div><div>
+          <h4>Semantic Layer</h4>
+          <p>Governed metrics, dimensions and joins over the golden layer, so every tool and query computes the same numbers the same way.</p></div></div>
+
+        <div class="mod"><div class="lt">AI</div><div>
+          <h4>Conversational Agent</h4>
+          <p>Natural-language questions become governed answers through a verification loop, with saved, re-runnable named queries.</p></div></div>
+
+        <div class="mod"><div class="lt">DB</div><div>
+          <h4>Dashboards &amp; Reporting</h4>
+          <p>Tenant-scoped, permission-aware dashboards built on saved semantic queries — one consistent set of governed definitions.</p></div></div>
+      </div>
+
+
+    </div>
+  </section>
+
+  <!-- ============ PAGE 3 — ENTERPRISE ARCHITECTURE ============ -->
+  <section class="page">
+    <div class="page__bar"><span>Enterprise Data Lake Platform</span><span class="r">High-Level Product Definition</span></div>
+    <div class="page__body">
+
+      <p class="eyebrow">Enterprise Architecture</p>
+      <h2 class="section">One pipeline. One control plane. One intelligence layer.</h2>
+      <p class="kicker-lede">Serverless AWS services carry data from systems of record through governed layers to
+      analytics and serving, while a self-service control plane configures every tenant.</p>
+
+      <div class="arch">
+        <div class="arch-col">
+          <h5>Systems of Record</h5>
+          <div class="node"><span class="k">SF</span><div><b>Salesforce</b><span>CRM · accounts, contacts, opportunities</span></div></div>
+          <div class="node"><span class="k">DB</span><div><b>MySQL RDS</b><span>Transactional · contracts &amp; terms</span></div></div>
+          <div class="node"><span class="k">NS</span><div><b>NetSuite</b><span>ERP — SuiteQL</span></div></div>
+          <div class="node"><span class="k">SG</span><div><b>Sage (Intacct + X3)</b><span>Cloud &amp; enterprise ERP · customers, vendors, AR/AP</span></div></div>
+        </div>
+
+        <div class="arch-col mid">
+          <h5>Pipeline &amp; Orchestration</h5>
+          <div class="node"><span class="k aws">EVT</span><div><b>EventBridge &rarr; SQS FIFO &rarr; Step Functions</b><span>Scheduled, chained state machine over 8 Lambdas</span></div></div>
+          <div class="node"><span class="k aws">S3</span><div><b>S3 data layers</b><span>Raw/Bronze &middot; Curated/Silver &middot; Analytics/Gold — Parquet + KMS</span></div></div>
+          <div class="node"><span class="k aws">DDB</span><div><b>DynamoDB state</b><span>Config · watermarks · audit · registries</span></div></div>
+          <div class="node"><span class="k aws">SEC</span><div><b>Secrets Manager + KMS</b><span>Per-source credentials · encryption (KMS/TLS)</span></div></div>
+          <div class="node"><span class="k aws">GLU</span><div><b>Glue Catalog + Athena</b><span>Catalogued, partitioned, SQL-queryable</span></div></div>
+        </div>
+
+        <div class="arch-col">
+          <h5>Intelligence &amp; Serving</h5>
+          <div class="node"><span class="k">GR</span><div><b>Golden records</b><span>Entity-resolved masters with provenance</span></div></div>
+          <div class="node"><span class="k">TW</span><div><b>Digital Twin</b><span>Connected entities, relationships &amp; rollups</span></div></div>
+          <div class="node"><span class="k">SM</span><div><b>Semantic Layer</b><span>Governed metrics, dimensions &amp; joins</span></div></div>
+          <div class="node"><span class="k">AI</span><div><b>Conversational Agent</b><span>NL questions &rarr; governed answers, saved queries</span></div></div>
+          <div class="node"><span class="k">SRV</span><div><b>Serving &amp; BI</b><span>5 engines + Athena / QuickSight dashboards</span></div></div>
+        </div>
+      </div>
+
+      <div class="cplane">
+        <div class="ico">CP</div>
+        <div>
+          <h5>Configuration Control Plane &nbsp;&middot;&nbsp; companion capability</h5>
+          <p><b>datalake-config-service</b> (FastAPI / Pydantic, JWT-secured) + the <b>CST-UI</b> React console — a
+          self-service, permission-gated, maker-checker configuration authority that writes directly into the platform's
+          own datastores — delivered inside the same enterprise suite as the Franchise Operations Suite.</p>
+        </div>
+      </div>
+
+      <p class="eyebrow" style="margin-top:26px;">Design Principles</p>
+      <div class="principles">
+        <div class="pr"><div class="bar"></div><div class="h">Metadata-driven</div><div class="s">Zero-code source onboarding</div></div>
+        <div class="pr"><div class="bar"></div><div class="h">Security-first</div><div class="s">Least-privilege IAM, KMS, OWASP-cited controls</div></div>
+        <div class="pr"><div class="bar"></div><div class="h">Multi-tenant</div><div class="s">Tenant-scoped end to end</div></div>
+        <div class="pr"><div class="bar"></div><div class="h">Config-over-code</div><div class="s">Versioned JSON, no redeploy</div></div>
+        <div class="pr"><div class="bar"></div><div class="h">Governed</div><div class="s">Lineage, audit, retention, quality gates</div></div>
+        <div class="pr"><div class="bar"></div><div class="h">Cloud-native</div><div class="s">Serverless AWS, Terraform IaC</div></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ PAGE 4 — CONNECTED SOURCES & CURRENT STATUS ============ -->
+  <section class="page">
+    <div class="page__bar"><span>Enterprise Data Lake Platform</span><span class="r">High-Level Product Definition</span></div>
+    <div class="page__body">
+
+      <p class="eyebrow">Platform Status &amp; Roadmap</p>
+      <h2 class="section">Where the platform stands — and where it's going</h2>
+      <p class="kicker-lede">Dev is deployed and the pipeline runs end-to-end for its two connected sources. Staging and
+      production are not yet provisioned. Figures below reflect the Dev environment — not a production benchmark.</p>
+
+      <div class="stat-row">
+        <div class="stat"><div class="num">5</div><div class="lbl">Connectors</div></div>
+        <div class="stat"><div class="num">9</div><div class="lbl">Entity types</div></div>
+        <div class="stat"><div class="num">5</div><div class="lbl">Serving engines</div></div>
+        <div class="stat"><div class="num">8</div><div class="lbl">Lambdas</div></div>
+        <div class="stat"><div class="num">9</div><div class="lbl">DynamoDB tables</div></div>
+        <div class="stat"><div class="num">3</div><div class="lbl">Environments</div></div>
+      </div>
+
+      <table class="src">
+        <thead><tr><th>Source</th><th>Type</th><th>Status</th><th>Entities</th><th>Extraction</th></tr></thead>
+        <tbody>
+          <tr><td><b>Salesforce</b></td><td>CRM</td><td><span class="pill live">Live</span></td>
+              <td>Account (34), Contact, Opportunity, Contract</td><td>Bulk API 2.0 · incremental</td></tr>
+          <tr><td><b>MySQL RDS</b></td><td>Transactional</td><td><span class="pill live">Live</span></td>
+              <td>Contracts (36,023), Contract Terms</td><td>JDBC · incremental</td></tr>
+          <tr><td><b>Sage Intacct</b></td><td>Cloud ERP</td><td><span class="pill ready">Ready</span></td>
+              <td>Customer, Vendor, AR Invoice, AP Bill</td><td>REST / OAuth 2.0</td></tr>
+          <tr><td><b>Sage X3</b></td><td>Enterprise ERP</td><td><span class="pill ready">Ready</span></td>
+              <td>Customer, Supplier</td><td>OData v4 / OAuth 2.0</td></tr>
+          <tr><td><b>NetSuite</b></td><td>ERP</td><td><span class="pill ready">Ready</span></td>
+              <td>Customer</td><td>SuiteQL REST</td></tr>
+        </tbody>
+      </table>
+
+      <p class="eyebrow" style="margin-top:20px;">The Four Data Layers</p>
+      <div class="strata">
+        <div class="stratum"><h5>Raw (Bronze)</h5><p>Every source record exactly as received. Immutable, Object-Lock, 7-year retention.</p></div>
+        <div class="stratum"><h5>Curated (Silver)</h5><p>Canonical field names, quality-checked, PII-masked. Full current-state per entity.</p></div>
+        <div class="stratum"><h5>Analytics (Gold)</h5><p>Entity-resolved golden records that power the Digital Twin and semantic layer — Glue-catalogued and Athena-queryable.</p></div>
+        <div class="stratum"><h5>Serving</h5><p>Relational export for BI &amp; apps — Redshift, MySQL, PostgreSQL, SQL Server, Azure SQL.</p></div>
+      </div>
+
+      <p class="eyebrow" style="margin-top:24px;">The Plan Ahead</p>
+      <div class="plan">
+        <div class="plan-card">
+          <div class="ph">Now — activating</div>
+          <ul>
+            <li>Connect Sage Intacct, Sage X3 &amp; NetSuite (credentials + entity config)</li>
+            <li>Onboard the first pilot tenant via the self-service console</li>
+            <li>Deploy staging &amp; production environments</li>
+          </ul>
+        </div>
+        <div class="plan-card">
+          <div class="ph">Next — hardening</div>
+          <ul>
+            <li>Deploy the multi-engine serving store &amp; a secure BI network path</li>
+            <li>Wire the Digital Twin build stage &amp; semantic query endpoints into the pipeline</li>
+            <li>Close remaining tenant-isolation gaps toward IAM enforcement</li>
+          </ul>
+        </div>
+        <div class="plan-card accent">
+          <div class="ph">Ahead — deepening intelligence</div>
+          <ul>
+            <li>Automated insights &amp; anomaly detection on the golden layer</li>
+            <li>Graph-backed twin — value rollups &amp; lifecycle history</li>
+            <li>ML feature store, more connectors &amp; real-time CDC</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer class="docfoot">
+    Enterprise Data Lake Platform · High-Level Product Definition · Draft V1 · 2026-07-23 · Internal —
+    see the accompanying PDF for the print-ready copy.
+  </footer>
+
+</div>
+</body>
+</html>
