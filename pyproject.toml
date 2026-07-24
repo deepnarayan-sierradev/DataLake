@@ -52,6 +52,10 @@ packages = [
     "governance",
     "analytics_publisher",
     "serving_store",
+    "processing_engine",
+    "knowledge",
+    "semantic",
+    "agent",
 ]
 
 # ---------------------------------------------------------------------------
@@ -104,6 +108,10 @@ known-first-party = [
     "governance",
     "analytics_publisher",
     "serving_store",
+    "processing_engine",
+    "knowledge",
+    "semantic",
+    "agent",
 ]
 
 # ---------------------------------------------------------------------------
@@ -182,6 +190,10 @@ testpaths = [
     "governance/tests",
     "analytics_publisher/tests",
     "serving_store/tests",
+    "processing_engine/tests",
+    "knowledge/tests",
+    "semantic/tests",
+    "agent/tests",
     "tests",
 ]
 addopts = "--cov --cov-report=term-missing --cov-fail-under=80 -v"
@@ -200,6 +212,10 @@ source = [
     "governance",
     "analytics_publisher",
     "serving_store",
+    "processing_engine",
+    "knowledge",
+    "semantic",
+    "agent",
 ]
 
 [tool.coverage.report]

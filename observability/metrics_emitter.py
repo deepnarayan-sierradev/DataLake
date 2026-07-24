@@ -267,6 +267,58 @@ class CloudWatchMetricsEmitter:
             ),
         )
 
+    def emit_circuit_breaker_opened(
+        self, source_id: str, entity_id: str, environment: str, count: int = 1
+    ) -> None:
+        """Emit when a source circuit breaker transitions to open (OBS-01 alarm signal)."""
+        self._put_metric(
+            metric_name="CircuitBreakerOpened",
+            value=float(count),
+            unit="Count",
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, tenant_code=self._tenant_code
+            ),
+        )
+
+    def emit_circuit_breaker_ddb_fallback(
+        self, source_id: str, entity_id: str, environment: str, count: int = 1
+    ) -> None:
+        """Emit when circuit-breaker state falls back to DynamoDB (OBS-01 alarm signal)."""
+        self._put_metric(
+            metric_name="CircuitBreakerDDBFallback",
+            value=float(count),
+            unit="Count",
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, tenant_code=self._tenant_code
+            ),
+        )
+
+    def emit_input_validation_failures(
+        self, source_id: str, entity_id: str, environment: str, count: int = 1
+    ) -> None:
+        """Emit when a Lambda event fails input validation (OBS-01 alarm signal; OWASP A03)."""
+        self._put_metric(
+            metric_name="InputValidationFailures",
+            value=float(count),
+            unit="Count",
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, tenant_code=self._tenant_code
+            ),
+        )
+
+    def emit_credential_retrieval_failures(
+        self, source_id: str, entity_id: str, environment: str, count: int = 1
+    ) -> None:
+        """Emit when source credential retrieval fails (OBS-01 alarm signal)."""
+        self._put_metric(
+            metric_name="CredentialRetrievalFailures",
+            value=float(count),
+            unit="Count",
+            dimensions=self._build_dimensions(
+                source_id, entity_id, environment, tenant_code=self._tenant_code
+            ),
+        )
+
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _put_metric(

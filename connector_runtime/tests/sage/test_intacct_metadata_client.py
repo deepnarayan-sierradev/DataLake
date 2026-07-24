@@ -552,3 +552,37 @@ class TestErrorCases:
                 include_fields=[],
                 exclude_fields=[],
             )
+
+
+class TestAuthenticatesBeforeReadingBaseUrl:
+    """Regression: base_url must be read only after build_auth_headers() authenticates."""
+
+    def test_discover_fields_authenticates_before_base_url(self) -> None:
+        class _LazyAuth:
+            def __init__(self) -> None:
+                self._authenticated = False
+
+            @property
+            def base_url(self) -> str:
+                if not self._authenticated:
+                    raise RuntimeError("base_url unavailable before auth")
+                return _BASE_URL
+
+            def build_auth_headers(self) -> dict[str, str]:
+                self._authenticated = True
+                return {"Authorization": "Bearer test-token"}
+
+        client = IntacctMetadataClient(
+            auth_client=_LazyAuth(),  # type: ignore[arg-type]
+            http_client=_make_mock_http(),
+            object_path=_OBJECT_PATH,
+        )
+        fc = client.discover_fields(
+            source_id=_SOURCE_ID,
+            entity_id=_ENTITY_ID,
+            object_path=_OBJECT_PATH,
+            field_mode=FieldMode.ALL,
+            include_fields=[],
+            exclude_fields=[],
+        )
+        assert fc.fields

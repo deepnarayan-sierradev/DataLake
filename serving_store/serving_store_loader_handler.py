@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import io
 import os
-import re
 from collections.abc import Iterator
 from typing import Any, Final
 
@@ -68,6 +67,7 @@ import serving_store.loaders.postgresql_loader
 import serving_store.loaders.redshift_loader
 import serving_store.loaders.sqlserver_loader  # noqa: F401
 from contracts.identifier_policy import ENTITY_TYPE_PATTERN as _ENTITY_TYPE_PATTERN
+from contracts.identifier_policy import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
 from observability.lambda_utils import (
@@ -99,9 +99,6 @@ _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
     }
 )
 _KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
-_SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[a-zA-Z0-9][a-zA-Z0-9\-_/=\.]{0,511}$"
-)
 _PARQUET_BATCH_SIZE: Final[int] = 2_000
 
 

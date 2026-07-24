@@ -25,64 +25,80 @@
 <body>
 <h1>Platform Status — Enterprise Data Lake</h1>
 
-<strong>Last updated:</strong> 2026-07-07
+<strong>Last updated:</strong> 2026-07-14
 <strong>Prepared by:</strong> Platform Engineering
 
-<blockquote><strong>Multi-tenancy note:</strong> <code>tenant_code</code> is now a first-class concept (default: <code>demo</code>, from</blockquote>
-<blockquote><code>contracts/identifier_policy.DEFAULT_TENANT_CODE</code>). It is prefixed into S3 keys for the</blockquote>
-<blockquote><strong>curated layer, schema snapshots, and the config repository's S3 backend</strong> — but <strong>not yet</strong></blockquote>
-<blockquote>for the <strong>raw layer</strong>, which remains unprefixed today (tracked in</blockquote>
-<blockquote><code>architecture/MULTI_TENANT_ROLLOUT_PLAN.md</code>). See the S3 Key Patterns table below for exact,</blockquote>
-<blockquote>per-layer paths — don't assume uniform tenant-prefixing across every bucket.</blockquote>
+<blockquote><strong>Multi-tenancy note:</strong> <code>tenant_code</code> is a first-class concept (default: <code>demo</code>, from</blockquote>
+<blockquote><code>contracts/identifier_policy.DEFAULT_TENANT_CODE</code>), prefixed into S3 keys for <strong>every</strong> data-plane</blockquote>
+<blockquote>layer (raw, curated, analytics, schema snapshots), and genuinely key-scoped in the watermark and</blockquote>
+<blockquote>entity-type-registry DynamoDB tables. See <code>docs/PIPELINE_FLOW.md</code>'s canonical isolation-model table</blockquote>
+<blockquote>for the full layer-by-layer picture, and <code>docs/KNOWN_GAPS_AND_ROADMAP.md</code> for what's still open (no</blockquote>
+<blockquote>IAM enforcement anywhere — S3 prefixing is write-path convention, not a bucket-policy boundary —</blockquote>
+<blockquote>shared Secrets Manager credentials, Glue/Athena's wildcard grant).</blockquote>
 
 <hr/>
 
-<h2>Current Status: Dev ✅ | Staging 🔲 | Production 🔲</h2>
+<h2>Current Status: Dev ✅ (infrastructure) | Staging 🔲 | Production 🔲</h2>
 
 <table>
 <tr><td>Environment</td><td>Status</td><td>Notes</td></tr>
-<tr><td><strong>Dev</strong></td><td>✅ Live and operational</td><td>All 4 Lambda stages deployed and tested end-to-end</td></tr>
-<tr><td><strong>Staging</strong></td><td>🔲 Not started</td><td>Requires DynamoDB pre-creation + Terraform apply</td></tr>
-<tr><td><strong>Production</strong></td><td>🔲 Not started</td><td>Requires staging sign-off first</td></tr>
+<tr><td><strong>Dev</strong></td><td>✅ Infrastructure deployed, pipeline verified live</td><td>All 8 Lambda functions, Step Functions state machine, control-plane API (Cognito + API Gateway), DynamoDB tables, S3 buckets, SQS queues, EventBridge Scheduler group — deployed fresh on 2026-07-09 (an earlier "live" claim for this account had gone stale; the account was found empty and redeployed from scratch). Salesforce and MySQL RDS credentials are populated and the extraction → transformation → entity resolution → analytics pipeline has run end-to-end with real data (see Live Data below). Sage Intacct, Sage X3, and NetSuite credentials are still empty shells — those sources are code-complete but not connected.</td></tr>
+<tr><td><strong>Staging</strong></td><td>🔲 Not provisioned</td><td><code>terraform validate</code> is clean. No AWS account/credentials provisioned yet.</td></tr>
+<tr><td><strong>Production</strong></td><td>🔲 Not provisioned</td><td><code>terraform validate</code> is clean. Requires staging sign-off first per this repo's promotion policy.</td></tr>
 </table>
 
 <hr/>
 
-<h2>Live Data (Dev — as of 2026-07-02)</h2>
+<h2>Live Data (Dev)</h2>
 
-<table>
-<tr><td>Entity</td><td>Records</td><td>Latest analytics_date</td><td>Location</td></tr>
-<tr><td>Companies (Salesforce Accounts)</td><td>34</td><td><code>2026-07-02</code></td><td><code>dev_edl_analytics.company</code></td></tr>
-<tr><td>Persons (Salesforce Contacts)</td><td>49</td><td><code>2026-06-29</code></td><td><code>dev_edl_analytics.person</code></td></tr>
-<tr><td>Contracts (MySQL RDS)</td><td>35,971+</td><td><code>2026-07-02</code></td><td><code>dev_edl_analytics.contract</code></td></tr>
-</table>
+Verified as of 2026-07-09, for the two connected sources: <strong>34 Salesforce accounts</strong> and
+<strong>36,023 MySQL RDS contract rows</strong> extracted, transformed, resolved, and published — Athena
+returns real query results against <code>edl_analytics</code> for these entities. Per-entity counts for
+<code>salesforce-contact</code> were not re-confirmed with an exact number in this pass; treat the two
+figures above as the solid data point and re-check row counts directly
+(<code>aws s3 ls</code> / Athena <code>SELECT COUNT(<em>)</code>) before quoting others.
 
-<strong>Query in Athena (AWS Console → Athena → database: <code>dev_edl_analytics</code>, workgroup: <code>dev-edl-analytics</code>):</strong>
+<code>edl_curated</code> (the Glue database, not the S3 layer) stays empty regardless — see the Glue
+Catalog section below for why; only <code>edl_analytics</code> tables get registered at pipeline runtime,
+by <code>analytics_publisher/analytics_publisher_handler.py</code>, not by Terraform.
 
-<pre><code>-- Always filter by the latest analytics_date for current state
-SELECT * FROM dev_edl_analytics.company    WHERE analytics_date='2026-07-02';
-SELECT * FROM dev_edl_analytics.person     WHERE analytics_date='2026-06-29';
-SELECT COUNT(*) FROM dev_edl_analytics.contract   WHERE analytics_date='2026-07-02';
+The three newer entities (<code>salesforce-opportunity</code>, <code>salesforce-contract</code>,
+<code>mysql-rds-contractterms</code>) are config-complete but <strong>not yet seeded or scheduled</strong> — no data
+exists for them yet. Sage Intacct, Sage X3, and NetSuite have no populated credentials, so
+nothing has run for those sources either.
 
--- For contracts: filter out soft-deleted records
-SELECT COUNT(*) FROM dev_edl_analytics.contract
-WHERE analytics_date='2026-07-02' AND is_deleted = false;
-</code></pre>
-
-<blockquote><strong>Note:</strong> Use the fully-qualified table name (<code>dev_edl_analytics.company</code>) or select <code>dev_edl_analytics</code> as the database in the Athena console before running queries. The workgroup must be <code>dev-edl-analytics</code>.</blockquote>
+Path to live data for the remaining sources/entities: populate real credentials in the Secrets
+Manager shells below, seed entity configs (<code>scripts/seed_entity_config.py</code>), enable and sync
+schedules (<code>scripts/seed_schedules.py</code>), then either wait for a scheduled run or trigger one
+manually (<code>scripts/trigger_extraction.py</code>).
 
 <hr/>
 
 <h2>Connected Data Sources</h2>
 
+All five credential secrets are Terraform-managed shells (<code>terraform apply</code> creates the secret
+resource but does not populate a value). Salesforce and MySQL RDS have had real credentials
+written via <code>aws secretsmanager put-secret-value</code> and are confirmed reachable. Sage Intacct,
+Sage X3, and NetSuite are still empty shells — not reachable until real credentials are written.
+
 <table>
 <tr><td>Source</td><td>Status</td><td>Entities</td><td>Extraction mode</td></tr>
-<tr><td><strong>Salesforce CRM</strong></td><td>✅ Connected</td><td><code>salesforce-account</code> (companies), <code>salesforce-contact</code> (persons)</td><td>Incremental (watermark: <code>SystemModstamp</code>)</td></tr>
-<tr><td><strong>MySQL RDS</strong></td><td>✅ Connected</td><td><code>mysql-rds-contracts</code> (contracts)</td><td>Incremental (watermark: <code>ModifiedOn</code>, tombstone soft-delete on <code>is_deleted</code>)</td></tr>
-<tr><td><strong>Sage Intacct</strong></td><td>✅ Connected</td><td><code>sage-intacct-customer</code> (companies), <code>sage-intacct-vendor</code> (suppliers), <code>sage-intacct-arinvoice</code> (AR invoices), <code>sage-intacct-apbill</code> (AP bills)</td><td>Incremental</td></tr>
-<tr><td><strong>Sage X3</strong></td><td>✅ Connected</td><td><code>sage-x3-customer</code> (companies), <code>sage-x3-supplier</code> (suppliers)</td><td>Incremental</td></tr>
-<tr><td><strong>NetSuite ERP</strong></td><td>🟡 Code-complete, not yet live</td><td>Connector, auth client, SuiteQL query planner, and raw layer writer are all implemented (<code>connector_runtime/adapters/netsuite/</code>) — not "no code changes required" as previously stated. Not yet confirmed whether entity config is seeded/schedule-enabled in dev; verify before assuming live traffic.</td><td>Incremental (SuiteQL)</td></tr>
+<tr><td><strong>Salesforce CRM</strong></td><td>✅ Connected, verified live</td><td><code>salesforce-account</code> (companies, live), <code>salesforce-contact</code> (persons, live), <code>salesforce-opportunity</code> (opportunities, configured — not yet seeded), <code>salesforce-contract</code> (sales contracts, configured — not yet seeded)</td><td>Incremental (watermark: <code>SystemModstamp</code>)</td></tr>
+<tr><td><strong>MySQL RDS</strong></td><td>✅ Connected, verified live</td><td><code>mysql-rds-contracts</code> (contracts, live — 36,023 rows), <code>mysql-rds-contractterms</code> (contract terms, configured — not yet seeded)</td><td>Incremental (watermark: <code>ModifiedOn</code>, tombstone soft-delete on <code>is_deleted</code>)</td></tr>
+<tr><td><strong>Sage Intacct</strong></td><td>🟡 Code-complete, not connected</td><td><code>sage-intacct-customer</code> (companies), <code>sage-intacct-vendor</code> (suppliers), <code>sage-intacct-arinvoice</code> (AR invoices), <code>sage-intacct-apbill</code> (AP bills)</td><td>Incremental</td></tr>
+<tr><td><strong>Sage X3</strong></td><td>🟡 Code-complete, not connected</td><td><code>sage-x3-customer</code> (companies), <code>sage-x3-supplier</code> (suppliers)</td><td>Incremental</td></tr>
+<tr><td><strong>NetSuite ERP</strong></td><td>🟡 Code-complete, not connected</td><td>Connector, auth client, SuiteQL query planner, and raw layer writer are all implemented (<code>connector_runtime/adapters/netsuite/</code>). SuiteQL offset/limit pagination hard-stops with an actionable error before requesting <code>offset > 100,000</code> — NetSuite's real pagination ceiling. Full keyset-pagination (paginate by a monotonic column instead of offset/limit) is not yet implemented; keep the watermark increment tight enough that a single run's result set stays under 100,000 rows.</td><td>Incremental (SuiteQL)</td></tr>
 </table>
+
+<blockquote><code>salesforce-opportunity</code>, <code>salesforce-contract</code>, and <code>mysql-rds-contractterms</code> are new as of this</blockquote>
+<blockquote>pass — field-mapping config (<code>config/field_mappings/salesforce/salesforce-opportunity/</code>,</blockquote>
+<blockquote><code>salesforce-contract/</code>, <code>config/field_mappings/mysql-rds/mysql-rds-contractterms/</code>) and</blockquote>
+<blockquote>entity-resolution config (<code>config/entity_resolution/opportunity/</code>, <code>sales-contract/</code>,</blockquote>
+<blockquote><code>contract-term/</code>) exist, and all three are wired into</blockquote>
+<blockquote><code>entity_resolution/entity_type_registry.py</code>'s fallback seed dicts and</blockquote>
+<blockquote><code>scripts/seed_entity_config.py</code>. No new connector code was needed — the Salesforce and MySQL RDS</blockquote>
+<blockquote>adapters are generic (object/table name comes from config), not per-entity — but nothing is</blockquote>
+<blockquote>seeded into DynamoDB or scheduled in dev yet, so treat these as config-complete, not live.</blockquote>
 
 <hr/>
 
@@ -94,120 +110,170 @@ WHERE analytics_date='2026-07-02' AND is_deleted = false;
 
 <table>
 <tr><td>Bucket</td><td>Pipeline stage</td><td>Written by</td><td>Read by</td><td>Purpose</td></tr>
-<tr><td><code>dev-edl-raw-layer</code></td><td>Stage A — Extraction</td><td>Extraction Lambda</td><td>Transformation Lambda</td><td>Immutable raw Parquet files written once per extraction run. One Hive-partitioned prefix per entity per date. Never overwritten; watermark prevents re-extraction of unchanged data.</td></tr>
-<tr><td><code>dev-edl-curated-layer</code></td><td>Stage B — Transformation</td><td>Transformation Lambda</td><td>Entity Resolution Lambda, Athena</td><td>Field-mapped, quality-checked Parquet (canonical column names). Also stores field-mapping JSON config files under <code>field-mappings/{source_id}/{entity_id}/</code>.</td></tr>
-<tr><td><code>dev-edl-analytics-layer</code></td><td>Stages C & D — Entity Resolution + Analytics</td><td>Entity Resolution Lambda, Analytics Publisher Lambda</td><td>Athena, downstream BI tools</td><td>Golden (de-duplicated) records from entity resolution and consumption-optimised Parquet for analytics. Registered in Glue Catalog for Athena queries.</td></tr>
-<tr><td><code>dev-edl-schema-snapshots</code></td><td>Stage A — Extraction (post-extract)</td><td>Extraction Lambda</td><td>Drift Evaluation (same Lambda)</td><td>JSON schema fingerprints captured after every extraction. The drift evaluator compares the new snapshot against <code>latest.json</code> to detect breaking changes (added/removed/type-changed columns). Path: <code>{tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json</code> + <code>drift-report-{extraction_date}.json</code>; latest-pointer at <code>{tenant_code}/{source_id}/{entity_id}/latest.json</code>.</td></tr>
-<tr><td><code>dev-edl-s3-access-logs</code></td><td>All stages (passive)</td><td>AWS S3 service (automatic)</td><td>Security & compliance audits</td><td>Receives S3 server access logs from every other data lake bucket. Never written to directly by pipeline code. Used for access auditing, cost attribution, and compliance. Retention: 30 days (dev).</td></tr>
-<tr><td><code>dev-edl-terraform-state</code></td><td>Infrastructure (deploy time only)</td><td>Terraform CLI, <code>make lambda-upload</code></td><td>Terraform CLI, Lambda service at deploy</td><td>Dual-purpose: (1) Terraform remote state file (<code>environments/dev/terraform.tfstate</code>) with DynamoDB lock for single-writer safety. (2) Lambda artifact store — <code>lambda/extraction-pipeline.zip</code> uploaded here by <code>make lambda-upload</code> and pulled by Lambda on every <code>terraform apply</code>. Not accessed at pipeline runtime.</td></tr>
+<tr><td><code>edl-raw-087972550871</code></td><td>Stage A — Extraction</td><td>Extraction Lambda</td><td>Transformation Lambda</td><td>Immutable raw Parquet files written once per extraction run. One Hive-partitioned prefix per entity per date. Never overwritten; watermark prevents re-extraction of unchanged data.</td></tr>
+<tr><td><code>edl-curated-087972550871</code></td><td>Stage B — Transformation</td><td>Transformation Lambda</td><td>Entity Resolution Lambda, Athena (Athena access not wired in dev today — see Glue Catalog section)</td><td>Field-mapped, quality-checked Parquet (canonical column names). Also stores field-mapping JSON config files under <code>field-mappings/{source_id}/{entity_id}/</code>.</td></tr>
+<tr><td><code>edl-analytics-087972550871</code></td><td>Stages C & D — Entity Resolution + Analytics</td><td>Entity Resolution Lambda, Analytics Publisher Lambda</td><td>Athena, downstream BI tools</td><td>Golden (de-duplicated) records from entity resolution and consumption-optimised Parquet for analytics. Registered in Glue Catalog for Athena queries.</td></tr>
+<tr><td><code>edl-schema-snapshots-087972550871</code></td><td>Stage A — Extraction (post-extract)</td><td>Extraction Lambda</td><td>Drift Evaluation (same Lambda)</td><td>JSON schema fingerprints captured after every extraction. The drift evaluator compares the new snapshot against <code>latest.json</code> to detect breaking changes (added/removed/type-changed columns). Path: <code>{tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json</code> + <code>drift-report-{extraction_date}.json</code>; latest-pointer at <code>{tenant_code}/{source_id}/{entity_id}/latest.json</code>.</td></tr>
+<tr><td><code>edl-access-logs-087972550871</code></td><td>All stages (passive)</td><td>AWS S3 service (automatic)</td><td>Security & compliance audits</td><td>Receives S3 server access logs from every other data lake bucket. Never written to directly by pipeline code. Used for access auditing, cost attribution, and compliance. Retention: 30 days (dev).</td></tr>
+<tr><td><code>edl-terraform-state-087972550871</code></td><td>Infrastructure (deploy time only)</td><td>Terraform CLI, <code>make lambda-upload</code></td><td>Terraform CLI, Lambda service at deploy</td><td>Dual-purpose: (1) Terraform remote state file (<code>environments/dev/terraform.tfstate</code>) with DynamoDB lock for single-writer safety. (2) Lambda artifact store — <code>lambda/extraction-pipeline.zip</code> uploaded here by <code>make lambda-upload</code> and pulled by Lambda on every <code>terraform apply</code>. Not accessed at pipeline runtime.</td></tr>
 </table>
 
 <h3>S3 Key Patterns</h3>
 
 <table>
 <tr><td>Layer</td><td>Pattern</td></tr>
-<tr><td>Raw</td><td><code>s3://dev-edl-raw-layer/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/data.parquet</code> — <strong>not tenant-prefixed yet</strong></td></tr>
-<tr><td>Curated</td><td><code>s3://dev-edl-curated-layer/{tenant_code}/curated/{domain}/{entity_id}/curated_date=YYYY-MM-DD/run_id={run_id}/data.parquet</code></td></tr>
-<tr><td>Golden records</td><td><code>s3://dev-edl-analytics-layer/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet</code></td></tr>
-<tr><td>Analytics</td><td><code>s3://dev-edl-analytics-layer/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet</code></td></tr>
+<tr><td>Raw</td><td><code>s3://edl-raw-087972550871/{tenant_code}/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/data.parquet</code> — tenant-prefixed root segment (ARCH-1), then one hyphenated source segment (<code>salesforce</code>, <code>netsuite</code>, <code>mysql-rds</code>, <code>sage-intacct</code>, <code>sage-x3</code>); no <code>raw/</code> root segment (<code>connector_runtime/raw_layer_writer.py::RawLayerWriter._partition_path</code>). App-level convention, not yet IAM/bucket-policy-enforced</td></tr>
+<tr><td>Curated</td><td><code>s3://edl-curated-087972550871/{tenant_code}/curated/{domain}/{entity_id}/curated_date=YYYY-MM-DD/run_id={run_id}/data.parquet</code></td></tr>
+<tr><td>Golden records</td><td><code>s3://edl-analytics-087972550871/{tenant_code}/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet</code></td></tr>
+<tr><td>Analytics</td><td><code>s3://edl-analytics-087972550871/{tenant_code}/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet</code></td></tr>
 <tr><td>Entity config (S3 backend, alternate to DynamoDB)</td><td><code>s3://<config-bucket>/{tenant_code}/{source_id}/{entity_id}/config.json</code></td></tr>
 </table>
 
 <blockquote><code>{tenant_code}</code> defaults to <code>demo</code> (<code>contracts/identifier_policy.DEFAULT_TENANT_CODE</code>) and is</blockquote>
-<blockquote>always present in prefixed paths above — there is no unprefixed legacy mode for those layers.</blockquote>
-<blockquote>The raw layer and golden/analytics layers are not yet tenant-prefixed; don't assume tenant</blockquote>
-<blockquote>isolation applies uniformly across every bucket.</blockquote>
+<blockquote>always present in every pattern above — there is no unprefixed legacy mode left for any layer.</blockquote>
+<blockquote>This is prefix-level isolation only, enforced by writer code, not yet backed by an S3</blockquote>
+<blockquote>bucket-policy IAM condition — don't treat it as a hard security boundary until that lands (see</blockquote>
+<blockquote><code>docs/KNOWN_GAPS_AND_ROADMAP.md</code>).</blockquote>
 
 <blockquote><strong>Curated layer — SCD Type 1 merge:</strong> For incremental entities with <code>primary_key_field</code> set, each curated partition holds the <strong>full current state</strong> of all records (not just the day's delta). This ensures entity resolution always sees complete data. Deleted records are retained as tombstones (<code>is_deleted=True</code>) rather than physically removed.</blockquote>
 
+<blockquote><strong>Curated layer — Glue table naming:</strong> The curated Glue table</blockquote>
+<blockquote>name is now tenant-scoped — <code>{tenant_code}_{entity_id}_{domain}_curated</code></blockquote>
+<blockquote>(<code>transformation/transformation_pipeline.py::_register_curated_catalog</code>, line ~751). Previously</blockquote>
+<blockquote>the table name carried no tenant segment, so two tenants running the same <code>entity_id</code>/<code>domain</code></blockquote>
+<blockquote>registered the </em>same* Glue table and silently overwrote each other's <code>Location</code> — the second</blockquote>
+<blockquote>tenant's transformation run would repoint the first tenant's Athena table at its own data</blockquote>
+<blockquote>(now fixed — table names are tenant-scoped). The</blockquote>
+<blockquote><code>curated_date</code> partition is now also registered per run via <code>glue_client.create_partition()</code></blockquote>
+<blockquote>(falling back to <code>update_partition()</code> on <code>AlreadyExistsException</code>) immediately after catalog</blockquote>
+<blockquote>registration — previously the table declared <code>partition_keys=("curated_date",)</code> but no</blockquote>
+<blockquote>partition value was ever registered, so partitioned Athena queries returned zero rows until a</blockquote>
+<blockquote>manual <code>MSCK REPAIR TABLE</code>.</blockquote>
+>
+<blockquote><strong>This code path is currently unreachable in dev</strong> — see the Glue Catalog section below;</blockquote>
+<blockquote><code>glue_catalog_database</code> is not set on the dev <code>transformation_lambda</code> module, so</blockquote>
+<blockquote><code>_register_curated_catalog</code> is never invoked there today regardless of how correct its logic is.</blockquote>
+
 <h3>DynamoDB Tables</h3>
 
-<blockquote><strong>Unresolved doc/infra discrepancy — verify before running <code>terraform apply</code> in any environment.</strong></blockquote>
-<blockquote><code>infrastructure/modules/metadata_persistence/main.tf</code> defines all four tables below as real</blockquote>
-<blockquote><code>aws_dynamodb_table</code> resources with <code>lifecycle { prevent_destroy = true }</code> — this is not new,</blockquote>
-<blockquote>it predates the current round of changes (confirmed via <code>git log</code> on that file). It directly</blockquote>
-<blockquote>contradicts this section's previous claim that the first three tables are "not Terraform-managed</blockquote>
-<blockquote>and must be created by hand." <strong>Do not assume either narrative.</strong> Before applying in any</blockquote>
-<blockquote>environment, run <code>terraform state list | grep dynamodb</code> to check whether these resources are</blockquote>
-<blockquote>already tracked in state — if they exist in AWS but aren't in state, <code>terraform apply</code> will</blockquote>
-<blockquote>fail with "already exists" rather than adopting them; if they were manually created under the</blockquote>
-<blockquote>old instructions and never imported, you'll need <code>terraform import</code> first.</blockquote>
+Five of the six tables below are Terraform-managed with <code>lifecycle { prevent_destroy = true }</code>
+(<code>infrastructure/modules/metadata_persistence/main.tf</code>) — never create any of them by hand.
+<code>EdlSourceOnboardingRegistry</code> is Terraform-managed too but does <strong>not</strong> have <code>prevent_destroy</code> set
+(confirmed by reading the resource block directly) — a <code>terraform destroy</code>/replace on that table
+is not blocked the way it is for the other five.
 
 <table>
 <tr><td>Table</td><td>Purpose</td><td>Hash key</td><td>Terraform resource</td></tr>
-<tr><td><code>dev-edl-entity-extraction-config</code></td><td>Entity extraction configuration (source, watermark field, load type, tenant_code, etc.)</td><td><code>source_id</code> + <code>entity_id</code> (range)</td><td><code>aws_dynamodb_table.entity_extraction_config</code></td></tr>
-<tr><td><code>dev-edl-watermark-repository</code></td><td>Per-entity watermark timestamps for incremental loads, now tenant-checked on read</td><td><code>source_id</code> + <code>entity_id</code> (range)</td><td><code>aws_dynamodb_table.watermark_repository</code></td></tr>
-<tr><td><code>dev-edl-run-audit-log</code></td><td>Immutable audit record of every pipeline run (including partial/checkpointed runs)</td><td><code>run_id</code> + <code>stage</code> (range)</td><td><code>aws_dynamodb_table.run_audit_log</code></td></tr>
-<tr><td><code>dev-edl-entity-type-registry</code></td><td><strong>New.</strong> Tenant-scoped entity-type/entity-id registry (<code>entity_resolution/entity_type_registry.py::EntityTypeRegistryClient</code>) — supersedes the old hardcoded dicts, which remain as fallback seed data</td><td><code>tenant_code</code> + <code>sk</code> (range)</td><td><code>aws_dynamodb_table.entity_type_registry</code></td></tr>
+<tr><td><code>EdlEntityExtractionConfig</code></td><td>Entity extraction configuration (source, watermark field, load type, tenant_code, etc.)</td><td><code>source_id</code> + <code>entity_id</code> (range)</td><td><code>aws_dynamodb_table.entity_extraction_config</code></td></tr>
+<tr><td><code>EdlWatermarkRepository</code></td><td>Per-entity watermark timestamps for incremental loads. The DynamoDB <strong>key itself is tenant-scoped</strong> — <code>WatermarkRepository</code> stores <code>tenant_scoped_key(tenant_code, source_id)</code> (e.g. <code>"demo#salesforce"</code>) as the <code>source_id</code> attribute, not just an application-level guard checked on read</td><td><code>source_id</code> (tenant-scoped composite) + <code>entity_id</code> (range)</td><td><code>aws_dynamodb_table.watermark_repository</code></td></tr>
+<tr><td><code>EdlRunAuditLog</code></td><td>Immutable audit record of every pipeline run (including partial/checkpointed runs). <code>source-entity-time-index</code> GSI hash key (<code>source_entity_key</code>) is tenant-scoped as <code>{tenant_code}#{source_id}#{entity_id}</code>, populated for every run, not just DLQ-routed failures</td><td><code>run_id</code> + <code>stage</code> (range)</td><td><code>aws_dynamodb_table.run_audit_log</code></td></tr>
+<tr><td><code>EdlEntityTypeRegistry</code></td><td>Tenant-scoped entity-type/entity-id registry (<code>entity_resolution/entity_type_registry.py::EntityTypeRegistryClient</code>) — supersedes the old hardcoded dicts, which remain as fallback seed data</td><td><code>tenant_code</code> + <code>sk</code> (range)</td><td><code>aws_dynamodb_table.entity_type_registry</code></td></tr>
+<tr><td><code>EdlSourceOnboardingRegistry</code></td><td>Tracks onboarding-gate state (registration → gate transitions → activation) <strong>per <code>source_id</code>, not per tenant</strong> (<code>governance/source_onboarding_registry.py::SourceOnboardingRegistryClient</code>) — a source-level certification workflow (see <code>connector_runtime/certification/connector_certification_checklist.py</code>), distinct from the control-plane API's tenant/entity registration flow. Not currently called from <code>connector_runtime/api/</code> — no route in the Control Plane API section below reads or writes this table today.</td><td><code>source_id</code> (no range key)</td><td><code>aws_dynamodb_table.source_onboarding_registry</code></td></tr>
+<tr><td><code>EdlServingStoreConfig</code></td><td>Which tenant/entity_type pairs load into a serving store, and into which engine (<code>serving_store/serving_store_config_repository.py::ServingStoreConfigRepositoryClient</code>) — tenant-partitioned from creation, no <code>tenant_scoped_key()</code> composite-key needed. Keyed by <code>entity_type</code> (the analytics-layer entity, e.g. <code>company</code>), not a source-level <code>entity_id</code> — one entity_type's analytics dataset can be fed by several contributing sources. Not yet created in any AWS account (see Stage 16 in <code>docs/PIPELINE_FLOW.md</code>)</td><td><code>tenant_code</code> + <code>entity_type</code> (range)</td><td><code>aws_dynamodb_table.serving_store_config</code></td></tr>
 </table>
 
-<blockquote>Table names above use the <code>-edl-</code> infix to match the actual Terraform <code>name</code> attribute</blockquote>
-<blockquote>(<code>"${var.environment}-edl-<table>"</code>). If you see references elsewhere to <code>dev-entity-extraction-config</code></blockquote>
-<blockquote>(no <code>-edl-</code> infix), treat that as the stale form and prefer the name shown here.</blockquote>
+<blockquote>Table names above follow the <code>Edl<Table></code> PascalCase convention, with no environment prefix —</blockquote>
+<blockquote>each environment (dev/staging/prod) lives in its own separate AWS account, so the account</blockquote>
+<blockquote>boundary provides isolation instead of a name prefix.</blockquote>
 
 <h3>Lambda Functions</h3>
 
 <table>
 <tr><td>Function</td><td>Handler</td><td>Purpose</td></tr>
-<tr><td><code>dev-extraction-pipeline</code></td><td><code>connector_runtime.extraction_pipeline_handler.lambda_handler</code></td><td>Extract from source → raw layer. Now supports mid-run checkpointing on approaching Lambda timeout (<code>LambdaTimeoutWarning</code>, partial watermark commit) — see Known Gotchas in <code>docs/DEVELOPER_GUIDE.md</code>.</td></tr>
-<tr><td><code>dev-transformation-pipeline</code></td><td><code>transformation.transformation_pipeline_handler.lambda_handler</code></td><td>Raw → curated layer (tenant-prefixed S3 keys)</td></tr>
-<tr><td><code>dev-entity-resolution-pipeline</code></td><td><code>entity_resolution.entity_resolution_pipeline_handler.lambda_handler</code></td><td>Curated → golden records; now streams curated records via DuckDB rather than fully materializing them, and resolves entity types via <code>EntityTypeRegistryClient</code> (DynamoDB) with fallback to hardcoded seed dicts</td></tr>
-<tr><td><code>dev-analytics-layer-publisher</code></td><td><code>analytics_publisher.analytics_publisher_handler.lambda_handler</code></td><td>Golden records → analytics layer; emits an end-to-end pipeline SLA metric. (Not <code>dev-analytics-publisher</code> — that shorter form appears in some older references but doesn't match the actual Terraform <code>function_name</code>, <code>infrastructure/modules/analytics_publisher_lambda/main.tf</code>.)</td></tr>
-<tr><td><code>dev-edl-control-plane</code></td><td><code>connector_runtime.api.control_plane_handler.lambda_handler</code></td><td><strong>New.</strong> SaaS control-plane REST API behind a Cognito/JWT authorizer — tenant provisioning, entity registration/listing, pipeline trigger, run status. Code-complete but <strong>not yet verified against a live AWS deployment</strong> — see <code>connector_runtime/CLAUDE.md</code>.</td></tr>
-<tr><td><code>dev-edl-credential-expiry-notifier</code></td><td><code>connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler</code></td><td><strong>New.</strong> Daily check of all 5 source-credential secrets' age; publishes an SNS alert if rotation is overdue.</td></tr>
-<tr><td><code>dev-edl-pipeline-trigger</code></td><td><code>orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler</code></td><td><strong>New.</strong> Rate-limited SQS FIFO consumer that starts Step Functions executions — the single path both <code>scripts/trigger_extraction.py</code> and the control-plane API's pipeline-trigger route funnel through.</td></tr>
-<tr><td><code>dev-edl-dlq-processor</code></td><td><code>orchestration.dlq_processor.dlq_processor_handler.lambda_handler</code></td><td><strong>New.</strong> Processes the extraction-failure DLQ: writes an audit record, sends an SNS alert, and optionally auto-replays (<code>AUTO_REPLAY=false</code> by default).</td></tr>
+<tr><td><code>EdlExtractionPipeline</code></td><td><code>connector_runtime.extraction_pipeline_handler.lambda_handler</code></td><td>Extract from source → raw layer. Now supports mid-run checkpointing on approaching Lambda timeout (<code>LambdaTimeoutWarning</code>, partial watermark commit) — see Known Gotchas in <code>docs/DEVELOPER_GUIDE.md</code>.</td></tr>
+<tr><td><code>EdlTransformationPipeline</code></td><td><code>transformation.transformation_pipeline_handler.lambda_handler</code></td><td>Raw → curated layer (tenant-prefixed S3 keys)</td></tr>
+<tr><td><code>EdlEntityResolutionPipeline</code></td><td><code>entity_resolution.entity_resolution_pipeline_handler.lambda_handler</code></td><td>Curated → golden records; now streams curated records via DuckDB rather than fully materializing them, and resolves entity types via <code>EntityTypeRegistryClient</code> (DynamoDB) with fallback to hardcoded seed dicts</td></tr>
+<tr><td><code>EdlAnalyticsLayerPublisher</code></td><td><code>analytics_publisher.analytics_publisher_handler.lambda_handler</code></td><td>Golden records → analytics layer; emits an end-to-end pipeline SLA metric.</td></tr>
+<tr><td><code>EdlControlPlane</code></td><td><code>connector_runtime.api.control_plane_handler.lambda_handler</code></td><td>SaaS control-plane REST API behind a Cognito/JWT authorizer — tenant provisioning, entity registration/listing, pipeline trigger, run status. Deployed; end-to-end request flow against the live API Gateway + Cognito authorizer has not yet been exercised.</td></tr>
+<tr><td><code>EdlCredentialExpiryNotifier</code></td><td><code>connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler</code></td><td>Daily check of all 5 source-credential secrets' age; publishes an SNS alert if rotation is overdue.</td></tr>
+<tr><td><code>EdlPipelineTrigger</code></td><td><code>orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler</code></td><td>Rate-limited SQS FIFO consumer that starts Step Functions executions — the single path both <code>scripts/trigger_extraction.py</code> and the control-plane API's pipeline-trigger route funnel through.</td></tr>
+<tr><td><code>EdlDlqProcessor</code></td><td><code>orchestration.dlq_processor.dlq_processor_handler.lambda_handler</code></td><td>Processes the extraction-failure DLQ: writes an audit record, sends an SNS alert, and optionally auto-replays (<code>AUTO_REPLAY=false</code> by default).</td></tr>
 </table>
 
 All eight Lambdas are deployed from the <strong>same zip</strong> (via <code>var.lambda_package_s3_bucket</code> /
-<code>lambda_package_s3_key</code>, shared across every module): <code>s3://dev-edl-terraform-state/lambda/extraction-pipeline.zip</code>
+<code>lambda_package_s3_key</code>, shared across every module): <code>s3://edl-terraform-state-087972550871/lambda/extraction-pipeline.zip</code>
+
+<h3>Control Plane API</h3>
+
+<table>
+<tr><td>Resource</td><td>Value</td></tr>
+<tr><td>API Gateway (HTTP API) endpoint</td><td><code>https://qy5g7az09f.execute-api.us-east-1.amazonaws.com</code> — <strong>not re-verified this session</strong>; this is a runtime value assigned at <code>terraform apply</code> and isn't derivable from HCL source. Confirm with <code>terraform output</code> or the API Gateway console before relying on it.</td></tr>
+<tr><td>Cognito User Pool ID</td><td><code>us-east-1_7tjRZnlIa</code> — same caveat as above, unverified this session</td></tr>
+<tr><td>Routes</td><td><code>POST /tenants</code>, <code>GET/POST /tenants/{tenant_code}/entities</code>, <code>POST /tenants/{tenant_code}/pipelines/trigger</code>, <code>GET /tenants/{tenant_code}/runs/{run_id}</code>, <code>GET /tenants/{tenant_code}/runs</code> (<code>infrastructure/modules/control_plane/main.tf</code> route map, confirmed against source)</td></tr>
+</table>
+
+<h3>Networking</h3>
+
+<table>
+<tr><td>Resource</td><td>Value</td></tr>
+<tr><td>VPC ID</td><td><code>vpc-0698799f8ec063837</code> — unverified this session, see caveat above</td></tr>
+<tr><td>Private subnet IDs</td><td><code>subnet-0f5556d36179a7e83</code>, <code>subnet-01eee5cd6d9cad41a</code> — unverified this session</td></tr>
+<tr><td>NAT Gateway public IP</td><td><code>52.203.144.191</code> (allowlist this in Salesforce/NetSuite/MySQL RDS security groups before extraction can reach those sources) — unverified this session</td></tr>
+</table>
 
 <h3>Step Functions</h3>
 
 <table>
 <tr><td>State Machine</td><td>Purpose</td></tr>
-<tr><td><code>dev-extraction-pipeline</code></td><td>Full end-to-end pipeline: extraction → transformation → entity resolution → analytics → serving store (optional). Single state machine for all four stages. Now includes an <code>ExtractionCheckpointed</code> terminal <code>Succeed</code> state, reached via a <code>Catch</code> on <code>LambdaTimeoutWarning</code> — the extraction stage commits a partial watermark and exits cleanly rather than failing when it detects it's about to hit the Lambda timeout. <strong>Automatic re-invocation from the checkpoint is not yet implemented</strong> — a checkpointed run currently needs a manual re-trigger; see <code>architecture/GAP_ANALYSIS_FINDINGS.md</code>'s <code>PERF-5</code> entry.</td></tr>
+<tr><td><code>EdlExtractionPipeline</code></td><td>Full end-to-end pipeline: extraction → transformation → entity resolution → analytics → serving store (optional). Single state machine for all four stages. Now includes an <code>ExtractionCheckpointed</code> terminal <code>Succeed</code> state, reached via a <code>Catch</code> on <code>LambdaTimeoutWarning</code> — the extraction stage commits a partial watermark and exits cleanly rather than failing when it detects it's about to hit the Lambda timeout. <strong>Automatic re-invocation from the checkpoint is not yet implemented</strong> — a checkpointed run currently needs a manual re-trigger (see <code>docs/KNOWN_GAPS_AND_ROADMAP.md</code>). The <code>LoadServingStore</code> state (<code>infrastructure/modules/orchestration/main.tf</code>) is a conditional <code>Task</code>/<code>Pass</code> — a <code>Pass</code> (no-op) unless <code>serving_store_loader_lambda_arn</code> is set. The <code>serving_store/</code> module (adapter+registry pattern, five engine loaders — MySQL RDS, PostgreSQL, SQL Server, Azure SQL, Redshift — behind <code>ServingStoreLoaderRegistry</code>) and its Terraform (<code>infrastructure/modules/serving_store_database</code>, <code>infrastructure/modules/serving_store_lambda</code>, and <code>infrastructure/modules/serving_store_redshift</code>) are code-complete and wire that ARN automatically in all three environments' <code>main.tf</code>, but none of it has been <code>terraform apply</code>'d anywhere, so <code>serving_store_loader_lambda_arn</code> still resolves empty today and the state still takes the <code>Pass</code> branch. The <code>Task</code> branch threads <code>"tenant_code.$" = "$.tenant_code"</code> and <code>"entity_type.$" = "$.analytics.entity_type"</code> through (the analytics-layer entity type produced by the prior stage, not the source-level <code>entity_id</code> that triggered the run — kept alongside it for tracing only), and the loader's tenant isolation is now real — database-per-tenant (MySQL) or schema-per-tenant (PostgreSQL/SQL Server/Azure SQL/Redshift), enforced at the database engine's own GRANT model — code-complete, unexercised in any live deployment. Redshift is the exception to the row-upsert path: it is a columnar MPP warehouse (Serverless), so its adapter loads set-based via <code>COPY</code> from the analytics Parquet in S3 (<code>supports_s3_bulk_load</code>) with an IAM-auth writer — no writer password — rather than driver row upserts.</td></tr>
 </table>
 
 <h3>EventBridge Scheduler</h3>
 
 <table>
 <tr><td>Schedule</td><td>Target</td><td>Purpose</td></tr>
-<tr><td><code>dev-edl-credential-expiry-check</code></td><td><code>dev-edl-credential-expiry-notifier</code></td><td><strong>New.</strong> Daily (<code>rate(1 day)</code>) check of source-credential secret age across all 5 sources.</td></tr>
+<tr><td><code>EdlCredentialExpiryCheck</code></td><td><code>EdlCredentialExpiryNotifier</code></td><td><strong>New.</strong> Daily (<code>rate(1 day)</code>) check of source-credential secret age across all 5 sources.</td></tr>
 </table>
+
+Per-entity extraction schedules (one per tenant/source/entity, created via
+<code>orchestration/event_bridge/extraction_schedule_client.py</code>) are named
+<code>{tenant_code}--{source_id}--{entity_id}</code> — double-hyphen throughout, specifically because a
+single-hyphen delimiter between <code>tenant_code</code> and <code>source_id</code> would let two
+distinct tenants collide on one literal schedule name whenever either field itself contained a
+hyphen (e.g. <code>tenant="acme"</code>/<code>source="corp-salesforce"</code> vs. <code>tenant="acme-corp"</code>/<code>source="salesforce"</code>)
+— a silent cross-tenant schedule clobber, since <code>create_or_update_schedule()</code> is update-first. For
+tenant/source/entity combinations whose joined name would exceed EventBridge Scheduler's 64-character
+limit, the name is deterministically collapsed to a truncated prefix plus a SHA-256 content-hash
+suffix, never a naive slice (<code>_build_schedule_name()</code>).
 
 <h3>Dead-Letter Queue</h3>
 
 <table>
 <tr><td>Resource</td><td>Purpose</td></tr>
-<tr><td><code>extraction_failure_dlq</code> (SQS, see <code>infrastructure/modules/metadata_persistence/main.tf</code>)</td><td>Failed extraction runs land here; <code>dev-edl-dlq-processor</code> drains it into an audit record + SNS alert, with optional auto-replay.</td></tr>
+<tr><td><code>EdlExtractionFailureDlq</code> (SQS, <code>aws_sqs_queue.extraction_failure_dlq</code> in <code>infrastructure/modules/metadata_persistence/main.tf</code>)</td><td>Failed extraction runs land here; <code>EdlDlqProcessor</code> drains it into an audit record + SNS alert, with optional auto-replay.</td></tr>
 </table>
 
 <h3>Glue Catalog</h3>
 
 <table>
-<tr><td>Database</td><td>Tables</td></tr>
-<tr><td><code>dev_edl_analytics</code></td><td><code>company</code>, <code>person</code>, <code>contract</code>, <code>supplier</code>, <code>ar_invoice</code>, <code>ap_bill</code></td></tr>
+<tr><td>Database</td><td>Wired to</td><td>Tables</td></tr>
+<tr><td><code>edl_curated</code></td><td><strong>Nothing, in dev today.</strong> <code>infrastructure/modules/transformation_lambda/main.tf</code>'s <code>glue_catalog_database</code> variable defaults to <code>""</code> (registration disabled) and <code>infrastructure/environments/dev/main.tf</code>'s <code>module.transformation_lambda</code> block never sets it.</td><td>Created by Terraform; permanently empty in dev until someone wires this variable. The curated-registration code path (<code>transformation/transformation_pipeline.py::_register_curated_catalog</code>, one table per <code>{tenant_code}_{entity_id}_{domain}_curated</code>) exists and is exercised by tests, but is currently dead code in the deployed dev Lambda.</td></tr>
+<tr><td><code>edl_analytics</code></td><td><code>module.analytics_publisher_lambda</code> (<code>glue_catalog_database = module.glue.analytics_database_name</code> in <code>infrastructure/environments/dev/main.tf</code>)</td><td>Created by Terraform; empty until a pipeline run completes. Tables are registered by <code>analytics_publisher/analytics_publisher_handler.py</code> (not <code>_register_curated_catalog</code>) after a full run reaches the analytics-publish stage.</td></tr>
 </table>
+
+<blockquote>Both Glue databases are provisioned in every environment (<code>infrastructure/modules/glue/main.tf</code>),</blockquote>
+<blockquote>but only <code>edl_analytics</code> is actually reachable by a running Lambda in dev right now — don't assume</blockquote>
+<blockquote>curated-layer tables will appear in Athena without first wiring <code>glue_catalog_database</code> on the</blockquote>
+<blockquote>transformation Lambda module block.</blockquote>
 
 <h3>Secrets Manager</h3>
 
 <table>
 <tr><td>Secret</td><td>Contents</td></tr>
-<tr><td><code>dev/sources/salesforce/credentials</code></td><td><code>instance_url</code>, <code>client_id</code>, <code>client_secret</code></td></tr>
-<tr><td><code>dev/sources/netsuite/credentials</code></td><td>NetSuite OAuth/TBA credentials — connector is code-complete (<code>connector_runtime/adapters/netsuite/</code>); confirm this secret is actually populated before assuming live extraction</td></tr>
-<tr><td><code>dev/sources/mysql-rds/credentials</code></td><td><code>host</code>, <code>port</code>, <code>username</code>, <code>password</code>, <code>database</code></td></tr>
-<tr><td><code>dev/sources/sage/intacct/credentials</code></td><td><code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>company_id</code></td></tr>
-<tr><td><code>dev/sources/sage/x3/credentials</code></td><td><code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>folder</code></td></tr>
+<tr><td><code>edl/sources/salesforce/credentials</code></td><td><code>instance_url</code>, <code>client_id</code>, <code>client_secret</code></td></tr>
+<tr><td><code>edl/sources/netsuite/credentials</code></td><td>NetSuite OAuth/TBA credentials — connector is code-complete (<code>connector_runtime/adapters/netsuite/</code>); confirm this secret is actually populated before assuming live extraction</td></tr>
+<tr><td><code>edl/sources/mysql-rds/credentials</code></td><td><code>host</code>, <code>port</code>, <code>username</code>, <code>password</code>, <code>database</code></td></tr>
+<tr><td><code>edl/sources/sage/intacct/credentials</code></td><td><code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>company_id</code></td></tr>
+<tr><td><code>edl/sources/sage/x3/credentials</code></td><td><code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>folder</code></td></tr>
 </table>
 
 <blockquote>All five secrets above are now Terraform-managed (<code>infrastructure/modules/secrets/main.tf</code>),</blockquote>
 <blockquote>including Sage's — each has a resource policy (<code>DenyAllOtherPrincipals</code>) restricting</blockquote>
-<blockquote><code>GetSecretValue</code> to the extraction runtime role only (<code>SEC-3</code>). <code>terraform apply</code> creates the</blockquote>
+<blockquote><code>GetSecretValue</code> to the extraction runtime role only. <code>terraform apply</code> creates the</blockquote>
 <blockquote>empty secret <strong>shells</strong>; the actual credential values still need to be populated by hand via</blockquote>
 <blockquote><code>aws secretsmanager put-secret-value</code> — don't assume <code>terraform apply</code> alone makes a source live.</blockquote>
 >
-<blockquote><strong>Credential rotation monitoring</strong>: <code>dev-edl-credential-expiry-notifier</code> (daily) checks the age</blockquote>
+<blockquote><strong>Credential rotation monitoring</strong>: <code>EdlCredentialExpiryNotifier</code> (daily) checks the age</blockquote>
 <blockquote>of all five secrets above and alerts via SNS if rotation is overdue.</blockquote>
 
 <hr/>
@@ -217,48 +283,36 @@ All eight Lambdas are deployed from the <strong>same zip</strong> (via <code>var
 <table>
 <tr><td>Item</td><td>Value</td></tr>
 <tr><td>Backend</td><td>S3 remote state</td></tr>
-<tr><td>State bucket</td><td><code>dev-edl-terraform-state</code></td></tr>
+<tr><td>State bucket</td><td><code>edl-terraform-state-087972550871</code></td></tr>
 <tr><td>State key</td><td><code>environments/dev/terraform.tfstate</code></td></tr>
-<tr><td>Lock table</td><td><code>dev-edl-terraform-state-lock</code></td></tr>
+<tr><td>Lock table</td><td><code>EdlTerraformStateLock</code></td></tr>
 </table>
 
 <hr/>
 
 <h2>Next Steps</h2>
 
-<h3>Activate Sage Intacct and Sage X3 Schedules</h3>
+<h3>Onboard a source in Dev</h3>
 
-Entity configs for all 6 Sage entities are already seeded. To enable live extraction:
+No entity config is seeded yet for any source. To bring one online (Salesforce, MySQL RDS, Sage
+Intacct, Sage X3, or NetSuite):
 
-<ul><li><strong>Populate</strong> (not "create" — <code>terraform apply</code> already creates the secret shells, see Secrets</li></ul>
-  Manager section above) the values for <code>dev/sources/sage/intacct/credentials</code> and
-  <code>dev/sources/sage/x3/credentials</code> via <code>aws secretsmanager put-secret-value</code>
-<ul><li>Set <code>schedule_enabled=True</code> for Sage entities in DynamoDB via <code>seed_entity_config.py</code></li>
-<li>Trigger a dry-run: <code>python scripts/run_sage_connector_local.py --entity-id sage-intacct-customer --dry-run</code></li></ul>
+<ul><li>Populate the relevant Secrets Manager shell (see Secrets Manager section above) via</li></ul>
+  <code>aws secretsmanager put-secret-value</code>
+<ul><li>Seed its entity config records via <code>scripts/seed_entity_config.py</code></li>
+<li>Set <code>schedule_enabled=True</code> for its entities and sync schedules via <code>scripts/seed_schedules.py</code></li>
+<li>Trigger a dry-run first, e.g. <code>python scripts/run_sage_connector_local.py --entity-id sage-intacct-customer --dry-run</code></li></ul>
 
 <h3>Deploy Staging Environment</h3>
 
-<strong>Known blocker as of this writing:</strong> <code>terraform validate</code> for <code>staging</code> currently fails with 7
-pre-existing errors on the <code>orchestration</code> module block (missing <code>lambda_package_s3_key</code>,
-<code>lambda_package_s3_bucket</code>, <code>lambda_package_source_hash</code>, <code>run_audit_log_table_name</code>,
-<code>extraction_failure_dlq_arn</code>, <code>pipeline_trigger_role_arn</code>, <code>dlq_processor_role_arn</code> — confirmed via
-<code>git diff</code>, not introduced by any recent change). *<em>Fix these missing module arguments before
-attempting any of the steps below</em>* — they will fail at <code>terraform apply</code>, not just <code>validate</code>.
+<code>terraform validate</code> is clean for <code>staging</code>. Prerequisites:
+<ul><li>Staging AWS account and credentials</li>
+<li>Terraform state bootstrap (state bucket, lock table, KMS key — <code>docs/DEPLOYMENT_GUIDE.md</code> Phase 1,</li></ul>
+  including the orphaned-resource check in Step 1.6)
+<ul><li><code>ARTIFACTS_BUCKET=edl-terraform-state-{staging_account_id} make lambda-deploy</code> once the staging</li></ul>
+  account ID is known (always as a single command — see <code>infrastructure/CLAUDE.md</code>)
 
-Pre-requisites:
-<ul><li>Staging AWS credentials configured</li>
-<li>Confirm whether <code>staging-edl-watermark-repository</code>, <code>staging-edl-run-audit-log</code>,</li></ul>
-  <code>staging-edl-entity-extraction-config</code>, and <code>staging-edl-entity-type-registry</code> already exist in
-  AWS and, if so, whether they're tracked in Terraform state (<code>terraform state list | grep dynamodb</code>)
-  — see the DynamoDB Tables caveat above. Do not assume they need manual creation; that guidance is
-  now unverified.
-<ul><li>Upload Lambda zip: <code>ARTIFACTS_BUCKET=staging-edl-terraform-state make lambda-upload</code></li></ul>
-
-The module apply order below is the same one used for <code>dev</code>, but is no longer exhaustive — it
-predates <code>module.entity_resolution_lambda</code>, <code>module.analytics_publisher_lambda</code>, and
-<code>module.control_plane</code> (which additionally depends on <code>module.metadata_persistence</code>). Apply
-without <code>-target</code> once <code>terraform validate</code> is clean, or extend the targeted sequence to cover
-every module in <code>infrastructure/CLAUDE.md</code>'s module list:
+Apply order (see <code>infrastructure/CLAUDE.md</code> for the full module list and dependency mechanics):
 
 <pre><code>cd infrastructure/environments/staging
 terraform init
@@ -271,20 +325,17 @@ terraform apply -target=module.control_plane
 
 <h3>Deploy Production Environment</h3>
 
-Same pattern as staging — use <code>prod-edl-terraform-state</code> as <code>ARTIFACTS_BUCKET</code>. Lambda log
-retention is already configured at 365 days in HCL. <code>prod</code> has the same 7 pre-existing
-<code>orchestration</code> module validation errors as <code>staging</code> — fix once, the fix applies to both.
+Same pattern as staging — use <code>edl-terraform-state-{prod_account_id}</code> as <code>ARTIFACTS_BUCKET</code>. Lambda
+log retention is already configured at 365 days in HCL. <code>terraform apply</code>/<code>destroy</code> against
+<code>infrastructure/environments/prod</code> requires explicit operator sign-off outside of automated tooling.
 
 <h3>Onboard NetSuite</h3>
 
-The connector is <strong>code-complete</strong>, not "no code changes required — configuration only" as
-previously stated: <code>connector_runtime/adapters/netsuite/</code> already has a full implementation
-(connector, OAuth/TBA auth client, SuiteQL query planner, raw layer writer). Remaining steps are
-genuinely configuration-only:
+<code>connector_runtime/adapters/netsuite/</code> has a full implementation (connector, OAuth/TBA auth
+client, SuiteQL query planner, raw layer writer). Remaining steps are configuration-only:
 
-<ul><li>Confirm <code>dev/sources/netsuite/credentials</code> (already Terraform-managed as a secret shell) is</li></ul>
-  populated with real OAuth/TBA credentials
-<ul><li>Seed entity config for NetSuite entities via <code>seed_entity_config.py</code></li>
+<ul><li>Populate <code>edl/sources/netsuite/credentials</code> with real OAuth/TBA credentials</li>
+<li>Seed entity config for NetSuite entities via <code>seed_entity_config.py</code></li>
 <li>Set <code>schedule_enabled=True</code> once ready for live scheduled extraction</li></ul>
 
 </body>

@@ -82,9 +82,7 @@ class TestSqlServerLoader:
         mock_conn, _ = _make_connection()
         loader = SqlServerLoader(_SECRET_ARN, _REGION)
 
-        with patch(
-            "serving_store.loaders.sqlserver_loader.pymssql.connect", return_value=mock_conn
-        ):
+        with patch("pymssql.connect", return_value=mock_conn):
             result = loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         assert result.records_loaded == 2
@@ -96,15 +94,11 @@ class TestSqlServerLoader:
         loader = SqlServerLoader(_SECRET_ARN, _REGION)
 
         mock_conn_a, _ = _make_connection()
-        with patch(
-            "serving_store.loaders.sqlserver_loader.pymssql.connect", return_value=mock_conn_a
-        ):
+        with patch("pymssql.connect", return_value=mock_conn_a):
             result_a = loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         mock_conn_b, _ = _make_connection()
-        with patch(
-            "serving_store.loaders.sqlserver_loader.pymssql.connect", return_value=mock_conn_b
-        ):
+        with patch("pymssql.connect", return_value=mock_conn_b):
             result_b = loader.load(
                 _make_records(), _TABLE_NAME, ("account_id",), _OTHER_TENANT_CODE
             )
@@ -116,7 +110,7 @@ class TestSqlServerLoader:
     def test_connection_error_raises_serving_store_error(self):
         loader = SqlServerLoader(_SECRET_ARN, _REGION)
         with patch(
-            "serving_store.loaders.sqlserver_loader.pymssql.connect",
+            "pymssql.connect",
             side_effect=Exception("Connection refused"),
         ):
             with pytest.raises(ServingStoreError):
@@ -126,9 +120,7 @@ class TestSqlServerLoader:
         mock_conn, mock_cursor = _make_connection()
         loader = SqlServerLoader(_SECRET_ARN, _REGION)
 
-        with patch(
-            "serving_store.loaders.sqlserver_loader.pymssql.connect", return_value=mock_conn
-        ):
+        with patch("pymssql.connect", return_value=mock_conn):
             loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         executed_sql = " ".join(str(c.args[0]) for c in mock_cursor.execute.call_args_list)
@@ -141,9 +133,7 @@ class TestSqlServerLoader:
         mock_conn, mock_cursor = _make_connection(login_exists=True, user_exists=True)
         loader = SqlServerLoader(_SECRET_ARN, _REGION)
 
-        with patch(
-            "serving_store.loaders.sqlserver_loader.pymssql.connect", return_value=mock_conn
-        ):
+        with patch("pymssql.connect", return_value=mock_conn):
             loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         executed_sql = " ".join(str(c.args[0]) for c in mock_cursor.execute.call_args_list)
@@ -157,15 +147,11 @@ class TestSqlServerLoader:
         mock_conn, mock_cursor = _make_connection()
         loader = SqlServerLoader(_SECRET_ARN, _REGION)
 
-        with patch(
-            "serving_store.loaders.sqlserver_loader.pymssql.connect", return_value=mock_conn
-        ):
+        with patch("pymssql.connect", return_value=mock_conn):
             first = loader.load(records, _TABLE_NAME, ("account_id",), _TENANT_CODE)
             assert first.records_loaded == 2
 
-            mock_cursor.fetchall.return_value = [
-                {"account_id": "001", "_row_hash": unchanged_hash}
-            ]
+            mock_cursor.fetchall.return_value = [{"account_id": "001", "_row_hash": unchanged_hash}]
             mock_cursor.fetchone.side_effect = _fetchone_sequence(
                 schema_exists=True, login_exists=True, user_exists=True, table_exists=True
             )

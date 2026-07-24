@@ -25,18 +25,14 @@ from __future__ import annotations
 
 import io
 import re
-from typing import Any, Final
+from typing import Any
 
 import pyarrow.parquet as pq
 
+from contracts.identifier_policy import SAFE_S3_PREFIX_PATTERN
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
-
-# S3 prefix safety: no path traversal sequences, no leading slash (OWASP A03).
-# Hive-style partition paths (curated_date=2026-07-02, run_id=...) require '=' and '-'.
-# Single definition — imported wherever prefix validation is needed (no duplication).
-SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-_/=]{0,511}$")
 
 
 def source_id_to_domain(source_id: str) -> str:

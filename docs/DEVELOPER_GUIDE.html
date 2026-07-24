@@ -26,8 +26,10 @@
 <h1>Developer Guide — Enterprise Data Lake Platform</h1>
 
 <strong>Audience:</strong> Engineers new to the codebase, or anyone setting up a fresh workstation
-<strong>Last updated:</strong> 2026-07-07
-<strong>Status:</strong> Dev environment is live and fully operational
+<strong>Last updated:</strong> 2026-07-14
+<strong>Status:</strong> Dev infrastructure is deployed; Salesforce and MySQL RDS have real credentials and
+have run end-to-end. Sage Intacct, Sage X3, and NetSuite are code-complete but still have empty
+credential shells (see <code>docs/PLATFORM_STATUS.md</code> for current detail).
 
 <blockquote>If you're using Claude Code (or another AI coding agent) on this repo, read root <code>CLAUDE.md</code></blockquote>
 <blockquote>first — it captures the same setup/verification conventions as this guide plus non-obvious</blockquote>
@@ -77,11 +79,10 @@ DynamoDB config record (see §11).
 <strong>Multi-tenancy:</strong> the platform is multi-tenant-aware, not strictly single-tenant. Every entity
 config, watermark, schema snapshot, and entity-type lookup carries a <code>tenant_code</code> (default:
 <code>demo</code>, from <code>contracts/identifier_policy.DEFAULT_TENANT_CODE</code>). Isolation is <strong>not yet uniform</strong>:
-S3 curated/schema-snapshot keys and the <code>entity-type-registry</code> DynamoDB table are genuinely
-isolated (bucket prefix / partition key); <code>entity-extraction-config</code> and <code>watermark-repository</code>
-are only isolated by an application-level guard today, and the raw layer isn't tenant-prefixed at
-all yet. See <code>docs/PRODUCTION_INCIDENT_RUNBOOK.md</code>'s "How tenant isolation actually works today"
-section and run <code>tests/test_tenant_isolation.py</code> before touching any repository class. A new
+See <code>docs/PIPELINE_FLOW.md</code>'s canonical "Multi-tenancy — the canonical isolation model" table
+for exactly which layers are genuinely key/prefix-isolated vs. application-level-guard-only vs.
+not isolated at all — don't assume uniformity across layers. Run <code>tests/test_tenant_isolation.py</code>
+before touching any repository class. A new
 Cognito-authenticated SaaS control-plane API (<code>connector_runtime/api/</code>) exists for self-service
 tenant provisioning and pipeline triggering — it's code-complete but not yet verified against a
 live AWS deployment (see §2 and <code>connector_runtime/CLAUDE.md</code>).
@@ -99,7 +100,7 @@ live AWS deployment (see §2 and <code>connector_runtime/CLAUDE.md</code>).
 <tr><td><code>entity_resolution/</code></td><td>Cross-source entity matching; writes golden records to analytics layer. <code>entity_type_registry.py</code> now has a DynamoDB-backed <code>EntityTypeRegistryClient</code> (tenant-scoped) alongside the original hardcoded fallback dicts. <code>publishing_shared.py</code> holds logic shared between the golden/canonical record publishers.</td></tr>
 <tr><td><code>analytics_publisher/</code></td><td>Publishes partitioned analytics Parquet; registers Glue partitions; emits an end-to-end pipeline SLA metric</td></tr>
 <tr><td><code>schema_management/</code></td><td>Schema snapshot capture and drift detection (tenant-prefixed S3 keys)</td></tr>
-<tr><td><code>watermark_management/</code></td><td>Incremental extraction watermark read/write (tenant-checked on read)</td></tr>
+<tr><td><code>watermark_management/</code></td><td>Incremental extraction watermark read/write (tenant-scoped DynamoDB key via <code>tenant_scoped_key()</code>)</td></tr>
 <tr><td><code>orchestration/</code></td><td>Step Functions and EventBridge wiring. <code>pipeline_trigger/</code> (SQS FIFO → Step Functions, rate-limited) and <code>dlq_processor/</code> (DLQ → audit + alert + optional replay) are new dedicated Lambdas here, not just Terraform glue.</td></tr>
 <tr><td><code>governance/</code></td><td>Lineage records, data classification, retention enforcement</td></tr>
 <tr><td><code>observability/</code></td><td>Structured logging and CloudWatch metrics emission</td></tr>
@@ -195,77 +196,79 @@ Run these to confirm all dev resources exist before doing any work:
 <h3>S3 Buckets</h3>
 
 <pre><code>export AWS_PROFILE=dev
-aws s3 ls | grep dev-edl
+aws s3 ls | grep edl-
 </code></pre>
 
 Expected output:
 
-<pre><code>dev-edl-analytics-layer
-dev-edl-curated-layer
-dev-edl-raw-layer
-dev-edl-s3-access-logs
-dev-edl-schema-snapshots
-dev-edl-terraform-state
+<pre><code>edl-analytics-087972550871
+edl-curated-087972550871
+edl-raw-087972550871
+edl-access-logs-087972550871
+edl-schema-snapshots-087972550871
+edl-terraform-state-087972550871
 </code></pre>
 
 <h3>DynamoDB Tables</h3>
 
-<pre><code>aws dynamodb list-tables --region us-east-1 | grep dev-
+<pre><code>aws dynamodb list-tables --region us-east-1 | grep Edl
 </code></pre>
 
 Expected (see Known Gotcha #3 — whether these are actually Terraform-managed in this account is
 currently unverified; don't assume either way):
 
-<pre><code>dev-edl-entity-extraction-config
-dev-edl-run-audit-log
-dev-edl-watermark-repository
-dev-edl-entity-type-registry
+<pre><code>EdlEntityExtractionConfig
+EdlRunAuditLog
+EdlWatermarkRepository
+EdlEntityTypeRegistry
 </code></pre>
 
-<blockquote>If you see the same names <em>without</em> the <code>-edl-</code> infix (e.g. <code>dev-entity-extraction-config</code>),</blockquote>
-<blockquote>that's the older naming form referenced in some docs — prefer the <code>-edl-</code> form shown above,</blockquote>
-<blockquote>which matches the actual Terraform <code>name</code> attribute.</blockquote>
+<blockquote>Resource names no longer carry an environment prefix — since each of dev/staging/prod now lives</blockquote>
+<blockquote>in its own separate AWS account, the env prefix was redundant and has been dropped. The <code>Edl</code></blockquote>
+<blockquote>workload token is now applied consistently in PascalCase (previously an inconsistent lowercase</blockquote>
+<blockquote>infix present on some resources but not others). The environment is still tracked via an</blockquote>
+<blockquote><code>Environment</code> tag on every resource, not via the resource name.</blockquote>
 
 <h3>Secrets Manager</h3>
 
-<pre><code>aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name' | grep dev/sources
+<pre><code>aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name' | grep edl/sources
 </code></pre>
 
 Expected:
 
-<pre><code>dev/sources/salesforce/credentials
-dev/sources/netsuite/credentials
-dev/sources/mysql-rds/credentials
-dev/sources/sage/intacct/credentials
-dev/sources/sage/x3/credentials
+<pre><code>edl/sources/salesforce/credentials
+edl/sources/netsuite/credentials
+edl/sources/mysql-rds/credentials
+edl/sources/sage/intacct/credentials
+edl/sources/sage/x3/credentials
 </code></pre>
 
 <h3>Lambda Functions</h3>
 
-<pre><code>aws lambda list-functions --region us-east-1 --query 'Functions[?starts_with(FunctionName, `dev-`)].FunctionName'
+<pre><code>aws lambda list-functions --region us-east-1 --query 'Functions[?starts_with(FunctionName, `Edl`)].FunctionName'
 </code></pre>
 
 Expected:
 
-<pre><code>dev-analytics-layer-publisher
-dev-entity-resolution-pipeline
-dev-extraction-pipeline
-dev-transformation-pipeline
-dev-edl-control-plane
-dev-edl-credential-expiry-notifier
-dev-edl-pipeline-trigger
-dev-edl-dlq-processor
+<pre><code>EdlAnalyticsLayerPublisher
+EdlEntityResolutionPipeline
+EdlExtractionPipeline
+EdlTransformationPipeline
+EdlControlPlane
+EdlCredentialExpiryNotifier
+EdlPipelineTrigger
+EdlDlqProcessor
 </code></pre>
 
 <h3>Step Functions</h3>
 
-<pre><code>aws stepfunctions list-state-machines --region us-east-1 --query 'stateMachines[?starts_with(name, `dev-`)].name'
+<pre><code>aws stepfunctions list-state-machines --region us-east-1 --query 'stateMachines[?starts_with(name, `Edl`)].name'
 </code></pre>
 
 Expected — there is only one state machine (a previous version of this doc listed a second,
 <code>dev-data-pipeline</code>, that doesn't exist in <code>infrastructure/modules/orchestration/main.tf</code>):
 
-<pre><code>dev-extraction-pipeline
+<pre><code>EdlExtractionPipeline
 </code></pre>
 
 <hr/>
@@ -304,32 +307,37 @@ pytest tests/ -v --no-cov
 
 <h3>Full CI check suite (same as GitHub Actions)</h3>
 
-<pre><code>ruff check .                           # lint
-ruff format --check .                  # formatting (separate CI job from lint)
-mypy .                                 # type check — SEE CAVEAT BELOW, currently broken
-pytest --cov --cov-fail-under=80       # tests + coverage
-bandit -r . -c pyproject.toml          # SAST security scan
-pip-audit                              # dependency CVE scan
-make banned-names                      # rejects helper/util/common/manager identifiers
+<pre><code>ruff check .                            # lint
+ruff format --check .                   # formatting (separate CI job from lint)
+mypy -p connector_runtime -p transformation -p entity_resolution -p analytics_publisher \
+     -p orchestration -p observability -p watermark_management -p schema_management \
+     -p contracts -p governance          # type check — SEE CAVEAT BELOW
+pytest --cov --cov-fail-under=80        # tests + coverage
+bandit -r . --exclude .venv,tests,dist -c pyproject.toml   # SAST security scan
+pip-audit                               # dependency CVE scan
+make banned-names                       # rejects helper/util/common/manager identifiers
 </code></pre>
 
-<blockquote><strong><code>mypy .</code> currently fails for reasons unrelated to your change.</strong> It stops immediately on</blockquote>
-<blockquote><code>dist/lambda-build/typing_extensions.py</code> shadowing the real <code>typing_extensions</code> package (present</blockquote>
-<blockquote>after running <code>make lambda-package</code>), and — once that's worked around — on a module-name</blockquote>
-<blockquote>collision between <code>scripts/generate_presentation.py</code> and <code>pptx/generate_presentation.py</code>.</blockquote>
-<blockquote><code>make typecheck</code> has the exact same problem (it also just runs bare <code>mypy .</code>), so switching to</blockquote>
-<blockquote>the Makefile target doesn't help. <strong>Scope mypy to the packages you actually touched</strong> instead,</blockquote>
-<blockquote>e.g. <code>mypy connector_runtime schema_management watermark_management observability orchestration</blockquote>
-<blockquote>transformation governance entity_resolution analytics_publisher contracts</code> (this excludes</blockquote>
-<blockquote><code>dist/</code>, <code>scripts/</code>, and <code>pptx/</code> by construction). This is tracked as a real bug, not just a</blockquote>
-<blockquote>docs caveat — fixing the root cause (excluding <code>dist/</code> from mypy's search path, and renaming one</blockquote>
-<blockquote>of the two colliding <code>generate_presentation.py</code> files) is still open.</blockquote>
+<blockquote><strong>Never run bare <code>mypy .</code></strong> — it stops immediately on <code>dist/lambda-build/typing_extensions.py</code></blockquote>
+<blockquote>shadowing the real <code>typing_extensions</code> package (present after running <code>make lambda-package</code>),</blockquote>
+<blockquote>and — once that's worked around — on a module-name collision between</blockquote>
+<blockquote><code>scripts/generate_presentation.py</code> and <code>pptx/generate_presentation.py</code>. <code>make typecheck</code> has the</blockquote>
+<blockquote>exact same problem (it also just runs bare <code>mypy .</code>), so switching to the Makefile target doesn't</blockquote>
+<blockquote>help. Use the scoped <code>-p</code> form shown above — it currently surfaces a number of pre-existing type</blockquote>
+<blockquote>errors (re-run it to get the current count; see <code>docs/KNOWN_GAPS_AND_ROADMAP.md</code>), tracked as</blockquote>
+<blockquote>follow-up remediation debt, not something to fix incidentally. The CI type-check job reports red</blockquote>
+<blockquote>on this debt until it's separately remediated.</blockquote>
 
 <hr/>
 
 <h2>8. Running Pipelines</h2>
 
-<blockquote><strong>Important:</strong> The <code>dev-edl-raw-layer</code> S3 bucket policy only allows writes from the Lambda execution role (<code>dev-extraction-runtime-role</code>). Local scripts can run with <code>--dry-run</code> for schema/connectivity checks, but full extraction must go through Step Functions.</blockquote>
+<blockquote><strong>Prerequisite:</strong> none of this works yet in dev as of this writing — no source secret is</blockquote>
+<blockquote>populated (see <a href="../README.md#connector-credentials-aws-secrets-manager">Connector Credentials</a></blockquote>
+<blockquote>in the README) and no entity config is seeded (§11 below). The commands below are the procedure</blockquote>
+<blockquote>once both are done, not evidence that they've already been run.</blockquote>
+
+<blockquote><strong>Important:</strong> The <code>edl-raw-087972550871</code> S3 bucket policy only allows writes from the Lambda execution role (<code>EdlExtractionRuntimeRole</code>). Local scripts can run with <code>--dry-run</code> for schema/connectivity checks, but full extraction must go through Step Functions.</blockquote>
 
 <h3>Dry-run connectors (schema + connectivity check, no S3 write)</h3>
 
@@ -361,7 +369,7 @@ python scripts/trigger_extraction.py \
   --entity-id mysql-rds-contracts \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param table_name=Contracts
 
 # Salesforce — Account (full load)
@@ -370,7 +378,7 @@ python scripts/trigger_extraction.py \
   --entity-id salesforce-account \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param object_name=Account
 
 # Salesforce — Contact (incremental)
@@ -379,7 +387,7 @@ python scripts/trigger_extraction.py \
   --entity-id salesforce-contact \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param object_name=Contact
 
 # Sage Intacct — Customer (incremental)
@@ -388,7 +396,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-intacct-customer \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct --param object_path=accounts-receivable/customer
 
 # Sage Intacct — Vendor (incremental)
@@ -397,7 +405,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-intacct-vendor \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct --param object_path=accounts-payable/vendor
 
 # Sage Intacct — AR Invoice (incremental)
@@ -406,7 +414,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-intacct-arinvoice \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct --param object_path=accounts-receivable/invoice
 
 # Sage Intacct — AP Bill (incremental)
@@ -415,7 +423,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-intacct-apbill \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=intacct --param object_path=accounts-payable/bill
 
 # Sage X3 — Customer (incremental)
@@ -424,7 +432,7 @@ python scripts/trigger_extraction.py \
   --entity-id sage-x3-customer \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=x3 --param object_path=BPCUSTOMER
 
 # Sage X3 — Supplier (incremental)
@@ -433,29 +441,34 @@ python scripts/trigger_extraction.py \
   --entity-id sage-x3-supplier \
   --environment dev \
   --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:dev-extraction-pipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
   --param sage_product=x3 --param object_path=BPSUPPLIER
 </code></pre>
 
 <h3>Query analytics output via Athena</h3>
 
+Real data exists in dev for <code>company</code> (Salesforce accounts) and <code>mysql-rds-contracts</code> — the
+pipeline has run end-to-end for these (see <code>docs/PLATFORM_STATUS.md</code>). Other entities (persons,
+opportunities, contracts, Sage/NetSuite sources) aren't seeded/connected yet, so treat those rows
+as illustrative only. Replace <code>analytics_date</code> with a real run's date:
+
 <pre><code>-- Latest companies
-SELECT * FROM dev_edl_analytics.company WHERE analytics_date='2026-06-29';
+SELECT * FROM edl_analytics.company WHERE analytics_date='YYYY-MM-DD';
 
 -- Latest persons
-SELECT * FROM dev_edl_analytics.person WHERE analytics_date='2026-06-29';
+SELECT * FROM edl_analytics.person WHERE analytics_date='YYYY-MM-DD';
 
 -- Latest contracts
-SELECT COUNT(*) FROM dev_edl_analytics.contract   WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.contract   WHERE analytics_date='YYYY-MM-DD';
 
 -- Latest suppliers (Sage Intacct vendors + Sage X3 suppliers merged)
-SELECT COUNT(*) FROM dev_edl_analytics.supplier   WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.supplier   WHERE analytics_date='YYYY-MM-DD';
 
 -- Latest AR invoices
-SELECT COUNT(*) FROM dev_edl_analytics.ar_invoice  WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.ar_invoice  WHERE analytics_date='YYYY-MM-DD';
 
 -- Latest AP bills
-SELECT COUNT(*) FROM dev_edl_analytics.ap_bill     WHERE analytics_date='2026-06-29';
+SELECT COUNT(*) FROM edl_analytics.ap_bill     WHERE analytics_date='YYYY-MM-DD';
 </code></pre>
 
 <hr/>
@@ -494,7 +507,7 @@ terraform apply -target=module.control_plane
 
 Or skip <code>-target</code> entirely and apply everything in one pass once <code>terraform validate</code> is clean —
 Terraform resolves the dependency graph itself; the staged order above is only needed when you
-want to control blast radius. See <code>infrastructure/CLAUDE.md</code> for the full 14-module list and
+want to control blast radius. See <code>infrastructure/CLAUDE.md</code> for the current full module list and
 <code>make iac-validate</code> / <code>make iac-scan</code> for the CI-equivalent local checks.
 
 <blockquote><strong>Critical:</strong> Run <code>terraform init</code> after adding any new module, even if the module directory already exists. Forgetting causes "Module not installed" error.</blockquote>
@@ -509,27 +522,27 @@ The single zip <code>dist/extraction-pipeline.zip</code> serves all Lambda funct
 make lambda-package
 
 # Upload to S3 (note the SHA-256 hash printed — save it for Terraform var)
-ARTIFACTS_BUCKET=dev-edl-terraform-state make lambda-upload
+ARTIFACTS_BUCKET=edl-terraform-state-087972550871 make lambda-upload
 
 # After any code change, update deployed Lambdas immediately
 AWS_PROFILE=dev aws lambda update-function-code \
-  --function-name dev-extraction-pipeline \
-  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --function-name EdlExtractionPipeline \
+  --s3-bucket edl-terraform-state-087972550871 --s3-key lambda/extraction-pipeline.zip \
   --region us-east-1
 
 AWS_PROFILE=dev aws lambda update-function-code \
-  --function-name dev-transformation-pipeline \
-  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --function-name EdlTransformationPipeline \
+  --s3-bucket edl-terraform-state-087972550871 --s3-key lambda/extraction-pipeline.zip \
   --region us-east-1
 
 AWS_PROFILE=dev aws lambda update-function-code \
-  --function-name dev-entity-resolution-pipeline \
-  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --function-name EdlEntityResolutionPipeline \
+  --s3-bucket edl-terraform-state-087972550871 --s3-key lambda/extraction-pipeline.zip \
   --region us-east-1
 
 AWS_PROFILE=dev aws lambda update-function-code \
-  --function-name dev-analytics-layer-publisher \
-  --s3-bucket dev-edl-terraform-state --s3-key lambda/extraction-pipeline.zip \
+  --function-name EdlAnalyticsLayerPublisher \
+  --s3-bucket edl-terraform-state-087972550871 --s3-key lambda/extraction-pipeline.zip \
   --region us-east-1
 </code></pre>
 
@@ -537,14 +550,14 @@ AWS_PROFILE=dev aws lambda update-function-code \
 
 <table>
 <tr><td>Lambda</td><td>Handler</td></tr>
-<tr><td><code>dev-extraction-pipeline</code></td><td><code>connector_runtime.extraction_pipeline_handler.lambda_handler</code></td></tr>
-<tr><td><code>dev-transformation-pipeline</code></td><td><code>transformation.transformation_pipeline_handler.lambda_handler</code></td></tr>
-<tr><td><code>dev-entity-resolution-pipeline</code></td><td><code>entity_resolution.entity_resolution_pipeline_handler.lambda_handler</code></td></tr>
-<tr><td><code>dev-analytics-layer-publisher</code></td><td><code>analytics_publisher.analytics_publisher_handler.lambda_handler</code></td></tr>
-<tr><td><code>dev-edl-control-plane</code></td><td><code>connector_runtime.api.control_plane_handler.lambda_handler</code></td></tr>
-<tr><td><code>dev-edl-credential-expiry-notifier</code></td><td><code>connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler</code></td></tr>
-<tr><td><code>dev-edl-pipeline-trigger</code></td><td><code>orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler</code></td></tr>
-<tr><td><code>dev-edl-dlq-processor</code></td><td><code>orchestration.dlq_processor.dlq_processor_handler.lambda_handler</code></td></tr>
+<tr><td><code>EdlExtractionPipeline</code></td><td><code>connector_runtime.extraction_pipeline_handler.lambda_handler</code></td></tr>
+<tr><td><code>EdlTransformationPipeline</code></td><td><code>transformation.transformation_pipeline_handler.lambda_handler</code></td></tr>
+<tr><td><code>EdlEntityResolutionPipeline</code></td><td><code>entity_resolution.entity_resolution_pipeline_handler.lambda_handler</code></td></tr>
+<tr><td><code>EdlAnalyticsLayerPublisher</code></td><td><code>analytics_publisher.analytics_publisher_handler.lambda_handler</code></td></tr>
+<tr><td><code>EdlControlPlane</code></td><td><code>connector_runtime.api.control_plane_handler.lambda_handler</code></td></tr>
+<tr><td><code>EdlCredentialExpiryNotifier</code></td><td><code>connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler</code></td></tr>
+<tr><td><code>EdlPipelineTrigger</code></td><td><code>orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler</code></td></tr>
+<tr><td><code>EdlDlqProcessor</code></td><td><code>orchestration.dlq_processor.dlq_processor_handler.lambda_handler</code></td></tr>
 </table>
 
 All eight share the same deployment zip (see §10 above) — a code change to any handler requires
@@ -574,47 +587,48 @@ Configs are defined in <code>config/</code> — edit them there and re-seed, nev
 <pre><code>EventBridge Scheduler (cron)
     │
     ▼
-SQS FIFO queue ──► dev-edl-pipeline-trigger Lambda (rate-limited) ──► Step Functions (dev-extraction-pipeline)
+SQS FIFO queue ──► EdlPipelineTrigger Lambda (rate-limited) ──► Step Functions (EdlExtractionPipeline)
     │  (the control-plane API's pipeline-trigger route enqueues here too — same path, not a
     │   parallel one)
     │
-    ├─ Step 1: dev-extraction-pipeline Lambda
+    ├─ Step 1: EdlExtractionPipeline Lambda
     │       Reads DynamoDB config (tenant_code-scoped) → fetches from source API
-    │       Writes Parquet to: s3://dev-edl-raw-layer/raw/{source_id}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/
-    │         (raw layer is NOT tenant-prefixed yet — see §1 Multi-tenancy note)
-    │       Updates watermark in DynamoDB (tenant-checked)
+    │       Writes Parquet to: s3://edl-raw-087972550871/{tenant_code}/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/
+    │         ({source} is one hyphenated segment: salesforce, netsuite, mysql-rds, sage-intacct, sage-x3)
+    │       Updates watermark in DynamoDB (tenant-scoped key)
     │       If approaching the Lambda timeout mid-run: commits a partial watermark, emits a
     │       checkpoint audit record, and the state machine exits cleanly via the
     │       `ExtractionCheckpointed` terminal state instead of failing. Automatic resume from a
     │       checkpoint is NOT yet implemented — needs a manual re-trigger.
     │       On unrecoverable failure: message lands on the extraction-failure DLQ →
-    │       dev-edl-dlq-processor Lambda (audit record + SNS alert + optional auto-replay)
+    │       EdlDlqProcessor Lambda (audit record + SNS alert + optional auto-replay)
     │
-    ├─ Step 2: dev-transformation-pipeline Lambda
+    ├─ Step 2: EdlTransformationPipeline Lambda
     │       Reads raw Parquet → applies field mapping JSON
     │       Quality checks → PII masking (now actually wired up — see governance module)
     │       SCD Type 1 merge: loads previous curated state, merges delta by
     │       primary_key_field → writes FULL current-state Parquet to curated
     │       (full-load entities: writes delta only, no merge)
-    │       Writes to: s3://dev-edl-curated-layer/{tenant_code}/curated/{domain}/{entity_id}/
-    │       Registers Glue table
+    │       Writes to: s3://edl-curated-087972550871/{tenant_code}/curated/{domain}/{entity_id}/
+    │       Registers Glue table (tenant-scoped table name `{tenant_code}_{entity_id}_{domain}_curated`)
+    │         and the run's `curated_date` partition
     │
-    ├─ Step 3: dev-entity-resolution-pipeline Lambda
+    ├─ Step 3: EdlEntityResolutionPipeline Lambda
     │       Loads latest curated data from ALL sources per entity type — streamed via DuckDB
     │       rather than fully materialized into memory
     │       Resolves entity type via EntityTypeRegistryClient (DynamoDB, tenant-scoped), falling
     │       back to hardcoded seed dicts if no registry record exists
     │       Runs matching (Jaro-Winkler + Jaccard)
-    │       Writes golden records to: s3://dev-edl-analytics-layer/canonical/{entity_type}/
+    │       Writes golden records to: s3://edl-analytics-087972550871/{tenant_code}/canonical/{entity_type}/
     │
-    └─ Step 4: dev-analytics-layer-publisher Lambda
+    └─ Step 4: EdlAnalyticsLayerPublisher Lambda
             Writes partitioned analytics Parquet
-            Path: s3://dev-edl-analytics-layer/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet
+            Path: s3://edl-analytics-087972550871/{tenant_code}/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet
             Registers Glue partition → queryable in Athena
             Emits an end-to-end pipeline SLA metric (run start → analytics publish latency)
 </code></pre>
 
-<strong>Entity type mapping:</strong>
+<strong>Entity type mapping</strong> (<code>entity_resolution/entity_type_registry.py::ENTITY_ID_TO_TYPE</code>):
 
 <table>
 <tr><td>Source entity</td><td>Entity type</td></tr>
@@ -627,7 +641,18 @@ SQS FIFO queue ──► dev-edl-pipeline-trigger Lambda (rate-limited) ──�
 <tr><td><code>sage-x3-supplier</code></td><td><code>supplier</code></td></tr>
 <tr><td><code>sage-intacct-arinvoice</code></td><td><code>ar_invoice</code></td></tr>
 <tr><td><code>sage-intacct-apbill</code></td><td><code>ap_bill</code></td></tr>
+<tr><td><code>salesforce-opportunity</code></td><td><code>opportunity</code></td></tr>
+<tr><td><code>salesforce-contract</code></td><td><code>sales-contract</code></td></tr>
+<tr><td><code>mysql-rds-contractterms</code></td><td><code>contract-term</code></td></tr>
 </table>
+
+The last three rows are newly added (field mapping under <code>config/field_mappings/</code>, entity
+resolution config under <code>config/entity_resolution/</code>, and registry/seed-script wiring are all in
+place) but not yet seeded to any environment's DynamoDB — run <code>scripts/seed_entity_config.py</code>
+after reviewing the new records. <code>sales-contract</code> and <code>contract-term</code> are deliberately separate
+entity types rather than merged into <code>contract</code>: Salesforce Contract and MySQL RDS ContractTerms
+share no common key, so merging them would require a fuzzy match that risks combining unrelated
+records.
 
 <hr/>
 
@@ -637,37 +662,47 @@ SQS FIFO queue ──► dev-edl-pipeline-trigger Lambda (rate-limited) ──�
 
 2. <strong>Terraform module apply order</strong> — <code>module.iam</code> → <code>module.metadata_persistence</code> → (<code>module.lambda_pipeline</code> + <code>module.transformation_lambda</code> + <code>module.entity_resolution_lambda</code> + <code>module.analytics_publisher_lambda</code>) → <code>module.orchestration</code> → <code>module.control_plane</code> (needs <code>iam</code>, <code>orchestration</code>, <em>and</em> <code>metadata_persistence</code>). Orchestration and control_plane fail at plan time if any dependency's ARN is empty. See §9.
 
-3. <strong>DynamoDB tables — unresolved doc/infra contradiction, verify before applying.</strong> This doc previously said these tables are "NOT Terraform-managed... Terraform uses <code>data \"aws_dynamodb_table\"</code> lookups." That's contradicted by the actual code: <code>infrastructure/modules/metadata_persistence/main.tf</code> defines real <code>aws_dynamodb_table</code> <em>resource</em> blocks (with <code>prevent_destroy</code>) for <code>watermark_repository</code>, <code>run_audit_log</code>, <code>entity_extraction_config</code>, and <code>entity_type_registry</code> — and this predates the current round of changes (confirmed via <code>git log</code> on that file), so it's a pre-existing mismatch, not something newly broken. <strong>Before running <code>terraform apply</code> in any environment</strong>, run <code>terraform state list | grep dynamodb</code> to check whether these are already tracked in state. If they exist in AWS but aren't in state, <code>apply</code> will fail with "already exists"; if you're setting up a fresh environment, they may need to be created via Terraform directly rather than by hand as this doc used to instruct.
+3. <strong>DynamoDB tables are all Terraform-managed</strong> — <code>module.metadata_persistence</code> defines real <code>aws_dynamodb_table</code> resources for all five (<code>entity_extraction_config</code>, <code>entity_type_registry</code>, <code>run_audit_log</code>, <code>source_onboarding_registry</code>, <code>watermark_repository</code>). Don't create any of them by hand.
 
-4. <strong>Raw layer bucket rejects IAM user writes</strong> — <code>dev-edl-raw-layer</code> policy allows writes only from <code>dev-extraction-runtime-role</code> (Lambda). Local scripts must use <code>--dry-run</code>. Full runs go through Step Functions.
+4. <strong>Raw layer bucket rejects IAM user writes</strong> — <code>edl-raw-087972550871</code> policy allows writes only from <code>EdlExtractionRuntimeRole</code> (Lambda). Local scripts must use <code>--dry-run</code>. Full runs go through Step Functions.
 
 5. <strong>Entity config <code>s3://</code> prefix required</strong> — <code>target_raw_s3_prefix</code> and <code>schema_snapshot_s3_prefix</code> in entity configs must start with <code>s3://</code>. Bare paths fail Pydantic validation at runtime.
 
-6. <strong>Salesforce <code>connector_params</code> must include <code>object_name</code></strong> — e.g. <code>{"object_name": "Account"}</code>. Missing this raises <code>ValueError</code> at runtime.
+6. <strong>Lambda <code>environment.variables</code> can never set <code>AWS_REGION</code></strong> (or any other AWS-reserved key) — <code>CreateFunction</code>/<code>UpdateFunctionConfiguration</code> reject the whole request. Lambda injects it automatically — see <code>infrastructure/CLAUDE.md</code> for detail.
 
-7. <strong>Field mapping <code>behavior</code> valid values</strong> — <code>raise_error</code>, <code>use_default</code>, <code>drop_field</code>. The value <code>use_null</code> does not exist and causes a validation error.
+7. <strong>A queue's <code>visibility_timeout_seconds</code> must be ≥ the timeout of any Lambda consuming it via an event source mapping</strong>, or <code>CreateEventSourceMapping</code> fails outright — see <code>infrastructure/CLAUDE.md</code>.
 
-8. <strong>Glue domain name</strong> — source ID <code>mysql-rds</code> becomes <code>mysql_rds</code> in Glue (dashes → underscores for catalog naming compliance).
+8. <strong>A one-attribute fix in one module can force spurious security-group/Lambda-permission replacement in every module that consumes its outputs</strong> (Terraform defers <code>data.aws_region</code>/<code>data.aws_caller_identity</code>/<code>data.aws_vpc</code> reads to apply-time whenever their containing module "depends on a module with changes pending"). Land small unrelated fixes via <code>-target</code> first, then re-plan the full environment. See <code>infrastructure/CLAUDE.md</code> for the full mechanism.
 
-9. <strong>MySQL RDS is in <code>us-west-1</code></strong> — the platform is in <code>us-east-1</code>. Cross-region connectivity goes through NAT Gateway. NAT IP <code>3.208.252.220</code> must be whitelisted in the RDS security group.
+9. <strong>Never assume an environment's AWS account is orphan-free just because nothing was "officially" deployed there.</strong> A prior deployment torn down by deleting only the big, visible resources (not via <code>terraform destroy</code>) can leave SQS queues, Secrets Manager secrets, CloudWatch Logs query definitions, an X-Ray group, a Glue resource policy, or an EventBridge Scheduler group behind, blocking the next <code>apply</code> with <code>AlreadyExists</code> errors. Run an inventory sweep before assuming a clean slate — see <code>infrastructure/CLAUDE.md</code> for the exact commands.
 
-10. <strong>S3 Hive partition paths require <code>=</code> in prefix pattern</strong> — paths like <code>extraction_date=2026-06-29</code> contain <code>=</code>. The <code>_SAFE_S3_PREFIX_PATTERN</code> regex must allow it.
+10. <strong><code>make lambda-package</code> is not byte-reproducible</strong> (unpinned dependency ranges in <code>pyproject.toml</code>) — running it twice, or running <code>lambda-package</code> then <code>lambda-upload</code> as separate commands, can upload a different artifact than the one whose hash you copied. Always run <code>make lambda-deploy</code> as a single command, which updates all eight Lambda functions in one pass — see <code>infrastructure/CLAUDE.md</code>.
 
-11. <strong>Salesforce Bulk API returns <code>""</code> for null fields</strong> — treated as missing (becomes <code>None</code> via <code>use_default</code>). This is intentional. A genuine empty string in a Salesforce field will also be treated as missing.
+11. <strong>Salesforce <code>connector_params</code> must include <code>object_name</code></strong> — e.g. <code>{"object_name": "Account"}</code>. Missing this raises <code>ValueError</code> at runtime.
 
-12. <strong>Sage <code>connector_params</code> must include <code>sage_product</code> and <code>object_path</code></strong> — e.g. <code>{"sage_product": "intacct", "object_path": "accounts-receivable/customer"}</code>. Missing either key raises <code>ValueError</code> at runtime. Valid <code>sage_product</code> values are <code>"intacct"</code> and <code>"x3"</code>.
+12. <strong>Field mapping <code>behavior</code> valid values</strong> — <code>raise_error</code>, <code>use_default</code>, <code>drop_field</code>. The value <code>use_null</code> does not exist and causes a validation error.
 
-13. <strong>Sage X3 field names must be UPPERCASE</strong> — e.g. <code>BPCNUM_0</code>, <code>MODDAT_0</code>. The X3 query engine validates against <code>^[A-Z][A-Z0-9_]{0,63}$</code>. Lowercase field names in <code>include_fields</code> are rejected with <code>X3QueryBuildError</code>.
+13. <strong>Glue domain name</strong> — source ID <code>mysql-rds</code> becomes <code>mysql_rds</code> in Glue (dashes → underscores for catalog naming compliance).
 
-14. <strong>Sage Intacct incremental watermark field is <code>auditInfo.modifiedAt</code></strong> — dot-notation key returned flat in query responses. Set <code>watermark_field</code> to this exact string in the entity config.
+14. <strong>MySQL RDS is in <code>us-west-1</code></strong> — the platform is in <code>us-east-1</code>. Cross-region connectivity goes through NAT Gateway. NAT IP <code>3.208.252.220</code> must be whitelisted in the RDS security group.
 
-15. <strong>Sage uses per-product secret paths</strong> — <code>{env}/sources/sage/intacct/credentials</code> and <code>{env}/sources/sage/x3/credentials</code> are separate Secrets Manager secrets. Intacct requires <code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>company_id</code>. X3 requires the same plus <code>folder</code> (the X3 company folder, e.g. <code>"SEED"</code>).
+15. <strong>S3 Hive partition paths require <code>=</code> in prefix pattern</strong> — paths like <code>extraction_date=2026-06-29</code> contain <code>=</code>. The <code>_SAFE_S3_PREFIX_PATTERN</code> regex must allow it.
 
-16. <strong>Sage X3 OData discriminant</strong> — the X3 query engine embeds <code>"_x3_odata": true</code> in <code>query_text</code> JSON. <code>SageConnector.execute_extraction()</code> dispatches on this key to the OData GET path. Do not set this key manually in entity configs.
+16. <strong>Salesforce Bulk API returns <code>""</code> for null fields</strong> — treated as missing (becomes <code>None</code> via <code>use_default</code>). This is intentional. A genuine empty string in a Salesforce field will also be treated as missing.
 
-17. <strong><code>primary_key_field</code> must be a flat canonical field name</strong> — dotted paths like <code>"auditInfo.id"</code> are silently treated as missing because <code>record.get()</code> only does top-level dict lookup. Use the canonical field name after field mapping (e.g. <code>"Id"</code>, <code>"contact_id"</code>). Only set this field for incremental entities; <code>None</code> (default) leaves pipeline unchanged.
+17. <strong>Sage <code>connector_params</code> must include <code>sage_product</code> and <code>object_path</code></strong> — e.g. <code>{"sage_product": "intacct", "object_path": "accounts-receivable/customer"}</code>. Missing either key raises <code>ValueError</code> at runtime. Valid <code>sage_product</code> values are <code>"intacct"</code> and <code>"x3"</code>.
 
-18. <strong>Tombstone soft-delete is the default</strong> — <code>soft_delete_field=None</code> means deleted records are never physically removed from the curated or analytics layers. They persist with their source deletion flag (e.g. <code>is_deleted=True</code>). Always filter <code>WHERE is_deleted = false</code> (or equivalent) in analytics queries to see only active records. To physically remove records, set <code>soft_delete_field</code> to the canonical name of the deletion flag field.
+18. <strong>Sage X3 field names must be UPPERCASE</strong> — e.g. <code>BPCNUM_0</code>, <code>MODDAT_0</code>. The X3 query engine validates against <code>^[A-Z][A-Z0-9_]{0,63}$</code>. Lowercase field names in <code>include_fields</code> are rejected with <code>X3QueryBuildError</code>.
+
+19. <strong>Sage Intacct incremental watermark field is <code>auditInfo.modifiedAt</code></strong> — dot-notation key returned flat in query responses. Set <code>watermark_field</code> to this exact string in the entity config.
+
+20. <strong>Sage uses per-product secret paths</strong> — <code>edl/sources/sage/intacct/credentials</code> and <code>edl/sources/sage/x3/credentials</code> are separate Secrets Manager secrets. Intacct requires <code>token_url</code>, <code>client_id</code>, <code>client_secret</code>, <code>base_url</code>, <code>company_id</code>. X3 requires the same plus <code>folder</code> (the X3 company folder, e.g. <code>"SEED"</code>).
+
+21. <strong>Sage X3 OData discriminant</strong> — the X3 query engine embeds <code>"_x3_odata": true</code> in <code>query_text</code> JSON. <code>SageConnector.execute_extraction()</code> dispatches on this key to the OData GET path. Do not set this key manually in entity configs.
+
+22. <strong><code>primary_key_field</code> must be a flat canonical field name</strong> — dotted paths like <code>"auditInfo.id"</code> are silently treated as missing because <code>record.get()</code> only does top-level dict lookup. Use the canonical field name after field mapping (e.g. <code>"Id"</code>, <code>"contact_id"</code>). Only set this field for incremental entities; <code>None</code> (default) leaves pipeline unchanged.
+
+23. <strong>Tombstone soft-delete is the default</strong> — <code>soft_delete_field=None</code> means deleted records are never physically removed from the curated or analytics layers. They persist with their source deletion flag (e.g. <code>is_deleted=True</code>). Always filter <code>WHERE is_deleted = false</code> (or equivalent) in analytics queries to see only active records. To physically remove records, set <code>soft_delete_field</code> to the canonical name of the deletion flag field.
 
 </body>
 </html>

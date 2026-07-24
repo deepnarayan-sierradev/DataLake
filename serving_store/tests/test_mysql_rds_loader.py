@@ -176,9 +176,7 @@ class TestServingStoreLoaderSecretRetrieval:
             assert first.records_loaded == 2
 
             # Second run: DB already has record 001 unchanged; 002 is new/changed.
-            mock_cursor.fetchall.return_value = [
-                {"account_id": "001", "_row_hash": unchanged_hash}
-            ]
+            mock_cursor.fetchall.return_value = [{"account_id": "001", "_row_hash": unchanged_hash}]
             mock_cursor.rowcount = 1
             second = loader.load(records, _TABLE_NAME, ("account_id",), _TENANT_CODE)
 

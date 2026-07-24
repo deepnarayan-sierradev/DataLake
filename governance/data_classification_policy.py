@@ -13,7 +13,8 @@ Classification levels (ascending sensitivity):
   INTERNAL      — internal use only; not exposed externally
   CONFIDENTIAL  — restricted access; logged on query
   PII           — personal data; masked in curated and analytics layers
-  SENSITIVE_PII — high-risk personal data (SSN, financial); always tokenised
+  SENSITIVE_PII — high-risk personal data (SSN, financial); irreversibly masked
+                  (FULL_MASK auto-default; TOKENISE when a key is configured)
 
 Security (OWASP A01, A04):
   - Classification policies are configuration artefacts, not runtime input.
@@ -159,13 +160,12 @@ def build_auto_classification_policy(
     for field_name in field_names:
         level = auto_classify_field(field_name)
         if level == DataClassificationLevel.SENSITIVE_PII:
-            # HASH requires no secret and is irreversible — a safe default
-            # until a Secrets-Manager-backed tokenisation key is wired in.
+            # OWASP A02: irreversible FULL_MASK (unsalted HASH is dictionary-reversible for SSN/CC).
             classifications.append(
                 FieldClassification(
                     field_name=field_name,
                     classification=level,
-                    masking_strategy=MaskingStrategy.HASH,
+                    masking_strategy=MaskingStrategy.FULL_MASK,
                 )
             )
         elif level == DataClassificationLevel.PII:

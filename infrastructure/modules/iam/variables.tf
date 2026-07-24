@@ -52,6 +52,21 @@ variable "serving_store_config_table_arn" {
   description = "ARN of the serving store config DynamoDB table (read-only by the serving store loader runtime)."
 }
 
+variable "twin_index_table_arn" {
+  type        = string
+  description = "ARN of the twin index DynamoDB table (written by twin build, read by the control plane)."
+}
+
+variable "semantic_model_table_arn" {
+  type        = string
+  description = "ARN of the semantic model DynamoDB table (read by the control plane)."
+}
+
+variable "saved_query_table_arn" {
+  type        = string
+  description = "ARN of the saved query DynamoDB table (read/written by the control plane)."
+}
+
 variable "serving_store_secret_arns" {
   type        = list(string)
   description = "Secrets Manager ARNs the serving store loader role may read/create/update: the writer credential(s) plus the edl/serving-store/* reader-credential prefix."

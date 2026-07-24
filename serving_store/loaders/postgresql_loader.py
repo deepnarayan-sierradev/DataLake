@@ -23,9 +23,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Final
 
-import psycopg
-import psycopg.rows
-
 from serving_store.interfaces.loader_interface import (
     RESERVED_COLUMNS,
     SAFE_COLUMN_PATTERN,
@@ -57,6 +54,9 @@ class PostgreSqlLoader(ServingStoreLoaderInterface):
 
     def _connect(self, credentials: dict[str, str], connection_database: str) -> Any:
         """Open a psycopg connection with TLS enforced (OWASP A02)."""
+        import psycopg
+        import psycopg.rows
+
         return psycopg.connect(
             host=credentials["host"],
             port=int(credentials.get("port", self.default_port)),
@@ -121,14 +121,12 @@ class PostgreSqlLoader(ServingStoreLoaderInterface):
             if not SAFE_COLUMN_PATTERN.match(col):
                 raise ServingStoreError(f"Unsafe column name rejected: {col!r}")
 
-        col_defs = ", ".join(
-            f'"{col}" {_infer_postgres_type(sample.get(col))}' for col in columns
-        )
+        col_defs = ", ".join(f'"{col}" {_infer_postgres_type(sample.get(col))}' for col in columns)
         pk_def = ", ".join(f'"{k}"' for k in primary_keys)
         ddl = (
             f'CREATE TABLE IF NOT EXISTS "{table_name}" '
             f'({col_defs}, "_row_hash" CHAR(64), "_synced_at" TIMESTAMP, '
-            f'PRIMARY KEY ({pk_def}))'
+            f"PRIMARY KEY ({pk_def}))"
         )
         with connection.cursor() as cur:
             cur.execute(ddl)
@@ -181,9 +179,7 @@ class PostgreSqlLoader(ServingStoreLoaderInterface):
             f"ON CONFLICT ({pk_cols}) DO UPDATE SET {update_clause}"
         )
         now = datetime.now(UTC).isoformat()
-        rows = [
-            (*(record.get(c) for c in columns), row_hash, now) for record, row_hash in changed
-        ]
+        rows = [(*(record.get(c) for c in columns), row_hash, now) for record, row_hash in changed]
         total = 0
         with connection.cursor() as cur:
             for start in range(0, len(rows), _UPSERT_CHUNK_SIZE):

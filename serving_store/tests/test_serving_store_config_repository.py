@@ -132,9 +132,7 @@ class TestServingStoreConfigRepositoryDynamoDB:
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         table = _create_dynamodb_table(dynamodb)
         table.put_item(Item=_VALID_RECORD)
-        table.put_item(
-            Item={**_VALID_RECORD, "tenant_code": "globex-eu", "entity_type": "person"}
-        )
+        table.put_item(Item={**_VALID_RECORD, "tenant_code": "globex-eu", "entity_type": "person"})
 
         client = ServingStoreConfigRepositoryClient(environment=_ENV, region_name=_REGION)
         configs = client.list_configs_for_tenant("acme-corp")

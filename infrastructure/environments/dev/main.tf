@@ -193,6 +193,9 @@ module "iam" {
   dlq_arn                        = module.metadata_persistence.extraction_failure_dlq_arn
 
   serving_store_config_table_arn = module.metadata_persistence.serving_store_config_table_arn
+  twin_index_table_arn           = module.metadata_persistence.twin_index_table_arn
+  semantic_model_table_arn       = module.metadata_persistence.semantic_model_table_arn
+  saved_query_table_arn          = module.metadata_persistence.saved_query_table_arn
   serving_store_secret_arns = [
     module.serving_store_database.master_user_secret_arn,
     "arn:aws:secretsmanager:${local.aws_region}:${data.aws_caller_identity.current.account_id}:secret:edl/serving-store/*",
@@ -444,6 +447,27 @@ resource "aws_security_group_rule" "serving_store_database_from_lambda" {
   description              = "MySQL ingress to the serving store RDS instance from the loader Lambda only."
 }
 
+module "twin_build_lambda" {
+  source      = "../../modules/twin_build_lambda"
+  environment = local.environment
+
+  kms_key_arn        = module.kms_logs.key_arn
+  execution_role_arn = module.iam.twin_build_runtime_role_arn
+
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  analytics_s3_bucket_name          = module.storage.analytics_layer_bucket_id
+  relationship_rules_s3_bucket_name = module.storage.curated_layer_bucket_id
+
+  reserved_concurrent_executions = 10
+
+  tags = local.common_tags
+
+  depends_on = [module.iam, module.storage]
+}
+
 module "orchestration" {
   source      = "../../modules/orchestration"
   environment = local.environment
@@ -460,6 +484,7 @@ module "orchestration" {
   entity_resolution_lambda_arn       = module.entity_resolution_lambda.lambda_function_arn
   analytics_publisher_lambda_arn     = module.analytics_publisher_lambda.lambda_function_arn
   serving_store_loader_lambda_arn    = module.serving_store_lambda.lambda_function_arn
+  twin_build_lambda_arn              = module.twin_build_lambda.lambda_function_arn
 
   # SQS burst buffer — pipeline trigger Lambda package (same zip as extraction pipeline)
   lambda_package_s3_bucket   = var.lambda_package_s3_bucket
@@ -505,6 +530,10 @@ module "control_plane" {
   entity_config_table_name        = module.metadata_persistence.entity_extraction_config_table_name
   entity_type_registry_table_name = module.metadata_persistence.entity_type_registry_table_name
   run_audit_log_table_name        = module.metadata_persistence.run_audit_log_table_name
+  analytics_s3_bucket_name        = module.storage.analytics_layer_bucket_id
+  twin_index_table_name           = module.metadata_persistence.twin_index_table_name
+  semantic_model_table_name       = module.metadata_persistence.semantic_model_table_name
+  saved_query_table_name          = module.metadata_persistence.saved_query_table_name
 
   tags = local.common_tags
 

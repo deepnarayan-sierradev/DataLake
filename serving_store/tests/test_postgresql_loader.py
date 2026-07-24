@@ -69,9 +69,7 @@ class TestPostgreSqlLoader:
         mock_conn, _ = _make_connection()
         loader = PostgreSqlLoader(_SECRET_ARN, _REGION)
 
-        with patch(
-            "serving_store.loaders.postgresql_loader.psycopg.connect", return_value=mock_conn
-        ):
+        with patch("psycopg.connect", return_value=mock_conn):
             result = loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         assert result.records_loaded == 2
@@ -83,9 +81,7 @@ class TestPostgreSqlLoader:
         mock_conn, _ = _make_connection()
         loader = PostgreSqlLoader(_SECRET_ARN, _REGION)
 
-        with patch(
-            "serving_store.loaders.postgresql_loader.psycopg.connect", return_value=mock_conn
-        ):
+        with patch("psycopg.connect", return_value=mock_conn):
             result_a = loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
             result_b = loader.load(
                 _make_records(), _TABLE_NAME, ("account_id",), _OTHER_TENANT_CODE
@@ -98,7 +94,7 @@ class TestPostgreSqlLoader:
     def test_connection_error_raises_serving_store_error(self):
         loader = PostgreSqlLoader(_SECRET_ARN, _REGION)
         with patch(
-            "serving_store.loaders.postgresql_loader.psycopg.connect",
+            "psycopg.connect",
             side_effect=Exception("Connection refused"),
         ):
             with pytest.raises(ServingStoreError):
@@ -108,9 +104,7 @@ class TestPostgreSqlLoader:
         mock_conn, mock_cursor = _make_connection()
         loader = PostgreSqlLoader(_SECRET_ARN, _REGION)
 
-        with patch(
-            "serving_store.loaders.postgresql_loader.psycopg.connect", return_value=mock_conn
-        ):
+        with patch("psycopg.connect", return_value=mock_conn):
             loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         executed_sql = " ".join(str(c.args[0]) for c in mock_cursor.execute.call_args_list)
@@ -123,9 +117,7 @@ class TestPostgreSqlLoader:
         mock_conn, mock_cursor = _make_connection(role_exists=True)
         loader = PostgreSqlLoader(_SECRET_ARN, _REGION)
 
-        with patch(
-            "serving_store.loaders.postgresql_loader.psycopg.connect", return_value=mock_conn
-        ):
+        with patch("psycopg.connect", return_value=mock_conn):
             loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         executed_sql = " ".join(str(c.args[0]) for c in mock_cursor.execute.call_args_list)
@@ -138,15 +130,11 @@ class TestPostgreSqlLoader:
         mock_conn, mock_cursor = _make_connection()
         loader = PostgreSqlLoader(_SECRET_ARN, _REGION)
 
-        with patch(
-            "serving_store.loaders.postgresql_loader.psycopg.connect", return_value=mock_conn
-        ):
+        with patch("psycopg.connect", return_value=mock_conn):
             first = loader.load(records, _TABLE_NAME, ("account_id",), _TENANT_CODE)
             assert first.records_loaded == 2
 
-            mock_cursor.fetchall.return_value = [
-                {"account_id": "001", "_row_hash": unchanged_hash}
-            ]
+            mock_cursor.fetchall.return_value = [{"account_id": "001", "_row_hash": unchanged_hash}]
             second = loader.load(records, _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         assert second.records_loaded == 1

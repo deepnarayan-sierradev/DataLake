@@ -154,6 +154,12 @@ def tenant_scoped_key(tenant_code: str, key: str) -> str:
     return f"{tenant_code}#{key}"
 
 
+def strip_tenant_prefix(tenant_code: str, scoped_key: str) -> str:
+    """Inverse of `tenant_scoped_key`: plain key, or `scoped_key` unchanged if not prefixed."""
+    prefix = f"{tenant_code}#"
+    return scoped_key[len(prefix) :] if scoped_key.startswith(prefix) else scoped_key
+
+
 def validate_run_id(value: str) -> str:
     """
     Validate a run_id.
@@ -174,3 +180,17 @@ def validate_run_id(value: str) -> str:
             "enumeration. Example: 'run-20260611-143022123456-a3f9c1d2'."
         )
     return value
+
+
+SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-_/=]{0,511}$")
+
+# Physical column / SQL identifier — allowlisted before any query build (OWASP A03).
+SAFE_COLUMN_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+def validate_s3_prefix(value: str, field_name: str = "s3_prefix") -> str:
+    # OWASP A03: reject path traversal / injection in S3 key prefixes.
+    clean = value.rstrip("/")
+    if not SAFE_S3_PREFIX_PATTERN.match(clean):
+        raise ValueError(f"{field_name} {value!r} is not a safe S3 prefix.")
+    return clean

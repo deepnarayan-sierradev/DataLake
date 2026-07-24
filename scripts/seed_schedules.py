@@ -28,6 +28,7 @@ from decimal import Decimal
 import boto3
 from boto3.dynamodb.conditions import Attr
 
+from contracts.identifier_policy import DEFAULT_TENANT_CODE, strip_tenant_prefix
 from observability.structured_logger import get_platform_logger
 from orchestration.event_bridge.extraction_schedule_client import (
     ExtractionScheduleClient,
@@ -89,7 +90,11 @@ def _load_schedulable_entities(table_name: str, region: str) -> list[dict]:
         response = table.scan(**scan_kwargs)
         for item in response.get("Items", []):
             # DynamoDB returns Decimal for numbers — normalise to plain Python types.
-            items.append({k: int(v) if isinstance(v, Decimal) else v for k, v in item.items()})
+            record = {k: int(v) if isinstance(v, Decimal) else v for k, v in item.items()}
+            # PK is the tenant-scoped composite ("demo#salesforce"); restore the plain source_id.
+            tenant_code = str(record.get("tenant_code", DEFAULT_TENANT_CODE))
+            record["source_id"] = strip_tenant_prefix(tenant_code, str(record.get("source_id", "")))
+            items.append(record)
         last = response.get("LastEvaluatedKey")
         if not last:
             break

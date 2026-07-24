@@ -9,11 +9,14 @@ import pytest
 from contracts.identifier_policy import (
     DEFAULT_TENANT_CODE,
     PROHIBITED_IDENTIFIERS,
+    SAFE_S3_PREFIX_PATTERN,
     SEQUENTIAL_INTEGER_PATTERN,
     STABLE_ID_PATTERN,
     TENANT_CODE_PATTERN,
+    strip_tenant_prefix,
     tenant_scoped_key,
     validate_run_id,
+    validate_s3_prefix,
     validate_stable_id,
     validate_tenant_code,
 )
@@ -190,3 +193,53 @@ class TestTenantScopedKey:
         key_b = tenant_scoped_key("globex-eu", "salesforce-account")
         key_c = tenant_scoped_key(DEFAULT_TENANT_CODE, "salesforce-account")
         assert len({key_a, key_b, key_c}) == 3
+
+
+class TestStripTenantPrefix:
+    def test_round_trips_scoped_key(self) -> None:
+        scoped = tenant_scoped_key(DEFAULT_TENANT_CODE, "salesforce")
+        assert strip_tenant_prefix(DEFAULT_TENANT_CODE, scoped) == "salesforce"
+
+    def test_non_default_tenant_round_trips(self) -> None:
+        scoped = tenant_scoped_key("acme-corp", "salesforce")
+        assert strip_tenant_prefix("acme-corp", scoped) == "salesforce"
+
+    def test_unprefixed_value_returned_unchanged(self) -> None:
+        assert strip_tenant_prefix(DEFAULT_TENANT_CODE, "salesforce") == "salesforce"
+
+    def test_only_strips_matching_tenant_prefix(self) -> None:
+        assert strip_tenant_prefix("acme-corp", "demo#salesforce") == "demo#salesforce"
+
+
+class TestSafeS3PrefixPattern:
+    def test_valid_prefixes_match(self) -> None:
+        assert SAFE_S3_PREFIX_PATTERN.match("demo/analytics/company/analytics_date=2026-07-02")
+        assert SAFE_S3_PREFIX_PATTERN.match("acme-corp/curated/crm/entity/run_id=run-1")
+
+    def test_traversal_and_leading_slash_rejected(self) -> None:
+        # OWASP A03: no '.' means '..' can never match.
+        assert not SAFE_S3_PREFIX_PATTERN.match("../etc/passwd")
+        assert not SAFE_S3_PREFIX_PATTERN.match("/etc/passwd")
+        assert not SAFE_S3_PREFIX_PATTERN.match("a/../b")
+        assert not SAFE_S3_PREFIX_PATTERN.match("data.parquet")
+
+    def test_empty_and_bad_first_char_rejected(self) -> None:
+        assert not SAFE_S3_PREFIX_PATTERN.match("")
+        assert not SAFE_S3_PREFIX_PATTERN.match("-leading-hyphen")
+
+
+class TestValidateS3Prefix:
+    def test_valid_prefix_returned_without_trailing_slash(self) -> None:
+        assert validate_s3_prefix("demo/analytics/company/") == "demo/analytics/company"
+
+    def test_traversal_rejected(self) -> None:
+        with pytest.raises(ValueError, match="s3_prefix"):
+            validate_s3_prefix("../etc/passwd")
+
+    def test_leading_slash_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            validate_s3_prefix("/etc/passwd")
+
+    def test_custom_field_name_in_error(self) -> None:
+        with pytest.raises(ValueError, match="canonical_prefix"):
+            validate_s3_prefix("../x", field_name="canonical_prefix")

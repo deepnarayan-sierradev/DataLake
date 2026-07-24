@@ -86,9 +86,7 @@ class ServingStoreLoader(ServingStoreLoaderInterface):
             secret_name, username, container_name, writer_creds, container_name
         )
         with connection.cursor() as cur:
-            cur.execute(
-                f"CREATE USER IF NOT EXISTS '{username}'@'%' IDENTIFIED BY %s", (password,)
-            )
+            cur.execute(f"CREATE USER IF NOT EXISTS '{username}'@'%' IDENTIFIED BY %s", (password,))
             cur.execute(f"GRANT SELECT ON `{container_name}`.* TO '{username}'@'%'")
         connection.commit()
 
@@ -160,9 +158,7 @@ class ServingStoreLoader(ServingStoreLoaderInterface):
         placeholders = ", ".join(["%s"] * len(all_columns))
         sql = f"REPLACE INTO `{table_name}` ({col_list}) VALUES ({placeholders})"  # noqa: S608
         now = datetime.now(UTC).isoformat()
-        rows = [
-            (*(record.get(c) for c in columns), row_hash, now) for record, row_hash in changed
-        ]
+        rows = [(*(record.get(c) for c in columns), row_hash, now) for record, row_hash in changed]
         total = 0
         with connection.cursor() as cur:
             for start in range(0, len(rows), _UPSERT_CHUNK_SIZE):

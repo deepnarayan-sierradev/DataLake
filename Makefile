@@ -135,9 +135,11 @@ lambda-package:
 		--platform manylinux2014_x86_64 \
 		--python-version 3.13 \
 		--only-binary=:all: \
-		pydantic boto3 botocore structlog python-dateutil requests pyarrow pymysql
-	# Copy platform source packages into build directory
-	@for pkg in contracts connector_runtime schema_management watermark_management observability orchestration transformation governance entity_resolution analytics_publisher; do \
+		pydantic boto3 botocore structlog python-dateutil requests pyarrow pymysql duckdb
+	# Copy platform source packages into build directory. processing_engine/knowledge/
+	# semantic are imported by the control-plane Lambda (cold-start) and the twin builder;
+	# omitting them makes those Lambdas fail to import. agent ships for the deferred layer.
+	@for pkg in contracts connector_runtime schema_management watermark_management observability orchestration transformation governance entity_resolution analytics_publisher processing_engine knowledge semantic agent serving_store; do \
 		cp -r $$pkg $(LAMBDA_BUILD_DIR)/$$pkg; \
 	done
 	@mkdir -p dist
