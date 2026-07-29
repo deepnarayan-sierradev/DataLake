@@ -33,6 +33,22 @@ code exists, and until the entry point lands it cannot run.
 - `portability.transition_package` — transition artefact: no route requests one yet (S7)
 - `workflow_automation.actions` — the registered handlers: the runner constructs the engine but
   the wired handler set is injected by the deployment, so no module imports them yet (S9 remainder)
+- `tenancy.tenant_session` — the mechanism that makes the IAM tenant boundary enforceable, with no
+  caller yet. This is a *deliberate, tracked* state rather than an oversight, and the cost is
+  visible three ways: `make tenant-session-adoption` (G9) lists the 47 remaining call sites,
+  `tests/test_capability_reachability.py` asserts it is still pending so this waiver cannot go
+  stale unnoticed, and the Terraform interlock refuses `enforce` while
+  `tenant_session_tagging_adopted = false`.
+
+  Why it is not simply wired: the boundary conditions on `aws:PrincipalTag/tenant_code`, which
+  cannot exist on a shared Lambda execution role — a role tag holds one value and each of the four
+  runtime roles serves every tenant. So the policy was not merely unapplied, it was unsatisfiable:
+  under `enforce` the S3 statements would never apply (their `Null ... = false` guard is false for
+  an untagged principal, leaving S3 open) while the DynamoDB and Secrets Manager statements would
+  deny everything. Adoption means threading a tenant-tagged session through ~47 client
+  constructions inside repository constructors, which is design-sized work and is why it is
+  recorded here rather than half-done.
+
 - `serving_store.credential_delivery` — blocked on the BI network-path decision (gap 4); there is
   no point delivering a reader credential nobody can connect with. Note the RLS policy it would
   deliver against is now correct as of 2026-07-29 (the loader is exempted by role, so applying the

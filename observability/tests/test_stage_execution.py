@@ -14,9 +14,9 @@ from typing import Any
 import pytest
 import structlog
 
+from contracts.dlq_routing import DlqStage
 from contracts.platform_metrics import PlatformMetric
 from observability.metric_recorder import platform_metric_recorder, record_platform_metric
-from contracts.dlq_routing import DlqStage
 from observability.stage_execution import (
     StageExecution,
     StageIdentity,

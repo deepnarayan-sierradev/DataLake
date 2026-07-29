@@ -80,6 +80,7 @@ from observability.usage_metering import (
     current_period,
     read_audit_records_for_period,
 )
+from persistence.parquet_reader import iter_parquet_records
 
 _logger = get_platform_logger(__name__)
 
@@ -265,25 +266,14 @@ def _run_analytics_publication(
 
     s3 = boto3.client("s3", region_name=region_name)
 
-    # ── Load golden records from the analytics layer (written by ER stage) ────
-    golden_records = _load_parquet_records(s3, analytics_s3_bucket, canonical_prefix)
-    if not golden_records:
-        raise ValueError(
-            f"No golden records found at s3://{analytics_s3_bucket}/{canonical_prefix}. "
-            "Ensure the entity resolution stage completed successfully."
-        )
-
-    _logger.info(
-        "analytics_publisher_golden_records_loaded",
-        entity_type=entity_type,
-        golden_record_count=len(golden_records),
+    # ── Stream golden records from the analytics layer (written by the ER stage) ────
+    # Two full copies of every golden record used to be resident at once in a 512 MB Lambda: one
+    # list from the loader, and a second list comprehension stripping internal fields. Both are now
+    # generators, so peak memory is one Parquet row group rather than the entity's whole dataset.
+    analytics_records = (
+        {key: value for key, value in record.items() if key not in _INTERNAL_FIELDS_TO_DROP}
+        for record in iter_parquet_records(s3, analytics_s3_bucket, canonical_prefix)
     )
-
-    # ── Strip internal ER system fields, keep golden_id + all business fields ─
-    analytics_records = [
-        {k: v for k, v in rec.items() if k not in _INTERNAL_FIELDS_TO_DROP}
-        for rec in golden_records
-    ]
 
     # ── Write analytics Parquet (§3.3 — multipart upload for large files) ─────
     # Tenant-scoped root prefix, matching the {tenant_code}/... convention
@@ -295,7 +285,7 @@ def _run_analytics_publication(
 
     s3_writer = S3ParquetWriter(s3)
     record_count = s3_writer.write(
-        records_iter=iter(analytics_records),
+        records_iter=analytics_records,
         bucket=analytics_s3_bucket,
         key=analytics_key,
         compression="snappy",
@@ -308,6 +298,14 @@ def _run_analytics_publication(
     arrow_schema = s3_writer.last_written_schema
     if arrow_schema is None:
         arrow_schema = pa.schema([])
+
+    if record_count == 0:
+        # Checked from the writer's own count rather than by testing the iterator for emptiness,
+        # which would consume it. Same failure, same message, no second materialisation.
+        raise ValueError(
+            f"No golden records found at s3://{analytics_s3_bucket}/{canonical_prefix}. "
+            "Ensure the entity resolution stage completed successfully."
+        )
 
     _logger.info(
         "analytics_publisher_parquet_written",

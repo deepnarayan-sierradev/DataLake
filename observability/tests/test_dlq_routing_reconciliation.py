@@ -3,10 +3,10 @@ Bidirectional reconciliation of DLQ queues against their producers (gap items 20
 
 The alarm/emitter reconciliation exists because a catalogued metric with no producer looks exactly
 like a healthy one. A dead-letter queue has the same property, and it went unnoticed for longer: on
-2026-07-29 nine `EdlStageDlq-*` queues were created, alarmed with thresholds derived from the 2-4h
-freshness commitment, and given a `maxReceiveCount` — while **five of six pipeline stages enqueued to
-no queue at all**, because `enqueue_dlq_entry` accepted `failed_stage` and hardcoded the extraction
-queue name. Empty queues and quiet alarms were read as "nothing is failing".
+2026-07-29 nine `EdlStageDlq-*` queues were created, alarmed with thresholds derived from the
+2-4h freshness commitment, and given a `maxReceiveCount` — while **five of six pipeline stages
+enqueued to no queue at all**, because `enqueue_dlq_entry` accepted `failed_stage` and hardcoded
+the extraction queue name. Empty queues and quiet alarms read as "nothing is failing".
 
 So the same test shape applies here, in both directions:
 
@@ -59,9 +59,10 @@ def _terraform_stage_keys() -> set[str]:
     """
     The keys of `local.pipeline_stages`, which is what the queue names are built from.
 
-    Sliced to the block's own closing brace rather than to a marker line inside it: the first cut of
-    this parser stopped at `visibility_timeout = 120` and silently dropped `writeback`, which would
-    have made the reconciliation report a false disagreement — a parser bug reading as a code defect.
+    Sliced to the block's own closing brace rather than to a marker line inside it: the first cut
+    of this parser stopped at `visibility_timeout = 120` and silently dropped `writeback`, which
+    would have made the reconciliation report a false disagreement — a parser bug reading as a
+    code defect.
     """
     text = PER_STAGE_DLQ_TF.read_text(encoding="utf-8")
     start = text.index("pipeline_stages = {") + len("pipeline_stages = {")
@@ -110,7 +111,7 @@ class TestQueueNamesMatchTerraform:
         # changes, the code addresses a queue that does not exist.
         text = PER_STAGE_DLQ_TF.read_text(encoding="utf-8")
         camel = dlq_queue_name(stage).removeprefix("EdlStageDlq-")
-        assert f'title(replace(each.key, "_", " "))' in text or camel in text
+        assert 'title(replace(each.key, "_", " "))' in text or camel in text
 
     def test_entity_resolution_camel_cases_correctly(self) -> None:
         # The one name where the transform is non-trivial.
@@ -131,9 +132,10 @@ class TestEveryPipelineStageIsRouted:
         assert dlq_stage_for(pipeline_stage) in set(DlqStage)
 
     def test_the_mapping_covers_the_enum_exactly(self) -> None:
-        assert set(DLQ_STAGE_BY_PIPELINE_STAGE) == set(PipelineStage), (
+        routed = set(DLQ_STAGE_BY_PIPELINE_STAGE)
+        assert routed == set(PipelineStage), (
             "Every PipelineStage must declare a route, including NOT_REPLAYABLE ones: "
-            f"unrouted={sorted(s.value for s in set(PipelineStage) - set(DLQ_STAGE_BY_PIPELINE_STAGE))}"
+            f"unrouted={sorted(s.value for s in set(PipelineStage) - routed)}"
         )
 
 

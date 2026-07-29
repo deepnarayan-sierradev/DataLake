@@ -278,10 +278,12 @@ class TestPerf3SchemaReuse:
             {"golden_id": "g1", "name": "Acme", "_record_id": "sf:1", "_source_id": "salesforce"},
             {"golden_id": "g2", "name": "Globex", "_record_id": "sf:2", "_source_id": "salesforce"},
         ]
+        # Patches the shared streaming reader rather than the old materialising loader: the handler
+        # now streams golden records so it never holds two full copies in a 512 MB Lambda.
         monkeypatch.setattr(
             handler_module,
-            "_load_parquet_records",
-            lambda s3, bucket, prefix: golden_records,
+            "iter_parquet_records",
+            lambda s3, bucket, prefix: iter(golden_records),
         )
 
         captured_specs: list[Any] = []
@@ -347,10 +349,12 @@ class TestTenantIsolation:
         golden_records = [
             {"golden_id": "g1", "name": "Acme", "_record_id": "sf:1", "_source_id": "salesforce"},
         ]
+        # Patches the shared streaming reader rather than the old materialising loader: the handler
+        # now streams golden records so it never holds two full copies in a 512 MB Lambda.
         monkeypatch.setattr(
             handler_module,
-            "_load_parquet_records",
-            lambda s3, bucket, prefix: golden_records,
+            "iter_parquet_records",
+            lambda s3, bucket, prefix: iter(golden_records),
         )
         monkeypatch.setattr(
             handler_module,

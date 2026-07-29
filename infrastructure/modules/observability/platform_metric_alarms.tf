@@ -126,6 +126,9 @@ locals {
     AuthorizationDenials      = { threshold = 50, paging = false, statistic = "Sum" }
     AdminActions              = { threshold = 25, paging = false, statistic = "Sum" }
     CrossTenantAccessAttempts = { threshold = 0, paging = true, statistic = "Sum" }
+    # IAM's verdict rather than the application's. Pages for the same reason: in audit mode a
+    # non-zero value means the boundary would have broken a legitimate path; in enforce mode it did.
+    IamBoundaryAccessDenied   = { threshold = 0, paging = true, statistic = "Sum" }
     WafBlockedRequests        = { threshold = 100, paging = false, statistic = "Sum" }
     CredentialRotationAge     = { threshold = 7776000, paging = false, statistic = "Maximum" }
     RowLevelPredicateApplied  = { threshold = 1000000, paging = false, statistic = "Sum" }

@@ -49,8 +49,19 @@ class TestLoaderCanStillWrite:
 
     @pytest.mark.parametrize("engine", _POSTGRES_LIKE)
     def test_the_loader_policy_is_idempotent(self, engine: ServingEngine) -> None:
-        # Applied after every load, so a second application must not error.
-        assert _sql(engine).count("DROP POLICY IF EXISTS") == 2
+        """
+        Idempotent without a drop-then-create window.
+
+        This asserted two `DROP POLICY IF EXISTS` statements until 2026-07-29. Dropping *is* one way
+        to be idempotent, but between the drop and the create RLS is enabled with no SELECT policy —
+        and under RLS a command with no policy is denied, so every BI reader saw zero rows for the
+        duration of every load. Create-if-absent plus an unconditional ALTER re-asserts the
+        predicate with no window at all.
+        """
+        sql = _sql(engine)
+        assert "DROP POLICY" not in sql, "a drop leaves readers denied until the create lands"
+        assert sql.count("CREATE POLICY IF NOT EXISTS") == 2
+        assert "ALTER POLICY" in sql
 
     def test_sqlserver_exempts_the_loader_inside_the_predicate(self) -> None:
         # T-SQL has no per-command policy, and a filter predicate also constrains the read side of

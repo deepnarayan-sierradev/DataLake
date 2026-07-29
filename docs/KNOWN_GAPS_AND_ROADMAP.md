@@ -49,26 +49,45 @@ smaller polish items.
 
 ## Security and correctness
 
-### 1. No IAM-enforced tenant boundary in force yet (**closed in code, audit mode, unapplied**)
+### 1. IAM tenant boundary: the policy was **unsatisfiable**, not merely unapplied (**partially closed 2026-07-29**)
 
-**Programme status:** `infrastructure/modules/iam/tenant_boundary.tf` now defines a deny-based
-tenant boundary across S3, DynamoDB, and Secrets Manager with a `tenant_boundary_mode` variable
-(`audit` → `enforce`) and a CloudTrail metric filter producing `CrossTenantAccessAttempts`. It
-ships in `audit` mode deliberately: flipping straight to `enforce` against live dev data would
-take the existing default tenant offline if any path construction disagrees with the policy. The
-gap is therefore **not closed operationally** until (a) it is applied, (b) `CrossTenantAccessAttempts`
-sits at zero for a sustained window, and (c) the mode is switched. The original description
-follows, and remains accurate for anything not yet applied.
+The 2026-07-29 re-assessment found this was worse than "closed in code, awaiting apply". The policy
+conditions every statement on `${aws:PrincipalTag/tenant_code}`, and it attached to four Lambda
+execution roles that each serve **every** tenant — a role tag holds one value, so the tag was never
+set and could not be. Flipping to `enforce` would have broken asymmetrically:
 
-Tenant isolation for S3, Secrets Manager, and DynamoDB is entirely an application-level
-naming/prefix convention today — not backed by IAM. `infrastructure/modules/iam/main.tf` scopes
-every S3, DynamoDB, and Secrets Manager policy statement to the resource/bucket/table ARN only;
-there is no `Condition` block anywhere tying a principal to its own tenant's data. A bug in path
-construction, a compromised dependency, or a malformed request from one tenant could in principle
-read or write another tenant's data, or fetch another tenant's source credentials. This is the
-platform's single largest blocker to a credible multi-tenant security guarantee. Fixing it
-properly is design-sized work — per-tenant IAM roles or resource-tag/prefix `Condition`s across
-three services, phased carefully so the existing default tenant doesn't break.
+- the S3 statements are guarded by `Null aws:PrincipalTag/tenant_code = false`, never true for an
+  untagged principal, so the Deny would not apply and **S3 would have stayed open**;
+- the DynamoDB statement compares `dynamodb:LeadingKeys` against an unresolvable variable, which no
+  key matches, so it would have **denied every item operation**;
+- `secretsmanager:ResourceTag/tenant_code` is absent on every secret, and a negated condition on a
+  missing key is true, so it would have **denied every credential read**.
+
+Separately, **no environment passed `data_bucket_arns`, `tenant_scoped_table_arns`, or
+`cloudtrail_log_group_name`.** With empty lists the S3 and DynamoDB statements carry no `Resource`,
+which IAM rejects outright — so the policy could never have applied successfully anywhere, while
+`terraform validate` stayed green because validate does not call IAM.
+
+**What is now closed:**
+
+- `tenancy/tenant_session.py` is the mechanism that can carry the tag: a stage role assumes a
+  per-stage data role with `Tags=[{tenant_code}]`, and `sts:TagSession` in the trust policy makes
+  the tag authoritative. Credentials cache per *(role, tenant)* — keyed by role alone, a warm
+  container would hand one tenant's session to the next tenant it served.
+- The boundary attaches to those data roles rather than the shared stage roles.
+- All three inputs are wired in dev, staging and prod, and plan-time preconditions fail when the
+  boundary would be created with no resources or when `enforce` is set with no CloudTrail.
+- An **interlock**: `enforce` requires `tenant_session_tagging_adopted = true`, so the unsafe
+  combination is unreachable rather than merely discouraged.
+- The audit-stage metric is renamed `IamBoundaryAccessDenied`. It was `CrossTenantAccessAttempts`,
+  which the control plane already emits for a different event — so the "sustained zero" that gates
+  the flip was satisfiable by an unused API and proved nothing about IAM.
+
+**What is still open, and tracked rather than claimed:** 47 data-plane call sites build clients from
+ambient credentials, so they are outside the boundary regardless of the policy. `make
+tenant-session-adoption` (G9) lists them; `tests/test_capability_reachability.py` asserts the session
+helper is still pending so the waiver cannot go stale; `requirements/WAIVERS.md` records why threading
+a session through ~47 repository constructors is design-sized rather than half-done.
 
 ### 2. ~~Secrets Manager holds one shared credential per connector type~~ (**closed in code**)
 

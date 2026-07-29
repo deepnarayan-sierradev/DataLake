@@ -221,4 +221,7 @@ class TestEdgeFanOutIsFiltered:
         body = json.loads(resp["body"])
         assert resp["statusCode"] == 200
         assert [edge["to_golden_id"] for edge in body["edges"]] == ["v-own"]
-        assert body["edges_hidden_by_scope"] == 1
+        # The suppressed count is deliberately absent from the response: it lets a franchisee
+        # enumerate how many peer relationships exist, which is a weaker form of the disclosure this
+        # filter prevents. It is logged and metered instead.
+        assert "edges_hidden_by_scope" not in body

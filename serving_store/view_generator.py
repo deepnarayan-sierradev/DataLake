@@ -362,19 +362,32 @@ def generate_row_security_policy(
             f"current_setting('{session_scope_setting}', true), ','))"
         )
         if include_brand:
+            # A NULL brand is visible to every brand, deliberately: brand is a *reporting*
+            # dimension layered on top of the scope boundary, not the boundary itself, and a row
+            # with no brand belongs to the tenant rather than to none of it. Stated here because
+            # the scope clause above makes the opposite choice for NULL — that asymmetry is
+            # intentional and was previously undocumented, which is how it reads as an oversight.
             predicate += (
                 f" AND ({brand_column} IS NULL OR {brand_column} = ANY (string_to_array("
                 f"current_setting('{session_brand_setting}', true), ',')))"
             )
+        # `CREATE ... IF NOT EXISTS` then `ALTER` rather than `DROP` then `CREATE`.
+        #
+        # The drop-then-create form left a window in which RLS was ENABLED with no SELECT policy,
+        # and under RLS a command with no policy is denied — so every BI reader saw zero rows for
+        # the duration of every load. Fail-closed, but a read outage on the freshness path, and
+        # freshness loads are the frequent case. PostgreSQL has no `CREATE OR REPLACE POLICY`, so
+        # the idempotent form is create-if-absent followed by an unconditional `ALTER` that
+        # re-asserts the predicate.
         statements = (
             f"ALTER TABLE {quoted_table} ENABLE ROW LEVEL SECURITY;",
             f"ALTER TABLE {quoted_table} FORCE ROW LEVEL SECURITY;",
-            f"DROP POLICY IF EXISTS {policy_name} ON {quoted_table};",
-            f"CREATE POLICY {policy_name} ON {quoted_table} FOR SELECT USING ({predicate});",
+            f"CREATE POLICY IF NOT EXISTS {policy_name} ON {quoted_table} "
+            f"FOR SELECT USING ({predicate});",
+            f"ALTER POLICY {policy_name} ON {quoted_table} USING ({predicate});",
             # Without this the loader's own next upsert is refused: RLS denies any command with no
             # policy, and FORCE removes the owner exemption.
-            f"DROP POLICY IF EXISTS {loader_policy_name} ON {quoted_table};",
-            f"CREATE POLICY {loader_policy_name} ON {quoted_table} FOR ALL "
+            f"CREATE POLICY IF NOT EXISTS {loader_policy_name} ON {quoted_table} FOR ALL "
             f"TO {loader_role} USING (true) WITH CHECK (true);",
         )
     else:

@@ -101,6 +101,10 @@ class PlatformMetric(StrEnum):
     AUTHORIZATION_DENIALS = "AuthorizationDenials"
     ADMIN_ACTIONS = "AdminActions"
     CROSS_TENANT_ACCESS_ATTEMPTS = "CrossTenantAccessAttempts"
+    # IAM's own verdict, from the CloudTrail metric filter — distinct from the line above, which
+    # counts application-level claim mismatches. They were one metric, so the `enforce` gate's
+    # "sustained zero" could be satisfied by an unused API and prove nothing about the boundary.
+    IAM_BOUNDARY_ACCESS_DENIED = "IamBoundaryAccessDenied"
     WAF_BLOCKED_REQUESTS = "WafBlockedRequests"
     CREDENTIAL_ROTATION_AGE = "CredentialRotationAge"
     ROW_LEVEL_PREDICATE_APPLIED = "RowLevelPredicateApplied"

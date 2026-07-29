@@ -217,6 +217,53 @@ module "iam" {
   github_repo                 = var.github_repo
   cicd_deployment_policy_arns = var.cicd_deployment_policy_arns
 
+
+  # The tenant boundary's own inputs. All three were unset in every environment, so the S3 and
+  # DynamoDB Deny statements carried no Resource — a policy IAM rejects outright, which is why this
+  # had never applied anywhere while `terraform validate` stayed green.
+  data_bucket_arns = [
+    module.storage.raw_layer_bucket_arn,
+    module.storage.curated_layer_bucket_arn,
+    module.storage.analytics_layer_bucket_arn,
+  ]
+  tenant_scoped_table_arns = [
+    module.metadata_persistence.entity_extraction_config_table_arn,
+    module.metadata_persistence.watermark_repository_table_arn,
+    module.metadata_persistence.twin_index_table_arn,
+    module.metadata_persistence.semantic_model_table_arn,
+    module.metadata_persistence.saved_query_table_arn,
+    module.metadata_persistence.serving_store_config_table_arn,
+  ]
+  cloudtrail_log_group_name = module.audit_trail.log_group_name
+
+  # Stays false until every call site that touches tenant data builds its client from a
+  # tenant-tagged session (tenancy/tenant_session.py). The module refuses `enforce` while it is
+  # false, because enforcing over untagged principals leaves S3 open and denies DynamoDB outright.
+  tenant_session_tagging_adopted = false
+
+  tags = local.common_tags
+}
+
+
+# ---------------------------------------------------------------------------
+# Audit trail (SOW §23.4). Also the producer of IamBoundaryAccessDenied, which is what makes the
+# tenant boundary's audit stage measurable — see modules/audit_trail/main.tf.
+# ---------------------------------------------------------------------------
+
+module "audit_trail" {
+  source      = "../../modules/audit_trail"
+  environment = local.environment
+  account_id  = data.aws_caller_identity.current.account_id
+
+  kms_key_arn      = module.kms_logs.key_arn
+  logs_kms_key_arn = module.kms_logs.key_arn
+
+  data_bucket_arns = [
+    module.storage.raw_layer_bucket_arn,
+    module.storage.curated_layer_bucket_arn,
+    module.storage.analytics_layer_bucket_arn,
+  ]
+
   tags = local.common_tags
 }
 
@@ -225,6 +272,11 @@ module "iam" {
 # ---------------------------------------------------------------------------
 
 module "observability" {
+  # G6: alarm when a security or consistency control publishes nothing at all. Defaulted to
+  # false and set in no environment until 2026-07-29 — so the gate that exists to stop an
+  # unwired control looking healthy was itself unwired. Here: dev has run pipelines since 2026-07-09, so absence is a defect rather than expected.
+  enable_absence_alarms = true
+
   source      = "../../modules/observability"
   environment = local.environment
 

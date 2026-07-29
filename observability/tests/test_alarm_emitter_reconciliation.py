@@ -53,8 +53,11 @@ _PRODUCTION_PACKAGES = (
 # Metrics produced by AWS or by infrastructure rather than by application code. Each entry is
 # a deliberate exemption from the "must be emitted from Python" check, with the producer named.
 _INFRASTRUCTURE_PRODUCED: dict[str, str] = {
-    # CloudWatch metric filter over CloudTrail (iam/tenant_boundary.tf).
-    "CrossTenantAccessAttempts": "CloudTrail metric filter",
+    # The application's own claim check emits CrossTenantAccessAttempts (request_context.py), so it
+    # is NOT infrastructure-produced. The CloudTrail metric filter emits IamBoundaryAccessDenied —
+    # deliberately a different name, because one metric carrying both events made the enforce gate's
+    # "sustained zero" satisfiable without saying anything about IAM.
+    "IamBoundaryAccessDenied": "CloudTrail metric filter (iam/tenant_boundary.tf)",
     # AWS/WAFV2 BlockedRequests, republished by the WAF module's own alarm.
     "WafBlockedRequests": "AWS WAF",
     # AWS/ClientVPN and AWS/CertificateManager.

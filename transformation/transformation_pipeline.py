@@ -23,7 +23,6 @@ Security (OWASP A03, A05, A09):
 
 from __future__ import annotations
 
-import io
 import itertools
 import json
 import re
@@ -33,7 +32,6 @@ from datetime import UTC, date, datetime
 from typing import Any, Final
 
 import boto3
-import pyarrow.parquet as pq
 
 from contracts.platform_metrics import PlatformMetric
 from data_quality.batch_quality_gate import (
@@ -59,6 +57,7 @@ from observability.lambda_runtime import check_lambda_timeout_periodic as _check
 from observability.metric_recorder import record_platform_metric
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
+from persistence.parquet_reader import iter_parquet_records
 from tenancy.scope_attribution import ScopeAttributor
 from tenancy.scope_contract import PartitionModel, TenantPartitionProfile
 from tenancy.source_connection import SourceConnection
@@ -686,32 +685,24 @@ class TransformationPipeline:
 def _iter_raw_records_batched(
     s3: Any, bucket: str, raw_s3_prefix: str, batch_size: int = 10_000
 ) -> Iterator[dict[str, Any]]:
-    """Yield raw records one by one from all Parquet files under raw_s3_prefix.
+    """
+    Yield raw records one at a time from every Parquet file under `raw_s3_prefix`.
 
-    Uses RecordBatch iteration (§2.3): only `batch_size` rows are materialised
-    in Python heap at a time — never the full file.
-    Peak memory: O(batch_size), not O(total_rows_per_file).
+    Delegates the read to `persistence.parquet_reader`, which is the one implementation — this was
+    the third near-identical copy (`analytics_publisher` materialised, `serving_store` batched,
+    this one streamed), and only two of the three bounded their memory. The prefix validation stays
+    here because it encodes this layer's own naming rules.
+
+    Peak memory is one row group, not the file. Note that `_load_raw_records` below still
+    materialises for the batch quality gate — see `requirements/WAIVERS.md`: completeness and
+    duplicate *rates* are properties of the whole batch, so that path cannot stream without giving
+    up the gate.
     """
     if ".." in raw_s3_prefix or raw_s3_prefix.startswith("/"):
         raise ValueError(f"Unsafe raw_s3_prefix rejected: {raw_s3_prefix!r}")
     if not _SAFE_S3_PREFIX_PATTERN.match(raw_s3_prefix):
         raise ValueError(f"raw_s3_prefix {raw_s3_prefix!r} contains disallowed characters.")
-    prefix = raw_s3_prefix.rstrip("/") + "/"
-    paginator = s3.get_paginator("list_objects_v2")
-
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            if not obj["Key"].endswith(".parquet"):
-                continue
-            raw_data = s3.get_object(Bucket=bucket, Key=obj["Key"])
-            buf = io.BytesIO(raw_data["Body"].read())
-            table = pq.read_table(buf)  # type: ignore[no-untyped-call]
-            for batch in table.to_batches(max_chunksize=batch_size):
-                batch_dict: dict[str, list[Any]] = batch.to_pydict()
-                n = batch.num_rows
-                cols = list(batch_dict.keys())
-                yield from ({col: batch_dict[col][i] for col in cols} for i in range(n))
-            del table  # release Arrow buffer memory before reading next file
+    return iter_parquet_records(s3, bucket, raw_s3_prefix, batch_size=batch_size)
 
 
 def _iter_raw_records(s3: Any, bucket: str, raw_s3_prefix: str) -> Iterator[dict[str, Any]]:
@@ -755,7 +746,14 @@ def _classify_pass_through_entity(
 
 
 def _load_raw_records(s3: Any, bucket: str, raw_s3_prefix: str) -> list[dict[str, Any]]:
-    """List all Parquet files under raw_s3_prefix and return flat record list."""
+    """
+    Materialise the raw prefix. Required by the batch quality gate, not an oversight.
+
+    Completeness and duplicate *rates* are properties of the whole batch (DL-DQ-01..04), so this
+    path cannot stream without giving up the gate — the trade is recorded in
+    `requirements/WAIVERS.md` rather than left implicit. Callers that do not need the batch gate
+    should use `_iter_raw_records_batched`, which never holds more than one row group.
+    """
     return list(_iter_raw_records_batched(s3, bucket, raw_s3_prefix))
 
 

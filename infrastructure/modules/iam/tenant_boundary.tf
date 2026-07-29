@@ -33,6 +33,26 @@ variable "tenant_boundary_mode" {
   }
 }
 
+variable "tenant_session_tagging_adopted" {
+  description = <<-EOT
+    Whether every call site that touches tenant data builds its client from a tenant-tagged session
+    (`tenancy/tenant_session.py`). `enforce` is refused unless this is true, and that refusal is the
+    point.
+
+    The boundary conditions on `aws:PrincipalTag/tenant_code`. Attaching it to a shared Lambda
+    execution role — which is what the four runtime roles are — cannot work: a role tag holds one
+    value and each role serves every tenant. Enforcing in that state does not half-protect, it
+    breaks asymmetrically. The S3 statements are guarded by `Null ... = false`, so for an untagged
+    principal they never apply and S3 stays open; the DynamoDB and Secrets Manager statements
+    compare against an unresolvable variable and a missing resource tag, so they deny everything.
+    The pipeline would stop while the data it was protecting stayed reachable.
+
+    So this is not a feature flag, it is an interlock: the unsafe combination is unreachable.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "data_bucket_arns" {
   description = "Data-plane bucket ARNs the S3 prefix condition applies to."
   type        = list(string)
@@ -70,7 +90,17 @@ locals {
     analytics_publisher = aws_iam_role.analytics_publisher_runtime.name
   }
 
-  tenant_boundary_enforced = var.tenant_boundary_mode == "enforce"
+  # The same four stages by ARN, for the data roles' trust policies.
+  tenant_scoped_role_arns = {
+    extraction          = aws_iam_role.extraction_runtime.arn
+    transformation      = aws_iam_role.transformation_runtime.arn
+    entity_resolution   = aws_iam_role.entity_resolution_runtime.arn
+    analytics_publisher = aws_iam_role.analytics_publisher_runtime.arn
+  }
+
+  # Both conditions, deliberately. See `tenant_session_tagging_adopted` for why enforcing without
+  # the tagged-session path is worse than not enforcing at all.
+  tenant_boundary_enforced = var.tenant_boundary_mode == "enforce" && var.tenant_session_tagging_adopted
 }
 
 # ---------------------------------------------------------------------------
@@ -205,6 +235,28 @@ resource "aws_iam_policy" "tenant_boundary" {
   })
 }
 
+# The boundary is only meaningful over real resources. Every environment left
+# `data_bucket_arns` and `tenant_scoped_table_arns` unset, so the S3 and DynamoDB statements had an
+# empty `resources` list — a statement with no Resource, which IAM rejects outright. The policy
+# therefore could not have been applied successfully in any environment, while `terraform validate`
+# stayed green because validate does not call IAM. This check makes that a plan-time failure.
+resource "terraform_data" "tenant_boundary_covers_resources" {
+  lifecycle {
+    precondition {
+      condition     = length(var.data_bucket_arns) > 0
+      error_message = "tenant_boundary: data_bucket_arns is empty, so the S3 Deny statements would carry no Resource and IAM would reject the policy. Pass the data-plane bucket ARNs."
+    }
+    precondition {
+      condition     = length(var.tenant_scoped_table_arns) > 0
+      error_message = "tenant_boundary: tenant_scoped_table_arns is empty, so the DynamoDB Deny statement would carry no Resource. Pass the tenant-scoped table ARNs."
+    }
+    precondition {
+      condition     = !local.tenant_boundary_enforced || var.cloudtrail_log_group_name != ""
+      error_message = "tenant_boundary: enforce mode requires cloudtrail_log_group_name, or CrossTenantAccessAttempts has no producer and the observation window that gates the flip measures nothing."
+    }
+  }
+}
+
 resource "aws_iam_role_policy_attachment" "tenant_boundary" {
   for_each = local.tenant_boundary_enforced ? local.tenant_scoped_role_names : {}
 
@@ -228,7 +280,12 @@ resource "aws_cloudwatch_log_metric_filter" "cross_tenant_access_attempts" {
   pattern = "{ ($.errorCode = \"AccessDenied\") && ($.requestParameters.bucketName = \"edl-*\" || $.requestParameters.tableName = \"Edl*\") }"
 
   metric_transformation {
-    name      = "CrossTenantAccessAttempts"
+    # Deliberately NOT `CrossTenantAccessAttempts`. That name is already emitted by the control
+    # plane's own claim check, so one metric carried two unrelated events — and the go/no-go gate for
+    # `enforce` ("sustained zero") was therefore satisfiable by an API surface nobody was calling,
+    # while saying nothing about IAM. A separate name makes the observation window mean what the
+    # runbook claims it means.
+    name      = "IamBoundaryAccessDenied"
     namespace = "EnterpriseDatalake"
     value     = "1"
     unit      = "Count"
@@ -251,4 +308,70 @@ output "tenant_boundary_mode" {
 output "tenant_boundary_attached_roles" {
   description = "Roles the boundary is attached to; empty in audit mode."
   value       = local.tenant_boundary_enforced ? values(local.tenant_scoped_role_names) : []
+}
+
+# ---------------------------------------------------------------------------
+# Per-stage tenant data roles (DL-SEC-01).
+#
+# The boundary attaches here, not to the stage execution roles, because these are the only
+# principals that can carry `tenant_code`: a stage role assumes one of these per invocation with
+# `Tags=[{tenant_code}]` (see `tenancy/tenant_session.py`), and `sts:TagSession` in the trust policy
+# is what makes the tag authoritative — a caller cannot assert a tag the trust policy forbids.
+#
+# One data role per stage rather than one shared role, so each stays as narrow as the stage role it
+# serves. A single shared data role would widen every stage to the union of all of them.
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "tenant_data_assume_role" {
+  for_each = local.tenant_scoped_role_arns
+
+  statement {
+    sid     = "StageRoleMayAssumeWithTenantTag"
+    effect  = "Allow"
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+
+    principals {
+      type        = "AWS"
+      identifiers = [each.value]
+    }
+
+    # The tag must be present. Without this a caller could assume the role with no tag at all, which
+    # is the untagged state the boundary cannot constrain — the same "absent means everything"
+    # failure mode the scope predicate refuses.
+    condition {
+      test     = "StringLike"
+      variable = "aws:RequestTag/tenant_code"
+      values   = ["*"]
+    }
+
+    # Only this tag may be set, and it is transitive so a further hop cannot drop it.
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "sts:TransitiveTagKeys"
+      values   = ["tenant_code"]
+    }
+  }
+}
+
+resource "aws_iam_role" "tenant_data" {
+  for_each = local.tenant_scoped_role_arns
+
+  name               = "EdlTenantData${replace(title(replace(each.key, "_", " ")), " ", "")}Role"
+  assume_role_policy = data.aws_iam_policy_document.tenant_data_assume_role[each.key].json
+  description        = "Tenant-tagged data role for the ${each.key} stage; the boundary attaches here."
+  tags               = merge(var.tags, { Purpose = "tenant-tagged-data-access", Stage = each.key })
+}
+
+# Attached unconditionally: these roles exist *for* the boundary, so one without it would be a
+# strictly wider principal than the stage role that assumes it.
+resource "aws_iam_role_policy_attachment" "tenant_data_boundary" {
+  for_each = aws_iam_role.tenant_data
+
+  role       = each.value.name
+  policy_arn = aws_iam_policy.tenant_boundary.arn
+}
+
+output "tenant_data_role_arns" {
+  description = "Stage -> tenant-tagged data role ARN, for each stage Lambda's TENANT_DATA_ROLE_ARN."
+  value       = { for stage, role in aws_iam_role.tenant_data : stage => role.arn }
 }

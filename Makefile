@@ -86,7 +86,10 @@ security-columns:
 paging-primitive:
 	@python scripts/check_paging_primitive.py
 
-wiring-gates: reachability fail-open traceability security-columns paging-primitive
+tenant-session-adoption:
+	@python scripts/check_tenant_session_adoption.py
+
+wiring-gates: reachability fail-open traceability security-columns paging-primitive tenant-session-adoption
 
 format:
 	ruff format .

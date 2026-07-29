@@ -49,10 +49,17 @@ INHERITED_SURFACES: Final[frozenset[ConsumptionSurface]] = frozenset(
 )
 
 # Surfaces enforced by infrastructure rather than application code: an analyst queries Athena
-# directly, so the boundary has to be a Lake Formation tag, not a Python predicate.
+# directly, so the boundary has to be a Lake Formation data-cells filter, not a Python predicate.
 INFRASTRUCTURE_SURFACES: Final[frozenset[ConsumptionSurface]] = frozenset(
     {ConsumptionSurface.ATHENA}
 )
+
+# Surfaces proven by driving the entry point and inspecting the output, rather than by reading
+# source for a marker string. Strictly stronger, and the only kind of assertion that would have
+# caught an `execute` no caller reached — so a surface here must name the test that drives it.
+BEHAVIOURALLY_ASSERTED_SURFACES: Final[dict[ConsumptionSurface, str]] = {
+    ConsumptionSurface.EXPORT: "portability/tests/test_portability_handler.py",
+}
 
 # surface -> (module path, symbol whose source must show the predicate, marker)
 WIRING_CALL_SITES: Final[dict[ConsumptionSurface, tuple[str, str, str]]] = {
@@ -81,11 +88,11 @@ WIRING_CALL_SITES: Final[dict[ConsumptionSurface, tuple[str, str, str]]] = {
         "run",
         "suppress",
     ),
-    ConsumptionSurface.EXPORT: (
-        "portability/export_service.py",
-        "execute",
-        "scope_predicate",
-    ),
+    # EXPORT is deliberately absent from the wiring table: it is asserted *behaviourally* in
+    # `portability/tests/test_portability_handler.py`, which drives `lambda_handler` and reads the
+    # CSV that lands in S3. The wiring assertion here was that the string "scope_predicate" appears
+    # in `execute`'s source — which it did, in a method no production code called. Source text is
+    # not enforcement, and this surface is the proof.
 }
 
 _PROFILE: Final[TenantPartitionProfile] = TenantPartitionProfile(
@@ -138,13 +145,27 @@ class TestEverySurfaceIsAccountedFor:
     def test_no_surface_is_silently_unassigned(self) -> None:
         # A new surface must be given a call site, declared as inherited, or declared as
         # infrastructure-enforced. Adding one to the enum and forgetting it is the defect.
-        assigned = set(WIRING_CALL_SITES) | INHERITED_SURFACES | INFRASTRUCTURE_SURFACES
+        assigned = (
+            set(WIRING_CALL_SITES)
+            | INHERITED_SURFACES
+            | INFRASTRUCTURE_SURFACES
+            | set(BEHAVIOURALLY_ASSERTED_SURFACES)
+        )
         unassigned = sorted(set(ConsumptionSurface) - assigned)
         assert not unassigned, (
             f"{len(unassigned)} consumption surface(s) have no declared enforcement point: "
-            f"{unassigned}. Every surface either applies the predicate in code, inherits the "
-            "semantic API's enforcement, or is enforced by a Lake Formation tag."
+            f"{unassigned}. Every surface either applies the predicate at a call site, is asserted "
+            "behaviourally, inherits the semantic API's enforcement, or is enforced by Lake "
+            "Formation."
         )
+
+    def test_every_behavioural_assertion_names_a_test_that_exists(self) -> None:
+        # A surface declared "proven behaviourally" against a test that does not exist would be the
+        # same fiction as a stale waiver.
+        for surface, test_path in BEHAVIOURALLY_ASSERTED_SURFACES.items():
+            assert (REPO_ROOT / test_path).is_file(), (
+                f"{surface.value} claims behavioural proof in {test_path}, which does not exist."
+            )
 
 
 class TestCallSitesApplyThePredicate:

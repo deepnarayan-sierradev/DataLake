@@ -4,7 +4,6 @@ Control-plane API Lambda handler for the Enterprise Data Lake SaaS platform.
 Single Lambda dispatches all control-plane routes based on (httpMethod, path)
 from an API Gateway Lambda-proxy event:
 
-  POST   /tenants                                 — provision a new tenant
   GET    /tenants/{tenant_code}/entities           — list configured entities
   POST   /tenants/{tenant_code}/entities           — register a new entity
   POST   /tenants/{tenant_code}/pipelines/trigger  — enqueue a pipeline run
@@ -587,9 +586,27 @@ def _semantic_model_repository() -> SemanticModelRepository:
 
 
 def _twin_to_dict(twin: Any, predicate: ScopePredicate) -> dict[str, Any]:
-    # DL-SCOPE-13: an edge names the target, so fan-out is filtered too — a node the caller may
-    # see can still point at another unit's entity, and listing that edge discloses it exists.
+    """
+    One twin, with its edges filtered to the caller's units.
+
+    DL-SCOPE-13: an edge names the target, so fan-out is filtered too — a node the caller may
+    see can still point at another unit's entity, and listing that edge discloses it exists.
+
+    The suppressed *count* is deliberately not returned. `edges_hidden_by_scope` and the listing's
+    `hidden_by_scope` let a franchisee enumerate how many peer entities and relationships exist,
+    which is a weaker form of the same disclosure this filter exists to prevent — and the same
+    reasoning that removed `total_visible`. Both counts are logged and metered instead, where an
+    operator needs them and a tenant cannot read them.
+    """
     visible_edges = [edge for edge in twin.edges if predicate.matches(edge.scope_unit_id)]
+    hidden = len(twin.edges) - len(visible_edges)
+    if hidden:
+        _logger.info(
+            "twin_edges_hidden_by_scope",
+            entity_type=twin.entity_type,
+            golden_id=twin.golden_id,
+            hidden_edges=hidden,
+        )
     return {
         "entity_type": twin.entity_type,
         "golden_id": twin.golden_id,
@@ -603,7 +620,6 @@ def _twin_to_dict(twin: Any, predicate: ScopePredicate) -> dict[str, Any]:
             }
             for edge in visible_edges
         ],
-        "edges_hidden_by_scope": len(twin.edges) - len(visible_edges),
     }
 
 
@@ -708,6 +724,12 @@ def _handle_list_twins(
         start_key=_decode_page_token(event, tenant_code),
     )
     visible = [twin for twin in twins if predicate.matches(twin.scope_unit_id)]
+    if len(visible) != len(twins):
+        _logger.info(
+            "twins_hidden_by_scope",
+            entity_type=entity_type,
+            hidden_twins=len(twins) - len(visible),
+        )
     return _response(
         200,
         {
@@ -715,10 +737,9 @@ def _handle_list_twins(
             "entity_type": entity_type,
             "twins": [_twin_to_dict(twin, predicate) for twin in visible],
             "count": len(visible),
-            # `total_visible` is deliberately gone: reporting a total requires draining every page,
-            # which is the unbounded read this change removes. A page can also be entirely filtered
-            # out by scope while more pages remain, so follow `next_token`, never `count`.
-            "hidden_by_scope": len(twins) - len(visible),
+            # Neither `total_visible` nor `hidden_by_scope`: a total requires draining every page,
+            # and a suppressed count discloses how many peer entities exist. A page can be entirely
+            # filtered out by scope while more pages remain, so follow `next_token`, never `count`.
             "next_token": _encode_page_token(next_key),
         },
     )
