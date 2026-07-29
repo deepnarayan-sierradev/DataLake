@@ -85,7 +85,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     for secret_arn in secret_arns:
         try:
             age_days, secret_name = _check_secret_age(secretsmanager, secret_arn)
-        except Exception as exc:  # noqa: BLE001 — one bad secret must not block the rest
+        except Exception as exc:
             _logger.warning(
                 "credential_expiry_check_failed",
                 secret_arn=secret_arn,
@@ -95,9 +95,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         checked += 1
         if age_days >= warning_threshold_days:
-            stale_secrets.append(
-                {"secret_name": secret_name, "age_days": age_days}
-            )
+            stale_secrets.append({"secret_name": secret_name, "age_days": age_days})
 
     if stale_secrets:
         _publish_notification(sns, sns_topic_arn, environment, stale_secrets, secret_rotation_days)
@@ -140,9 +138,7 @@ def _publish_notification(
     secret_rotation_days: int,
 ) -> None:
     """Publish an SNS alert listing every secret approaching or past rotation age."""
-    lines = "\n".join(
-        f"  - {s['secret_name']}: {s['age_days']} days old" for s in stale_secrets
-    )
+    lines = "\n".join(f"  - {s['secret_name']}: {s['age_days']} days old" for s in stale_secrets)
     message = (
         f"[{environment}] {len(stale_secrets)} credential secret(s) are approaching or "
         f"past the {secret_rotation_days}-day rotation window:\n{lines}\n\n"
@@ -159,7 +155,7 @@ def _publish_notification(
                 "alert_type": {"DataType": "String", "StringValue": "credential_expiry"},
             },
         )
-    except Exception as exc:  # noqa: BLE001 — a notification failure must not raise
+    except Exception as exc:
         _logger.error(
             "credential_expiry_notification_publish_failed",
             environment=environment,

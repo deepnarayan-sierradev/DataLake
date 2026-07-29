@@ -55,14 +55,12 @@ GUARDED_PACKAGES: Final[tuple[str, ...]] = (
     "workflow_automation",
 )
 
-# Deployed entry points: Lambda handlers plus the operational scripts a human runs.
-# Terraform is the source of truth for the Lambda list; see _terraform_handlers().
-EXTRA_ENTRY_POINTS: Final[tuple[str, ...]] = (
-    "connector_runtime.webhook_receiver_handler",
-    "connector_runtime.writeback_handler",
-    "workflow_automation.workflow_runner_handler",
-    "portability.portability_handler",
-)
+# Deployed entry points beyond the Lambda handlers Terraform declares. Empty on purpose:
+# `_terraform_handlers()` already discovers every platform Lambda, and hardcoding them here as
+# well made the gate unfalsifiable — deleting the `platform_lambdas` module from Terraform would
+# have left G1 green while four handlers became undeployed, contradicting the comment below.
+# `tests/test_terraform_entry_points.py` asserts the parse still finds them.
+EXTRA_ENTRY_POINTS: Final[tuple[str, ...]] = ()
 
 WAIVER_FILE: Final[Path] = REPO_ROOT / "requirements" / "WAIVERS.md"
 _WAIVER_PATTERN: Final[re.Pattern[str]] = re.compile(

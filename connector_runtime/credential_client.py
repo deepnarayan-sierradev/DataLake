@@ -195,9 +195,7 @@ class SecretsManagerCredentialClient:
         try:
             credentials: dict[str, str] = json.loads(raw_secret)
         except (json.JSONDecodeError, ValueError):
-            raise self._error_cls(
-                f"{self._source_label} secret value is not valid JSON."
-            ) from None
+            raise self._error_cls(f"{self._source_label} secret value is not valid JSON.") from None
 
         missing = self._required_keys - credentials.keys()
         if missing:

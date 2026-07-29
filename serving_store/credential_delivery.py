@@ -195,7 +195,11 @@ class ServingCredentialDelivery:
         new_password = secrets.token_urlsafe(24)
         secret_id = serving_credential_secret_id(tenant_code)
         existing = self._read_secret(tenant_code)
-        payload = {**existing, "password": new_password, "rotated_at": datetime.now(UTC).isoformat()}
+        payload = {
+            **existing,
+            "password": new_password,
+            "rotated_at": datetime.now(UTC).isoformat(),
+        }
         import json
 
         self._secrets.put_secret_value(

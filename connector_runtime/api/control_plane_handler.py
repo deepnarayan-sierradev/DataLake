@@ -161,6 +161,11 @@ _MAX_RUNS_LISTED: Final[int] = 50
 
 _ENTITY_TYPE_REGISTRY_TABLE_NAME: Final[str] = "EdlEntityTypeRegistry"
 _AUDIT_LOG_TABLE_NAME: Final[str] = "EdlRunAuditLog"
+_AUDIT_TENANT_INDEX: Final[str] = "tenant-started-index"
+
+# Per-container cache of GSI presence, keyed by table name — `describe_table` on every listing
+# would add a round trip to the path the index exists to make cheaper.
+_INDEX_PRESENCE: dict[str, bool] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -507,39 +512,66 @@ def _handle_get_run(event: dict[str, Any], path_tenant_code: str, run_id: str) -
     )
 
 
+def _tenant_started_index_available(table: Any) -> bool:
+    """Whether the tenant GSI exists; cached per container so listing costs no extra round trip."""
+    cached = _INDEX_PRESENCE.get(table.name)
+    if cached is not None:
+        return cached
+    try:
+        description = table.meta.client.describe_table(TableName=table.name)
+        indexes = description["Table"].get("GlobalSecondaryIndexes") or []
+        present = any(index.get("IndexName") == _AUDIT_TENANT_INDEX for index in indexes)
+    except ClientError:
+        present = False
+    _INDEX_PRESENCE[table.name] = present
+    return present
+
+
 def _handle_list_runs(event: dict[str, Any], path_tenant_code: str) -> dict[str, Any]:
     """
     GET /tenants/{tenant_code}/runs — list recent runs for a tenant.
 
-    Implemented as a full table Scan with a FilterExpression on tenant_code:
-    the run-audit-log table's only GSI today is `source-entity-time-index`
-    (hash key source_entity_key, tenant-scoped as
-    `{tenant_code}#{source_id}#{entity_id}` — see
-    infrastructure/modules/metadata_persistence/main.tf), which serves
-    per-entity lookups, not tenant-wide listing. A tenant-code GSI would make
-    this an efficient Query at scale and is tracked as follow-up infra work,
-    not built speculatively here.
+    Queries `tenant-started-index` (hash `tenant_code`, range `started_at`, projection ALL). This
+    was a full-table Scan with a FilterExpression until 2026-07-29, and its docstring asserted no
+    tenant GSI existed — untrue since the index shipped in the same change set that added it for
+    usage metering. A Scan reads and bills every tenant's items to answer one tenant's request, so
+    the most-used tenant-facing endpoint degraded with total platform volume rather than with the
+    caller's own.
+
+    Falls back to the Scan when the index is absent, so code can deploy before the Terraform does.
+    `ScanIndexForward=False` also makes the cap keep the *most recent* runs; the Scan kept whatever
+    came back first and then sorted, so a capped response could omit newer runs than it returned.
     """
     tenant_code = _authorize_path_tenant(event, path_tenant_code)
 
     table = _run_audit_log_table()
-    scan_kwargs: dict[str, Any] = {
-        "FilterExpression": "tenant_code = :tc",
-        "ExpressionAttributeValues": {":tc": tenant_code},
-    }
+    use_index = _tenant_started_index_available(table)
+    read_kwargs: dict[str, Any] = (
+        {
+            "IndexName": _AUDIT_TENANT_INDEX,
+            "KeyConditionExpression": Key("tenant_code").eq(tenant_code),
+            "ScanIndexForward": False,
+        }
+        if use_index
+        else {
+            "FilterExpression": "tenant_code = :tc",
+            "ExpressionAttributeValues": {":tc": tenant_code},
+        }
+    )
     items: list[dict[str, Any]] = []
     try:
         while True:
-            page = table.scan(**scan_kwargs)
+            page = table.query(**read_kwargs) if use_index else table.scan(**read_kwargs)
             items.extend(page.get("Items", []))
             last_key = page.get("LastEvaluatedKey")
             if not last_key or len(items) >= _MAX_RUNS_LISTED:
                 break
-            scan_kwargs["ExclusiveStartKey"] = last_key
+            read_kwargs["ExclusiveStartKey"] = last_key
     except ClientError as exc:
         _logger.error(
-            "list_runs_scan_failed",
+            "list_runs_read_failed",
             tenant_code=tenant_code,
+            used_index=use_index,
             error_code=exc.response["Error"]["Code"],
         )
         raise ApiError("Failed to list runs due to an internal error.") from exc

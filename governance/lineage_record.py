@@ -9,7 +9,12 @@ Every record traces:
   - when the lineage was captured
 
 Lineage records are written to:
-  s3://{governance_bucket}/lineage/{target_entity_id}/{run_id}/lineage.json
+  s3://{governance_bucket}/{tenant_code}/lineage/{entity_id}/{run_id}/{stage}-lineage.json
+
+The `{tenant_code}/` prefix is what makes the key IAM-enforceable, matching every other data
+layer (DL-SEC-04). This docstring described the older unscoped layout until 2026-07-29, after
+the code had already been fixed — a reader auditing isolation from the docstring would have
+concluded the gap was open when it was closed.
 
 Security (OWASP A09):
   - Lineage records never include raw data values.

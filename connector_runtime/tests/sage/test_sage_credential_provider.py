@@ -24,9 +24,9 @@ import pytest
 from moto import mock_aws
 
 from connector_runtime.adapters.sage.substrate.sage_credential_provider import (
-    SageCredentialProvider,
-    SageCredentialError,
     _CREDENTIAL_CACHE_TTL_SECONDS,
+    SageCredentialError,
+    SageCredentialProvider,
 )
 
 _ENV = "dev"

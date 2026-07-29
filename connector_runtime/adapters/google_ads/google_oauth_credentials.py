@@ -17,7 +17,7 @@ from connector_runtime.credential_client import (
     SecretsManagerCredentialError,
 )
 
-GOOGLE_OAUTH_TOKEN_HOST: Final[str] = "oauth2.googleapis.com"
+GOOGLE_OAUTH_TOKEN_HOST: Final[str] = "oauth2.googleapis.com"  # noqa: S105 — a hostname, and the name ends in "TOKEN_HOST"; the token itself comes from Secrets Manager
 
 # Both Google sources need the same refresh-flow inputs plus the developer token Ads
 # requires; Analytics ignores the extra key rather than needing a second required set.
