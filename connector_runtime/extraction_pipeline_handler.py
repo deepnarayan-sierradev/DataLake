@@ -36,6 +36,7 @@ from typing import Any, Final
 
 # Import adapter modules so their @connector_registry.register() decorators
 # and register_builder() calls execute at Lambda cold-start time.
+import connector_runtime.adapters.bepro.bepro_connector
 import connector_runtime.adapters.dialpad.dialpad_connector
 import connector_runtime.adapters.google_ads.google_ads_connector
 import connector_runtime.adapters.google_analytics.google_analytics_connector
@@ -48,6 +49,7 @@ import connector_runtime.adapters.netsuite.netsuite_connector
 import connector_runtime.adapters.sage.sage_connector
 import connector_runtime.adapters.salesforce.salesforce_connector
 import connector_runtime.adapters.seniorplace.seniorplace_connector
+import connector_runtime.adapters.servicebridge.servicebridge_connector
 import connector_runtime.adapters.servman_pro.servman_pro_connector
 import connector_runtime.adapters.wellsky.wellsky_connector  # noqa: F401
 from connector_runtime.configuration_repository.configuration_repository import (

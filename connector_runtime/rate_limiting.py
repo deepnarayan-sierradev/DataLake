@@ -420,8 +420,10 @@ def _register_platform_policies() -> None:
     )
     rate_limit_policy_registry.register(
         "wellsky-conservative",
-        # WellSky documents rate limits but not the numbers; be conservative and adaptive.
-        RateLimitPolicySpec(RateLimitStrategy.RETRY_AFTER, base_backoff_seconds=2.0),
+        # WellSky Personal Care states it does not explicitly throttle but asks for no more
+        # than 100 req/s and advises against batch use. Sized an order of magnitude below
+        # the stated ceiling: an unenforced request is still a request.
+        RateLimitPolicySpec(RateLimitStrategy.TOKEN_BUCKET, capacity=10, refill_per_second=5.0),
     )
     rate_limit_policy_registry.register(
         "google-ads-standard",
@@ -442,15 +444,33 @@ def _register_platform_policies() -> None:
     )
     rate_limit_policy_registry.register(
         "dialpad-standard",
-        RateLimitPolicySpec(RateLimitStrategy.TOKEN_BUCKET, capacity=20, refill_per_second=2.0),
+        # DialPad documents 20 requests/second per company. The previous 2.0/s refill was a
+        # tenth of that with no stated reason and made a full call-log sweep ten times
+        # longer than it needed to be; 16/s keeps 20% headroom for the endpoint-specific
+        # per-minute caps that sit under the global limit.
+        RateLimitPolicySpec(RateLimitStrategy.TOKEN_BUCKET, capacity=20, refill_per_second=16.0),
     )
     rate_limit_policy_registry.register(
         "housecall-pro-standard",
         RateLimitPolicySpec(RateLimitStrategy.FIXED_WINDOW, max_requests=5, window_seconds=1.0),
     )
     rate_limit_policy_registry.register(
+        "maid-central-hourly",
+        # MaidCentral documents 1000 requests/hour with a 100/minute burst — 0.28 req/s
+        # sustained, the tightest budget on the platform. Capacity is the documented burst
+        # and refill is 80% of the hourly rate, so a burst drains and then settles to the
+        # sustained rate rather than spending the hour's budget in its first minute.
+        RateLimitPolicySpec(
+            RateLimitStrategy.TOKEN_BUCKET, capacity=100, refill_per_second=1000 / 3600 * 0.8
+        ),
+    )
+    rate_limit_policy_registry.register(
         "maid-central-standard",
-        RateLimitPolicySpec(RateLimitStrategy.RETRY_AFTER, base_backoff_seconds=1.0),
+        # Retained so a connection still configured with the old policy name resolves
+        # rather than failing at build time; it now points at the documented budget.
+        RateLimitPolicySpec(
+            RateLimitStrategy.TOKEN_BUCKET, capacity=100, refill_per_second=1000 / 3600 * 0.8
+        ),
     )
     rate_limit_policy_registry.register(
         "servman-pro-standard",

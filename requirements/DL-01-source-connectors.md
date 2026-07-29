@@ -37,6 +37,27 @@ list at all.
 | 10 | HubSpot | Brothers Gutters | Operations | API | migrating from Service Bridge |
 | 11 | HubSpot | Grasons | Operations | API | migrating from IFX |
 | 12 | SeniorPlace | Assisted Living Locators | Operations | API | currently OData to ALL IN |
+| 13 | ServiceBridge | Brothers Gutters | Operations | API | outgoing system behind row 10's migration; history source |
+| 14 | BePro | — | Performance | API | added 2026-07-29 from customer-supplied documentation |
+
+### Corrections applied 2026-07-29 from the customer's supplementary API documentation
+
+The customer supplied vendor documentation for MaidCentral, ServMan Pro and WellSky, plus doc URLs
+for SeniorPlace, ServiceBridge, BePro, DialPad, HubSpot and Sage Intacct. Reading them against the
+shipped specs found four material deviations, all now closed under `DL-CONN-20`:
+
+| Source | What the spec claimed | What the vendor documents |
+|---|---|---|
+| MaidCentral | `X-Api-Key`, `/v1/{entity}`, `data` envelope, `offset`/`limit`, 7 entities | OAuth 2.0 `POST /token`, `/api/v1/reporting/{entity}`, `Result.Items`, `skipCount`/`maxResultCount` (max 1000), 13 entities, 1000 req/hour |
+| WellSky | 50 entities at `/api/v2/...`, keyset paging, `data.records` | FHIR-shaped Home Connect API at `connect.clearcareonline.com/v1/`; `POST /_search/`, `_page`/`_count` (max 100), `entry[].resource`. The "~50 tables" is **WellSky Insights**, a separate warehouse product |
+| SeniorPlace | OData at `/odata/{Set}`, `$filter`, bearer | REST at `app.seniorplace.com/api/v1`, `Authorization: ApiKey <key>`, `updatedAfter` on `/clients` only, no documented paging. The OData contract belongs to **ALL IN**, the downstream system |
+| DialPad | token bucket refilling at 2 req/s | 20 req/s per company — the spec was throttling to a tenth of the allowance for no stated reason |
+
+**ServMan Pro is not corrected here because it is not a REST source.** The two documents supplied
+(`servmandatadictionary_2026.pdf`, `servmantablerelationships_2026.pdf`) are a 346-table *database*
+schema for a Microsoft SQL Server / Codebase installation, not an API reference. The REST spec is
+retained as-is with its `PENDING_VENDOR_ENTITIES` guard, and the database path is recorded as an
+open decision rather than silently modelled. See `docs/SOURCE_API_FIDELITY_AUDIT.md`.
 
 ---
 
@@ -69,6 +90,43 @@ list at all.
   rather than a new OData implementation.
 - **DL-CONN-12** Activate **Sage Intacct**: populate credentials, seed entity configs, seed field
   mappings, enable schedules, and complete a verified first extraction. No new code expected.
+- **DL-CONN-18** Deliver a **ServiceBridge** connector. Row 10's "migrating from Service Bridge"
+  makes this a *history* source: the pre-migration operational record for Brothers Gutters. Its
+  documented quota — 50 req/s and 60000 req/hour — is **per IP address, not per token**, so its
+  rate-limit policy must be `shared_across_connections`; a per-connection policy would let N
+  concurrent extractions each believe they own the whole budget. Its session-key credential travels
+  in the query string, so the HTTP layer must never log a query string (OWASP A09) and must
+  re-acquire the key on its 30-minute sliding expiry.
+- **DL-CONN-19** Deliver a **BePro Data API** connector over the vendor's published OpenAPI 3.1
+  surface (20 endpoints across `meta`, `data`, `external`, `video`). The API exposes **no
+  modification timestamp on any endpoint**, so the connector must decline the `incremental`
+  capability and run full loads rather than advancing a watermark against data it never filtered
+  on. Its quota is two-tier (1000 req/min sustained, 100 req/s burst) and must be expressed as a
+  token bucket, not a fixed window. Endpoints requiring a `match_id` are declared with
+  `required_run_parameters` and fail closed as a configuration error until a match-scoped fan-out
+  exists.
+- **DL-CONN-21** **Config-declared entities for REST sources.** A REST source must accept an
+  entity the configuration console declared, exactly as Salesforce (`object_name`), MySQL
+  (`table_name`) and NetSuite (`record_type`) always have. Adding an entity in the console must
+  not require a code change in this repository. The console supplies `entity_path` plus any of
+  `entity_records_json_path`, `entity_watermark_field`, `entity_natural_key_field`,
+  `entity_pagination_strategy`, `entity_record_unwrap_field`, `entity_read_method`; everything
+  omitted is inherited from the source's declared conventions. Constraints that must hold:
+  a spec-declared entity always wins over configuration (config cannot redirect a curated
+  endpoint); the path is rejected on traversal, protocol-relative form, or any character outside
+  the safe set; the host allowlist still applies at call time; the read verb is GET or POST only;
+  and **write-back is never settable from configuration** — enabling a read must not be able to
+  enable a source mutation. An unknown entity with no `entity_path` fails as
+  `DETERMINISTIC_INVALID_CONFIGURATION` naming exactly what to supply, not as a bare `KeyError`.
+  Added 2026-07-30: the spec-driven REST family was the only adapter family that required a code
+  change to onboard an entity, which contradicted the platform's configuration-driven premise.
+- **DL-CONN-20** **Specification fidelity.** Every source spec's endpoint paths, auth kind,
+  response envelope, pagination parameters, and rate limits must be traceable to that vendor's
+  published documentation, and asserted against it in
+  `connector_runtime/tests/test_documented_source_fidelity.py`. Added 2026-07-29 after an audit
+  against the customer-supplied API documentation found MaidCentral, WellSky and SeniorPlace each
+  specified against an imagined API — every one of them would have failed on its first request
+  while passing the entire substrate test suite.
 
 ### Framework capabilities the new connectors require
 
@@ -196,6 +254,11 @@ subsegment per source API call.
 
 1. All ten required sources registered, credentialed, seeded, scheduled, and each has completed at
    least one successful scheduled extraction in a non-dev environment with non-zero rows.
+1a. ServiceBridge (`DL-CONN-18`) and BePro (`DL-CONN-19`) likewise registered and reachable from
+   the extraction handler, with their documented quotas encoded and asserted.
+1b. Every source spec's documented facts asserted in
+   `connector_runtime/tests/test_documented_source_fidelity.py` (`DL-CONN-20`), so a spec and the
+   vendor document it came from cannot drift apart silently.
 2. HubSpot write-back demonstrated round-trip on a non-production HubSpot portal, with audit records.
 3. Rate-limit policy demonstrated against WellSky under a forced 429 without data loss.
 4. CDC or webhook ingest live for at least HubSpot, with a polling back-fill proving gap recovery.

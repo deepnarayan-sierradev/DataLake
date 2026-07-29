@@ -55,6 +55,10 @@ DIALPAD_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     ),
     default_pagination_strategy="cursor",
     default_rate_limit_policy="dialpad-standard",
+    # Inherited by a config-declared entity (DL-CONN-21); must match what this
+    # source's own entities use, or a console-added entity silently reads zero rows.
+    default_records_json_path=("items",),
+    default_page_size=100,
     default_sync_strategy="webhook_ingest",
     required_credential_keys=frozenset({"access_token"}),
     watermark_lower_parameter="started_after",

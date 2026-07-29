@@ -495,3 +495,51 @@ Two things remain deliberately open rather than fixed:
   there is no API to call, and a rotation schedule without working rotation logic would fail on
   every run while looking like a working control. The compensating control is the deployed
   `credential_expiry_notifier` (SEC-6), which sweeps daily and alerts before expiry.
+
+## Source API fidelity audit (2026-07-29)
+
+Full analysis in [SOURCE_API_FIDELITY_AUDIT.md](SOURCE_API_FIDELITY_AUDIT.md). Two connectors were
+missing and are now built (ServiceBridge, BePro); three shipped specs were written against an API
+that does not exist and are rewritten (MaidCentral, WellSky, SeniorPlace); DialPad was throttling
+itself to a tenth of its documented allowance. What that audit left open:
+
+### 25. ServMan Pro's real integration surface is a database, not the REST API we specified
+
+The two documents the customer supplied — `servmandatadictionary_2026.pdf` and
+`servmantablerelationships_2026.pdf` — are a **346-table Microsoft SQL Server / Codebase schema**,
+not an API reference. DL-01 already records the ServMan API as "being built out", and the REST spec
+is left as-is with its `PENDING_VENDOR_ENTITIES` guard. The realistic paths are a SQL Server adapter
+alongside `mysql_rds`, a replica/CDC feed, or waiting for the vendor. **This is a decision for the
+repo owner, not something to infer from a data dictionary.** Nothing is broken today; the connector
+simply cannot extract until one of those is chosen.
+
+### 26. WellSky Insights — the "~50 tables" in the SOW — is unmodelled
+
+The SOW's "~50+ tables, API rate limits" note against WellSky refers to **WellSky Insights**, a data
+warehouse with `CARE`, `Agencies`, `meta` and default schemas, documented in
+`API Docs/wellsky/EXTERNAL--Insights Data Dictionary (Feb 2023).xlsx`. It is a different product
+from the Home Connect API the `wellsky` connector now targets. Insights is a warehouse integration
+(JDBC), not a REST one, and no connector exists for it. Conflating the two is what produced the
+previous spec's fifty fictional entities, so the two must stay explicitly separate.
+
+### 27. ServiceBridge's endpoint catalogue is inferred, not documented
+
+`cloud.servicebridge.com/developer/index` answers 403 to unauthenticated clients, so the vendor's
+full method reference could not be read. Auth, both rate limits, the REST conventions and the v2
+resource changes are all documented and encoded faithfully. **The pagination parameter names
+(`page`/`pageSize`), the `Results` envelope, and the exact `/api/v1` vs `/api/v2` split for the
+seven non-v2 entities are inferred.** Verify against a live account before the first extraction —
+the fix is a one-line change to `_PAGINATION` and `records_json_path` in the adapter.
+
+### 28. BePro's match-scoped endpoints need a parent-scoped fan-out
+
+`bepro-tracking` and `bepro-video-timing` require a `match_id` the schedule cannot supply. They are
+declared with `required_run_parameters` and fail closed as a configuration error rather than
+reaching the provider and being retried on a 422. They become schedulable when a driver iterates
+`bepro-match` and fans out. Declared, visible in the capability declaration, not built.
+
+### 29. HubSpot and Sage Intacct rate limits were not re-verified
+
+Both vendors' documentation sites are login-gated. Their existing policies are internally consistent
+and conservative, so they were **left unchanged rather than edited on unverifiable information**.
+Re-verify when someone with an account can read the current published limits.

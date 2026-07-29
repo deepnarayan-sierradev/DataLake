@@ -42,7 +42,14 @@ SOW_SOURCE_IDS: Final[frozenset[str]] = frozenset(
         "meta-ads",
     }
 )
-ALL_SUPPORTED_SOURCE_IDS: Final[frozenset[str]] = LEGACY_SOURCE_IDS | SOW_SOURCE_IDS
+# Added 2026-07-29 from the customer's supplementary API documentation: ServiceBridge is the
+# system Brothers Gutters is migrating away from (row 10's "migrating from Service Bridge"),
+# and BePro is a new source. Listed separately from the original ten so a regression names
+# which programme the missing source belongs to.
+SUPPLEMENTARY_SOURCE_IDS: Final[frozenset[str]] = frozenset({"servicebridge", "bepro"})
+ALL_SUPPORTED_SOURCE_IDS: Final[frozenset[str]] = (
+    LEGACY_SOURCE_IDS | SOW_SOURCE_IDS | SUPPLEMENTARY_SOURCE_IDS
+)
 
 
 class TestEverySupportedSourceResolvesFromTheHandler:
@@ -70,4 +77,11 @@ class TestEverySupportedSourceResolvesFromTheHandler:
         assert SOW_SOURCE_IDS <= registered, (
             "DL-01 requires ten source systems to be extractable. Missing from the handler's "
             f"import set: {sorted(SOW_SOURCE_IDS - registered)}."
+        )
+
+    def test_the_supplementary_sources_are_present(self) -> None:
+        registered = set(connector_registry.registered_source_ids)
+        assert SUPPLEMENTARY_SOURCE_IDS <= registered, (
+            "DL-CONN-18 (ServiceBridge) and DL-CONN-19 (BePro) must be reachable from the "
+            f"handler. Missing: {sorted(SUPPLEMENTARY_SOURCE_IDS - registered)}."
         )

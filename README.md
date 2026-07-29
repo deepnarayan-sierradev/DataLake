@@ -26,6 +26,7 @@ form meant to survive across sessions.
 | [docs/PRODUCTION_INCIDENT_RUNBOOK.md](docs/PRODUCTION_INCIDENT_RUNBOOK.md) | On-call engineers | Incident response, runbooks per failure scenario, including cross-tenant incidents |
 | [docs/GO_LIVE_READINESS_CHECKLIST.md](docs/GO_LIVE_READINESS_CHECKLIST.md) | Platform engineers, leadership | Go-live gate checklist |
 | [docs/SAGE_ERP_IMPLEMENTATION_PLAN.md](docs/SAGE_ERP_IMPLEMENTATION_PLAN.md) | Engineers | Sage Intacct/X3 connector reference — open items, operational commands, new-product recipe |
+| [docs/SOURCE_API_FIDELITY_AUDIT.md](docs/SOURCE_API_FIDELITY_AUDIT.md) | Engineers | Every REST source checked against its vendor documentation (2026-07-29) — what each API actually is, its real rate limits, and what is still inferred rather than documented. Read before writing or editing a source spec |
 | [docs/COST_ANALYSIS_AND_ROI.md](docs/COST_ANALYSIS_AND_ROI.md) | Finance, leadership | AWS resource cost breakdown and ROI model |
 | [docs/FAQ_FOR_MANAGEMENT.md](docs/FAQ_FOR_MANAGEMENT.md) | Management | Common questions, plain-language answers |
 | [docs/EXECUTIVE_OVERVIEW.md](docs/EXECUTIVE_OVERVIEW.md) | Engineering & product leadership | Deep-dive functional walkthrough, compliance, security |

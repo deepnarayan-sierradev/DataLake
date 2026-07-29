@@ -39,6 +39,7 @@ from connector_runtime.interfaces.connector_interface import (
     TransientConnectorError,
 )
 from connector_runtime.pagination import (
+    PaginationParameters,
     SourcePage,
     SourceRequest,
     pagination_strategy_registry,
@@ -70,12 +71,18 @@ class RestApiConnector(ConnectorInterface):
         session: RestHttpSession,
         rate_limit_policy: RateLimitPolicy,
         connection_id: str | None = None,
+        entity: RestEntitySpec | None = None,
     ) -> None:
         self._spec = spec
-        self._entity = spec.entity(entity_id)
+        # `entity` is supplied when the configuration console declared it rather than this
+        # repo (DL-CONN-21). Falling back to the spec keeps every existing caller unchanged.
+        self._entity = entity if entity is not None else spec.entity(entity_id)
         self._session = session
         self._rate_limit = rate_limit_policy
         self._connection_id = connection_id or spec.source_id
+        # Bound at query-build time for a POST-search entity; discovery falls back to the
+        # spec's static filters so a sample page is fetched with the same shape as a run.
+        self._request_body: dict[str, Any] | None = None
         self.pages_fetched = 0
 
     # ── Capability declaration ────────────────────────────────────────────────
@@ -144,18 +151,22 @@ class RestApiConnector(ConnectorInterface):
         extraction_window_days: int,
     ) -> QueryContract:
         parameters: dict[str, Any] = dict(self._entity.static_query_parameters)
+        body: dict[str, Any] = dict(self._entity.search_body)
         if self._entity.shape is EntityShape.REPORT:
             parameters["metrics"] = ",".join(self._entity.report_metrics)
             if self._entity.report_dimensions:
                 parameters["dimensions"] = ",".join(self._entity.report_dimensions)
-        elif field_contract.fields:
-            parameters["properties"] = ",".join(f.name for f in field_contract.fields)
+        elif (
+            field_contract.fields
+            and self._entity.read_method == "GET"
+            and self._spec.field_projection_parameter
+        ):
+            parameters[self._spec.field_projection_parameter] = ",".join(
+                f.name for f in field_contract.fields
+            )
 
         if load_type is LoadType.INCREMENTAL:
-            if watermark_lower:
-                parameters[self._spec.watermark_lower_parameter] = watermark_lower
-            if watermark_upper:
-                parameters[self._spec.watermark_upper_parameter] = watermark_upper
+            self._apply_watermark(parameters, body, watermark_lower, watermark_upper)
 
         return QueryContract(
             source_id=self._spec.source_id,
@@ -168,21 +179,40 @@ class RestApiConnector(ConnectorInterface):
             watermark_lower=watermark_lower,
             watermark_upper=watermark_upper,
             watermark_field=watermark_field or self._entity.watermark_field,
+            request_body=body if self._entity.read_method == "POST" else None,
         )
+
+    def _apply_watermark(
+        self,
+        parameters: dict[str, Any],
+        body: dict[str, Any],
+        lower: str | None,
+        upper: str | None,
+    ) -> None:
+        """Bind the incremental bounds where this entity's read shape carries them."""
+        if self._entity.watermark_body_field:
+            # A FHIR-style search expresses a bound as a comparator-prefixed value in the
+            # body — `{"updated": "ge2026-07-01T00:00:00"}` — with no upper-bound form, so
+            # the upper bound is deliberately not sent rather than silently mistranslated.
+            if lower:
+                prefix = self._entity.watermark_comparator_prefix
+                body[self._entity.watermark_body_field] = f"{prefix}{lower}"
+            return
+        if lower:
+            parameters[self._spec.watermark_lower_parameter] = lower
+        if upper:
+            parameters[self._spec.watermark_upper_parameter] = upper
 
     # ── Extraction ────────────────────────────────────────────────────────────
 
     def execute_extraction(
         self, query_contract: QueryContract, run_id: str
     ) -> Iterator[ExtractionRecord]:
+        self._guard_required_run_parameters(query_contract.query_parameters)
+        self._request_body = query_contract.request_body
         strategy_name = self._entity.pagination_strategy or self._spec.default_pagination_strategy
         strategy = pagination_strategy_registry.resolve(strategy_name, self._fetch_page)
-        request = SourceRequest(
-            entity_id=self._entity.entity_id,
-            page_size=self._entity.page_size,
-            query_parameters=query_contract.query_parameters,
-            keyset_field=self._entity.keyset_field,
-        )
+        request = self._source_request(query_contract.query_parameters)
         watermark_field = query_contract.watermark_field
         for page in strategy.pages(request):
             self.pages_fetched = strategy.pages_fetched
@@ -200,13 +230,55 @@ class RestApiConnector(ConnectorInterface):
                     ),
                 )
 
+    def _source_request(self, query_parameters: Mapping[str, Any]) -> SourceRequest:
+        names = self._spec.pagination_names_for(self._entity)
+        return SourceRequest(
+            entity_id=self._entity.entity_id,
+            page_size=self._entity.page_size,
+            query_parameters=query_parameters,
+            keyset_field=self._entity.keyset_field,
+            parameters=PaginationParameters(
+                offset=names.offset,
+                limit=names.limit,
+                cursor=names.cursor,
+                page=names.page,
+                keyset_after=names.keyset_after,
+                keyset_field=names.keyset_field,
+                first_page_index=names.first_page_index,
+            ),
+        )
+
+    def _guard_required_run_parameters(self, parameters: Mapping[str, Any]) -> None:
+        """Fail closed on a provider-required parameter the schedule cannot supply."""
+        missing = [
+            name
+            for name in self._entity.required_run_parameters
+            if parameters.get(name) in (None, "")
+        ]
+        if missing:
+            raise SourceCapabilityUnavailableError(
+                f"Entity {self._entity.entity_id!r} of source {self._spec.source_id!r} requires "
+                f"{missing} on every request, and a scheduled extraction supplies none. This is "
+                "a configuration gap, not an outage — the entity needs a parent-scoped fan-out "
+                "before it can be scheduled standalone."
+            )
+
     def _fetch_page(self, parameters: Mapping[str, Any]) -> SourcePage:
         working = dict(parameters)
         url = working.pop("url", None)
         path = str(url) if url else self._entity.path
-        response = self._session.get(path, working)
+        if self._entity.read_method == "POST":
+            # A search-shaped read: filters travel in the body, paging in the query string.
+            body = self._request_body
+            if body is None:
+                body = dict(self._entity.search_body)
+            response = self._session.post(path, body, working)
+        else:
+            response = self._session.get(path, working)
         return SourcePage(
-            records=response.records(self._entity.records_json_path),
+            records=response.records(
+                self._entity.records_json_path, self._entity.record_unwrap_field
+            ),
             next_cursor=_next_cursor(response),
             next_link=None,
             headers=response.headers,
@@ -218,12 +290,7 @@ class RestApiConnector(ConnectorInterface):
             self._fetch_page,
             max_pages=_DISCOVERY_SAMPLE_PAGES,
         )
-        request = SourceRequest(
-            entity_id=self._entity.entity_id,
-            page_size=self._entity.page_size,
-            query_parameters=dict(self._entity.static_query_parameters),
-            keyset_field=self._entity.keyset_field,
-        )
+        request = self._source_request(dict(self._entity.static_query_parameters))
         names: list[str] = []
         seen: set[str] = set()
         for page in strategy.pages(request):
@@ -286,8 +353,13 @@ class RestApiConnector(ConnectorInterface):
         """Structural check only — a live call would consume the source's rate-limit budget."""
         try:
             self.get_capability_declaration()
-            self._spec.entity(self._entity.entity_id)
-            return True
+            # The resolved entity, not the spec's list: a config-declared entity is just as
+            # extractable as a declared one, and asking the spec would fail it every time.
+            pagination_strategy_registry.resolve(
+                self._entity.pagination_strategy or self._spec.default_pagination_strategy,
+                self._fetch_page,
+            )
+            return bool(self._entity.path)
         except Exception:
             return False
 

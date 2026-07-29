@@ -111,3 +111,16 @@ logs/
 # ─── Build outputs ───────────────────────────────────────────────────────────
 target/
 out/
+
+# ─── Vendor API documentation — deliberately NOT committed ───────────────────
+# This repository is public. `API Docs/` holds vendor material supplied by the
+# customer, including a ServMan data dictionary marked "Unauthorized distribution
+# of these documents is strictly prohibited" (Cube Six, Inc.) and a WellSky file
+# marked EXTERNAL. Committing them here would publish them, and git history makes
+# that irreversible.
+#
+# Nothing depends on them being present: every fact extracted from them is
+# restated in docs/SOURCE_API_FIDELITY_AUDIT.md and asserted in
+# connector_runtime/tests/test_documented_source_fidelity.py. The connector
+# docstrings cite them by path for provenance only.
+API Docs/

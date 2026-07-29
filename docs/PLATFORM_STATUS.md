@@ -85,9 +85,19 @@ make migrate-connections    # scripts/migrate_to_connection_identity.py — defa
 make migrate-credentials    # scripts/migrate_credentials_to_connection_paths.py — per-connection secrets
 ```
 
-Ten new sources (HubSpot, MaidCentral, ServMan Pro, WellSky, Housecall Pro, Dialpad, SeniorPlace,
-Google Ads, Google Analytics, Meta Ads) are implemented as declarative specs on the shared REST
-substrate.
+Twelve sources (HubSpot, MaidCentral, ServMan Pro, WellSky, Housecall Pro, Dialpad, SeniorPlace,
+Google Ads, Google Analytics, Meta Ads, ServiceBridge, BePro) are implemented as declarative specs
+on the shared REST substrate. ServiceBridge and BePro were added on 2026-07-29 from
+customer-supplied API documentation.
+
+**Correction (2026-07-29):** three of those specs — MaidCentral, WellSky and SeniorPlace — had been
+written against an API that does not exist (wrong auth kind, wrong paths, wrong response envelope,
+wrong pagination parameters, invented entities) and would have failed on their first request. All
+three are rewritten against the vendors' published documentation, and
+`connector_runtime/tests/test_documented_source_fidelity.py` now asserts the documented facts so a
+spec and its source document cannot drift apart silently. Read
+[SOURCE_API_FIDELITY_AUDIT.md](SOURCE_API_FIDELITY_AUDIT.md) before trusting any source's spec.
+None of it has been exercised against a live vendor account.
 
 **Correction (2026-07-28):** an earlier version of this section said they were "code-complete in
 the same sense Sage and NetSuite are". That was wrong and materially so. Sage and NetSuite are

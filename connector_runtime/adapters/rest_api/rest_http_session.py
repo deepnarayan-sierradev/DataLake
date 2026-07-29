@@ -18,6 +18,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from connector_runtime.adapters.rest_api.rest_source_spec import AuthKind, RestSourceSpec
+from connector_runtime.adapters.rest_api.rest_token_exchange import RestTokenExchange
 from connector_runtime.interfaces.connector_interface import (
     DeterministicConnectorError,
     ExtractionErrorClassification,
@@ -72,7 +73,9 @@ class RestResponse:
     body: Any
     headers: dict[str, str]
 
-    def records(self, json_path: tuple[str, ...]) -> list[dict[str, Any]]:
+    def records(
+        self, json_path: tuple[str, ...], unwrap_field: str | None = None
+    ) -> list[dict[str, Any]]:
         """Walk the declared JSON path to the record list; a scalar leaf becomes one record."""
         node: Any = self.body
         for segment in json_path:
@@ -83,10 +86,21 @@ class RestResponse:
             if node is None:
                 return []
         if isinstance(node, list):
-            return [item for item in node if isinstance(item, dict)]
-        if isinstance(node, dict):
-            return [node]
-        return []
+            found = [item for item in node if isinstance(item, dict)]
+        elif isinstance(node, dict):
+            # An empty object is no record. It reaches here only for a source whose records
+            # are the body itself (an empty `records_json_path`), where a blank response
+            # parses to `{}` — yielding it would write a field-less row to the raw layer and
+            # poison the schema fingerprint.
+            found = [node] if node else []
+        else:
+            return []
+        if unwrap_field is None:
+            return found
+        # A FHIR search bundle nests each row one level down under `resource`; an entry that
+        # carries no wrapper is dropped rather than stored as an envelope masquerading as a
+        # record, which would poison the raw layer's schema fingerprint.
+        return [item[unwrap_field] for item in found if isinstance(item.get(unwrap_field), dict)]
 
 
 class RestHttpSession:
@@ -106,6 +120,11 @@ class RestHttpSession:
         self._rate_limit = rate_limit_policy
         self._timeout = timeout_seconds
         self._session = session or requests.Session()
+        self._token_exchange = (
+            RestTokenExchange(spec, credentials, session=self._session)
+            if spec.token_endpoint_path
+            else None
+        )
         self.requests_issued = 0
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -133,14 +152,32 @@ class RestHttpSession:
         parameters: Mapping[str, Any] | None = None,
         payload: Mapping[str, Any] | None = None,
     ) -> RestResponse:
+        response = self._issue(method, path, parameters, payload)
+        if response.status_code == 401 and self._token_exchange is not None:
+            # A token that expired mid-entity is not a bad credential: re-exchange once and
+            # retry, so a long extraction is not failed by its own duration. Exactly one
+            # retry — a genuinely revoked credential must still surface as deterministic.
+            self._token_exchange.invalidate()
+            response = self._issue(method, path, parameters, payload)
+        self._raise_for_status(response.status_code, method, path)
+        return response
+
+    def _issue(
+        self,
+        method: str,
+        path: str,
+        parameters: Mapping[str, Any] | None,
+        payload: Mapping[str, Any] | None,
+    ) -> RestResponse:
         url = self._resolve_url(path)
         enforce_allowed_host(self._spec.source_id, urlparse(url).netloc)
         self._rate_limit.acquire()
+        query = {**dict(parameters or {}), **self._auth_query_parameters()}
         try:
             raw = self._session.request(
                 method,
                 url,
-                params=dict(parameters or {}),
+                params=query,
                 json=dict(payload) if payload is not None else None,
                 headers=self._auth_headers(),
                 timeout=self._timeout,
@@ -157,6 +194,8 @@ class RestHttpSession:
         # sends no Retry-After header.
         self._rate_limit.observe({**headers, "x-edl-response-status": str(raw.status_code)})
 
+        # `path` is the spec-declared template only. The query string is deliberately never
+        # logged: a session-key source carries its credential there (OWASP A09).
         _logger.info(
             "rest_source_request_completed",
             source_id=self._spec.source_id,
@@ -171,8 +210,10 @@ class RestHttpSession:
                 SourceId=self._spec.source_id,
                 StatusClass=f"{raw.status_code // 100}xx",
             )
-        self._raise_for_status(raw.status_code, method, path)
-        return RestResponse(status_code=raw.status_code, body=_parse_body(raw), headers=headers)
+        # An error body is never parsed: a 5xx HTML error page is a transient outage, and
+        # parsing it would misclassify the failure as a deterministic contract break.
+        body = {} if raw.status_code >= 400 else _parse_body(raw)
+        return RestResponse(status_code=raw.status_code, body=body, headers=headers)
 
     def _resolve_url(self, path: str) -> str:
         if path.startswith("https://"):
@@ -182,13 +223,27 @@ class RestHttpSession:
         base = base_url if base_url.endswith("/") else base_url + "/"
         return urljoin(base, path.lstrip("/"))
 
+    def _auth_query_parameters(self) -> dict[str, str]:
+        """A session-key source authenticates in the query string, not in a header."""
+        if self._spec.auth_kind is not AuthKind.SESSION_KEY_QUERY:
+            return {}
+        return {self._spec.session_key_parameter: self._bearer_value()}
+
+    def _bearer_value(self) -> str:
+        """The live token: exchanged when the source declares an endpoint, else the stored one."""
+        if self._token_exchange is not None:
+            return self._token_exchange.token()
+        return self._credentials.get("access_token", "")
+
     def _auth_headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
         kind = self._spec.auth_kind
         if kind in (AuthKind.BEARER_TOKEN, AuthKind.OAUTH2_REFRESH):
-            headers["Authorization"] = f"Bearer {self._credentials.get('access_token', '')}"
+            headers["Authorization"] = f"Bearer {self._bearer_value()}"
         elif kind is AuthKind.API_KEY_HEADER:
-            headers[self._spec.api_key_header_name] = self._credentials.get("api_key", "")
+            headers[self._spec.api_key_header_name] = (
+                f"{self._spec.api_key_value_prefix}{self._credentials.get('api_key', '')}"
+            )
         elif kind is AuthKind.BASIC:
             username = self._credentials.get("username", "")
             secret = self._credentials.get("password", "")

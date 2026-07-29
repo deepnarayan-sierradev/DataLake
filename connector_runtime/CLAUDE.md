@@ -6,11 +6,49 @@ Two connector families now live here:
   each implementing `connector_runtime/interfaces/connector_interface.py::ConnectorInterface`:
   Salesforce, NetSuite, MySQL RDS, Sage (Intacct + X3 products under `adapters/sage/products/`).
 - **Spec-driven REST adapters** — `adapters/rest_api/` is one shared connector
-  (`RestApiConnector`) plus one shared HTTP session (`RestHttpSession`); each of the ten SOW
+  (`RestApiConnector`) plus one shared HTTP session (`RestHttpSession`); each of the twelve REST
   sources (HubSpot, MaidCentral, ServMan Pro, WellSky, Housecall Pro, Dialpad, SeniorPlace,
-  Google Ads, Google Analytics, Meta Ads) is a **declarative `RestSourceSpec`**, not a new
-  connector class. Adding a REST source means registering a spec — see
-  `adapters/rest_api/rest_adapter_registration.py`.
+  Google Ads, Google Analytics, Meta Ads, **ServiceBridge**, **BePro**) is a **declarative
+  `RestSourceSpec`**, not a new connector class. Adding a REST source means registering a spec —
+  see `adapters/rest_api/rest_adapter_registration.py`.
+
+**Write the spec from the vendor's document, and assert the document.** On 2026-07-29 an audit
+against customer-supplied API documentation found MaidCentral, WellSky and SeniorPlace each
+specified against an imagined API — wrong auth kind, wrong paths, wrong envelope, wrong paging,
+invented entities. All three passed the entire substrate suite, because a substrate test exercises
+a spec against itself and cannot know whether an endpoint exists. `DL-CONN-20` and
+`tests/test_documented_source_fidelity.py` are the control: every assertion there restates a fact
+from a vendor document, so a spec and its source document must change together. Read
+`docs/SOURCE_API_FIDELITY_AUDIT.md` before writing or editing a spec.
+
+Provider vocabulary is spec-declared, not hardcoded in a strategy: `PaginationParameterNames`
+(`skipCount`/`maxResultCount`, `_page`/`_count`, …), `record_unwrap_field` (FHIR `entry[].resource`),
+`read_method` + `search_body` + `watermark_body_field` (a read that is a POST search),
+`api_key_value_prefix` (`Authorization: ApiKey <key>`), `token_endpoint_path` + `token_grant_kind`
+(a token shorter than a full sweep — see `rest_token_exchange.py`), and `required_run_parameters`
+(a provider-required scope a schedule cannot supply — fails closed as a *configuration* error, not
+a retryable 422).
+
+**An entity does not have to be declared here.** `DL-CONN-21`: the configuration console can add
+a REST entity this repo has never heard of by supplying `entity_path` (plus optional
+`entity_records_json_path`, `entity_watermark_field`, `entity_natural_key_field`,
+`entity_pagination_strategy`, `entity_record_unwrap_field`, `entity_read_method`) in the entity's
+`connector_params` — the same property Salesforce's `object_name` and MySQL's `table_name` always
+had. `resolve_entity_spec()` in `rest_adapter_registration.py` is where a declared entity wins over
+configuration, and where an unknown entity with no path fails as a *configuration* error naming
+what to supply. A spec's `entities` tuple is the curated set, **not** the extractable set; the
+`default_records_json_path` / `default_page_size` fields exist so a console-added entity inherits
+that source's conventions.
+
+Config-declared paths are a validated boundary, not an escape hatch: no traversal segment, no
+protocol-relative `//`, safe characters only, host allowlist enforced at call time, GET or POST
+only — and **write-back is never settable from configuration**, because enabling a read must not
+be able to enable a source mutation.
+
+**A rate limit's scope matters as much as its number.** ServiceBridge's quota is documented **per
+IP address**, and every Lambda egresses through one NAT address — so its policy is
+`shared_across_connections=True`. HubSpot's and BePro's are per token, so theirs are not. Getting
+this backwards lets N concurrent extractions each believe they own the whole budget.
 
 Use `/new-connector` to scaffold a bespoke adapter — it encodes the checklist below as an
 executable prompt. For a REST/report source, write a spec instead; the substrate is tested in

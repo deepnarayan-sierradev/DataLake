@@ -33,10 +33,30 @@ class PaginationKind(StrEnum):
     CURSOR = "cursor"
     KEYSET = "keyset"
     LINK_HEADER = "link_header"
+    PAGE_NUMBER = "page_number"
+    SINGLE_REQUEST = "single_request"
 
 
 class PaginationExhaustionError(Exception):
     """Raised when a provider never signals the end of its result set."""
+
+
+@dataclass(frozen=True)
+class PaginationParameters:
+    """
+    The query-parameter names one provider uses for the pagination knobs.
+
+    Defaults reproduce the names the strategies previously hardcoded, so a source that never
+    declares them behaves exactly as before.
+    """
+
+    offset: str = "offset"
+    limit: str = "limit"
+    cursor: str = "after"
+    page: str = "page"
+    keyset_after: str = "after_key"
+    keyset_field: str = "keyset_field"
+    first_page_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -48,6 +68,7 @@ class SourceRequest:
     query_parameters: Mapping[str, Any] = field(default_factory=dict)
     keyset_field: str | None = None
     initial_cursor: str | None = None
+    parameters: PaginationParameters = field(default_factory=PaginationParameters)
 
 
 @dataclass
@@ -99,11 +120,16 @@ class OffsetLimitPagination(PaginationStrategy):
     kind = PaginationKind.OFFSET_LIMIT
 
     def pages(self, request: SourceRequest) -> Iterator[SourcePage]:
+        names = request.parameters
         offset = 0
         while True:
             self._guard_page_budget(request)
             page = self._fetch_page(
-                {**request.query_parameters, "offset": offset, "limit": request.page_size}
+                {
+                    **request.query_parameters,
+                    names.offset: offset,
+                    names.limit: request.page_size,
+                }
             )
             self.pages_fetched += 1
             if page.records:
@@ -119,13 +145,17 @@ class CursorPagination(PaginationStrategy):
     kind = PaginationKind.CURSOR
 
     def pages(self, request: SourceRequest) -> Iterator[SourcePage]:
+        names = request.parameters
         cursor = request.initial_cursor
         seen_cursors: set[str] = set()
         while True:
             self._guard_page_budget(request)
-            parameters: dict[str, Any] = {**request.query_parameters, "limit": request.page_size}
+            parameters: dict[str, Any] = {
+                **request.query_parameters,
+                names.limit: request.page_size,
+            }
             if cursor:
-                parameters["after"] = cursor
+                parameters[names.cursor] = cursor
             page = self._fetch_page(parameters)
             self.pages_fetched += 1
             if page.records:
@@ -158,13 +188,17 @@ class KeysetPagination(PaginationStrategy):
                 f"Keyset pagination for entity {request.entity_id!r} requires keyset_field — "
                 "without a monotonic key it cannot seek."
             )
+        names = request.parameters
         last_key: Any = None
         while True:
             self._guard_page_budget(request)
-            parameters: dict[str, Any] = {**request.query_parameters, "limit": request.page_size}
+            parameters: dict[str, Any] = {
+                **request.query_parameters,
+                names.limit: request.page_size,
+            }
             if last_key is not None:
-                parameters["after_key"] = last_key
-                parameters["keyset_field"] = request.keyset_field
+                parameters[names.keyset_after] = last_key
+                parameters[names.keyset_field] = request.keyset_field
             page = self._fetch_page(parameters)
             self.pages_fetched += 1
             if not page.records:
@@ -199,11 +233,15 @@ class LinkHeaderPagination(PaginationStrategy):
     kind = PaginationKind.LINK_HEADER
 
     def pages(self, request: SourceRequest) -> Iterator[SourcePage]:
+        names = request.parameters
         next_url: str | None = None
         seen_urls: set[str] = set()
         while True:
             self._guard_page_budget(request)
-            parameters: dict[str, Any] = {**request.query_parameters, "limit": request.page_size}
+            parameters: dict[str, Any] = {
+                **request.query_parameters,
+                names.limit: request.page_size,
+            }
             if next_url:
                 parameters["url"] = next_url
             page = self._fetch_page(parameters)
@@ -217,6 +255,55 @@ class LinkHeaderPagination(PaginationStrategy):
                 return
             seen_urls.add(candidate)
             next_url = candidate
+
+
+class PageNumberPagination(PaginationStrategy):
+    """
+    Increments a page index rather than a row offset; ends on a short page.
+
+    Distinct from offset/limit because the provider counts pages, not rows: WellSky's
+    `_page`/`_count` advances by one per request, so reusing offset paging would skip
+    `page_size - 1` pages out of every `page_size`.
+    """
+
+    kind = PaginationKind.PAGE_NUMBER
+
+    def pages(self, request: SourceRequest) -> Iterator[SourcePage]:
+        names = request.parameters
+        page_index = names.first_page_index
+        while True:
+            self._guard_page_budget(request)
+            page = self._fetch_page(
+                {
+                    **request.query_parameters,
+                    names.page: page_index,
+                    names.limit: request.page_size,
+                }
+            )
+            self.pages_fetched += 1
+            if page.records:
+                yield page
+            if len(page.records) < request.page_size:
+                return
+            page_index += 1
+
+
+class SingleRequestPagination(PaginationStrategy):
+    """
+    One request, one page — for an endpoint the provider does not paginate at all.
+
+    Modelling it as a strategy rather than a `None` keeps the connector free of a
+    "is this entity paginated" branch, and makes the absence of paging a declared fact.
+    """
+
+    kind = PaginationKind.SINGLE_REQUEST
+
+    def pages(self, request: SourceRequest) -> Iterator[SourcePage]:
+        self._guard_page_budget(request)
+        page = self._fetch_page(dict(request.query_parameters))
+        self.pages_fetched += 1
+        if page.records:
+            yield page
 
 
 class PaginationStrategyRegistry:
@@ -254,6 +341,8 @@ pagination_strategy_registry.register(PaginationKind.OFFSET_LIMIT.value, OffsetL
 pagination_strategy_registry.register(PaginationKind.CURSOR.value, CursorPagination)
 pagination_strategy_registry.register(PaginationKind.KEYSET.value, KeysetPagination)
 pagination_strategy_registry.register(PaginationKind.LINK_HEADER.value, LinkHeaderPagination)
+pagination_strategy_registry.register(PaginationKind.PAGE_NUMBER.value, PageNumberPagination)
+pagination_strategy_registry.register(PaginationKind.SINGLE_REQUEST.value, SingleRequestPagination)
 
 
 def stream_records(

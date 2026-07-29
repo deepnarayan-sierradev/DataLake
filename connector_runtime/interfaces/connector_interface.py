@@ -155,6 +155,10 @@ class QueryContract:
     watermark_upper: str | None  # ISO8601 UTC
     watermark_field: str | None = None  # Source field name used for watermark filtering
     estimated_record_count: int | None = None
+    # Bound body for a source whose read is a POST search rather than a GET — WellSky
+    # Personal Care Connect filters on `POST /_search/` with a JSON body. Values are bound
+    # here for the same reason they are bound in query_parameters, never interpolated.
+    request_body: dict[str, Any] | None = None
 
 
 @dataclass

@@ -75,6 +75,10 @@ GOOGLE_ADS_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     ),
     default_pagination_strategy="cursor",
     default_rate_limit_policy="google-ads-standard",
+    # Inherited by a config-declared entity (DL-CONN-21); must match what this
+    # source's own entities use, or a console-added entity silently reads zero rows.
+    default_records_json_path=("results",),
+    default_page_size=1_000,
     required_credential_keys=GOOGLE_REQUIRED_CREDENTIAL_KEYS | frozenset({"developer_token"}),
     watermark_lower_parameter="start_date",
     watermark_upper_parameter="end_date",

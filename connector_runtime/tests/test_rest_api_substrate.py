@@ -323,12 +323,14 @@ class TestHttpSessionErrorTaxonomy:
 
 
 def _connector(
-    responses: list[Any] | None = None, entity_id: str = "widget"
+    responses: list[Any] | None = None,
+    entity_id: str = "widget",
+    spec: RestSourceSpec | None = None,
 ) -> tuple[RestApiConnector, _RecordingSession]:
     session, transport = _session(responses)
     return (
         RestApiConnector(
-            spec=_spec(),
+            spec=spec or _spec(),
             entity_id=entity_id,
             session=session,
             rate_limit_policy=_CountingPolicy(),
@@ -447,11 +449,20 @@ class TestConnectorQueryBuild:
         assert "updated_before" not in query.query_parameters
 
     def test_the_discovered_fields_are_requested_from_the_source(self) -> None:
-        connector, _ = _connector()
+        connector, _ = _connector(spec=_spec(field_projection_parameter="properties"))
         query = connector.build_extraction_query(
             self._contract(connector), LoadType.FULL, None, None, None, 7
         )
         assert query.query_parameters["properties"] == "id,name"
+
+    def test_no_projection_parameter_is_sent_when_the_source_documents_none(self) -> None:
+        # Sending an undocumented query parameter to an API that validates its query string
+        # is a 400, not a harmless extra. Projection is opt-in per source (DL-CONN-20).
+        connector, _ = _connector()
+        query = connector.build_extraction_query(
+            self._contract(connector), LoadType.FULL, None, None, None, 7
+        )
+        assert "properties" not in query.query_parameters
 
     def test_a_report_entity_sends_metrics_and_dimensions(self) -> None:
         connector, _ = _connector(entity_id="spend-report")

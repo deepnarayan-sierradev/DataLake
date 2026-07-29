@@ -86,6 +86,10 @@ META_ADS_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     ),
     default_pagination_strategy="cursor",
     default_rate_limit_policy="meta-ads-standard",
+    # Inherited by a config-declared entity (DL-CONN-21); must match what this
+    # source's own entities use, or a console-added entity silently reads zero rows.
+    default_records_json_path=("data",),
+    default_page_size=500,
     required_credential_keys=frozenset({"access_token", "ad_account_id"}),
     watermark_lower_parameter="time_range_since",
     watermark_upper_parameter="time_range_until",

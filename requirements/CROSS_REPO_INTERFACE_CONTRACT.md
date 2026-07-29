@@ -90,6 +90,42 @@ Five carry `lifecycle { prevent_destroy = true }`; never create any by hand.
 | `EdlTwinIndex` | `tenant_code` | `sk` | Read-only from EP |
 | `EdlSourceOnboardingRegistry` | `source_id` | — | Per-source, **not** per-tenant. No `prevent_destroy` |
 
+### 2a. Declaring a REST entity the DataLake has never heard of (DL-CONN-21)
+
+Added 2026-07-30, **additive** — no existing payload changes.
+
+Salesforce, MySQL and NetSuite have always taken their entity from configuration
+(`connector_params.object_name` / `table_name` / `record_type`). The spec-driven REST family did
+not, so onboarding a REST entity meant a code change in DataLake. It no longer does.
+
+For a REST source, write these into `EdlEntityExtractionConfig.connector_params`:
+
+| Key | Required | Meaning |
+|---|---|---|
+| `entity_id` | yes | The entity, as always |
+| `entity_path` | **only for an entity DataLake does not declare** | Endpoint path, e.g. `/api/v2/quotes` |
+| `entity_records_json_path` | no | Dotted path to the record array, e.g. `Result.Items`. Empty string = the body *is* the array. Omit to inherit the source's convention |
+| `entity_watermark_field` | no | Field carrying the modification timestamp |
+| `entity_natural_key_field` | no | Defaults to `id` |
+| `entity_pagination_strategy` | no | `offset_limit` \| `cursor` \| `keyset` \| `link_header` \| `page_number` \| `single_request` |
+| `entity_record_unwrap_field` | no | For an envelope that nests each row, e.g. FHIR's `resource` |
+| `entity_read_method` | no | `GET` (default) or `POST` |
+| `page_size` | no | 1–1000; otherwise the source's default |
+
+Rules the DataLake enforces, which the console should surface rather than fight:
+
+- **A DataLake-declared entity always wins.** Sending `entity_path` for a declared entity is
+  ignored, so configuration can never redirect a curated endpoint elsewhere.
+- **The path is validated**: leading `/`, no traversal segment, no protocol-relative `//`, no
+  query string or fragment, safe characters only. The source's host allowlist still applies at
+  call time.
+- **Write-back is not settable from configuration.** Enabling a read must never enable a source
+  mutation; write-back stays spec-declared plus the entity's own `writeback_enabled` flag.
+- An unknown `entity_id` with no `entity_path` fails as `DETERMINISTIC_INVALID_CONFIGURATION`
+  with a message naming what to supply. It is not retried.
+
+`extra="forbid"` still applies: any key not in the table above is rejected at validation.
+
 ---
 
 ## 3. S3 config layouts

@@ -95,6 +95,10 @@ HUBSPOT_SPEC: Final[RestSourceSpec] = RestSourceSpec(
         }
     ),
     default_pagination_strategy="cursor",
+    # HubSpot CRM v3 documents `properties` as the field-projection parameter. It is
+    # declared here rather than assumed by the substrate: no other source on the platform
+    # documents one, and sending it to an API that validates its query string is a 400.
+    field_projection_parameter="properties",
     default_rate_limit_policy="hubspot-standard",
     default_sync_strategy="webhook_ingest",
     required_credential_keys=frozenset({"access_token"}),
