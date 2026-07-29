@@ -47,6 +47,49 @@ from contracts.identifier_policy import tenant_scoped_key
 _INCREMENTAL_EXTRACTION_WINDOW_DAYS = 1
 
 
+class SeedValidationError(Exception):
+    """Raised when a seeded record could not be extracted as written."""
+
+
+def _validate_connector_params(records: list[dict[str, object]]) -> None:
+    """
+    Reject a seeded config whose connector_params its source's model would refuse.
+
+    The `netsuite-customer` record shipped with `connector_params: {}` while
+    `NetSuiteConnectorParams.record_type` is required under `extra="forbid"`, so extraction for
+    that entity raised ValidationError the moment it ran. Unit tests could not see it — the
+    defect was in the seed *data*, not the code. Validating here turns that class of defect into
+    a pre-deploy failure using the same registry the extraction handler validates against, so
+    the two cannot disagree.
+
+    Importing the extraction handler is what registers every source (the G2 property), so this
+    also fails if a seeded source_id has no registered connector at all.
+    """
+    from pydantic import ValidationError
+
+    import connector_runtime.extraction_pipeline_handler  # noqa: F401  (registers sources)
+    from connector_runtime.registry import connector_registry
+
+    problems: list[str] = []
+    for record in records:
+        source_id = str(record["source_id"])
+        entity_id = str(record["entity_id"])
+        params_model = connector_registry.get_params_model(source_id)
+        if params_model is None:
+            continue
+        try:
+            params_model.model_validate(record.get("connector_params") or {})
+        except ValidationError as exc:
+            problems.append(f"  {source_id} / {entity_id}: {exc}")
+
+    if problems:
+        raise SeedValidationError(
+            "Seeded connector_params would fail at extraction time:\n"
+            + "\n".join(problems)
+            + "\n\nFix the seed data; do not deploy a config that cannot run."
+        )
+
+
 def _table_name() -> str:
     return "EdlEntityExtractionConfig"
 
@@ -230,7 +273,11 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
                 account_id, "netsuite", "netsuite-customer", tenant_code
             ),
             "output_format": "parquet",
-            "connector_params": {},
+            # `record_type` is required by NetSuiteConnectorParams (extra="forbid"), so the
+            # previous `{}` made this entity raise ValidationError the moment extraction ran.
+            # Recorded as KNOWN_GAPS item 9; `_validate_connector_params` below now makes a
+            # config that cannot construct its params model a seed-time failure.
+            "connector_params": {"record_type": "customer"},
             "schedule_cron": None,
             "schedule_enabled": False,
             "schedule_timezone": "UTC",
@@ -471,6 +518,8 @@ def seed(environment: str, region: str, dry_run: bool = False, tenant_code: str 
     table_name = _table_name()
     account_id = _account_id(region)
     records = _build_records(account_id, tenant_code=tenant_code)
+    # Before the dry-run branch on purpose: a dry run should surface an unusable config too.
+    _validate_connector_params(records)
     print(
         f"Target table: {table_name}  "
         f"(account: {account_id}, region: {region}, tenant_code: {tenant_code})"

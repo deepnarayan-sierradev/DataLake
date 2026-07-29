@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
 
 import boto3
 import pytest
@@ -426,12 +427,42 @@ class TestExceptionRepository:
         keys = {r["exception_key"] for r in repository.list_for_run("evive", _RUN)}
         assert len(keys) == 2
 
-    def test_blocking_exceptions_filter_by_severity(self):
+    def test_list_for_run_drains_every_page(self):
+        # `list_for_run` issued a single `query`, so it stopped at DynamoDB's 1 MB page and a
+        # partial list was indistinguishable from a clean run. moto will not produce a >1 MB
+        # page here, so the paging contract is asserted directly: a response carrying
+        # LastEvaluatedKey must be followed.
+        repository = self._repository()
+        pages = [
+            {"Items": [{"exception_key": "a"}], "LastEvaluatedKey": {"k": 1}},
+            {"Items": [{"exception_key": "b"}], "LastEvaluatedKey": {"k": 2}},
+            {"Items": [{"exception_key": "c"}]},
+        ]
+        seen: list[dict] = []
+
+        def _paged_query(**kwargs):
+            seen.append(kwargs)
+            return pages[len(seen) - 1]
+
+        repository._table = SimpleNamespace(query=_paged_query)
+        records = repository.list_for_run("evive", _RUN)
+
+        assert [r["exception_key"] for r in records] == ["a", "b", "c"]
+        assert len(seen) == 3
+        assert seen[1]["ExclusiveStartKey"] == {"k": 1}
+        assert seen[2]["ExclusiveStartKey"] == {"k": 2}
+
+    def test_severity_is_recorded_so_a_consumer_can_filter_on_it(self):
+        # Replaces test_blocking_exceptions_filter_by_severity. That method had no production
+        # caller and this test was its only reference, which made dead code read as wired.
+        # Severity itself is still load-bearing — the triage route and the in-run gate use it —
+        # so what is worth asserting is that it round-trips, not that a deleted helper filtered.
         repository = self._repository()
         repository.record_many(
             [self._exception(), self._exception(severity=ExceptionSeverity.WARN)]
         )
-        assert len(repository.blocking_exceptions("evive", _RUN)) == 1
+        severities = {str(r["severity"]) for r in repository.list_for_run("evive", _RUN)}
+        assert severities == {ExceptionSeverity.ERROR.value, ExceptionSeverity.WARN.value}
 
     def test_open_listing_excludes_terminal_states(self):
         repository = self._repository()

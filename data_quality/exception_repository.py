@@ -194,12 +194,27 @@ class DataQualityExceptionRepository:
     # ── Reads ─────────────────────────────────────────────────────────────────
 
     def list_for_run(self, tenant_code: str, run_id: str) -> list[dict[str, Any]]:
+        """
+        Every exception recorded for one run.
+
+        Paginated: a single `query` stops at DynamoDB's 1 MB page, and a partial list here is
+        indistinguishable from a clean run. A run with many violations would have reported only
+        the first page, and any caller deciding whether to promote on that basis would fail open.
+        """
         tenant_code = validate_tenant_code(tenant_code)
-        response = self._table.query(
-            KeyConditionExpression="tenant_code = :tc AND begins_with(exception_key, :run)",
-            ExpressionAttributeValues={":tc": tenant_code, ":run": f"{run_id}#"},
-        )
-        return [dict(item) for item in response.get("Items", [])]
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "tenant_code = :tc AND begins_with(exception_key, :run)",
+            "ExpressionAttributeValues": {":tc": tenant_code, ":run": f"{run_id}#"},
+        }
+        records: list[dict[str, Any]] = []
+        while True:
+            response = self._table.query(**query_kwargs)
+            records.extend(dict(item) for item in response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key
+        return records
 
     def list_open(self, tenant_code: str) -> list[dict[str, Any]]:
         """Open findings, for the operations dashboard and the triage inbox."""
@@ -227,13 +242,13 @@ class DataQualityExceptionRepository:
             query_kwargs["ExclusiveStartKey"] = last_key
         return records
 
-    def blocking_exceptions(self, tenant_code: str, run_id: str) -> list[dict[str, Any]]:
-        """ERROR-severity findings for one run — the input to the promotion gate."""
-        return [
-            record
-            for record in self.list_for_run(tenant_code, run_id)
-            if str(record.get("severity")) == ExceptionSeverity.ERROR.value
-        ]
+    # `blocking_exceptions()` was removed on 2026-07-29. Its docstring called it "the input to
+    # the promotion gate" and it had no production caller — only a unit test, which made dead
+    # code read as wired. Promotion is already blocked in-run: `run_batch_quality_gate` raises
+    # `QualityGateBlockedError` after persisting the evidence, so a second mechanism reading the
+    # same rows back would be the duplication the `build_merge_plan` decision already rejected.
+    # If an out-of-run promotion check is ever needed, it should query by severity through a
+    # sparse index rather than re-filter a full-run read in Python.
 
     # ── Private ───────────────────────────────────────────────────────────────
 
