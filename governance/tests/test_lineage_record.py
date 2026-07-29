@@ -54,7 +54,8 @@ class TestLineageEmitter:
     def test_emit_writes_to_s3(self):
         record = _sample_record()
         key = self.emitter.emit(record)
-        assert key.startswith("lineage/")
+        # DL-SEC-04: lineage keys are tenant-prefixed like every other layer.
+        assert key.startswith("demo/lineage/")
         assert _ENTITY_ID in key
         assert _RUN_ID in key
 

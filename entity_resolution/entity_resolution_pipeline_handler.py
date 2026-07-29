@@ -58,11 +58,14 @@ import time
 from typing import Any, Final
 
 import boto3
-import structlog
 
+from config_propagation.capability import ConfigCapability
+from config_propagation.pin_consumption import consume_pinned_config
+from config_propagation.pinned_versions import PinnedConfigVersions
 from contracts.identifier_policy import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN
+from contracts.observability_contract import PipelineStage
 from entity_resolution.canonical_record_publisher.canonical_record_publisher import (
     GoldenRecordPublicationError,
     GoldenRecordPublisher,
@@ -72,9 +75,15 @@ from entity_resolution.resolution_config.resolution_config_registry import (
     ResolutionConfigNotFoundError,
     ResolutionConfigRegistry,
 )
-from observability.lambda_utils import check_lambda_timeout, configure_xray, require_env
+from observability.lambda_utils import check_lambda_timeout, require_env
 from observability.metrics_emitter import CloudWatchMetricsEmitter
+from observability.stage_execution import (
+    StageIdentity,
+    derive_correlation_id,
+    stage_execution,
+)
 from observability.structured_logger import get_platform_logger
+from tenancy.scope_unit_repository import ScopeUnitRepository
 from transformation.curated_utils import (
     find_latest_curated_prefix,
     load_curated_records_duckdb,
@@ -135,21 +144,18 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     _stage_start_ms = time.monotonic() * 1000
 
-    # Instrument AWS SDK calls with X-Ray subsegments (§5.5).
-    configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id, run_id=run_id)
-
-    # Bind run context to every log line emitted in this Lambda invocation.
-    # Cleared in the `finally` block below (OBS-1) — without this, a warm
-    # container's NEXT invocation could log under this run's stale run_id if
-    # it fails before rebinding (e.g. in _validate_event).
-    structlog.contextvars.bind_contextvars(
-        run_id=run_id,
+    # DL-OPS-05: one lifecycle, which also covers the hard-kill case no `finally` can.
+    identity = StageIdentity(
+        tenant_code=tenant_code,
         source_id=source_id,
         entity_id=entity_id,
-        tenant_code=tenant_code,
+        run_id=run_id,
+        environment=environment,
+        stage=PipelineStage.ENTITY_RESOLUTION.value,
+        correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
     )
 
-    try:
+    with stage_execution(identity, region_name=require_env("AWS_REGION"), lambda_context=context):
         return _run_entity_resolution(
             event=event,
             source_id=source_id,
@@ -160,19 +166,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             tenant_code=tenant_code,
             stage_start_ms=_stage_start_ms,
         )
-    except Exception as exc:
-        _logger.error(
-            "entity_resolution_stage_failed",
-            source_id=source_id,
-            entity_id=entity_id,
-            run_id=run_id,
-            environment=environment,
-            error=str(exc),
-            error_type=type(exc).__name__,
-        )
-        raise
-    finally:
-        structlog.contextvars.clear_contextvars()
 
 
 def _run_entity_resolution(
@@ -266,6 +259,12 @@ def _run_entity_resolution(
             governance_s3_bucket=governance_s3_bucket,
             curated_s3_bucket=curated_s3_bucket,
             curated_s3_prefixes=tuple(loaded_prefixes),
+            # DL-SCOPE-08: the tenant's partition profile decides the resolution grain. A
+            # partitioned tenant resolves per scope unit so two franchisees' identical customer
+            # cannot become one golden record — no read-path filter can undo that merge.
+            resolution_scope=ScopeUnitRepository(environment=environment, region_name=region_name)
+            .get_partition_profile(tenant_code)
+            .default_resolution_scope,
         )
     except ResolutionConfigNotFoundError as exc:
         raise ResolutionConfigNotFoundError(
@@ -275,6 +274,22 @@ def _run_entity_resolution(
             f"--tenant-code {tenant_code} to publish its match-rules/survivorship config "
             "under the new tenant-prefixed S3 path, then retry."
         ) from exc
+
+    # ── Reconcile the run's pinned config and record what became effective ────
+    # Entity resolution is the capability where a mid-run definition change produces *wrong*
+    # output rather than merely inconsistent provenance: two halves of one run would cluster
+    # under different match rules. So this stage fails closed on a mismatch (DL-CFG-01).
+    consume_pinned_config(
+        pinned=PinnedConfigVersions.from_payload(event.get("pinned_config_versions")),
+        capability=ConfigCapability.ENTITY_RESOLUTION,
+        observed_version=publisher.match_rules_version,
+        tenant_code=tenant_code,
+        entity_key=entity_type,
+        run_id=run_id,
+        environment=environment,
+        region_name=region_name,
+        fail_on_mismatch=True,
+    )
 
     # ── Run golden record publication ─────────────────────────────────────────
     result = publisher.publish(

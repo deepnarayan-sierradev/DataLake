@@ -59,9 +59,11 @@ See `docs/PIPELINE_FLOW.md`'s canonical "Multi-tenancy — the canonical isolati
 for exactly which layers are genuinely key/prefix-isolated vs. application-level-guard-only vs.
 not isolated at all — don't assume uniformity across layers. Run `tests/test_tenant_isolation.py`
 before touching any repository class. A new
-Cognito-authenticated SaaS control-plane API (`connector_runtime/api/`) exists for self-service
-tenant provisioning and pipeline triggering — it's code-complete but not yet verified against a
-live AWS deployment (see §2 and `connector_runtime/CLAUDE.md`).
+Cognito-authenticated control-plane API (`connector_runtime/api/`) exists for entity registration,
+pipeline triggering, and config/semantic governance — it's code-complete but not yet verified
+against a live AWS deployment (see §2 and `connector_runtime/CLAUDE.md`). It deliberately has **no
+tenant/user/role provisioning route**: identity belongs to the Identity API, and this repository
+only consumes a verified claim.
 
 ---
 
@@ -70,7 +72,15 @@ live AWS deployment (see §2 and `connector_runtime/CLAUDE.md`).
 | Module | Purpose |
 |---|---|
 | `connector_runtime/` | Extracts data from source APIs; writes Parquet to raw layer. Shared base classes for new connectors: `credential_client.py::SecretsManagerCredentialClient`, `raw_layer_writer.py::RawLayerWriter`, `query_builders/incremental_query_builder.py::build_incremental_select()` — see `connector_runtime/CLAUDE.md` before hand-rolling a new connector. |
-| `connector_runtime/api/` | **New.** SaaS control-plane REST API (Cognito/JWT-authenticated) — tenant provisioning, entity registration, pipeline trigger, run status. Code-complete, not yet deployment-verified. |
+| `connector_runtime/api/` | Control-plane REST API (Cognito/JWT-authenticated) — entity registration, pipeline trigger, run status, plus config/semantic governance in `config_governance_routes.py`. **No tenant/user/role provisioning.** Code-complete, not yet deployment-verified. |
+| `connector_runtime/adapters/rest_api/` | **New.** The shared REST/report substrate: one `RestApiConnector`, one `RestHttpSession`, and a declarative `RestSourceSpec` per source. The ten SOW sources are specs, not connector classes. |
+| `tenancy/` | **New.** Source connections, scope units below `tenant_code`, the scope predicate, aggregate protection, scope attribution, and connection-aware key construction (DL-12). |
+| `config_propagation/` | **New.** Run-level config version pinning, effective-config records, restatement events, declared cache-invalidation bases, and audited rollback (DL-11). |
+| `data_quality/` | **New.** Quality checks and policies, the exception store, bounded backfill, source reconciliation, the brand registry, and the data dictionary (DL-02). |
+| `semantic/` | Semantic model, fiscal calendar, metric lineage, result cache, model governance (maker-checker publish/approve/activate), the authored enterprise model, and the KPI validation harness (DL-03). |
+| `serving_store/` | Per-engine loaders plus the view generator, row-level-security policies, merge strategies, and reader-credential delivery (DL-05 serving parts, DL-SERV-*). |
+| `workflow_automation/` | **New.** Workflow definitions, the closed action registry, action handlers, and the execution engine with idempotency keys and per-destination circuit breakers (DL-07). |
+| `portability/` | **New.** Tenant export, transition package, deletion workflow, and the PHI onboarding gate that fails closed on an unclassified field (DL-08/DL-09). |
 | `connector_runtime/credential_rotation/` | **New.** Daily Lambda checking source-credential secret age; alerts via SNS if rotation is overdue. |
 | `transformation/` | Applies field mapping, quality checks, PII masking; writes to curated layer (tenant-prefixed S3 keys) |
 | `entity_resolution/` | Cross-source entity matching; writes golden records to analytics layer. `entity_type_registry.py` now has a DynamoDB-backed `EntityTypeRegistryClient` (tenant-scoped) alongside the original hardcoded fallback dicts. `publishing_shared.py` holds logic shared between the golden/canonical record publishers. |
@@ -215,10 +225,11 @@ EdlEntityTypeRegistry
 ### Secrets Manager
 
 ```bash
-aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name' | grep edl/sources
+aws secretsmanager list-secrets --region us-east-1 --query 'SecretList[].Name' | grep edl/
 ```
 
-Expected:
+Expected in dev today (the legacy shared paths — the per-connection migration has not run here
+yet; see `make migrate-credentials`):
 
 ```
 edl/sources/salesforce/credentials
@@ -227,6 +238,10 @@ edl/sources/mysql-rds/credentials
 edl/sources/sage/intacct/credentials
 edl/sources/sage/x3/credentials
 ```
+
+After the migration, the resolved path is
+`edl/tenants/{tenant_code}/connections/{connection_id}/credentials`, with a separate
+`...-writeback` secret for the write-back path.
 
 ### Lambda Functions
 
@@ -292,7 +307,12 @@ pytest analytics_publisher/tests/ -v --no-cov
 pytest schema_management/tests watermark_management/tests observability/tests \
        contracts/tests governance/tests orchestration/tests -v --no-cov
 
-# Cross-cutting integration tests (tenant isolation)
+# SOW programme modules
+pytest tenancy/tests config_propagation/tests data_quality/tests \
+       workflow_automation/tests portability/tests semantic/tests \
+       serving_store/tests -v --no-cov
+
+# Cross-cutting integration tests (tenant isolation, every consumption surface)
 pytest tests/ -v --no-cov
 ```
 
@@ -303,7 +323,9 @@ ruff check .                            # lint
 ruff format --check .                   # formatting (separate CI job from lint)
 mypy -p connector_runtime -p transformation -p entity_resolution -p analytics_publisher \
      -p orchestration -p observability -p watermark_management -p schema_management \
-     -p contracts -p governance          # type check — SEE CAVEAT BELOW
+     -p contracts -p governance -p tenancy -p config_propagation -p data_quality \
+     -p workflow_automation -p portability -p semantic \
+     -p serving_store                    # type check — SEE CAVEAT BELOW
 pytest --cov --cov-fail-under=80        # tests + coverage
 bandit -r . --exclude .venv,tests,dist -c pyproject.toml   # SAST security scan
 pip-audit                               # dependency CVE scan
@@ -315,10 +337,14 @@ make banned-names                       # rejects helper/util/common/manager ide
 > and — once that's worked around — on a module-name collision between
 > `scripts/generate_presentation.py` and `pptx/generate_presentation.py`. `make typecheck` has the
 > exact same problem (it also just runs bare `mypy .`), so switching to the Makefile target doesn't
-> help. Use the scoped `-p` form shown above — it currently surfaces a number of pre-existing type
-> errors (re-run it to get the current count; see `docs/KNOWN_GAPS_AND_ROADMAP.md`), tracked as
-> follow-up remediation debt, not something to fix incidentally. The CI type-check job reports red
-> on this debt until it's separately remediated.
+> help. Use the scoped `-p` form shown above.
+>
+> **Both `mypy` (scoped) and `bandit` are green as of 2026-07-28.** The old backlog — 29 mypy errors
+> across 11 files, and 20 bandit findings — was cleared as part of DL-SEC-18, whose exit gate is
+> "CI fully green including typecheck". So a failure you see now is most likely yours: confirm
+> against `HEAD` (`git show HEAD:<file> | mypy -`) before calling anything pre-existing. Bandit
+> hard-fails on **any** finding and `[tool.bandit]` declares no skips, so the only permitted
+> suppression is an inline `# nosec BXXX — <justification>`.
 
 ---
 
@@ -557,12 +583,35 @@ AWS_PROFILE=dev aws lambda update-function-code \
 | `EdlPipelineTrigger` | `orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler` |
 | `EdlDlqProcessor` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` |
 
+Two further handlers exist in code with **no deployed function yet** (no Terraform `aws_lambda_function`
+and no dev deployment):
+
+| Handler | Purpose |
+|---|---|
+| `connector_runtime.webhook_receiver_handler.lambda_handler` | Provider webhooks: verifies the signature (mandatory, fails closed), dedups on the provider event id, enqueues to the FIFO queue grouped per tenant/connection/entity. Never processes inline. |
+| `connector_runtime.writeback_handler.lambda_handler` | Bi-directional write-back, gated on the entity's own `writeback_enabled` flag and using a separate write-back secret. |
+
 All eight share the same deployment zip (see §10 above) — a code change to any handler requires
 rebuilding and re-uploading once, then an `update-function-code` call per affected function.
 
 ---
 
 ## 11. Seeding Configuration Data
+
+> **Migrations first, then the code.** Two migrations must run per environment **before** the
+> connection-aware code is deployed there — deploying first takes existing configs dark. Both are
+> dry-run by default and reversible:
+>
+> ```bash
+> make migrate-connections   # registers the default connection per source (connection_id == source_id)
+> make migrate-credentials   # copies shared per-source secrets to per-connection paths (additive)
+> ```
+>
+> `make seed-semantic-model` publishes the authored enterprise semantic model as a **draft**.
+> Activating it needs a named owner's signature per KPI (`--sign owner=entity.metric`), then
+> `--approve` by a *different* actor, then `--activate` — maker-checker is enforced by
+> `semantic/model_governance.py`, not by the script.
+
 
 Entity configs drive all extraction behaviour. They must exist in DynamoDB before any pipeline run.
 

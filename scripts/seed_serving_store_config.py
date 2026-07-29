@@ -149,8 +149,10 @@ def seed(
     if dry_run:
         print("\n[DRY RUN] Would write the following records:")
         for rec in records:
-            print(f"  {rec.tenant_code} / {rec.entity_type} → table {rec.table_name} "
-                  f"(pk={list(rec.primary_keys)}, host={rec.db_host}, enabled={rec.enabled})")
+            print(
+                f"  {rec.tenant_code} / {rec.entity_type} → table {rec.table_name} "
+                f"(pk={list(rec.primary_keys)}, host={rec.db_host}, enabled={rec.enabled})"
+            )
         return
 
     repo = ServingStoreConfigRepositoryClient(environment=environment, region_name=region)

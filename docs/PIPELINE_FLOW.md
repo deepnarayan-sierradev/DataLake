@@ -138,12 +138,13 @@ re-deriving its own version.
 | S3 — schema snapshots | `{tenant_code}/{source_id}/{entity_id}/{schema_version}/...` | App-level, same caveat |
 | DynamoDB — `entity_type_registry` | Hash key is `tenant_code` itself | **Genuinely key-level isolated** |
 | DynamoDB — `watermark_repository` | Hash key is `tenant_scoped_key(tenant_code, source_id)` | **Genuinely key-level isolated** |
-| DynamoDB — `entity_extraction_config` | Key is `(source_id, entity_id)`; `tenant_code` is a plain attribute | App-level guard only (`_enforce_tenant_match`) — mismatches 409, not a silent leak |
+| DynamoDB — `entity_extraction_config` | Hash key stores `tenant_scoped_key(tenant_code, connection_id)`; `_enforce_tenant_match` remains as defence in depth | **Genuinely key-level isolated** (migration applied to dev 2026-07-24) |
 | DynamoDB — `run_audit_log` | Key is `(run_id, stage)`, not tenant-keyed | App-level guard only — reads for another tenant's `run_id` return 404, not 403 |
 | DynamoDB — `source_onboarding_registry` | Key is `source_id` only | Models sources, not per-tenant state — no tenant dimension by design |
-| Secrets Manager | One shared credential per connector type (`edl/sources/{source_id}/credentials`) | **Not isolated at all** — same secret across every tenant using that connector |
+| Secrets Manager | Per connection: `edl/tenants/{tenant_code}/connections/{connection_id}/credentials`, resolved via `ConnectionCredentialPathResolver`; write-back uses a separate `-writeback` secret with no fallback | **Isolated by path** in code. Legacy shared `edl/sources/{source_id}/credentials` is still read as a fallback *with a warning*, and dev still holds credentials only at that legacy path until `make migrate-credentials` runs — so treat dev as **not yet isolated** in practice |
+| Scope units below `tenant_code` (brand / franchisee / location) | `tenancy/scope_predicate.py` builds the predicate; `partition_model` is `single` or `partitioned`, `IMPLICIT_SCOPE_UNIT_ID = "__tenant__"` for the degenerate case, and an **empty scope set means deny**, never "all" | App-level, fails closed; `tests/test_tenant_isolation.py::TestScopeIsolationAcrossEverySurface` parameterises it over every `ConsumptionSurface` |
 | Control-plane API | `_authorize_path_tenant` cross-checks the path's `tenant_code` against the JWT claim | App-level only, fails closed (401/403) |
-| Glue / Athena | Two shared databases (`edl_curated`, `edl_analytics`); table names prefixed `{tenant_code}_{entity_type}` | **Not isolated at all** — naming convention only, no per-tenant database/LF-Tags/data-cell filters |
+| Glue / Athena | Two shared databases (`edl_curated`, `edl_analytics`); table names prefixed `{tenant_code}_{entity_type}` | **Not isolated at all as deployed** — naming convention only. Per-tenant and per-department LF-Tags replacing the wildcard grant exist in `infrastructure/modules/lake_formation/` but are **unapplied** |
 | Serving store | Database-per-tenant (MySQL) / schema-per-tenant (Postgres, SQL Server, Azure SQL, Redshift), enforced by the database engine's own GRANT model | **Genuinely isolated** at the credential level — see Stage 16 below for the separate network-reachability gap |
 
 Where the state machine threads tenant identity through: `infrastructure/modules/orchestration/main.tf`
@@ -153,11 +154,18 @@ analytics publisher Lambda handlers treat `tenant_code` as a **required** Step F
 field — `_validate_event()` raises `ValueError` and fails the run closed if it's missing or
 malformed, rather than silently defaulting to another tenant's identity.
 
-For everything still open in this model (no IAM enforcement anywhere — S3 prefixing is write-path
-convention, not a bucket-policy boundary; Secrets Manager sharing; Glue/Athena's wildcard grant),
-see `docs/KNOWN_GAPS_AND_ROADMAP.md`. Regression
-coverage: `tests/test_tenant_isolation.py`. Incident response: `docs/PRODUCTION_INCIDENT_RUNBOOK.md`
-→ "Suspected Cross-Tenant Data Incident."
+**Nothing in this table is IAM-enforced in a running environment yet.** A deny-based tenant
+boundary across S3, DynamoDB, and Secrets Manager exists in
+`infrastructure/modules/iam/tenant_boundary.tf` with a `tenant_boundary_mode` variable, but it is
+unapplied and ships in **audit** mode: it emits `CrossTenantAccessAttempts` from a CloudTrail metric
+filter rather than denying, so the policy can be proven against real traffic before it can take the
+default tenant offline. Read the "Genuinely enforced" column as *"enforced by a key or a database
+GRANT"*, never as *"enforced by IAM"*.
+
+For everything still open in this model, see `docs/KNOWN_GAPS_AND_ROADMAP.md`. Regression
+coverage: `tests/test_tenant_isolation.py` (zero skipped tests — the old Secrets Manager placeholder
+is now `TestSecretsManagerConnectionIsolation` with real assertions). Incident response:
+`docs/PRODUCTION_INCIDENT_RUNBOOK.md` → "Suspected Cross-Tenant Data Incident."
 
 ---
 

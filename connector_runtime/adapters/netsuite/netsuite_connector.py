@@ -39,6 +39,7 @@ Known limitation — SuiteQL offset pagination ceiling:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from typing import Any, Final
 
@@ -88,11 +89,21 @@ _PAGE_SIZE: Final[int] = 10_000
 # retry, and for the deferred full fix (keyset pagination).
 _MAX_SUITEQL_OFFSET: Final[int] = 100_000
 
+# Keyset seek columns are interpolated into the SuiteQL text (the endpoint has no parameter
+# slots), so the identifier is allowlisted before it gets there (OWASP A03).
+_SAFE_SUITEQL_IDENTIFIER: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
 
 class NetSuiteSuiteQLRateLimitError(TransientConnectorError):
     """Raised when NetSuite returns HTTP 429 (SuiteQL rate limit exceeded)."""
 
     classification = ExtractionErrorClassification.TRANSIENT_THROTTLE
+
+
+class NetSuiteSuiteQLKeysetError(DeterministicConnectorError):
+    """Raised when an entity's watermark field cannot be used as a keyset seek column."""
+
+    classification = ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
 
 
 class NetSuiteSuiteQLOffsetLimitExceededError(DeterministicConnectorError):
@@ -236,9 +247,15 @@ class NetSuiteConnector(ConnectorInterface):
         suiteql_url = _SUITEQL_URL_TEMPLATE.format(account_id=self._auth.account_id)
         record_count = 0
         offset = 0
+        # L17: keyset pagination seeks by the watermark column instead of walking an offset, so
+        # the 100,000-row ceiling stops applying. It needs a monotonic column to seek on, which is
+        # exactly what a watermark field is — when the entity has none, offset/limit remains the
+        # only option and the ceiling below is still the honest answer.
+        keyset_field = query_contract.watermark_field
+        keyset_cursor: str | None = None
 
         while True:
-            if offset > _MAX_SUITEQL_OFFSET:
+            if keyset_field is None and offset > _MAX_SUITEQL_OFFSET:
                 # Stop BEFORE issuing a request NetSuite will reject outright —
                 # see module docstring "Known limitation" and
                 # NetSuiteSuiteQLOffsetLimitExceededError's docstring.
@@ -254,11 +271,18 @@ class NetSuiteConnector(ConnectorInterface):
                     "result set stays under 100,000 rows, then re-run this entity."
                 )
 
+            page_query = (
+                _with_keyset_predicate(bound_query, keyset_field, keyset_cursor)
+                if keyset_field is not None
+                else bound_query
+            )
             page_rows = list(
                 self._fetch_page(
                     suiteql_url=suiteql_url,
-                    query=bound_query,
-                    offset=offset,
+                    query=page_query,
+                    # Keyset pagination always asks for the first page of the *remaining* rows, so
+                    # the offset stays at zero and never approaches the ceiling.
+                    offset=0 if keyset_field is not None else offset,
                     limit=_PAGE_SIZE,
                 )
             )
@@ -275,7 +299,25 @@ class NetSuiteConnector(ConnectorInterface):
             if len(page_rows) < _PAGE_SIZE:
                 # Last page — no more data.
                 break
-            offset += _PAGE_SIZE
+
+            if keyset_field is not None:
+                advanced = _next_keyset_cursor(page_rows, keyset_field, keyset_cursor)
+                if advanced is None:
+                    # The cursor did not move: every row in this page shares one watermark value,
+                    # so seeking past it would skip rows and seeking to it would loop forever.
+                    # Fall back to offset for the remainder rather than risk either.
+                    _logger.warning(
+                        "netsuite_keyset_cursor_stalled_falling_back_to_offset",
+                        entity_id=query_contract.entity_id,
+                        keyset_field=keyset_field,
+                        cursor=keyset_cursor,
+                    )
+                    keyset_field = None
+                    offset += _PAGE_SIZE
+                else:
+                    keyset_cursor = advanced
+            else:
+                offset += _PAGE_SIZE
 
         _logger.info(
             "netsuite_extraction_completed",
@@ -402,3 +444,40 @@ def _build_netsuite(
 
 connector_registry.register_builder(_SOURCE_ID, _build_netsuite)
 connector_registry.register_params_model(_SOURCE_ID, NetSuiteConnectorParams)
+
+
+def _with_keyset_predicate(query: str, keyset_field: str, cursor: str | None) -> str:
+    """
+    Add a `> cursor` seek predicate and a deterministic order to a SuiteQL query (L17).
+
+    The ordering is not cosmetic: keyset pagination is only correct if the rows come back in the
+    column's order, and SuiteQL makes no ordering guarantee without an explicit ORDER BY.
+
+    The cursor is embedded rather than bound because SuiteQL's REST endpoint takes one query
+    string with no parameter slots. It is safe here because `keyset_field` comes from the entity's
+    own validated configuration and the cursor is a value NetSuite itself returned — but the quote
+    escaping below is what stops a value containing a quote from breaking the statement.
+    """
+    if not _SAFE_SUITEQL_IDENTIFIER.match(keyset_field):
+        raise NetSuiteSuiteQLKeysetError(
+            f"keyset field {keyset_field!r} is not a plain SuiteQL identifier, so it cannot be "
+            "used in a seek predicate."
+        )
+    ordered = f"{query} ORDER BY {keyset_field} ASC"
+    if cursor is None:
+        return ordered
+    escaped = str(cursor).replace("'", "''")
+    connector = "AND" if " WHERE " in query.upper() else "WHERE"
+    # Insert the predicate before the ORDER BY that was just appended.
+    return f"{query} {connector} {keyset_field} > '{escaped}' ORDER BY {keyset_field} ASC"
+
+
+def _next_keyset_cursor(
+    page_rows: list[dict[str, Any]], keyset_field: str, current: str | None
+) -> str | None:
+    """The last row's keyset value, or None when it did not advance past `current`."""
+    last = page_rows[-1].get(keyset_field)
+    if last in (None, ""):
+        return None
+    candidate = str(last)
+    return None if candidate == current else candidate

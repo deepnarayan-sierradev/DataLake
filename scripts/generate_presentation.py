@@ -17,6 +17,8 @@ from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 import os
+import tempfile
+from pathlib import Path
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 CHARCOAL  = RGBColor(0x38, 0x3E, 0x48)  # title text  (#383E48)
@@ -46,7 +48,7 @@ SH = Inches(7.5)
 # Gradient strip geometry
 GX = Inches(10.9)   # strip left edge
 GW = Inches(2.43)   # strip width
-_STRIP = "/tmp/gradient_strip.png"
+_STRIP = str(Path(tempfile.gettempdir()) / "gradient_strip.png")
 
 # Safe content geometry
 CX  = Inches(0.55)   # left margin

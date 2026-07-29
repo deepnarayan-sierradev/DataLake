@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
+import subprocess  # nosec B404 — fixed-argv developer tooling only
 import sys
 from datetime import UTC, datetime
 
@@ -32,7 +32,9 @@ from datetime import UTC, datetime
 def _get_state_machine_arn(environment: str, region: str) -> str:
     """Read state machine ARN from Terraform output."""
     try:
-        result = subprocess.run(
+        # nosec B603,B607: literal argv, no shell, and `terraform` is resolved from the
+        # developer's own PATH by design — this script is not deployed.
+        result = subprocess.run(  # nosec B603 B607
             ["terraform", "output", "-raw", "state_machine_arn"],
             capture_output=True,
             text=True,

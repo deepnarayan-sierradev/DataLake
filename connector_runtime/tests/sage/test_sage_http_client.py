@@ -40,6 +40,7 @@ from connector_runtime.adapters.sage.common.sage_http_client import (
     SageServiceUnavailableError,
     SageTimeoutError,
 )
+from connector_runtime.tests.sage.request_assertions import _sent_request
 
 _BASE_URL = "https://api.intacct.com/ia/api/v1"
 _GET_URL = f"{_BASE_URL}/objects/accounts-receivable/customer"
@@ -70,7 +71,7 @@ class TestGetMethod:
         client = _make_client()
         result = client.get(_GET_URL, headers=_AUTH_HEADERS, params={"limit": "10"})
         assert result == {"ok": True}
-        assert "limit=10" in requests_mock.last_request.url
+        assert "limit=10" in _sent_request(requests_mock).url
 
     def test_get_401_raises_auth_error(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.get(_GET_URL, status_code=401)
@@ -212,7 +213,7 @@ class TestPostMethod:
         client.post(_POST_URL, headers=_AUTH_HEADERS, json_body=body)
         import json
 
-        sent = json.loads(requests_mock.last_request.text)
+        sent = json.loads(_sent_request(requests_mock).text)
         assert sent == body
 
 
@@ -247,7 +248,7 @@ class TestPostFormMethod:
             headers={"Accept": "application/json"},
             form_data={"grant_type": "client_credentials"},
         )
-        assert "application/x-www-form-urlencoded" in requests_mock.last_request.headers.get(
+        assert "application/x-www-form-urlencoded" in _sent_request(requests_mock).headers.get(
             "Content-Type", ""
         )
 

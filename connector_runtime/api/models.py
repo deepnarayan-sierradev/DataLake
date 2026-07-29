@@ -17,26 +17,7 @@ from contracts.identifier_policy import (
     SAFE_COLUMN_PATTERN,
     STABLE_ID_PATTERN,
     validate_stable_id,
-    validate_tenant_code,
 )
-
-
-class TenantProvisionRequest(BaseModel):
-    """Request body for POST /tenants."""
-
-    model_config = {"extra": "forbid"}
-
-    tenant_code: str = Field(
-        ...,
-        min_length=2,
-        max_length=48,
-        description="Tenant identifier slug to provision (e.g. 'acme-corp').",
-    )
-
-    @field_validator("tenant_code")
-    @classmethod
-    def _validate_tenant_code(cls, value: str) -> str:
-        return validate_tenant_code(value)
 
 
 class PipelineTriggerRequest(BaseModel):

@@ -88,6 +88,23 @@ class EntityExtractionConfig(BaseModel):
         description="Semantic version of this configuration record (e.g. '1.0.0').",
     )
 
+    # ── Connection identity (DL-SCOPE-04) ─────────────────────────────────────
+    connection_id: str | None = Field(
+        default=None,
+        description=(
+            "Identity of the connector instance this entity is extracted through. "
+            "None means the source's default connection (connection_id == source_id), "
+            "which keeps every key byte-identical to the pre-DL-12 form."
+        ),
+    )
+
+    # ── Configuration schema compatibility (DL-CFG-14) ────────────────────────
+    config_schema_version: int = Field(
+        default=1,
+        ge=1,
+        description="Schema generation of this config artefact; runtime declares its range.",
+    )
+
     # ── Multi-tenancy (§1.1) ──────────────────────────────────────────────────
     tenant_code: str = Field(
         default="demo",
@@ -241,7 +258,68 @@ class EntityExtractionConfig(BaseModel):
         ),
     )
 
+    # ── Sync, pagination and rate limiting (DL-CONN-11, 13, 15) ───────────────
+    sync_strategy: str = Field(
+        default="watermark_polling",
+        description=(
+            "Registered SyncStrategy name: watermark_polling | webhook_ingest | log_based_cdc."
+        ),
+    )
+    rate_limit_policy: str | None = Field(
+        default=None,
+        description="Registered RateLimitPolicy name; None uses the source's declared default.",
+    )
+    pagination_strategy: str | None = Field(
+        default=None,
+        description="Registered PaginationStrategy name; None uses the adapter's declared default.",
+    )
+    writeback_enabled: bool = Field(
+        default=False,
+        description=(
+            "Opt-in bi-directional write path (DL-CONN-02). Deliberately a separate flag from "
+            "`active` so enabling reads can never enable source mutation."
+        ),
+    )
+
+    # ── Quality, brand and retention (DL-DQ-05, DL-DQ-09, DL-PORT-03) ─────────
+    quality_policy_id: str | None = Field(
+        default=None,
+        description="Attached quality policy; required before production promotion (DL-DQ-05).",
+    )
+    quality_gate_blocks_on_error: bool = Field(
+        default=True,
+        description="ERROR-severity violations block the analytics publish for this entity.",
+    )
+    brand_code: str | None = Field(
+        default=None,
+        max_length=64,
+        description="First-class brand dimension, distinct from tenant_code (DL-DQ-09).",
+    )
+    retention_days: int | None = Field(
+        default=None,
+        ge=1,
+        description="Raw-layer retention for this entity; validated against reprocessing windows.",
+    )
+    minimum_reprocessing_window_days: int | None = Field(
+        default=None,
+        ge=1,
+        description="Declared reprocess-eligible window; retention must be at least this long.",
+    )
+
     # ── Validators ────────────────────────────────────────────────────────────
+
+    @field_validator("connection_id", mode="before")
+    @classmethod
+    def validate_connection_id(cls, value: str | None) -> str | None:
+        """connection_id shares the stable-id charset with source_id."""
+        if value is None:
+            return None
+        if not _STABLE_ID_PATTERN.match(value):
+            raise ValueError(
+                f"connection_id '{value}' does not conform to the stable ID format "
+                "(lowercase letters, digits, hyphens; 2-64 chars; must start with a letter)."
+            )
+        return value
 
     @field_validator("source_id", "entity_id", mode="before")
     @classmethod
@@ -310,7 +388,25 @@ class EntityExtractionConfig(BaseModel):
                 "to be set. A primary key is needed to identify and remove deleted records "
                 "from the merged curated state."
             )
+        # DL-CFG-12: a retention policy shorter than a declared reprocessing window is a
+        # configuration error caught at publish, not discovered when the data is gone.
+        if (
+            self.retention_days is not None
+            and self.minimum_reprocessing_window_days is not None
+            and self.retention_days < self.minimum_reprocessing_window_days
+        ):
+            raise ValueError(
+                f"Entity '{self.entity_id}': retention_days={self.retention_days} is shorter "
+                f"than minimum_reprocessing_window_days="
+                f"{self.minimum_reprocessing_window_days}. Reprocessing would find the input "
+                "data already expired."
+            )
         return self
+
+    @property
+    def effective_connection_id(self) -> str:
+        """Identity component for keys: the explicit connection, else the source's default."""
+        return self.connection_id or self.source_id
 
     @field_validator("primary_key_field", "soft_delete_field", mode="before")
     @classmethod

@@ -48,6 +48,7 @@ def _agent(proposer, engine, granted=frozenset(), max_attempts=3):
         model=_model(),
         engine=engine,
         entity_uri_resolver=lambda name: f"s3://edl-analytics-1/demo/analytics/{name}",
+        scope_predicate=None,
         granted_access_tags=granted,
         max_attempts=max_attempts,
     )

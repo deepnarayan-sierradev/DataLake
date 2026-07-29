@@ -346,7 +346,7 @@ class SalesforceBulkQueryJobController:
                 raise BulkJobFailedError(f"Bulk job {job_id!r} terminated with state={status!r}.")
 
             # Exponential backoff with full jitter — non-cryptographic use only.
-            jitter = random.uniform(0, _POLL_JITTER_MAX_S)  # noqa: S311
+            jitter = random.uniform(0, _POLL_JITTER_MAX_S)  # nosec B311 — poll jitter only  # noqa: S311
             time.sleep(min(delay + jitter, _POLL_MAX_DELAY_S))
             delay = min(delay * _POLL_BACKOFF_FACTOR, _POLL_MAX_DELAY_S)
 

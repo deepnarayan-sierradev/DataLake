@@ -59,6 +59,7 @@ class TestContextvarsAndErrorHandling:
         structlog.contextvars.clear_contextvars()
 
     def test_contextvars_cleared_after_success(self, monkeypatch) -> None:
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.setattr(
             handler_module,
             "_run_entity_resolution",
@@ -68,6 +69,8 @@ class TestContextvarsAndErrorHandling:
         assert structlog.contextvars.get_contextvars() == {}
 
     def test_contextvars_cleared_after_failure(self, monkeypatch) -> None:
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+
         def _boom(**_kwargs: Any) -> dict[str, Any]:
             raise RuntimeError("simulated pipeline failure")
 
@@ -81,6 +84,8 @@ class TestContextvarsAndErrorHandling:
         assert structlog.contextvars.get_contextvars() == {}
 
     def test_failure_is_logged_before_reraise(self, monkeypatch, caplog) -> None:
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+
         def _boom(**_kwargs: Any) -> dict[str, Any]:
             raise RuntimeError("simulated pipeline failure")
 
@@ -93,6 +98,7 @@ class TestContextvarsAndErrorHandling:
         # exception propagate through an unstructured code path silently.
 
     def test_second_invocation_does_not_see_prior_run_id(self, monkeypatch) -> None:
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
         """
         Regression for OBS-1: simulate a warm container running a failing
         invocation followed by a second invocation, and confirm the second
@@ -123,6 +129,7 @@ class TestLoadAllContributingRecords:
     _PREFIX = "curated/salesforce/salesforce-account/curated_date=2026-01-01/run_id=run-1/"
 
     def test_uses_duckdb_loader_and_tags_records(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.setenv("AWS_REGION", "us-east-1")
         calls: list[tuple[Any, str, str, str]] = []
 
@@ -155,6 +162,7 @@ class TestLoadAllContributingRecords:
         assert prefixes == [self._PREFIX]
 
     def test_does_not_call_python_list_based_loader(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
         """The old fully-materialising loader must not be imported/used anymore."""
         monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.setattr(
@@ -214,6 +222,7 @@ class TestLoadAllContributingRecords:
         assert prefixes == loaded_prefixes_seen
 
     def test_raises_when_aws_region_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.delenv("AWS_REGION", raising=False)
         with pytest.raises(RuntimeError, match="AWS_REGION"):
             handler_module._load_all_contributing_records(

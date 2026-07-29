@@ -70,20 +70,33 @@ from contracts.identifier_policy import ENTITY_TYPE_PATTERN as _ENTITY_TYPE_PATT
 from contracts.identifier_policy import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
+from contracts.platform_metrics import PlatformMetric
 from observability.lambda_utils import (
     check_lambda_timeout,
     check_lambda_timeout_periodic,
     configure_xray,
     require_env,
 )
+from observability.metric_recorder import record_platform_metric
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
-from serving_store.interfaces.loader_interface import TransientServingError
+from serving_store.interfaces.loader_interface import (
+    TransientServingError,
+    record_load_failure,
+)
+from serving_store.merge_strategy import default_sizing_profile
 from serving_store.registry import serving_store_registry
 from serving_store.serving_store_config_repository import (
     ServingStoreConfigNotFoundError,
     ServingStoreConfigRepositoryClient,
 )
+from serving_store.view_generator import (
+    EngineUnsuitableError,
+    RowSecurityPolicy,
+    generate_row_security_policy,
+    serving_engine_from_config,
+)
+from tenancy.scope_predicate import ConsumptionSurface
 
 _logger = get_platform_logger(__name__)
 
@@ -135,6 +148,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             context=context,
         )
     except Exception as exc:
+        record_load_failure(
+            entity_type,
+            connection_error=isinstance(exc, ConnectionError | TimeoutError | OSError),
+        )
         _logger.error(
             "serving_store_load_stage_failed",
             entity_id=entity_id,
@@ -169,6 +186,9 @@ def _run_serving_store_load(
     try:
         config = config_repo.load_config(tenant_code, entity_type)
     except ServingStoreConfigNotFoundError:
+        # Alarmed at zero: a silent skip must never be mistaken for a successful load
+        # (DL-SERV-07's own observability note).
+        record_platform_metric(PlatformMetric.SERVING_STORE_SKIPPED_NO_CONFIG)
         _logger.info(
             "serving_store_load_skipped_no_config",
             entity_id=entity_id,
@@ -233,6 +253,7 @@ def _run_serving_store_load(
             analytics_s3_prefix=analytics_s3_prefix,
             connection_database=config.connection_database,
         )
+    _apply_row_level_security(config, tenant_code, result.table_name)
     metrics_emitter.flush()
 
     return {
@@ -299,3 +320,64 @@ def _validate_event(event: dict[str, Any]) -> None:
     tenant_code = str(event["tenant_code"])
     if not _TENANT_CODE_PATTERN.match(tenant_code):
         raise ValueError(f"tenant_code={tenant_code!r} does not conform to the tenant code format.")
+
+
+def _apply_row_level_security(config: Any, tenant_code: str, table_name: str) -> None:
+    """
+    Apply the engine's native row-level-security policy to the freshly loaded table
+    (DL-SERV-07, ConsumptionSurface.SERVING_STORE).
+
+    BI tools connect straight to the database, so the Python scope predicate never runs on this
+    path: without an RLS policy the per-tenant reader credential sees every scope unit inside its
+    own tenant. The policy filters on a **session setting** the connection pool sets from verified
+    claims, not on a value the client can supply.
+
+    An engine with no native RLS (MySQL) raises `EngineUnsuitableError`; that is not a load
+    failure — the isolation mechanism for those engines is schema-per-scope-unit, chosen at
+    provisioning by `decide_isolation()` — so it is logged and skipped rather than raised.
+    """
+    engine = serving_engine_from_config(config.target_engine.value)
+    try:
+        policy: RowSecurityPolicy = generate_row_security_policy(
+            table_name=table_name, engine=engine
+        )
+    except EngineUnsuitableError:
+        _logger.info(
+            "serving_store_row_security_not_native",
+            engine=engine.value,
+            table_name=table_name,
+            mechanism="schema_per_scope_unit",
+        )
+        return
+
+    loader = serving_store_registry.resolve(
+        config.target_engine.value,
+        secret_arn=config.secret_arn,
+        region_name=config.region_name,
+        db_host=config.db_host,
+        db_port=config.db_port,
+    )
+    # The RLS predicate filters on scope_unit_id/brand_code, so the supporting indexes are
+    # applied in the same pass: a row-security filter on an unindexed column turns every BI query
+    # into a table scan, which is the failure §11 forbids (it bans throttling included
+    # capabilities, so the layer must be sized rather than rate-limited).
+    sizing = default_sizing_profile((table_name,))
+    index_statements = tuple(
+        index.create_sql(engine) for index in sizing.indexes if index.table_name == table_name
+    )
+    applied = loader.apply_statements(
+        policy.sql_statements + index_statements, tenant_code, table_name
+    )
+    record_platform_metric(
+        PlatformMetric.ROW_LEVEL_PREDICATE_APPLIED,
+        float(applied),
+        Surface=ConsumptionSurface.SERVING_STORE.value,
+    )
+    _logger.info(
+        "serving_store_row_security_applied",
+        tenant_code=tenant_code,
+        table_name=table_name,
+        engine=engine.value,
+        statements=applied,
+        security_columns=list(policy.security_columns),
+    )

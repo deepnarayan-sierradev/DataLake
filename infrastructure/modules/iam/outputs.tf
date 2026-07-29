@@ -77,3 +77,25 @@ output "control_plane_role_arn" {
   description = "ARN of the control-plane API Lambda IAM role."
   value       = aws_iam_role.control_plane.arn
 }
+
+# ─── S8/S9 platform Lambda roles ─────────────────────────────────────────────
+
+output "webhook_receiver_role_arn" {
+  description = "Webhook receiver execution role; enqueue + signing secret only."
+  value       = aws_iam_role.webhook_receiver.arn
+}
+
+output "writeback_role_arn" {
+  description = "Write-back execution role; reads the -writeback secret suffix only."
+  value       = aws_iam_role.writeback.arn
+}
+
+output "workflow_runner_role_arn" {
+  description = "Workflow runner execution role."
+  value       = aws_iam_role.workflow_runner.arn
+}
+
+output "portability_role_arn" {
+  description = "Portability execution role; the only role with bulk object deletion."
+  value       = aws_iam_role.portability.arn
+}

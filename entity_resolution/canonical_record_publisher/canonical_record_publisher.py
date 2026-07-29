@@ -48,6 +48,7 @@ from entity_resolution.survivorship_policy import (
 )
 from observability.s3_writer import S3ParquetWriter
 from observability.structured_logger import get_platform_logger
+from tenancy.scope_contract import ResolutionScope
 
 _logger = get_platform_logger(__name__)
 
@@ -87,8 +88,15 @@ class GoldenRecordPublisher:
         governance_s3_bucket: str | None = None,
         curated_s3_bucket: str | None = None,
         curated_s3_prefixes: tuple[str, ...] | None = None,
+        resolution_scope: ResolutionScope | None = None,
     ) -> None:
-        self._match_engine = MatchRuleEngine(rule_set)
+        # DL-SCOPE-08: a partitioned tenant resolves at scope-unit grain so two franchisees'
+        # identical customer never becomes one golden record. Defaults to tenant grain, which
+        # preserves pre-DL-12 behaviour for single-partition tenants.
+        self._match_engine = MatchRuleEngine(rule_set, resolution_scope=resolution_scope)
+        # Set by from_registry() to the version the registry resolved; the rule set itself is the
+        # source of truth when constructed directly.
+        self.match_rules_version: str = rule_set.rule_set_version
         self._survivorship = GoldenRecordSurvivorshipPolicy(survivorship_policy)
         self._analytics_s3_bucket = analytics_s3_bucket
         self._region_name = region_name
@@ -111,6 +119,7 @@ class GoldenRecordPublisher:
         curated_s3_prefixes: tuple[str, ...] | None = None,
         match_rules_version: str = "latest",
         survivorship_version: str = "latest",
+        resolution_scope: ResolutionScope | None = None,
     ) -> GoldenRecordPublisher:
         """
         Factory that constructs a publisher by loading config from a
@@ -139,7 +148,7 @@ class GoldenRecordPublisher:
             match_rules_version=match_rules_version,
             survivorship_version=survivorship_version,
         )
-        return cls(
+        publisher = cls(
             rule_set=config.match_rule_set,
             survivorship_policy=config.survivorship_policy,
             analytics_s3_bucket=analytics_s3_bucket,
@@ -147,7 +156,12 @@ class GoldenRecordPublisher:
             governance_s3_bucket=governance_s3_bucket,
             curated_s3_bucket=curated_s3_bucket,
             curated_s3_prefixes=curated_s3_prefixes,
+            resolution_scope=resolution_scope,
         )
+        # The *resolved* version, not the requested one: an effective-config record naming
+        # "latest" would tell the console nothing about what a run actually consumed (DL-CFG-08).
+        publisher.match_rules_version = config.match_rule_set.rule_set_version
+        return publisher
 
     def publish(
         self,
@@ -266,6 +280,7 @@ class GoldenRecordPublisher:
                 rule_set_version=self._match_engine._rule_set.rule_set_version,
                 survivorship_version=self._survivorship._policy.policy_version,
                 region_name=self._region_name,
+                tenant_code=tenant_code,
             )
 
         return GoldenRecordPublicationResult(

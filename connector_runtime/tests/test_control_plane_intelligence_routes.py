@@ -59,6 +59,10 @@ def _create_tables(dynamodb):
     _ct(dynamodb, "EdlTwinIndex", "sk")
     _ct(dynamodb, "EdlSavedQuery", "query_id")
     _ct(dynamodb, "EdlSemanticModel", "model_version")
+    # Every read route now builds a scope predicate from the caller's claim, which reads the
+    # tenant's partition profile and unit list (DL-SCOPE-14). Absent table -> absent profile ->
+    # the single-partition default, which is the demo shape these tests exercise.
+    _ct(dynamodb, "EdlScopeUnit", "scope_unit_id")
 
 
 def _model():

@@ -36,11 +36,34 @@ import boto3
 from botocore.exceptions import ClientError
 
 from contracts.observability_contract import scrub_sensitive_values
+from contracts.platform_metrics import PlatformMetric, metric_unit
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
 PLATFORM_METRIC_NAMESPACE: Final[str] = "EnterpriseDatalake"
+
+# Dimension names permitted on catalogued metrics (OWASP A09: bounded cardinality).
+_ALLOWED_DIMENSION_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "TenantCode",
+        "SourceId",
+        "EntityId",
+        "EntityType",
+        "Environment",
+        "Stage",
+        "Capability",
+        "Surface",
+        "Severity",
+        "Format",
+        "ActionType",
+        "Status",
+        "StatusClass",
+        "ConnectionId",
+        "Rule",
+        "Engine",
+    }
+)
 
 
 class CloudWatchMetricsEmitter:
@@ -317,6 +340,37 @@ class CloudWatchMetricsEmitter:
             dimensions=self._build_dimensions(
                 source_id, entity_id, environment, tenant_code=self._tenant_code
             ),
+        )
+
+    def emit_metric(
+        self,
+        metric: PlatformMetric,
+        value: float = 1.0,
+        *,
+        environment: str | None = None,
+        dimensions: dict[str, str] | None = None,
+    ) -> None:
+        """Emit any catalogued metric; the unit comes from the catalogue, never the caller."""
+        dims: list[dict[str, str]] = []
+        if self._tenant_code:
+            dims.append({"Name": "TenantCode", "Value": self._tenant_code})
+        if environment:
+            dims.append({"Name": "Environment", "Value": environment})
+        for name, dim_value in (dimensions or {}).items():
+            if name not in _ALLOWED_DIMENSION_NAMES:
+                raise ValueError(
+                    f"Dimension {name!r} is not in the permitted dimension set. "
+                    f"Permitted: {sorted(_ALLOWED_DIMENSION_NAMES)}."
+                )
+            dims.append({"Name": name, "Value": scrub_sensitive_values(str(dim_value))[:255]})
+        self._pending.append(
+            {
+                "MetricName": metric.value,
+                "Dimensions": dims,
+                "Timestamp": datetime.now(UTC),
+                "Value": float(value),
+                "Unit": metric_unit(metric).value,
+            }
         )
 
     # ── Internal helpers ──────────────────────────────────────────────────────

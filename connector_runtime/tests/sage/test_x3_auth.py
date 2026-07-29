@@ -41,6 +41,7 @@ from connector_runtime.adapters.sage.products.x3.x3_auth import (
     X3AuthError,
     X3CredentialError,
 )
+from connector_runtime.tests.sage.request_assertions import _sent_request
 
 _TOKEN_URL = "https://x3.company.com/auth/token"
 _SERVER_BASE_URL = "https://x3.company.com"
@@ -136,9 +137,9 @@ class TestTokenAcquisition:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         auth.get_access_token()
-        request_body = requests_mock.last_request.text
+        request_body = _sent_request(requests_mock).text
         assert "x3-super-secret" in request_body
-        assert "x3-super-secret" not in requests_mock.last_request.url
+        assert "x3-super-secret" not in _sent_request(requests_mock).url
 
 
 # ---------------------------------------------------------------------------

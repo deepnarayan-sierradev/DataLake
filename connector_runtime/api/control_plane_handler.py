@@ -53,6 +53,9 @@ Required Lambda environment variables:
 
 from __future__ import annotations
 
+import base64
+import binascii
+import dataclasses
 import json
 import os
 import re
@@ -69,6 +72,24 @@ from pydantic import ValidationError as PydanticValidationError
 
 import processing_engine.engines.duckdb_engine  # noqa: F401  (registers "duckdb")
 from analytics_publisher.analytics_location import latest_partition_uri
+from config_propagation.capability import ConfigCapability
+from config_propagation.config_rollback import (
+    ConfigGovernanceService,
+    MakerCheckerViolationError,
+    RollbackRequest,
+)
+from config_propagation.effective_config_repository import EffectiveConfigRepository
+from config_propagation.restatement_repository import RestatementRepository
+from connector_runtime.api.config_governance_routes import (
+    ConfigRoute,
+    ConfigRouteError,
+    ReprocessRequestParams,
+    RollbackRequestParams,
+    build_config_routes,
+    match_config_route,
+    parse_capability,
+    parse_entity_key,
+)
 from connector_runtime.api.errors import (
     ApiError,
     AuthenticationError,
@@ -81,7 +102,6 @@ from connector_runtime.api.models import (
     PipelineTriggerRequest,
     SavedQueryCreateBody,
     SemanticQueryBody,
-    TenantProvisionRequest,
 )
 from connector_runtime.configuration_repository.configuration_repository import (
     ConfigurationAlreadyExistsError,
@@ -96,10 +116,19 @@ from contracts.identifier_policy import (
     validate_run_id,
     validate_tenant_code,
 )
+from contracts.platform_metrics import PlatformMetric
+from contracts.serving_store_config_contract import ServingStoreLoadConfig
+from data_quality.exception_repository import DataQualityExceptionRepository
+from entity_resolution.resolution_config.resolution_config_registry import (
+    ResolutionConfigRegistry,
+)
 from knowledge.twin_repository import TwinNotFoundError, TwinRepository
 from observability.lambda_utils import require_env
+from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from processing_engine.registry import set_based_engine_registry
+from semantic.metric_lineage import metric_lineage
+from semantic.model_governance import SemanticModelGovernance
 from semantic.query_compiler import (
     AccessDeniedError,
     SemanticQueryError,
@@ -113,6 +142,15 @@ from semantic.semantic_model_repository import (
     SemanticModelRepository,
 )
 from semantic.semantic_query_service import SemanticQueryService
+from serving_store.serving_store_config_repository import ServingStoreConfigRepositoryClient
+from tenancy.scope_predicate import (
+    ConsumptionSurface,
+    EmptyScopeDenialError,
+    ScopePredicate,
+    build_scope_claims,
+    scope_predicate,
+)
+from tenancy.scope_unit_repository import ScopeUnitRepository
 
 _logger = get_platform_logger(__name__)
 
@@ -192,12 +230,14 @@ def _authenticated_tenant_code(event: dict[str, Any]) -> str:
     """
     claims = _extract_claims(event)
     if not claims:
+        record_platform_metric(PlatformMetric.AUTHENTICATION_FAILURES)
         raise AuthenticationError(
             "Request is missing authenticated identity context. This API requires "
             "a valid authenticated request."
         )
     tenant_claim = claims.get("custom:tenant_code") or claims.get("tenant_code")
     if not tenant_claim:
+        record_platform_metric(PlatformMetric.AUTHENTICATION_FAILURES)
         raise AuthenticationError("Authenticated identity does not carry a tenant_code claim.")
     return validate_tenant_code(str(tenant_claim))
 
@@ -207,6 +247,10 @@ def _authorize_path_tenant(event: dict[str, Any], path_tenant_code: str) -> str:
     tenant_code = validate_tenant_code(path_tenant_code)
     authenticated = _authenticated_tenant_code(event)
     if authenticated != tenant_code:
+        # A caller reaching for another tenant's path is a cross-tenant attempt whether the
+        # cause is a bug or an attack, so it pages either way.
+        record_platform_metric(PlatformMetric.CROSS_TENANT_ACCESS_ATTEMPTS)
+        record_platform_metric(PlatformMetric.AUTHORIZATION_DENIALS, 1.0, Capability="tenant_path")
         raise AuthorizationError(
             "Authenticated tenant is not permitted to access this tenant_code path."
         )
@@ -257,54 +301,6 @@ def _parse_json_body(event: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
-
-
-def _handle_create_tenant(event: dict[str, Any]) -> dict[str, Any]:
-    """
-    POST /tenants — provision a new tenant.
-
-    There is no existing tenant to authorize against yet (this is the
-    genesis operation), so this route only requires a valid authenticated
-    caller (any authenticated identity) rather than a tenant_code match.
-    Promoting this to a platform-admin-scoped claim is tracked as follow-up
-    work once an admin authorizer scope exists.
-    """
-    if not _extract_claims(event):
-        raise AuthenticationError("Request is missing authenticated identity context.")
-
-    body_dict = _parse_json_body(event)
-    try:
-        request = TenantProvisionRequest.model_validate(body_dict)
-    except PydanticValidationError as exc:
-        raise ValidationFailedError(
-            f"Request body failed validation: {exc.error_count()} error(s)."
-        ) from exc
-
-    table = _entity_type_registry_table()
-    now_iso = datetime.now(UTC).isoformat()
-    try:
-        table.put_item(
-            Item={
-                "tenant_code": request.tenant_code,
-                "sk": "tenant_registry#meta",
-                "status": "active",
-                "provisioned_at": now_iso,
-            },
-            ConditionExpression="attribute_not_exists(sk)",
-        )
-    except ClientError as exc:
-        error_code = exc.response["Error"]["Code"]
-        if error_code == "ConditionalCheckFailedException":
-            raise ConflictError(f"Tenant {request.tenant_code!r} already exists.") from exc
-        _logger.error(
-            "tenant_provisioning_dynamodb_error",
-            tenant_code=request.tenant_code,
-            error_code=error_code,
-        )
-        raise ApiError("Tenant provisioning failed due to an internal error.") from exc
-
-    _logger.info("tenant_provisioned", tenant_code=request.tenant_code)
-    return _response(201, {"tenant_code": request.tenant_code, "status": "active"})
 
 
 def _handle_list_entities(event: dict[str, Any], path_tenant_code: str) -> dict[str, Any]:
@@ -577,6 +573,11 @@ def _handle_list_runs(event: dict[str, Any], path_tenant_code: str) -> dict[str,
 
 _SAFE_GOLDEN_ID: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,255}$")
 _MAX_TWINS_LISTED: Final[int] = 200
+# Triage is a working list, not an export: an operator cannot act on thousands at once, and the
+# response says when it truncated rather than implying completeness.
+_MAX_EXCEPTIONS_LISTED: Final[int] = 200
+# Prefix makes a token recognisable in a log line and stops a bare integer from being accepted.
+_PAGE_TOKEN_PREFIX: Final[str] = "edl-page:"  # noqa: S105 — a page marker, not a secret
 
 
 def _twin_repository() -> TwinRepository:
@@ -603,6 +604,53 @@ def _granted_access_tags(event: dict[str, Any]) -> frozenset[str]:
     claims = _extract_claims(event) or {}
     raw = str(claims.get("custom:access_tags") or claims.get("access_tags") or "")
     return frozenset(tag.strip() for tag in raw.split(",") if tag.strip())
+
+
+def _granted_scope_units(event: dict[str, Any]) -> frozenset[str]:
+    """
+    Scope units this caller was granted, from the verified claim only (OWASP A01).
+
+    Never read from the body or a query string: the whole point of DL-12 is that the caller
+    cannot choose which franchisee's data it sees.
+    """
+    claims = _extract_claims(event) or {}
+    raw = str(claims.get("custom:scope_units") or claims.get("scope_units") or "")
+    return frozenset(unit.strip().lower() for unit in raw.split(",") if unit.strip())
+
+
+def _claims_grant_tenant_wide(event: dict[str, Any]) -> bool:
+    """A tenant-wide grant is explicit; absence of scope units is never read as "everything"."""
+    claims = _extract_claims(event) or {}
+    raw = str(claims.get("custom:scope_tenant_wide") or claims.get("scope_tenant_wide") or "")
+    return raw.strip().lower() in {"1", "true", "yes"}
+
+
+def _scope_predicate_for(
+    event: dict[str, Any], tenant_code: str, surface: ConsumptionSurface
+) -> ScopePredicate:
+    """
+    Build the row filter for this caller on this surface (DL-SCOPE-14).
+
+    One builder, used by every read path in this handler. An empty grant raises
+    `EmptyScopeDenialError`, which `_error_response` renders as 403 — never as "no filter".
+    """
+    repository = ScopeUnitRepository(environment=_environment(), region_name=_region())
+    profile = repository.get_partition_profile(tenant_code)
+    claims = build_scope_claims(
+        tenant_code,
+        profile,
+        granted_scope_unit_ids=_granted_scope_units(event),
+        tenant_wide=_claims_grant_tenant_wide(event),
+        units=repository.list_scope_units(tenant_code),
+    )
+    try:
+        return scope_predicate(claims, surface=surface)
+    except EmptyScopeDenialError as exc:
+        # Empty grant means deny, and the caller is told so — a 500 here would read as an
+        # outage and invite a retry loop against a decision that will not change.
+        raise AuthorizationError(
+            "Your access grant names no scope units, so no rows are visible."
+        ) from exc
 
 
 def _twin_to_dict(twin: Any) -> dict[str, Any]:
@@ -660,6 +708,7 @@ def _semantic_query_service(
         engine=engine,
         entity_uri_resolver=_resolve_entity_uri,
         granted_access_tags=_granted_access_tags(event),
+        scope_predicate=_scope_predicate_for(event, tenant_code, ConsumptionSurface.SEMANTIC_QUERY),
     )
 
 
@@ -673,6 +722,36 @@ def _run_query(service: SemanticQueryService, request: SemanticQueryRequest) -> 
     return {"sql": result.sql, "rows": result.rows, "row_count": len(result.rows)}
 
 
+def _page_offset(event: dict[str, Any]) -> int:
+    """
+    Decode the caller's continuation token to a row offset (S12).
+
+    Opaque and validated: a caller must not be able to send an arbitrary offset that would make
+    the response's `total_visible` inconsistent, and a malformed token is a 400 rather than a
+    silent restart from zero — restarting silently would loop a paginating client forever.
+    """
+    raw = str((event.get("queryStringParameters") or {}).get("next_token") or "")
+    if not raw:
+        return 0
+    try:
+        decoded = base64.urlsafe_b64decode(raw.encode("ascii")).decode("ascii")
+        # The prefix must be present: `removeprefix` is a no-op when it is absent, which would
+        # accept a hand-written bare integer and defeat the point of an opaque cursor.
+        if not decoded.startswith(_PAGE_TOKEN_PREFIX):
+            raise ValueError("token is missing its marker")
+        offset = int(decoded[len(_PAGE_TOKEN_PREFIX) :])
+    except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+        raise ValidationFailedError("next_token is not a valid continuation token.") from exc
+    if offset < 0:
+        raise ValidationFailedError("next_token is not a valid continuation token.")
+    return offset
+
+
+def _encode_page_token(offset: int) -> str:
+    """Encode a row offset as an opaque continuation token."""
+    return base64.urlsafe_b64encode(f"{_PAGE_TOKEN_PREFIX}{offset}".encode("ascii")).decode("ascii")
+
+
 def _handle_get_twin(
     event: dict[str, Any], path_tenant_code: str, entity_type: str, golden_id: str
 ) -> dict[str, Any]:
@@ -684,6 +763,11 @@ def _handle_get_twin(
         raise ValidationFailedError(f"golden_id {golden_id!r} is not valid.")
     try:
         twin = _twin_repository().get_twin(tenant_code, entity_type, golden_id)
+        predicate = _scope_predicate_for(event, tenant_code, ConsumptionSurface.TWIN_TRAVERSAL)
+        if not predicate.matches(getattr(twin, "scope_unit_id", None)):
+            # 404 rather than 403: confirming the twin exists in another unit is the disclosure
+            # DL-SCOPE-13 forbids.
+            raise NotFoundError(f"No twin for {entity_type}/{golden_id}.")
     except TwinNotFoundError as exc:
         raise NotFoundError(str(exc)) from exc
     return _response(200, {"tenant_code": tenant_code, **_twin_to_dict(twin)})
@@ -696,7 +780,23 @@ def _handle_list_twins(
     tenant_code = _authorize_path_tenant(event, path_tenant_code)
     if not ENTITY_TYPE_PATTERN.match(entity_type):
         raise ValidationFailedError(f"entity_type {entity_type!r} is not valid.")
-    twins = _twin_repository().list_twins(tenant_code, entity_type)[:_MAX_TWINS_LISTED]
+    # DL-SCOPE-13: the fan-out itself discloses existence, so the listing is filtered by the
+    # caller's scope units before pagination — never after.
+    predicate = _scope_predicate_for(event, tenant_code, ConsumptionSurface.TWIN_TRAVERSAL)
+    visible = [
+        twin
+        for twin in _twin_repository().list_twins(tenant_code, entity_type)
+        if predicate.matches(getattr(twin, "scope_unit_id", None))
+    ]
+    # A silent truncation is indistinguishable from a complete list, so a caller building a
+    # dashboard on it under-reports without knowing (S12). The token says there is more.
+    offset = _page_offset(event)
+    twins = visible[offset : offset + _MAX_TWINS_LISTED]
+    next_token = (
+        _encode_page_token(offset + _MAX_TWINS_LISTED)
+        if offset + _MAX_TWINS_LISTED < len(visible)
+        else None
+    )
     return _response(
         200,
         {
@@ -704,6 +804,8 @@ def _handle_list_twins(
             "entity_type": entity_type,
             "twins": [_twin_to_dict(twin) for twin in twins],
             "count": len(twins),
+            "total_visible": len(visible),
+            "next_token": next_token,
         },
     )
 
@@ -823,6 +925,146 @@ class _Route:
         )
 
 
+# ---------------------------------------------------------------------------
+# Config- and semantic-governance handlers (DL-11, DL-03).
+#
+# `config_governance_routes.py` defined this route table and its parameter guards on 2026-07-28
+# and nothing imported it, so the console could not answer "is my change live yet", "which run
+# consumed it", or perform an audited rollback. These are the injected handlers it expects.
+# ---------------------------------------------------------------------------
+
+
+def _effective_config_repository() -> EffectiveConfigRepository:
+    return EffectiveConfigRepository(environment=_environment(), region_name=_region())
+
+
+def _handle_list_effective_config(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
+    """GET /tenants/{t}/config/effective — every capability's in-effect version."""
+    tenant_code = _authorize_path_tenant(event, path_tenant)
+    records = _effective_config_repository().list_effective(tenant_code)
+    return _response(200, {"tenant_code": tenant_code, "effective": records})
+
+
+def _handle_get_effective_config(
+    event: dict[str, Any], path_tenant: str, raw_capability: str, raw_entity: str
+) -> dict[str, Any]:
+    """GET /tenants/{t}/config/effective/{capability}/{entity_key} — one capability."""
+    tenant_code = _authorize_path_tenant(event, path_tenant)
+    try:
+        capability = parse_capability(raw_capability)
+        entity_key = parse_entity_key(raw_entity)
+    except ConfigRouteError as exc:
+        raise ValidationFailedError(str(exc)) from exc
+    repository = _effective_config_repository()
+    record = repository.get_effective(tenant_code, capability, entity_key)
+    if record is None:
+        raise NotFoundError(
+            f"No version of {capability.value!r} has been consumed for {entity_key!r} yet."
+        )
+    return _response(
+        200,
+        {
+            "tenant_code": tenant_code,
+            "effective": record,
+            "propagation_lag_seconds": repository.propagation_lag_seconds(
+                tenant_code, capability, entity_key
+            ),
+        },
+    )
+
+
+def _handle_list_restatements(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
+    """GET /tenants/{t}/config/restatements — why a historical figure changed (DL-CFG-13)."""
+    tenant_code = _authorize_path_tenant(event, path_tenant)
+    events = RestatementRepository(
+        environment=_environment(), region_name=_region()
+    ).list_restatements(tenant_code)
+    return _response(200, {"tenant_code": tenant_code, "restatements": events})
+
+
+def _handle_config_rollback(
+    event: dict[str, Any], path_tenant: str, raw_capability: str, raw_entity: str
+) -> dict[str, Any]:
+    """POST /tenants/{t}/config/{capability}/{entity_key}/rollback — audited, maker-checker."""
+    tenant_code = _authorize_path_tenant(event, path_tenant)
+    body = _parse_json_body(event)
+    try:
+        params = RollbackRequestParams(
+            capability=parse_capability(raw_capability),
+            entity_key=parse_entity_key(raw_entity),
+            target_version=str(body.get("target_version") or ""),
+            requested_by=str(body.get("requested_by") or ""),
+            approved_by=str(body.get("approved_by") or ""),
+        )
+    except ConfigRouteError as exc:
+        # Maker-checker violations surface as 400 rather than 403: the request is malformed
+        # (it names one actor for both roles), not unauthorized.
+        raise ValidationFailedError(str(exc)) from exc
+
+    service = ConfigGovernanceService(
+        environment=_environment(),
+        region_name=_region(),
+        pointer_store=_resolution_pointer_store(),
+    )
+    try:
+        result = service.rollback(
+            RollbackRequest(
+                tenant_code=tenant_code,
+                capability=params.capability,
+                entity_key=params.entity_key,
+                target_version=params.target_version,
+                requested_by=params.requested_by,
+                approved_by=params.approved_by,
+                correlation_id=str(event.get("requestContext", {}).get("requestId", "")),
+            )
+        )
+    except MakerCheckerViolationError as exc:
+        raise ValidationFailedError(str(exc)) from exc
+    except ValueError as exc:
+        raise NotFoundError(str(exc)) from exc
+    return _response(
+        200,
+        {
+            "tenant_code": tenant_code,
+            "rollback_id": result.rollback_id,
+            "previous_version": result.previous_version,
+            "target_version": result.target_version,
+        },
+    )
+
+
+def _handle_metric_lineage(
+    event: dict[str, Any], path_tenant: str, metric_name: str
+) -> dict[str, Any]:
+    """GET /tenants/{t}/semantic/metrics/{metric}/lineage — columns, joins, filters (DL-SEM-10)."""
+    tenant_code = _authorize_path_tenant(event, path_tenant)
+    model = _load_active_model(tenant_code)
+    for entity in model.entities:
+        for metric in entity.metrics:
+            if metric.name == metric_name:
+                return _response(
+                    200,
+                    {
+                        "tenant_code": tenant_code,
+                        "lineage": dataclasses.asdict(
+                            metric_lineage(model, entity.name, metric_name)
+                        ),
+                    },
+                )
+    raise NotFoundError(f"Metric {metric_name!r} is not in the active semantic model.")
+
+
+def _handle_list_model_versions(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
+    """GET /tenants/{t}/semantic/model/versions — publish history and status."""
+    tenant_code = _authorize_path_tenant(event, path_tenant)
+    governance = SemanticModelGovernance(
+        environment=_environment(), region_name=_region(), s3_bucket=_curated_bucket()
+    )
+    return _response(
+        200, {"tenant_code": tenant_code, "versions": governance.list_versions(tenant_code)}
+    )
+
+
 # Intelligence-layer routes kept in a table so _route stays within the complexity gate.
 _INTELLIGENCE_ROUTES: tuple[_Route, ...] = (
     _Route("GET", 5, "twins", None, lambda e, s: _handle_get_twin(e, s[1], s[3], s[4])),
@@ -832,6 +1074,215 @@ _INTELLIGENCE_ROUTES: tuple[_Route, ...] = (
     _Route("POST", 3, "saved-queries", None, lambda e, s: _handle_create_saved_query(e, s[1])),
     _Route("GET", 4, "saved-queries", None, lambda e, s: _handle_get_saved_query(e, s[1], s[3])),
     _Route("POST", 5, "saved-queries", "run", lambda e, s: _handle_run_saved_query(e, s[1], s[3])),
+    _Route(
+        "GET",
+        4,
+        "quality",
+        "exceptions",
+        lambda e, s: _handle_list_quality_exceptions(e, s[1]),
+    ),
+    _Route(
+        "POST",
+        4,
+        "serving-store",
+        "entities",
+        lambda e, s: _handle_onboard_serving_entity(e, s[1]),
+    ),
+)
+
+
+def _curated_bucket() -> str:
+    return require_env("CURATED_S3_BUCKET")
+
+
+def _resolution_pointer_store() -> Any:
+    """
+    Adapt the resolution-config registry to the `PointerStore` protocol a rollback needs.
+
+    Only entity-resolution pointers are rollback-able today, because it is the only capability
+    whose versions this system stores. A rollback naming another capability fails on
+    `version_exists`, which is the correct answer rather than a silent no-op.
+    """
+    registry = ResolutionConfigRegistry(s3_bucket=_curated_bucket(), region_name=_region())
+
+    class _RegistryPointerStore:
+        def read_pointer(self, tenant_code: str, capability: ConfigCapability, key: str) -> str:
+            return registry.resolved_version(tenant_code, key)
+
+        def write_pointer(
+            self, tenant_code: str, capability: ConfigCapability, key: str, version: str
+        ) -> None:
+            registry.repoint_latest(tenant_code, key, version)
+
+        def version_exists(
+            self, tenant_code: str, capability: ConfigCapability, key: str, version: str
+        ) -> bool:
+            return registry.version_exists(tenant_code, key, version)
+
+    return _RegistryPointerStore()
+
+
+def _handle_active_model(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
+    """GET /tenants/{t}/semantic/model — the active model's shape, for the console."""
+    tenant_code = _authorize_path_tenant(event, path_tenant)
+    model = _load_active_model(tenant_code)
+    return _response(
+        200,
+        {
+            "tenant_code": tenant_code,
+            "model_version": model.model_version,
+            "entities": [
+                {
+                    "name": entity.name,
+                    "entity_type": entity.entity_type,
+                    "metrics": [metric.name for metric in entity.metrics],
+                    "dimensions": [dimension.name for dimension in entity.dimensions],
+                }
+                for entity in model.entities
+            ],
+        },
+    )
+
+
+def _handle_config_reprocess(
+    event: dict[str, Any], path_tenant: str, raw_capability: str, raw_entity: str
+) -> dict[str, Any]:
+    """
+    POST /tenants/{t}/config/{capability}/{entity_key}/reprocess — bounded historical replay.
+
+    Validated and recorded here; the replay itself is a pipeline run, so the response returns the
+    accepted window rather than pretending the recompute finished synchronously.
+    """
+    tenant_code = _authorize_path_tenant(event, path_tenant)
+    body = _parse_json_body(event)
+    try:
+        params = ReprocessRequestParams(
+            capability=parse_capability(raw_capability),
+            entity_key=parse_entity_key(raw_entity),
+            window_start=date.fromisoformat(str(body.get("window_start") or "")),
+            window_end=date.fromisoformat(str(body.get("window_end") or "")),
+            reason=str(body.get("reason") or ""),
+            pinned_config_version=str(body.get("pinned_config_version") or ""),
+        )
+    except (ConfigRouteError, ValueError) as exc:
+        raise ValidationFailedError(str(exc)) from exc
+
+    retention_days = body.get("retention_days")
+    try:
+        params.guard_retention(int(retention_days) if retention_days is not None else None)
+    except Exception as exc:
+        raise ValidationFailedError(str(exc)) from exc
+
+    _logger.warning(
+        "config_reprocess_accepted",
+        tenant_code=tenant_code,
+        capability=params.capability.value,
+        entity_key=params.entity_key,
+        window_days=params.window_days,
+        pinned_config_version=params.pinned_config_version,
+        reason=params.reason,
+    )
+    record_platform_metric(
+        PlatformMetric.ADMIN_ACTIONS, 1.0, Capability=f"reprocess_{params.capability.value}"
+    )
+    return _response(
+        202,
+        {
+            "tenant_code": tenant_code,
+            "capability": params.capability.value,
+            "entity_key": params.entity_key,
+            "window_days": params.window_days,
+            "pinned_config_version": params.pinned_config_version,
+            "status": "accepted",
+        },
+    )
+
+
+def _handle_list_quality_exceptions(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
+    """
+    GET /tenants/{t}/quality/exceptions — the triage inbox (DL-DQ-13).
+
+    Open findings only by default. The store had no reader at all before this route existed, so
+    every exception the pipeline recorded was invisible to the operator expected to act on it.
+    """
+    tenant_code = _authorize_path_tenant(event, path_tenant)
+    repository = DataQualityExceptionRepository(environment=_environment(), region_name=_region())
+    run_id = str((event.get("queryStringParameters") or {}).get("run_id") or "")
+    records = (
+        repository.list_for_run(tenant_code, run_id)
+        if run_id
+        else repository.list_open(tenant_code)
+    )
+    return _response(
+        200,
+        {
+            "tenant_code": tenant_code,
+            "scope": "run" if run_id else "open",
+            "exceptions": records[
+                _page_offset(event) : _page_offset(event) + _MAX_EXCEPTIONS_LISTED
+            ],
+            "total_open": len(records),
+            "next_token": (
+                _encode_page_token(_page_offset(event) + _MAX_EXCEPTIONS_LISTED)
+                if _page_offset(event) + _MAX_EXCEPTIONS_LISTED < len(records)
+                else None
+            ),
+        },
+    )
+
+
+def _handle_onboard_serving_entity(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
+    """
+    POST /tenants/{t}/serving-store/entities — onboard an entity into the serving store.
+
+    DL-SERV-03: `scripts/seed_serving_store_config.py` covered the operator path; this is the API
+    the enterprise-platform's console (EP-04) drives, so onboarding does not require shell access
+    to this account.
+    """
+    tenant_code = _authorize_path_tenant(event, path_tenant)
+    body = _parse_json_body(event)
+    try:
+        config = ServingStoreLoadConfig.model_validate({**body, "tenant_code": tenant_code})
+    except PydanticValidationError as exc:
+        raise ValidationFailedError(
+            f"Serving-store config failed validation: {exc.error_count()} error(s)."
+        ) from exc
+    ServingStoreConfigRepositoryClient(
+        environment=_environment(), region_name=_region()
+    ).save_config(config, overwrite=bool(body.get("overwrite", False)))
+    _logger.info(
+        "serving_store_entity_onboarded",
+        tenant_code=tenant_code,
+        entity_type=config.entity_type,
+        target_engine=config.target_engine.value,
+        enabled=config.enabled,
+    )
+    return _response(
+        201,
+        {
+            "tenant_code": tenant_code,
+            "entity_type": config.entity_type,
+            "target_engine": config.target_engine.value,
+            "enabled": config.enabled,
+        },
+    )
+
+
+_GOVERNANCE_ROUTES: tuple[ConfigRoute, ...] = build_config_routes(
+    effective_config=lambda e, tenant: _handle_list_effective_config(e, tenant),
+    effective_config_one=lambda e, tenant, capability, entity: _handle_get_effective_config(
+        e, tenant, capability, entity
+    ),
+    rollback=lambda e, tenant, capability, entity: _handle_config_rollback(
+        e, tenant, capability, entity
+    ),
+    reprocess=lambda e, tenant, capability, entity: _handle_config_reprocess(
+        e, tenant, capability, entity
+    ),
+    restatements=lambda e, tenant: _handle_list_restatements(e, tenant),
+    metric_lineage=lambda e, tenant, metric: _handle_metric_lineage(e, tenant, metric),
+    model_versions=lambda e, tenant: _handle_list_model_versions(e, tenant),
+    active_model=lambda e, tenant: _handle_active_model(e, tenant),
 )
 
 
@@ -849,8 +1300,9 @@ def _route(event: dict[str, Any]) -> dict[str, Any]:
     path = str(event.get("path") or event.get("rawPath") or "")
     segments = [segment for segment in path.split("/") if segment]
 
-    if method == "POST" and segments == ["tenants"]:
-        return _handle_create_tenant(event)
+    # There is deliberately no tenant-provisioning route. Tenants, users, roles, and
+    # permissions are owned by the Identity API; this system only ever *consumes* a verified
+    # tenant claim. See the "Ownership" section of requirements/CROSS_REPO_INTERFACE_CONTRACT.md.
 
     if len(segments) == 3 and segments[0] == "tenants" and segments[2] == "entities":
         if method == "GET":
@@ -886,6 +1338,10 @@ def _route(event: dict[str, Any]) -> dict[str, Any]:
     intelligence_response = _route_intelligence_layer(event, method, segments)
     if intelligence_response is not None:
         return intelligence_response
+
+    governance_response = match_config_route(_GOVERNANCE_ROUTES, event, method, segments)
+    if governance_response is not None:
+        return governance_response
 
     raise NotFoundError(f"No route matches {method} {path!r}.")
 

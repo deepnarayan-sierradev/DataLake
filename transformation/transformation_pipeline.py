@@ -35,6 +35,12 @@ from typing import Any, Final
 import boto3
 import pyarrow.parquet as pq
 
+from contracts.platform_metrics import PlatformMetric
+from data_quality.batch_quality_gate import (
+    QualityGateBlockedError,
+    persist_record_violations,
+    run_batch_quality_gate,
+)
 from governance.data_catalog_registration import (
     CatalogDatasetSpec,
     DataCatalogRegistrationClient,
@@ -50,8 +56,12 @@ from governance.lineage_record import (
     build_transformation_lineage,
 )
 from observability.lambda_utils import check_lambda_timeout_periodic as _check_timeout
+from observability.metric_recorder import record_platform_metric
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
+from tenancy.scope_attribution import ScopeAttributor
+from tenancy.scope_contract import PartitionModel, TenantPartitionProfile
+from tenancy.source_connection import SourceConnection
 from transformation.curated_accumulator import CuratedAccumulator
 from transformation.curated_layer_writer import CuratedLayerWriter
 from transformation.curated_utils import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
@@ -108,6 +118,12 @@ class TransformationContext:
     # When set, the pipeline checks remaining time before the curated write.
     # None = no periodic checks (safe; pre-execution check still applies).
     lambda_context: Any | None = None
+    # Scope attribution (DL-SCOPE-07). Both must be present for a partitioned tenant: the
+    # connection says which unit owns the rows, the profile says whether units exist at all.
+    # Absent for a `single` tenant, where every row belongs to the one implicit unit.
+    source_connection: SourceConnection | None = None
+    partition_profile: TenantPartitionProfile | None = None
+    known_scope_unit_ids: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         # Validate domain before it is used in Glue table name construction (OWASP A03 / F06)
@@ -153,6 +169,10 @@ class TransformationResult:
     mapping_version: str
     started_at: str  # ISO-8601 UTC
     completed_at: str  # ISO-8601 UTC
+
+
+class TransformationPipelineError(Exception):
+    """Raised when a transformation run cannot proceed without producing unusable output."""
 
 
 class TransformationPipeline:
@@ -414,6 +434,92 @@ class TransformationPipeline:
 
         return canonical_records, mapping_failures, raw_record_count
 
+    def _batch_gate_blocks(
+        self, ctx: TransformationContext, canonical_records: list[dict[str, Any]]
+    ) -> bool:
+        """
+        Run the batch quality gate; True when its attachment blocks publication.
+
+        Blocking here matches how a field-level block behaves — publication stops, the stage
+        succeeds, and the evidence is in the exception store — rather than failing the stage,
+        because a quality decision is not an infrastructure failure.
+        """
+        try:
+            batch_result = run_batch_quality_gate(
+                records=canonical_records,
+                tenant_code=ctx.tenant_code,
+                entity_id=ctx.entity_id,
+                run_id=ctx.run_id,
+                correlation_id=ctx.run_id,
+                environment=ctx.environment,
+                region_name=ctx.region_name,
+                source_id=ctx.source_id,
+            )
+        except QualityGateBlockedError as exc:
+            _logger.warning(
+                "transformation_blocked_by_batch_quality_gate",
+                run_id=ctx.run_id,
+                entity_id=ctx.entity_id,
+                reason=str(exc),
+            )
+            return True
+        if batch_result is not None and not batch_result.all_passed:
+            _logger.info(
+                "batch_quality_gate_observed_failures",
+                run_id=ctx.run_id,
+                entity_id=ctx.entity_id,
+                failed_rules=[o.rule_id for o in batch_result.outcomes if not o.passed],
+            )
+        return False
+
+    def _attribute_scope(
+        self, ctx: TransformationContext, records: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """
+        Stamp `scope_unit_id` on every curated record (DL-SCOPE-07).
+
+        This is the only place the column is written, and every downstream row filter — semantic
+        queries, serving-store views, exports, the twin — filters on it. An unstamped curated
+        layer makes all of them inert, which is why a partitioned tenant with no connection
+        context fails the stage rather than writing rows nobody can scope.
+        """
+        if ctx.partition_profile is None:
+            # The profile is published configuration; its absence is a wiring defect, not a data
+            # condition. Defaulting to `single` here would be the fail-open this exists to
+            # prevent: a partitioned tenant whose profile failed to load would stamp every row
+            # with the implicit unit, which the predicate treats as match-all.
+            raise TransformationPipelineError(
+                f"Entity {ctx.entity_id!r} of tenant {ctx.tenant_code!r} has no partition "
+                "profile, so `scope_unit_id` cannot be attributed. Curated rows without it "
+                "cannot be filtered by any consumption surface (DL-SCOPE-07)."
+            )
+
+        attributor = ScopeAttributor(
+            connection=ctx.source_connection,
+            profile=ctx.partition_profile,
+            known_scope_unit_ids=ctx.known_scope_unit_ids,
+        )
+        stamped = list(attributor.stamp_all(records))
+        attributor.log_outcome(ctx.entity_id)
+        record_platform_metric(
+            PlatformMetric.SCOPE_ATTRIBUTION_APPLIED, 1.0, EntityId=ctx.entity_id
+        )
+
+        if (
+            ctx.partition_profile.partition_model is PartitionModel.PARTITIONED
+            and attributor.outcome.exceeds()
+        ):
+            # Above the declared threshold the rows are not merely imperfect: a unit-scoped
+            # caller sees none of them (NULL fails closed), so the entity silently disappears
+            # from every franchisee's view. Fail the run instead.
+            raise TransformationPipelineError(
+                f"Entity {ctx.entity_id!r}: "
+                f"{attributor.outcome.unattributed_rate_pct:.1f}% of rows could not be "
+                "attributed to a scope unit, above the declared threshold. Unattributed rows "
+                "are invisible to every unit-scoped caller (DL-SCOPE-02 fails closed)."
+            )
+        return stamped
+
     def _write_curated_and_register(
         self,
         ctx: TransformationContext,
@@ -427,8 +533,9 @@ class TransformationPipeline:
         """
         # Pre-write timeout guard (§3.5): abort before large S3 write if < 120s remain.
         _check_timeout(ctx.lambda_context, min_remaining_ms=120_000, operation_name="curated_write")
+        attributed = self._attribute_scope(ctx, records_to_write)
         write_result = self._curated_writer.write(
-            records=records_to_write,
+            records=attributed,
             domain=ctx.domain,
             entity_id=ctx.entity_id,
             run_id=ctx.run_id,
@@ -491,6 +598,22 @@ class TransformationPipeline:
             )
             quality_report_key = _write_quality_report(s3, ctx.mapping_bucket, ctx, quality_report)
             is_blocked = quality_report.is_publication_blocked
+            # DL-DQ-14: the report is an artefact in S3; the exception store is what an operator
+            # triages from. Writing only the report left every violation invisible to the console.
+            persist_record_violations(
+                violations=quality_report.violations,
+                tenant_code=ctx.tenant_code,
+                entity_id=ctx.entity_id,
+                run_id=ctx.run_id,
+                correlation_id=ctx.run_id,
+                environment=ctx.environment,
+                region_name=ctx.region_name,
+            )
+
+        # Batch-level gate (DL-DQ-01..04): field checks pass record by record, but a batch can
+        # still be 40% incomplete or 5% duplicated.
+        if canonical_records:
+            is_blocked = self._batch_gate_blocks(ctx, canonical_records) or is_blocked
 
         # SCD Type 1 merge — only active when a CuratedAccumulator is injected.
         records_to_write = canonical_records
@@ -665,7 +788,11 @@ def _write_quality_report(
     report: QualityReport,
 ) -> str:
     """Persist quality report JSON to the mapping bucket; returns S3 key."""
-    key = f"quality-reports/{ctx.source_id}/{ctx.entity_id}/{ctx.run_id}/quality-report.json"
+    # DL-SEC-04 (gap 10): tenant-prefixed so the key is IAM-enforceable like every other layer.
+    key = (
+        f"{ctx.tenant_code}/quality-reports/{ctx.source_id}/{ctx.entity_id}/"
+        f"{ctx.run_id}/quality-report.json"
+    )
     payload: dict[str, Any] = {
         "run_id": report.run_id,
         "source_id": report.source_id,
@@ -870,6 +997,7 @@ def _emit_transformation_lineage(
             curated_s3_prefix=curated_prefix,
             record_count=0,
             mapping_version=ctx.mapping_version,
+            tenant_code=ctx.tenant_code,
         )
         emitter = LineageEmitter(
             governance_s3_bucket=ctx.governance_s3_bucket,

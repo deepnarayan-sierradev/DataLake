@@ -16,7 +16,7 @@ This creates .env.local which can be sourced in your shell:
 
 import json
 import os
-import subprocess
+import subprocess  # nosec B404 — fixed-argv developer tooling only
 import sys
 from pathlib import Path
 
@@ -24,7 +24,9 @@ from pathlib import Path
 def run_command(cmd: list[str]) -> str:
     """Run a shell command and return stdout."""
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(  # nosec B603 — cmd is a literal argv list, never shell
+            cmd, capture_output=True, text=True, check=True
+        )
         return result.stdout.strip()
     except FileNotFoundError as exc:
         print(f"Error: Command not found: {cmd[0]}", file=sys.stderr)

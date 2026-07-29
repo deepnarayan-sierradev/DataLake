@@ -40,6 +40,8 @@ from contracts.identifier_policy import (
     STABLE_ID_PATTERN as _STABLE_ID_PATTERN,
 )
 from contracts.identifier_policy import validate_tenant_code
+from contracts.platform_metrics import PlatformMetric
+from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -130,6 +132,10 @@ class RunReplayController:
             raise ValueError("state_machine_arn must not be empty.")
         self._state_machine_arn = state_machine_arn
         self._sfn = boto3.client("stepfunctions", region_name=region_name)
+        # Running counters for ReplaySuccessRate; a consistently-failing replay path is a
+        # different problem from a deep DLQ and must be visible separately.
+        self._replay_attempts = 0
+        self._replay_started = 0
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -298,6 +304,12 @@ class RunReplayController:
                     execution_arn=idempotent_arn,
                 )
                 return idempotent_arn
+            self._replay_attempts += 1
+            record_platform_metric(
+                PlatformMetric.REPLAY_SUCCESS_RATE,
+                100.0 * self._replay_started / self._replay_attempts,
+                EntityId=entry.entity_id,
+            )
             _logger.error(
                 "replay_execution_start_failed",
                 original_run_id=entry.run_id,
@@ -308,6 +320,13 @@ class RunReplayController:
             raise
 
         execution_arn: str = response["executionArn"]
+        self._replay_attempts += 1
+        self._replay_started += 1
+        record_platform_metric(
+            PlatformMetric.REPLAY_SUCCESS_RATE,
+            100.0 * self._replay_started / self._replay_attempts,
+            EntityId=entry.entity_id,
+        )
         _logger.info(
             "replay_execution_started",
             original_run_id=entry.run_id,

@@ -185,8 +185,9 @@ class ExtractionRetryPolicy:
             self._base_delay * (self._backoff_multiplier ** (attempt - 1)),
             self._max_delay,
         )
-        # Non-cryptographic use of random for retry-delay jitter.
-        jitter = raw_delay * self._jitter_fraction * random.uniform(-1.0, 1.0)  # noqa: S311
+        # Retry-delay jitter is scheduling, never a security decision.
+        signed_jitter = random.uniform(-1.0, 1.0)  # noqa: S311  # nosec B311
+        jitter = raw_delay * self._jitter_fraction * signed_jitter
         return max(0.0, raw_delay + jitter)
 
     # ── Circuit breaker ─────────────────────────────────────────────────────

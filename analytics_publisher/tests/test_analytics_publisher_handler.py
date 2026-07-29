@@ -63,6 +63,8 @@ class TestContextvarsAndErrorHandling:
         structlog.contextvars.clear_contextvars()
 
     def test_contextvars_cleared_after_success(self, monkeypatch) -> None:
+        # The stage lifecycle needs the region the Lambda runtime always injects (DL-OPS-05).
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.setattr(
             handler_module,
             "_run_analytics_publication",
@@ -72,6 +74,8 @@ class TestContextvarsAndErrorHandling:
         assert structlog.contextvars.get_contextvars() == {}
 
     def test_contextvars_cleared_after_failure(self, monkeypatch) -> None:
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+
         def _boom(**_kwargs: Any) -> dict[str, Any]:
             raise RuntimeError("simulated pipeline failure")
 

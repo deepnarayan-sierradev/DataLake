@@ -267,7 +267,7 @@ def load_curated_records_duckdb(
         # bucket is sourced exclusively from a Lambda env var and clean_prefix
         # has already been validated against SAFE_S3_PREFIX_PATTERN plus a
         # path-traversal check above — never raw event/user input (OWASP A03).
-        result_table = con.execute(f"SELECT * FROM read_parquet('{glob}')").arrow()  # noqa: S608
+        result_table = con.execute(f"SELECT * FROM read_parquet('{glob}')").arrow()  # noqa: S608  # nosec B608 — path validated against SAFE_S3_PREFIX_PATTERN
 
         records: list[dict[str, Any]] = []
         for batch in result_table.to_batches(max_chunksize=10_000):
@@ -407,7 +407,7 @@ def merge_with_duckdb(
         # field_name_pattern; previous_glob is built from internal S3
         # bucket/prefix state, not raw user input.
         sql = (
-            f"SELECT prev.* FROM read_parquet('{previous_glob}') AS prev "  # noqa: S608
+            f"SELECT prev.* FROM read_parquet('{previous_glob}') AS prev "  # noqa: S608  # nosec B608 — path validated against SAFE_S3_PREFIX_PATTERN
             f"WHERE CAST(prev.{pk_field} AS VARCHAR) NOT IN ("
             f"SELECT CAST({pk_field} AS VARCHAR) FROM delta) "
             f"UNION ALL SELECT delta.* FROM delta "
@@ -457,3 +457,10 @@ def merge_with_duckdb(
 
     finally:
         con.close()
+
+
+# Explicit re-export list: `no_implicit_reexport` is on, so a module importing
+# SAFE_S3_PREFIX_PATTERN from here needs it named rather than merely present.
+__all__ = [
+    "SAFE_S3_PREFIX_PATTERN",
+]

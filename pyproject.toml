@@ -56,6 +56,11 @@ packages = [
     "knowledge",
     "semantic",
     "agent",
+    "tenancy",
+    "config_propagation",
+    "data_quality",
+    "workflow_automation",
+    "portability",
 ]
 
 # ---------------------------------------------------------------------------
@@ -88,9 +93,14 @@ select = [
 ignore = ["ANN401"]  # Any is legitimately needed for boto3 clients, pyarrow tables, and dynamic record dicts
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["S101", "ANN", "T20", "S608", "S105", "S106", "S107"]  # assert, annotations, print, SQL-in-test-fixture, and mock credential/token literals allowed in tests
-"tests/*" = ["S101", "ANN", "T20", "S608", "S105", "S106", "S107"]  # top-level cross-cutting integration tests (same rationale as above)
+"**/tests/**" = ["S101", "ANN", "T20", "S608", "S105", "S106", "S107", "RUF012", "B017"]  # assert, annotations, print, SQL-in-test-fixture, and mock credential/token literals allowed in tests
+"tests/*" = ["S101", "ANN", "T20", "S608", "S105", "S106", "S107", "RUF012", "B017"]  # top-level cross-cutting integration tests (same rationale as above)
 "scripts/*" = ["T20", "ANN", "S603", "S607"]  # CLI scripts: print, annotations, subprocess allowed
+# DDL generators: every identifier is allowlisted through SAFE_COLUMN_PATTERN before it reaches
+# a statement, and there are no value literals to bind — these emit CREATE VIEW / CREATE POLICY /
+# MERGE templates, not queries over user input (OWASP A03 is enforced by the allowlist).
+"serving_store/view_generator.py" = ["S608"]
+"serving_store/merge_strategy.py" = ["S608"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -112,6 +122,11 @@ known-first-party = [
     "knowledge",
     "semantic",
     "agent",
+    "tenancy",
+    "config_propagation",
+    "data_quality",
+    "workflow_automation",
+    "portability",
 ]
 
 # ---------------------------------------------------------------------------
@@ -157,8 +172,17 @@ module = [
     "governance.tests.*",
     "analytics_publisher.tests.*",
     "serving_store.tests.*",
+    "tenancy.tests.*",
+    "config_propagation.tests.*",
+    "data_quality.tests.*",
+    "workflow_automation.tests.*",
+    "portability.tests.*",
 ]
 disallow_untyped_defs = false
+# Same policy as disallow_untyped_defs, for a *partially* annotated test helper
+# (e.g. `def _job(self, **overrides) -> BackfillJob:`). Without this the override only
+# exempts fully-unannotated functions, which is not what "tests are exempt" means.
+disallow_incomplete_defs = false
 check_untyped_defs = false
 warn_return_any = false
 disable_error_code = ["arg-type", "attr-defined", "type-arg", "unused-ignore", "no-untyped-call"]
@@ -194,6 +218,11 @@ testpaths = [
     "knowledge/tests",
     "semantic/tests",
     "agent/tests",
+    "tenancy/tests",
+    "config_propagation/tests",
+    "data_quality/tests",
+    "workflow_automation/tests",
+    "portability/tests",
     "tests",
 ]
 addopts = "--cov --cov-report=term-missing --cov-fail-under=80 -v"
@@ -216,6 +245,11 @@ source = [
     "knowledge",
     "semantic",
     "agent",
+    "tenancy",
+    "config_propagation",
+    "data_quality",
+    "workflow_automation",
+    "portability",
 ]
 
 [tool.coverage.report]

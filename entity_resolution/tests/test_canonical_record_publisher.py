@@ -301,7 +301,7 @@ class TestPublisherWithLineageEmission:
 
         # Verify lineage object written to governance bucket
         s3 = boto3.client("s3", region_name=_REGION)
-        response = s3.list_objects_v2(Bucket="test-governance-bucket", Prefix="lineage/")
+        response = s3.list_objects_v2(Bucket="test-governance-bucket", Prefix="demo/lineage/")
         assert response.get("KeyCount", 0) >= 1
 
     def test_publish_lineage_emission_failure_does_not_propagate(self):

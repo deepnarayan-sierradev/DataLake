@@ -123,56 +123,26 @@ _VALID_ENTITY_BODY: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 
-class TestCreateTenant:
-    @mock_aws
-    def test_provision_new_tenant_succeeds(self) -> None:
-        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
-        _create_entity_type_registry_table(dynamodb)
+class TestTenantProvisioningIsNotThisSystemsConcern:
+    """
+    Tenants, users, roles, and permissions are owned by the Identity API.
 
+    This system is a standalone data-lake processing engine driven by configuration authored
+    in the enterprise-platform: it consumes a verified tenant claim and never creates a
+    tenant. `POST /tenants` therefore does not exist here, and this test exists so nobody
+    re-adds it by reflex.
+    """
+
+    def test_post_tenants_is_not_routed(self) -> None:
         with patch.dict(os.environ, _BASE_ENV_VARS):
             response = lambda_handler(
                 _event("POST", "/tenants", body={"tenant_code": "acme-corp"}), None
             )
+        assert response["statusCode"] == 404
 
-        assert response["statusCode"] == 201
-        body = json.loads(response["body"])
-        assert body["tenant_code"] == "acme-corp"
-        assert body["status"] == "active"
-
-    @mock_aws
-    def test_duplicate_tenant_rejected_with_409(self) -> None:
-        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
-        table = _create_entity_type_registry_table(dynamodb)
-        table.put_item(
-            Item={"tenant_code": "acme-corp", "sk": "tenant_registry#meta", "status": "active"}
-        )
-
+    def test_a_verified_tenant_claim_is_still_required_on_tenant_scoped_routes(self) -> None:
         with patch.dict(os.environ, _BASE_ENV_VARS):
-            response = lambda_handler(
-                _event("POST", "/tenants", body={"tenant_code": "acme-corp"}), None
-            )
-
-        assert response["statusCode"] == 409
-        body = json.loads(response["body"])
-        assert "already exists" in body["error"]
-
-    @mock_aws
-    def test_invalid_tenant_code_rejected_with_400(self) -> None:
-        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
-        _create_entity_type_registry_table(dynamodb)
-
-        with patch.dict(os.environ, _BASE_ENV_VARS):
-            response = lambda_handler(
-                _event("POST", "/tenants", body={"tenant_code": "UPPER_CASE"}), None
-            )
-
-        assert response["statusCode"] == 400
-
-    def test_missing_authenticated_context_rejected_with_401(self) -> None:
-        with patch.dict(os.environ, _BASE_ENV_VARS):
-            response = lambda_handler(
-                _event("POST", "/tenants", body={"tenant_code": "acme-corp"}, no_claims=True), None
-            )
+            response = lambda_handler(_event("GET", "/tenants/demo/entities", no_claims=True), None)
         assert response["statusCode"] == 401
 
 
@@ -567,7 +537,7 @@ class TestRoutingAndErrors:
         assert response["statusCode"] == 404
 
     def test_invalid_json_body_returns_400(self) -> None:
-        event = _event("POST", "/tenants", tenant_claim="demo")
+        event = _event("POST", "/tenants/demo/entities", tenant_claim="demo")
         event["body"] = "not-json{{{"
         with patch.dict(os.environ, _BASE_ENV_VARS):
             response = lambda_handler(event, None)
@@ -579,12 +549,12 @@ class TestRoutingAndErrors:
         with (
             patch.dict(os.environ, _BASE_ENV_VARS),
             patch(
-                "connector_runtime.api.control_plane_handler._entity_type_registry_table",
+                "connector_runtime.api.control_plane_handler._configuration_repository",
                 side_effect=RuntimeError("super secret internal detail"),
             ),
         ):
             response = lambda_handler(
-                _event("POST", "/tenants", body={"tenant_code": "acme-corp"}), None
+                _event("GET", "/tenants/demo/entities", tenant_claim="demo"), None
             )
 
         assert response["statusCode"] == 500

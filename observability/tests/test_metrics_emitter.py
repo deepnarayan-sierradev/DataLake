@@ -156,6 +156,13 @@ class TestFlushAndBuffering:
         assert emitter._pending == []
 
 
+def _dimensions_of(datum: dict[str, object]) -> list[dict[str, str]]:
+    """_pending holds dict[str, object]; narrow the Dimensions list before indexing it."""
+    dimensions = datum["Dimensions"]
+    assert isinstance(dimensions, list)
+    return dimensions
+
+
 @mock_aws
 class TestTenantCodeDimension:
     def test_tenant_code_included_when_set_via_constructor(self) -> None:
@@ -163,10 +170,11 @@ class TestTenantCodeDimension:
         emitter.emit_records_extracted(
             source_id="salesforce", entity_id="salesforce-account", environment="dev", count=10
         )
-        dims = {d["Name"]: d["Value"] for d in emitter._pending[0]["Dimensions"]}
+        dimensions = _dimensions_of(emitter._pending[0])
+        dims = {d["Name"]: d["Value"] for d in dimensions}
         assert dims["TenantCode"] == "acme-corp"
         # TenantCode is the FIRST dimension (most visible in console)
-        assert emitter._pending[0]["Dimensions"][0]["Name"] == "TenantCode"
+        assert dimensions[0]["Name"] == "TenantCode"
 
     def test_tenant_code_included_when_set_via_set_tenant_context(self) -> None:
         emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
@@ -174,7 +182,7 @@ class TestTenantCodeDimension:
         emitter.emit_records_extracted(
             source_id="netsuite", entity_id="netsuite-customer", environment="dev", count=5
         )
-        dims = {d["Name"]: d["Value"] for d in emitter._pending[0]["Dimensions"]}
+        dims = {d["Name"]: d["Value"] for d in _dimensions_of(emitter._pending[0])}
         assert dims["TenantCode"] == "globex-eu"
 
     def test_tenant_code_absent_when_not_set(self) -> None:
@@ -182,7 +190,7 @@ class TestTenantCodeDimension:
         emitter.emit_records_extracted(
             source_id="salesforce", entity_id="salesforce-account", environment="dev", count=5
         )
-        dim_names = [d["Name"] for d in emitter._pending[0]["Dimensions"]]
+        dim_names = [d["Name"] for d in _dimensions_of(emitter._pending[0])]
         assert "TenantCode" not in dim_names
 
     def test_set_tenant_context_overrides_constructor_value(self) -> None:
@@ -191,7 +199,7 @@ class TestTenantCodeDimension:
         emitter.emit_records_extracted(
             source_id="sf", entity_id="sf-account", environment="dev", count=1
         )
-        dims = {d["Name"]: d["Value"] for d in emitter._pending[0]["Dimensions"]}
+        dims = {d["Name"]: d["Value"] for d in _dimensions_of(emitter._pending[0])}
         assert dims["TenantCode"] == "new-tenant"
 
     def test_stage_and_tenant_code_both_present(self) -> None:
@@ -203,7 +211,7 @@ class TestTenantCodeDimension:
             count=1,
             stage="transformation",
         )
-        dim_names = [d["Name"] for d in emitter._pending[0]["Dimensions"]]
+        dim_names = [d["Name"] for d in _dimensions_of(emitter._pending[0])]
         assert "TenantCode" in dim_names
         assert "Stage" in dim_names
 
@@ -217,7 +225,7 @@ class TestTenantCodeDimension:
             stage="transformation",
         )
         assert len(emitter._pending) == 1
-        dims = {d["Name"]: d["Value"] for d in emitter._pending[0]["Dimensions"]}
+        dims = {d["Name"]: d["Value"] for d in _dimensions_of(emitter._pending[0])}
         assert dims["Stage"] == "transformation"
 
     def test_stage_dimension_absent_when_not_provided(self) -> None:
@@ -229,7 +237,7 @@ class TestTenantCodeDimension:
             count=100,
         )
         assert len(emitter._pending) == 1
-        dim_names = [d["Name"] for d in emitter._pending[0]["Dimensions"]]
+        dim_names = [d["Name"] for d in _dimensions_of(emitter._pending[0])]
         assert "Stage" not in dim_names
 
     def test_emit_stage_duration(self) -> None:
@@ -243,7 +251,7 @@ class TestTenantCodeDimension:
         )
         assert len(emitter._pending) == 1
         assert emitter._pending[0]["MetricName"] == "StageDurationMs"
-        dims = {d["Name"]: d["Value"] for d in emitter._pending[0]["Dimensions"]}
+        dims = {d["Name"]: d["Value"] for d in _dimensions_of(emitter._pending[0])}
         assert dims["Stage"] == "entity_resolution"
 
     def test_emit_golden_record_count(self) -> None:

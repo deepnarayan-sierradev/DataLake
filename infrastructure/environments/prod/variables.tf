@@ -74,3 +74,88 @@ variable "analytics_reader_principals" {
   description = "IAM principal ARNs granted Lake Formation SELECT+DESCRIBE on curated/analytics tables (see infrastructure/modules/glue/variables.tf)."
   default     = []
 }
+
+# ---------------------------------------------------------------------------
+# SOW requirements programme variables (requirements/DL-01…DL-12)
+# ---------------------------------------------------------------------------
+
+variable "waf_enforcement_mode" {
+  description = <<-EOT
+    Control-plane WAF mode: "audit" counts what would be blocked, "enforce" blocks.
+
+    Defaults to audit in every environment. DL-SEC-13 requires alarming before blocking, so
+    promoting to enforce is a deliberate, reviewed change per environment — not a default.
+  EOT
+  type        = string
+  default     = "audit"
+}
+
+variable "client_vpn_enabled" {
+  description = <<-EOT
+    Whether to provision the Client VPN endpoint for BI access (DL-SERV-01).
+
+    False until the customer decides on VPN topology. While false, gap register item 4 (no
+    network path for any BI tool) remains open and the serving store stays unreachable.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "private_subnet_cidrs" {
+  description = "CIDRs of the private subnets, for Client VPN routes and client SG egress."
+  type        = list(string)
+  default     = []
+}
+
+variable "vpn_server_certificate_arn" {
+  description = "ACM ARN of the Client VPN server certificate."
+  type        = string
+  default     = ""
+}
+
+variable "vpn_client_root_certificate_arn" {
+  description = "ACM ARN of the client root certificate chain per-tenant certs are issued from."
+  type        = string
+  default     = ""
+}
+
+variable "vpn_tenant_access_groups" {
+  description = <<-EOT
+    Map of VPN access-group id to the CIDR that group may reach.
+
+    Per-tenant by construction: one issued certificate must not be sufficient to reach the
+    whole VPC.
+  EOT
+  type        = map(string)
+  default     = {}
+}
+
+variable "lake_formation_tenant_codes" {
+  description = "Tenant codes forming the `tenant` LF-Tag value set (DL-SERV-07)."
+  type        = list(string)
+  default     = ["demo"]
+}
+
+variable "lake_formation_tenant_scoped_principals" {
+  description = <<-EOT
+    Principals granted tag-scoped Athena read access, replacing the wildcard grant.
+
+    Empty means no principal can query through Lake Formation — which is the correct
+    fail-closed default, not an oversight.
+  EOT
+  type = map(object({
+    principal_arn = string
+    tenant_code   = string
+    department    = string
+  }))
+  default = {}
+}
+
+variable "lake_formation_admin_arns" {
+  description = <<-EOT
+    Lake Formation data-lake administrators. Keep short: an admin bypasses every tag grant.
+    Empty skips managing the data-lake settings resource entirely.
+  EOT
+  type        = list(string)
+  default     = []
+}

@@ -138,6 +138,7 @@ class RedshiftLoader(ServingStoreLoaderInterface):
             run_id=run_id,
             analytics_s3_bucket=analytics_s3_bucket,
             analytics_s3_prefix=analytics_s3_prefix,
+            tenant_code=tenant_code,
         )
 
     def _copy_and_merge(
@@ -173,12 +174,12 @@ class RedshiftLoader(ServingStoreLoaderInterface):
                 f'COPY "_stg_{table_name}" FROM %s IAM_ROLE %s FORMAT AS PARQUET',
                 (s3_uri, copy_iam_role),
             )
-            cur.execute(f'SELECT COUNT(*) FROM "_stg_{table_name}"')  # noqa: S608
+            cur.execute(f'SELECT COUNT(*) FROM "_stg_{table_name}"')  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
             total = int(cur.fetchone()[0])
 
             # New-or-changed = staging rows with no target row sharing pk AND the same hash.
             changed_filter = (
-                f'FROM "_stg_{table_name}" s WHERE NOT EXISTS ('  # noqa: S608
+                f'FROM "_stg_{table_name}" s WHERE NOT EXISTS ('  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
                 f"SELECT 1 FROM {target} t WHERE {pk_match} "
                 f'AND t."_row_hash" = SHA2({target_hash_expr}, 256))'
             )
@@ -191,7 +192,7 @@ class RedshiftLoader(ServingStoreLoaderInterface):
                     f'GETDATE() AS "_synced_at" {changed_filter}'
                 )
                 cur.execute(
-                    f"MERGE INTO {target} AS target USING ({source}) AS src "  # noqa: S608
+                    f"MERGE INTO {target} AS target USING ({source}) AS src "  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
                     f"ON {on_clause} "
                     f"WHEN MATCHED THEN UPDATE SET {update_set} "
                     f"WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals})"

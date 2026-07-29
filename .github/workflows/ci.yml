@@ -56,6 +56,32 @@ jobs:
         run: make banned-names
 
   # ──────────────────────────────────────────────────────────────────────────
+  # Stage 1c: Wiring gates — a module nothing imports, a requirement nothing cites,
+  # and a security parameter that defaults to None all pass every other gate in this
+  # file. On 2026-07-28 all three shipped. These jobs are why they cannot again.
+  # ──────────────────────────────────────────────────────────────────────────
+  wiring-gates:
+    name: "Wiring Gates (reachability / fail-open / traceability)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # No dependency install needed: all three gates read source with the standard library
+      # only, so they run in seconds and cannot be broken by a dependency resolution failure.
+      - name: Module reachability (G1)
+        run: python scripts/check_module_reachability.py
+
+      - name: No fail-open security defaults (G4)
+        run: python scripts/check_fail_open_defaults.py
+
+      - name: Requirement traceability (G5)
+        run: python scripts/check_requirement_traceability.py
+
+  # ──────────────────────────────────────────────────────────────────────────
   # Stage 2: Type checking
   # ──────────────────────────────────────────────────────────────────────────
   typecheck:
@@ -82,7 +108,9 @@ jobs:
         run: |
           mypy -p connector_runtime -p transformation -p entity_resolution \
                -p analytics_publisher -p orchestration -p observability \
-               -p watermark_management -p schema_management -p contracts -p governance
+               -p watermark_management -p schema_management -p contracts -p governance \
+               -p tenancy -p config_propagation -p data_quality \
+               -p workflow_automation -p portability -p semantic -p serving_store
 
   # ──────────────────────────────────────────────────────────────────────────
   # Stage 3: Unit tests with coverage gate

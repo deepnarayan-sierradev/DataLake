@@ -49,7 +49,6 @@ from datetime import UTC, datetime
 from typing import Any, Final
 
 import boto3
-import structlog
 
 from connector_runtime.configuration_repository.configuration_repository import (
     ConfigurationNotFoundError,
@@ -58,13 +57,22 @@ from connector_runtime.configuration_repository.configuration_repository import 
 )
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
+from contracts.observability_contract import PipelineStage
 from observability.lambda_utils import (
     check_lambda_timeout,
-    configure_xray,
     require_env,
 )
 from observability.metrics_emitter import CloudWatchMetricsEmitter
+from observability.stage_execution import (
+    StageIdentity,
+    derive_correlation_id,
+    stage_execution,
+)
 from observability.structured_logger import get_platform_logger
+from tenancy.connection_keys import resolve_connection_id
+from tenancy.scope_unit_repository import ScopeUnitRepository
+from tenancy.source_connection import SourceConnection
+from tenancy.source_connection_repository import SourceConnectionRepository
 from transformation.curated_accumulator import CuratedAccumulator
 from transformation.curated_layer_writer import CuratedLayerWriter
 from transformation.curated_utils import source_id_to_domain as _source_id_to_domain
@@ -116,23 +124,27 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     run_id: str = event["run_id"]
     raw_s3_prefix: str = event["raw_s3_prefix"]
     mapping_version: str = str(event.get("mapping_version") or "latest")
+    # DL-SCOPE-05: the connection is the identity dimension; for a single-connection source it
+    # equals source_id, which is what keeps pre-migration payloads working unchanged.
+    connection_id: str | None = str(event["connection_id"]) if event.get("connection_id") else None
     # Tenant code for S3 path isolation (§1.1 / ARCH-4). Required — a missing
     # or malformed tenant_code must fail closed rather than silently run as
     # another tenant (OWASP A03).
     tenant_code: str = str(event["tenant_code"])
 
-    # Instrument AWS SDK calls with X-Ray subsegments (§5.5).
-    configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id, run_id=run_id)
-
-    # Bind run context to every log line emitted in this Lambda invocation
-    # (§OBS-3 — standardizes on the same contextvars mechanism already used
-    # by entity_resolution and analytics_publisher handlers). Cleared in the
-    # existing `finally` block below alongside metrics flush.
-    structlog.contextvars.bind_contextvars(
-        run_id=run_id,
+    # DL-OPS-05: one lifecycle for every stage. `stage_execution` binds and clears contextvars,
+    # configures X-Ray, flushes metrics, emits the stage duration, and writes a failure record on
+    # both an exception and a hard Lambda kill — the `finally` this handler used to hand-roll
+    # could not cover the hard-kill case at all.
+    stage_identity = StageIdentity(
+        tenant_code=tenant_code,
         source_id=source_id,
         entity_id=entity_id,
-        tenant_code=tenant_code,
+        run_id=run_id,
+        environment=environment,
+        stage=PipelineStage.TRANSFORMATION.value,
+        correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
+        connection_id=connection_id,
     )
 
     if not _MAPPING_VERSION_PATTERN.match(mapping_version):
@@ -257,6 +269,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     )
 
     # ── Build context ─────────────────────────────────────────────────────────
+    scope_units = ScopeUnitRepository(environment=environment, region_name=region_name)
+
     ctx = TransformationContext(
         run_id=run_id,
         source_id=source_id,
@@ -274,18 +288,28 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         environment=environment,
         tenant_code=tenant_code,
         lambda_context=context,  # for mid-execution timeout checks (§3.5)
+        # DL-SCOPE-07: the pipeline stamps `scope_unit_id` on every curated row, so it needs the
+        # tenant's partition model and the owning connection. Without these the row filter every
+        # consumption surface applies would have nothing to filter on.
+        partition_profile=scope_units.get_partition_profile(tenant_code),
+        source_connection=_scope_connection(
+            environment=environment,
+            region_name=region_name,
+            tenant_code=tenant_code,
+            source_id=source_id,
+            connection_id=connection_id,
+        ),
+        known_scope_unit_ids=scope_units.known_unit_ids(tenant_code),
     )
 
     # ── Execute pipeline ──────────────────────────────────────────────────────
-    try:
+    with stage_execution(
+        stage_identity,
+        region_name=region_name,
+        lambda_context=context,
+        metrics=metrics_emitter,
+    ):
         result = pipeline.execute(ctx)
-    finally:
-        # Flush buffered CloudWatch metrics regardless of success or failure.
-        # flush() is designed to never raise — it swallows ClientError internally.
-        metrics_emitter.flush()
-        # §OBS-1: clear bound context so a warm container's next invocation
-        # never logs under this run's stale run_id/entity_id/tenant_code.
-        structlog.contextvars.clear_contextvars()
 
     _logger.info(
         "transformation_pipeline_handler_completed",
@@ -347,3 +371,34 @@ def _validate_event(event: dict[str, Any]) -> None:
     tenant_code = str(event["tenant_code"])
     if not _TENANT_CODE_PATTERN.match(tenant_code):
         raise ValueError(f"tenant_code={tenant_code!r} does not conform to the tenant code format.")
+
+
+def _scope_connection(
+    *,
+    environment: str,
+    region_name: str,
+    tenant_code: str,
+    source_id: str,
+    connection_id: str | None,
+) -> SourceConnection | None:
+    """
+    The connection that owns these rows, or None when the environment predates the connection
+    model.
+
+    None is safe rather than convenient: `ScopeAttributor` treats it as unattributable, which a
+    `single`-partition tenant absorbs structurally and a partitioned tenant fails on — the
+    correct outcome, because rows nobody can attribute are invisible to every unit-scoped caller.
+    """
+    resolved = resolve_connection_id(source_id, connection_id)
+    try:
+        return SourceConnectionRepository(
+            environment=environment, region_name=region_name
+        ).resolve_connection(tenant_code, resolved)
+    except Exception as exc:
+        _logger.warning(
+            "scope_connection_unavailable",
+            tenant_code=tenant_code,
+            connection_id=resolved,
+            error=str(exc),
+        )
+        return None

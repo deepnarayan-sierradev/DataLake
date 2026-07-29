@@ -41,6 +41,8 @@ from botocore.exceptions import ClientError
 
 from contracts.observability_contract import PipelineStage, RunStatus, scrub_sensitive_values
 from contracts.pipeline_stage_contract import DriftClassification, PipelineStageContract
+from contracts.platform_metrics import PlatformMetric
+from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -231,6 +233,18 @@ class RunCoordinator:
             error_message=error_message,
             error_code=error_code,
         )
+        if status is RunStatus.RETRYING:
+            record_platform_metric(
+                PlatformMetric.STAGE_RETRIES, 1.0, Stage=str(stage), EntityId=self._entity_id
+            )
+        if stage is PipelineStage.RUN_COMPLETION and status is RunStatus.SUCCESS:
+            # Freshness is the metric customers actually perceive: how old the newest
+            # successfully-published data is for this entity.
+            record_platform_metric(
+                PlatformMetric.PIPELINE_FRESHNESS_SECONDS,
+                max(0.0, (datetime.now(tz=UTC) - self._started_at).total_seconds()),
+                EntityId=self._entity_id,
+            )
         self._persist_audit_record(contract)
         return contract
 

@@ -283,7 +283,7 @@ class TestWritePartition:
                 raise RuntimeError("Simulated metadata write failure")
             return original_put(**kwargs)
 
-        writer._s3.put_object = selective_fail  # type: ignore[attr-defined]
+        writer._s3.put_object = selective_fail  # type: ignore[method-assign,assignment]
         # Should complete without raising.
         data_key = writer.write_partition(
             records=_make_records(),
@@ -299,7 +299,7 @@ class TestWritePartition:
     def test_s3_parquet_write_failure_raises(self) -> None:
         _create_bucket()
         writer = _make_writer()
-        writer._s3.put_object = MagicMock(  # type: ignore[attr-defined]
+        writer._s3.put_object = MagicMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("S3 unavailable")
         )
         with pytest.raises(SageRawLayerWriterError, match="Failed to write Parquet"):
@@ -478,7 +478,7 @@ class TestWritePartitionStreaming:
     def test_streaming_chunk_write_failure_raises(self) -> None:
         _create_bucket()
         writer = _make_writer()
-        writer._s3.put_object = MagicMock(  # type: ignore[attr-defined]
+        writer._s3.put_object = MagicMock(  # type: ignore[method-assign]
             side_effect=RuntimeError("S3 unavailable")
         )
         with pytest.raises(SageRawLayerWriterError):

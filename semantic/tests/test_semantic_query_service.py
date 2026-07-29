@@ -30,6 +30,7 @@ def _service(engine, granted=frozenset()):
         engine=engine,
         entity_uri_resolver=lambda name: f"s3://edl-analytics-1/demo/analytics/{name}",
         granted_access_tags=granted,
+        scope_predicate=None,
     )
 
 
@@ -43,7 +44,7 @@ class TestSemanticQueryService:
             )
         )
         assert result.rows == [{"industry": "Tech", "total_revenue": 100}]
-        assert "SUM(annual_revenue) AS total_revenue" in result.sql
+        assert "SUM(entity_data.annual_revenue) AS total_revenue" in result.sql
         _, kwargs = engine.stream.call_args
         assert kwargs["inputs"] == {"entity_data": "s3://edl-analytics-1/demo/analytics/company"}
 

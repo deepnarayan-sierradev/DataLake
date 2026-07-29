@@ -186,13 +186,19 @@ class RawLayerWriter:
         path_segments: list[str],
         region_name: str,
         tenant_code: str,
+        connection_id: str | None = None,
     ) -> None:
         if not s3_bucket:
             raise ValueError("s3_bucket must not be empty.")
         if not path_segments:
             raise ValueError("path_segments must not be empty.")
         self._bucket = s3_bucket
+        # DL-SCOPE-04: a non-default connection gets its own prefix under the source
+        # segment so two franchisees on one connector type never interleave rows.
         self._path_segments = list(path_segments)
+        if connection_id and connection_id not in self._path_segments:
+            self._path_segments.append(connection_id)
+        self._connection_id = connection_id
         self._tenant_code = validate_tenant_code(tenant_code)
         self._s3 = boto3.client("s3", region_name=region_name)
         self._parquet_writer = S3ParquetWriter(self._s3)

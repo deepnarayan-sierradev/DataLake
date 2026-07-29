@@ -1,7 +1,10 @@
 .PHONY: install lint format typecheck test banned-names security-scan audit \
+        reachability fail-open traceability wiring-gates \
         iac-validate iac-scan iac-fmt-check iac-fmt \
         lambda-package lambda-upload lambda-deploy \
-        seed-entity-config seed-serving-store-config seed-schedules clean help
+        seed-entity-config seed-serving-store-config seed-schedules \
+        seed-semantic-model migrate-connections migrate-credentials \
+        backfill-scope-attribution clean help
 
 # ─── Help ────────────────────────────────────────────────────────────────────
 help:
@@ -11,6 +14,10 @@ help:
 	@echo "  lint                Run ruff linter (check only)"
 	@echo "  format              Run ruff formatter"
 	@echo "  banned-names        Fail if prohibited generic identifiers appear in production code"
+	@echo "  reachability        Fail if a production module has no production importer (G1)"
+	@echo "  fail-open           Fail if a security parameter defaults to None (G4)"
+	@echo "  traceability        Fail if a requirement is uncited or unreachable (G5)"
+	@echo "  wiring-gates        Run all three wiring gates together"
 	@echo "  typecheck           Run mypy strict type checking"
 	@echo "  test                Run test suite with coverage (≥80% required)"
 	@echo "  security-scan       Run bandit SAST security scan"
@@ -63,6 +70,22 @@ banned-names:
 	else \
 		echo "OK — no prohibited generic identifiers found."; \
 	fi
+
+# ─── Wiring gates (G1, G4, G5) ───────────────────────────────────────────────
+# These exist because "module written + unit tests green" was the definition of done that let
+# eighteen unreachable modules ship on 2026-07-28. A unit test imports the module under test
+# directly, which is precisely the import a deployed handler was missing.
+
+reachability:
+	@python scripts/check_module_reachability.py
+
+fail-open:
+	@python scripts/check_fail_open_defaults.py
+
+traceability:
+	@python scripts/check_requirement_traceability.py
+
+wiring-gates: reachability fail-open traceability
 
 format:
 	ruff format .
@@ -140,7 +163,7 @@ lambda-package:
 	# Copy platform source packages into build directory. processing_engine/knowledge/
 	# semantic are imported by the control-plane Lambda (cold-start) and the twin builder;
 	# omitting them makes those Lambdas fail to import. agent ships for the deferred layer.
-	@for pkg in contracts connector_runtime schema_management watermark_management observability orchestration transformation governance entity_resolution analytics_publisher processing_engine knowledge semantic agent serving_store; do \
+	@for pkg in contracts connector_runtime schema_management watermark_management observability orchestration transformation governance entity_resolution analytics_publisher processing_engine knowledge semantic agent serving_store tenancy config_propagation data_quality workflow_automation portability; do \
 		cp -r $$pkg $(LAMBDA_BUILD_DIR)/$$pkg; \
 	done
 	@mkdir -p dist
@@ -207,6 +230,43 @@ seed-schedules:
 		--environment dev
 	@echo "Schedule sync complete."
 
+# ─── SOW programme: semantic model + DL-12 migrations ────────────────────────
+#
+# Both migrations are dry-run by default and must be run with APPLY=--apply BEFORE the
+# connection-aware code deploys to an environment (DL-SCOPE-05). migrate-connections must run
+# first: credential paths are derived from the connection model it creates.
+
+TENANT_CODE  ?= demo
+CURATED_BUCKET ?= edl-curated-087972550871
+PUBLISHED_BY ?= platform-team
+APPLY        ?=
+
+seed-semantic-model:
+	@echo "Publishing the enterprise semantic model for $(TENANT_CODE) (draft until signed)..."
+	python scripts/seed_enterprise_semantic_model.py \
+		--tenant-code $(TENANT_CODE) \
+		--bucket $(CURATED_BUCKET) \
+		--region $(AWS_REGION) \
+		--published-by $(PUBLISHED_BY) \
+		$(APPLY)
+
+migrate-connections:
+	@echo "Migrating to connection identity (DL-SCOPE-05)..."
+	python scripts/migrate_to_connection_identity.py --region $(AWS_REGION) $(APPLY)
+
+backfill-scope-attribution:
+	@echo "Backfilling scope_unit_id onto pre-DL-SCOPE-07 partitions (dry-run unless APPLY=1)..."
+	python scripts/backfill_scope_attribution.py \
+		--tenant-code $(TENANT_CODE) \
+		--connection-id $(CONNECTION_ID) \
+		--bucket $(BUCKET) \
+		--strategy $(or $(STRATEGY),report) \
+		$(if $(APPLY),--apply --confirm-rewrite,)
+
+migrate-credentials:
+	@echo "Migrating credentials to per-connection paths (DL-SEC-05)..."
+	python scripts/migrate_credentials_to_connection_paths.py --region $(AWS_REGION) $(APPLY)
+
 # ─── Clean ───────────────────────────────────────────────────────────────────
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
@@ -216,5 +276,5 @@ clean:
 	@echo "Clean complete."
 
 # ─── Full CI gate (mirrors CI pipeline locally) ──────────────────────────────
-ci: lint typecheck security-scan audit test iac-validate iac-scan
+ci: lint typecheck banned-names wiring-gates security-scan audit test iac-validate iac-scan
 	@echo "All CI gates passed."

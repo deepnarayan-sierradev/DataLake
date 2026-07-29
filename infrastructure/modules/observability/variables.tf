@@ -96,3 +96,14 @@ variable "pagerduty_integration_url" {
   description = "PagerDuty or OpsGenie HTTPS endpoint for SNS subscription. Leave empty to skip."
   sensitive   = true
 }
+
+variable "enable_absence_alarms" {
+  description = <<-EOT
+    Enable the "control is inert" alarms (G6) that fire when a security or consistency metric
+    publishes no data points at all. Disabled in an environment that has not yet had its first
+    run, where absence is expected rather than a defect; enable once the pipeline is live so an
+    unwired control cannot look healthy.
+  EOT
+  type        = bool
+  default     = false
+}

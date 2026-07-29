@@ -29,15 +29,36 @@ form meant to survive across sessions.
 | [docs/EXECUTIVE_OVERVIEW.md](docs/EXECUTIVE_OVERVIEW.md) | Engineering & product leadership | Deep-dive functional walkthrough, compliance, security |
 | [docs/GLOSSARY_AND_TERMINOLOGY.md](docs/GLOSSARY_AND_TERMINOLOGY.md) | All | Term definitions, canonical AWS-services reference table |
 | [DataLake_Configuration_Module_Requirements.md](DataLake_Configuration_Module_Requirements.md) | Architects | Requirements for a planned, separate self-service configuration service (not yet built) |
+| [docs/WIRING_PASS_HANDOFF.md](docs/WIRING_PASS_HANDOFF.md) | Engineers | Session handoff for the 2026-07-28 wiring pass — the six CI gates, what was wired, corrected findings, ordering hazards, and what awaits approval |
+| [requirements/WAIVERS.md](requirements/WAIVERS.md) | Engineers | Every deliberate exception to the wiring gates, with its reason. The gates fail on a stale entry, so this file cannot drift |
+| [requirements/README.md](requirements/README.md) | Engineers, architects | **SOW requirements programme (DL-01…DL-12)** — one document per phase, the implementation plan, and the cross-repo interface contract. Built as of 2026-07-28 except the deferred DL-04 (AI agent runtime) and DL-05 (ML platform); nothing is applied to AWS yet |
+
+## System boundary
+
+This repository is a **standalone, configuration-driven data-lake processing system**. It does not
+own tenants, users, roles, or permissions — those belong to the Identity API that
+`enterprise-platform` is built on. DataLake reads the configuration the enterprise-platform
+publishes (entity settings, field mappings, entity-resolution and survivorship rules, entity-type
+registry, semantic definitions, schedules, connections, scope model) and acts on it. There is
+deliberately no tenant-provisioning endpoint here, and a test asserts its absence.
 
 ## Connector Credentials (AWS Secrets Manager)
 
-Most connector credentials are loaded from AWS Secrets Manager using this path pattern:
+Credentials are **per connection**:
 
-`edl/sources/{source_id}/credentials`
+`edl/tenants/{tenant_code}/connections/{connection_id}/credentials`
+
+resolved through `connector_runtime/connection_credential_resolver.py`. Write-back uses a separate
+`...-writeback` secret so a read-only deployment cannot mutate a source.
+
+For a single-connection source, `connection_id == source_id`. The legacy shared path below is still
+read as a **fallback with a warning** until each environment has run `make migrate-credentials`
+(dry-run by default) and then `--delete-legacy`.
 
 Not environment-prefixed — each environment (dev/staging/prod) is deployed to its own AWS
 account, so the secret path doesn't need to disambiguate environment within a single account.
+
+### Legacy shared paths (still in place in dev until the migration runs)
 
 **Sage is the one exception** — it has an extra `{product_name}` segment because it has two
 distinct products (Intacct and X3) with separate credentials: `edl/sources/sage/{product_name}/credentials`.
@@ -49,6 +70,10 @@ distinct products (Intacct and X3) with separate credentials: `edl/sources/sage/
 | Sage Intacct | `edl/sources/sage/intacct/credentials` | 🟡 Code-complete, not connected | Customer, Vendor, AR Invoice, AP Bill | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
 | Sage X3 | `edl/sources/sage/x3/credentials` | 🟡 Code-complete, not connected | Customer, Supplier | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
 | NetSuite | `edl/sources/netsuite/credentials` | 🟡 Code-complete, not connected | Customer | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
+
+The ten SOW sources (HubSpot, MaidCentral, ServMan Pro, WellSky, Housecall Pro, Dialpad,
+SeniorPlace, Google Ads, Google Analytics, Meta Ads) are implemented as declarative REST specs and
+read their credentials from the per-connection path above. None is connected yet.
 
 All five secrets above are Terraform-managed (`infrastructure/modules/secrets/main.tf` creates
 the empty secret shells with a resource policy restricting reads to the extraction runtime role).

@@ -119,3 +119,19 @@ variable "tags" {
   default     = {}
   description = "Additional resource tags merged with module-managed tags."
 }
+
+variable "portability_data_bucket_arns" {
+  description = <<-EOT
+    Bucket ARNs the portability function may read for export and delete for a certified deletion.
+    Empty by default: an empty list means the portability function can do nothing, which is the
+    correct posture for an environment that has not been asked to export or delete anything.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+variable "export_artefact_bucket_arn" {
+  description = "Bucket ARN the export artefact is written to."
+  type        = string
+  default     = ""
+}

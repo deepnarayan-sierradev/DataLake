@@ -126,7 +126,7 @@ def configure_xray(
         run_id:      Run identifier for X-Ray annotation filtering.
     """
     try:
-        from aws_xray_sdk.core import patch_all, xray_recorder  # type: ignore[import-not-found]
+        from aws_xray_sdk.core import patch_all, xray_recorder  # type: ignore[import-untyped]
 
         patch_all()
         if tenant_code:

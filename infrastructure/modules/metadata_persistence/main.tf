@@ -123,6 +123,21 @@ resource "aws_dynamodb_table" "run_audit_log" {
     projection_type = "ALL"
   }
 
+  attribute {
+    name = "tenant_code"
+    type = "S"
+  }
+
+  # GSI: list one tenant's runs with a Query instead of a Scan (S12). The base table is keyed on
+  # (run_id, stage) because a run is the natural aggregate; nothing about that key lets you find
+  # "this tenant's runs", which is the control plane's most common read.
+  global_secondary_index {
+    name            = "tenant-started-index"
+    hash_key        = "tenant_code"
+    range_key       = "started_at"
+    projection_type = "ALL"
+  }
+
   # TTL: automatically expire old audit records (archival occurs before TTL if needed)
   ttl {
     attribute_name = "expires_at"
@@ -172,6 +187,27 @@ resource "aws_dynamodb_table" "entity_extraction_config" {
   attribute {
     name = "entity_id"
     type = "S"
+  }
+
+  attribute {
+    name = "tenant_code"
+    type = "S"
+  }
+
+  # GSI: list one tenant's configs with a Query instead of a full table Scan (S12).
+  #
+  # The base table's partition key is already tenant-scoped
+  # (`tenant_scoped_key(tenant_code, connection_id)`), but DynamoDB cannot prefix-match a
+  # partition key, so listing a tenant still required scanning every tenant's rows — cost and
+  # latency scaling with total table size rather than the caller's slice.
+  #
+  # KEYS_ONLY, not ALL: the listing path re-reads each item by key anyway to get the validated
+  # config, and projecting every attribute would double the table's storage for no read saved.
+  global_secondary_index {
+    name            = "tenant-entity-index"
+    hash_key        = "tenant_code"
+    range_key       = "entity_id"
+    projection_type = "KEYS_ONLY"
   }
 
   server_side_encryption {

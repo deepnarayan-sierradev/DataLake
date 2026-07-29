@@ -219,7 +219,7 @@ def run_extraction(
         # introspection) and connector._table_name is internal connector
         # state derived from validated entity config, not raw user/request
         # input, so string-based construction here is not an injection risk.
-        sample_sql = f"SELECT {', '.join(display_cols)} FROM `{connector._table_name}` LIMIT 5"  # noqa: S608
+        sample_sql = f"SELECT {', '.join(display_cols)} FROM `{connector._table_name}` LIMIT 5"  # noqa: S608  # nosec B608 — local dev script, config-derived names
         conn = pymysql.connect(
             host=creds.host,
             port=creds.port,

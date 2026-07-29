@@ -44,6 +44,7 @@ from contracts.identifier_policy import (
     validate_tenant_code,
 )
 from observability.structured_logger import get_platform_logger
+from tenancy.connection_keys import resolve_connection_id
 
 _logger = get_platform_logger(__name__)
 
@@ -75,6 +76,7 @@ class WatermarkRecord(BaseModel):
     model_config = {"frozen": True, "extra": "ignore"}
 
     source_id: str
+    connection_id: str | None = None
     entity_id: str
     environment: str
     last_successful_watermark: datetime
@@ -136,7 +138,11 @@ class WatermarkRepository:
     # ── Read ───────────────────────────────────────────────────────────────────
 
     def get_watermark(
-        self, source_id: str, entity_id: str, tenant_code: str = DEFAULT_TENANT_CODE
+        self,
+        source_id: str,
+        entity_id: str,
+        tenant_code: str = DEFAULT_TENANT_CODE,
+        connection_id: str | None = None,
     ) -> WatermarkRecord | None:
         """
         Load the current watermark for a source entity.
@@ -149,7 +155,11 @@ class WatermarkRepository:
         Uses a strongly-consistent read to prevent stale-read races.
         """
         tenant_code = validate_tenant_code(tenant_code)
-        scoped_source_id = tenant_scoped_key(tenant_code, source_id)
+        # DL-SCOPE-04: the key's identity component is the connection; for a
+        # single-connection source that is the source_id, so the key is unchanged.
+        scoped_source_id = tenant_scoped_key(
+            tenant_code, resolve_connection_id(source_id, connection_id)
+        )
         try:
             response = self._table.get_item(
                 Key={"source_id": scoped_source_id, "entity_id": entity_id},
@@ -170,7 +180,7 @@ class WatermarkRepository:
         # The stored item's "source_id" attribute is the tenant-scoped composite
         # key value — restore the plain source_id before constructing the model
         # so callers always see the unscoped identifier they passed in.
-        record_item = {**item, "source_id": source_id}
+        record_item = {**item, "source_id": source_id, "connection_id": connection_id}
         return WatermarkRecord(**record_item)  # type: ignore[arg-type]
 
     # ── Write ──────────────────────────────────────────────────────────────────
@@ -182,6 +192,7 @@ class WatermarkRepository:
         upper_watermark: datetime,
         run_id: str,
         tenant_code: str = DEFAULT_TENANT_CODE,
+        connection_id: str | None = None,
     ) -> WatermarkRecord:
         """
         Create the initial watermark record for a source entity (first run only).
@@ -194,6 +205,7 @@ class WatermarkRepository:
         now = datetime.now(tz=UTC)
         record = WatermarkRecord(
             source_id=source_id,
+            connection_id=connection_id,
             entity_id=entity_id,
             environment=self._environment,
             last_successful_watermark=_EPOCH,
@@ -211,7 +223,9 @@ class WatermarkRepository:
         except ClientError as exc:
             if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
                 # A concurrent initialisation succeeded first — return that record.
-                existing = self.get_watermark(source_id, entity_id, tenant_code=tenant_code)
+                existing = self.get_watermark(
+                    source_id, entity_id, tenant_code=tenant_code, connection_id=connection_id
+                )
                 if existing is not None:
                     return existing
             raise
@@ -245,6 +259,7 @@ class WatermarkRepository:
         new_version = current.version + 1
         updated = WatermarkRecord(
             source_id=current.source_id,
+            connection_id=current.connection_id,
             entity_id=current.entity_id,
             environment=current.environment,
             last_successful_watermark=new_upper_watermark,
@@ -344,7 +359,10 @@ def _serialise_watermark(record: WatermarkRecord) -> dict[str, Any]:
     (ARCH-1) — get_watermark() restores the plain source_id when reading back.
     """
     return {
-        "source_id": tenant_scoped_key(record.tenant_code, record.source_id),
+        "source_id": tenant_scoped_key(
+            record.tenant_code, resolve_connection_id(record.source_id, record.connection_id)
+        ),
+        "source_system_id": record.source_id,
         "entity_id": record.entity_id,
         "environment": record.environment,
         "last_successful_watermark": record.last_successful_watermark.isoformat(),

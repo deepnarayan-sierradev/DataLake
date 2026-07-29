@@ -28,6 +28,7 @@ from semantic.query_compiler import (
     SemanticQueryError,
 )
 from semantic.semantic_model import SemanticModel
+from tenancy.scope_predicate import ScopePredicate
 
 _logger = get_platform_logger(__name__)
 _ENTITY_VIEW = "entity_data"
@@ -61,10 +62,15 @@ class ConversationalAgent:
         engine: SetBasedQueryEngine,
         entity_uri_resolver: Callable[[str], str],
         granted_access_tags: frozenset[str],
+        # The agent queries on a user's behalf, so it carries that user's scope predicate. It is
+        # required rather than defaulted: an agent that silently queried tenant-wide would be
+        # the worst place for the fail-open of DL-SCOPE-14, since the caller never sees the SQL.
+        scope_predicate: ScopePredicate | None,
         max_attempts: int = 3,
     ) -> None:
         if max_attempts < 1:
             raise ValueError("max_attempts must be >= 1.")
+        self._scope_predicate = scope_predicate
         self._proposer = proposer
         self._model = model
         self._compiler = QueryCompiler(model)
@@ -80,7 +86,11 @@ class ConversationalAgent:
                 question=question, model=self._model, prior_error=prior_error
             )
             try:
-                compiled = self._compiler.compile(request, granted_access_tags=self._granted)
+                compiled = self._compiler.compile(
+                    request,
+                    granted_access_tags=self._granted,
+                    scope_predicate=self._scope_predicate,
+                )
             except AccessDeniedError as exc:
                 _logger.info("agent_access_denied", attempt=attempt, reason=str(exc))
                 return AgentTurnResult(

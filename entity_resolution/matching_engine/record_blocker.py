@@ -34,11 +34,14 @@ from __future__ import annotations
 
 import unicodedata
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 from observability.structured_logger import get_platform_logger
+from tenancy.scope_contract import ResolutionScope
+from tenancy.scope_predicate import SCOPE_UNIT_COLUMN
 
 _logger = get_platform_logger(__name__)
 
@@ -100,20 +103,39 @@ class RecordBlocker:
         # Each block is a list of candidate records to compare pairwise.
     """
 
-    def __init__(self, strategy: BlockingStrategy) -> None:
+    def __init__(
+        self, strategy: BlockingStrategy, *, resolution_scope: ResolutionScope | None = None
+    ) -> None:
         self._strategy = strategy
+        # DL-SCOPE-08: when resolution is scope-unit-grained, the scope unit participates in the
+        # blocking key. Two franchisees' identical customer then lands in two different blocks and
+        # cannot be compared, which is the only place a cross-unit merge can be prevented — no
+        # downstream row filter repairs a golden record that already merged two units' data.
+        self._resolution_scope = resolution_scope or ResolutionScope.TENANT
 
-    def partition(self, records: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    def partition(self, records: Iterable[dict[str, Any]]) -> list[list[dict[str, Any]]]:
         """
         Partition records into blocks by their computed blocking key.
+
+        Accepts any iterable, not just a list (L15): a caller streaming curated records from S3
+        never needs the whole set resident to partition it, and the blocks themselves are already
+        bounded by `max_block_size`. The union-find clustering that follows still needs each
+        block's records together — that is inherent to transitive matching, not an oversight.
 
         Returns:
             A list of blocks; each block is a list of candidate records.
             Guaranteed: no block has more than max_block_size records.
         """
         buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        record_count = 0
         for record in records:
+            record_count += 1
             key = self._compute_key(record)
+            if self._resolution_scope is ResolutionScope.SCOPE_UNIT:
+                # An unattributed record (None) blocks under its own sentinel rather than
+                # joining every unit's block — fail closed, matching the read-path predicate.
+                unit = record.get(SCOPE_UNIT_COLUMN) or "__unattributed__"
+                key = f"{unit}::{key}"
             buckets[key].append(record)
 
         blocks: list[list[dict[str, Any]]] = []
@@ -129,9 +151,10 @@ class RecordBlocker:
 
         _logger.info(
             "record_blocking_complete",
+            resolution_scope=self._resolution_scope.value,
             key_type=self._strategy.key_type,
             source_field=self._strategy.source_field,
-            input_records=len(records),
+            input_records=record_count,
             block_count=len(blocks),
             max_block_size=self._strategy.max_block_size,
         )

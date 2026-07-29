@@ -82,6 +82,10 @@ from connector_runtime.adapters.sage.products.x3.x3_query_engine import (
     X3QueryBuildError,
     X3QueryEngine,
 )
+from connector_runtime.adapters.sage.protocols.sage_metadata_protocol import (
+    SageMetadataProtocol,
+)
+from connector_runtime.adapters.sage.protocols.sage_query_protocol import SageQueryProtocol
 from connector_runtime.adapters.sage.sage_params import SageConnectorParams
 from connector_runtime.interfaces.connector_interface import (
     ConnectorCapabilities,
@@ -173,12 +177,16 @@ class SageConnector(ConnectorInterface):
             credential_manager=self._credential_manager,
             http_client=self._http_client,
         )
-        self._metadata_client = strategies.metadata_client_class(
+        # Annotated with the protocols the registry's bare `type` fields only assert in a
+        # comment, so a strategy that drifts from the contract fails the type check.
+        self._metadata_client: SageMetadataProtocol = strategies.metadata_client_class(
             auth_client=self._auth,
             http_client=self._http_client,
             object_path=object_path,
         )
-        self._query_engine = strategies.query_engine_class(object_path=object_path)
+        self._query_engine: SageQueryProtocol = strategies.query_engine_class(
+            object_path=object_path
+        )
 
     # ── ConnectorInterface implementation ─────────────────────────────────────
 
@@ -593,6 +601,11 @@ class SageConnector(ConnectorInterface):
 
         Raises typed SageHttpError subclasses on unrecoverable errors.
         """
+        if http_method == "POST" and query_body is None:
+            raise SageQueryBuildError(
+                f"A POST page request requires a query body; none was built for entity {entity_id}."
+            )
+        post_body: dict[str, Any] = query_body or {}  # guarded above; {} is GET-only, unused
         headers = self._auth.build_auth_headers()
         try:
             if http_method == "GET":
@@ -604,7 +617,7 @@ class SageConnector(ConnectorInterface):
             return self._http_client.post(
                 url=query_url,
                 headers=headers,
-                json_body=query_body,
+                json_body=post_body,
             )
         except SageAuthenticationError:
             # Token may have just expired — invalidate and retry once.
@@ -626,7 +639,7 @@ class SageConnector(ConnectorInterface):
             return self._http_client.post(
                 url=query_url,
                 headers=refreshed_headers,
-                json_body=query_body,
+                json_body=post_body,
             )
 
 

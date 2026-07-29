@@ -258,7 +258,8 @@ class TestCapabilityDeclaration:
 
     def test_supports_metadata_discovery(self) -> None:
         connector = _make_connector()
-        connector._metadata_client.supports_live_discovery = True  # type: ignore[attr-defined]
+        # The protocol declares it read-only; the concrete client exposes a plain attribute.
+        connector._metadata_client.supports_live_discovery = True  # type: ignore[misc]
         caps = connector.get_capability_declaration()
         assert caps.supports_metadata_discovery is True
 

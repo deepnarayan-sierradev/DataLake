@@ -196,7 +196,7 @@ class SqlServerLoader(ServingStoreLoaderInterface):
         # T-SQL has no row-value IN list (unlike MySQL/Postgres) — a VALUES-derived
         # table join is the portable equivalent. Identifiers validated above.
         sql = (
-            f"SELECT t.{pk_cols}, t.[_row_hash] "  # noqa: S608
+            f"SELECT t.{pk_cols}, t.[_row_hash] "  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
             f"FROM [{container_name}].[{table_name}] t "
             f"JOIN (VALUES {values_clause}) AS v({value_cols}) ON {join_clause}"
         )
@@ -238,7 +238,7 @@ class SqlServerLoader(ServingStoreLoaderInterface):
                 chunk = rows[start : start + _UPSERT_CHUNK_SIZE]
                 values_clause = ", ".join([row_placeholder] * len(chunk))
                 sql = (
-                    f"MERGE INTO [{container_name}].[{table_name}] AS target "  # noqa: S608
+                    f"MERGE INTO [{container_name}].[{table_name}] AS target "  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
                     f"USING (VALUES {values_clause}) AS source({source_cols}) "
                     f"ON {on_clause} "
                     f"WHEN MATCHED THEN UPDATE SET {update_clause} "

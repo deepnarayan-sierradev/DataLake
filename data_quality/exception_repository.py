@@ -1,0 +1,298 @@
+"""
+`EdlDataQualityException` — the structured exception store (DL-DQ-14).
+
+PK `tenant_code`, SK `{run_id}#{rule_id}#{seq}`, GSI on `entity_id` + `detected_at`.
+
+Every quality violation, count mismatch, and orphan lands here with a resolution state, so
+quality findings become an operational process (DL-WF-06) rather than a log line.
+
+Security (OWASP A01, A02): tenant-partitioned at the key level from creation, and offending
+key samples are masked through the classification policy before persistence —
+SENSITIVE_PII never appears, even masked.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
+from typing import Any, Final
+
+import boto3
+
+from contracts.identifier_policy import validate_tenant_code
+from governance.data_classification_policy import (
+    DataClassificationLevel,
+    EntityClassificationPolicy,
+)
+from observability.structured_logger import get_platform_logger
+
+_logger = get_platform_logger(__name__)
+
+_TABLE_NAME: Final[str] = "EdlDataQualityException"
+
+# Offending-key samples are capped so one bad batch cannot write an unbounded item.
+MAX_SAMPLE_KEYS: Final[int] = 20
+
+DEFAULT_EXCEPTION_TTL_DAYS: Final[int] = 180
+
+
+class ExceptionKind(StrEnum):
+    """What produced the exception."""
+
+    QUALITY_VIOLATION = "quality_violation"
+    RECORD_COUNT_MISMATCH = "record_count_mismatch"
+    KEY_FIELD_MISMATCH = "key_field_mismatch"
+    COMPLETENESS_BELOW_THRESHOLD = "completeness_below_threshold"
+    DUPLICATE_RATE_EXCEEDED = "duplicate_rate_exceeded"
+    REFERENTIAL_ORPHAN = "referential_orphan"
+    DATE_VALIDATION = "date_validation"
+    RECONCILIATION_VARIANCE = "reconciliation_variance"
+    UNATTRIBUTED_ROWS = "unattributed_rows"
+
+
+class ExceptionSeverity(StrEnum):
+    """Severity drives the promotion gate (DL-DQ-15)."""
+
+    INFO = "info"
+    WARN = "warn"
+    ERROR = "error"
+
+
+class ResolutionState(StrEnum):
+    """Triage lifecycle, consumed by the workflow engine's task model."""
+
+    OPEN = "open"
+    ASSIGNED = "assigned"
+    IN_PROGRESS = "in_progress"
+    RESOLVED = "resolved"
+    ACCEPTED = "accepted"
+    CLOSED = "closed"
+
+
+_TERMINAL_STATES: Final[frozenset[ResolutionState]] = frozenset(
+    {ResolutionState.RESOLVED, ResolutionState.ACCEPTED, ResolutionState.CLOSED}
+)
+
+
+@dataclass
+class QualityException:
+    """One structured exception record."""
+
+    tenant_code: str
+    run_id: str
+    rule_id: str
+    entity_id: str
+    kind: ExceptionKind
+    severity: ExceptionSeverity
+    message: str
+    correlation_id: str
+    sequence: int = 0
+    source_id: str = ""
+    connection_id: str | None = None
+    scope_unit_id: str | None = None
+    sample_keys: tuple[str, ...] = ()
+    key_field_name: str = ""
+    observed_value: str = ""
+    expected_value: str = ""
+    resolution_state: ResolutionState = ResolutionState.OPEN
+    assignee: str | None = None
+    resolution_note: str = ""
+    detected_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+    def __post_init__(self) -> None:
+        validate_tenant_code(self.tenant_code)
+
+    @property
+    def sort_key(self) -> str:
+        return f"{self.run_id}#{self.rule_id}#{self.sequence:04d}"
+
+    @property
+    def blocks_promotion(self) -> bool:
+        return self.severity is ExceptionSeverity.ERROR
+
+
+class DataQualityExceptionRepository:
+    """Writes and reads exception records; shared by DL-02, DL-06, and DL-09."""
+
+    def __init__(
+        self,
+        environment: str,
+        region_name: str,
+        classification_policy: EntityClassificationPolicy | None = None,
+        ttl_days: int = DEFAULT_EXCEPTION_TTL_DAYS,
+    ) -> None:
+        if not environment:
+            raise ValueError("environment must not be empty.")
+        self._environment = environment
+        self._classification_policy = classification_policy
+        self._ttl_days = ttl_days
+        table_name = os.environ.get("DATA_QUALITY_EXCEPTION_TABLE") or _TABLE_NAME
+        self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
+
+    # ── Writes ────────────────────────────────────────────────────────────────
+
+    def record(self, exception: QualityException) -> str:
+        """Persist one exception, masking its samples first."""
+        item = self._serialise(exception)
+        self._table.put_item(Item=item)
+        _logger.info(
+            "data_quality_exception_recorded",
+            tenant_code=exception.tenant_code,
+            entity_id=exception.entity_id,
+            rule_id=exception.rule_id,
+            kind=exception.kind.value,
+            severity=exception.severity.value,
+        )
+        return str(item["exception_key"])
+
+    def record_many(self, exceptions: list[QualityException]) -> int:
+        """Batch-write exceptions; sequence numbers are assigned per (run, rule)."""
+        counters: dict[tuple[str, str], int] = {}
+        with self._table.batch_writer() as batch:
+            for exception in exceptions:
+                key = (exception.run_id, exception.rule_id)
+                exception.sequence = counters.get(key, 0)
+                counters[key] = exception.sequence + 1
+                batch.put_item(Item=self._serialise(exception))
+        return len(exceptions)
+
+    def transition(
+        self,
+        tenant_code: str,
+        exception_key: str,
+        target: ResolutionState,
+        *,
+        assignee: str | None = None,
+        resolution_note: str = "",
+    ) -> None:
+        """Move an exception through triage; a terminal state requires a note."""
+        if target in _TERMINAL_STATES and not resolution_note:
+            raise ValueError(
+                f"Transitioning an exception to {target.value!r} requires a resolution note — "
+                "a closed finding with no explanation is not an audit record."
+            )
+        expression = "SET resolution_state = :state, resolution_note = :note, updated_at = :ts"
+        values: dict[str, Any] = {
+            ":state": target.value,
+            ":note": resolution_note,
+            ":ts": datetime.now(UTC).isoformat(),
+        }
+        if assignee is not None:
+            expression += ", assignee = :assignee"
+            values[":assignee"] = assignee
+        self._table.update_item(
+            Key={
+                "tenant_code": validate_tenant_code(tenant_code),
+                "exception_key": exception_key,
+            },
+            UpdateExpression=expression,
+            ExpressionAttributeValues=values,
+        )
+
+    # ── Reads ─────────────────────────────────────────────────────────────────
+
+    def list_for_run(self, tenant_code: str, run_id: str) -> list[dict[str, Any]]:
+        tenant_code = validate_tenant_code(tenant_code)
+        response = self._table.query(
+            KeyConditionExpression="tenant_code = :tc AND begins_with(exception_key, :run)",
+            ExpressionAttributeValues={":tc": tenant_code, ":run": f"{run_id}#"},
+        )
+        return [dict(item) for item in response.get("Items", [])]
+
+    def list_open(self, tenant_code: str) -> list[dict[str, Any]]:
+        """Open findings, for the operations dashboard and the triage inbox."""
+        tenant_code = validate_tenant_code(tenant_code)
+        open_states = {
+            ResolutionState.OPEN.value,
+            ResolutionState.ASSIGNED.value,
+            ResolutionState.IN_PROGRESS.value,
+        }
+        records: list[dict[str, Any]] = []
+        query_kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "tenant_code = :tc",
+            "ExpressionAttributeValues": {":tc": tenant_code},
+        }
+        while True:
+            response = self._table.query(**query_kwargs)
+            records.extend(
+                dict(item)
+                for item in response.get("Items", [])
+                if str(item.get("resolution_state")) in open_states
+            )
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key
+        return records
+
+    def blocking_exceptions(self, tenant_code: str, run_id: str) -> list[dict[str, Any]]:
+        """ERROR-severity findings for one run — the input to the promotion gate."""
+        return [
+            record
+            for record in self.list_for_run(tenant_code, run_id)
+            if str(record.get("severity")) == ExceptionSeverity.ERROR.value
+        ]
+
+    # ── Private ───────────────────────────────────────────────────────────────
+
+    def _serialise(self, exception: QualityException) -> dict[str, Any]:
+        expires_at = int((datetime.now(UTC) + timedelta(days=self._ttl_days)).timestamp())
+        return {
+            "tenant_code": exception.tenant_code,
+            "exception_key": exception.sort_key,
+            "run_id": exception.run_id,
+            "rule_id": exception.rule_id,
+            "entity_id": exception.entity_id,
+            "source_id": exception.source_id,
+            "connection_id": exception.connection_id,
+            "scope_unit_id": exception.scope_unit_id,
+            "kind": exception.kind.value,
+            "severity": exception.severity.value,
+            "message": exception.message,
+            "observed_value": exception.observed_value,
+            "expected_value": exception.expected_value,
+            "sample_keys": list(self._mask_samples(exception)),
+            "resolution_state": exception.resolution_state.value,
+            "assignee": exception.assignee,
+            "resolution_note": exception.resolution_note,
+            "correlation_id": exception.correlation_id,
+            "detected_at": exception.detected_at,
+            "environment": self._environment,
+            "expires_at": expires_at,
+        }
+
+    def _mask_samples(self, exception: QualityException) -> tuple[str, ...]:
+        """
+        Mask offending-key samples before persistence.
+
+        A SENSITIVE_PII key field is dropped entirely rather than masked — a masked value
+        still confirms the record exists, which is disclosure the policy forbids. With no
+        policy supplied, samples are redacted anyway: fail closed, not open.
+        """
+        samples = exception.sample_keys[:MAX_SAMPLE_KEYS]
+        policy = self._classification_policy
+        if policy is None:
+            return tuple(_redact(sample) for sample in samples)
+        level = next(
+            (
+                f.classification
+                for f in policy.field_classifications
+                if f.field_name == exception.key_field_name
+            ),
+            DataClassificationLevel.INTERNAL,
+        )
+        if level is DataClassificationLevel.SENSITIVE_PII:
+            return ()
+        if level is DataClassificationLevel.PII:
+            return tuple(_redact(sample) for sample in samples)
+        return samples
+
+
+def _redact(value: str) -> str:
+    """Keep enough of a key to correlate it with the source, never enough to read it."""
+    text = str(value)
+    if len(text) <= 4:
+        return "*" * len(text)
+    return f"{text[:2]}{'*' * (len(text) - 4)}{text[-2:]}"

@@ -54,7 +54,13 @@ import boto3
 from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field, field_validator
 
+from config_propagation.capability import ConfigCapability
+from config_propagation.pinned_versions import PinnedConfigVersions
+from config_propagation.pinning_service import ConfigPinningService
 from contracts.identifier_policy import STABLE_ID_PATTERN, TENANT_CODE_PATTERN
+from entity_resolution.resolution_config.resolution_config_registry import (
+    ResolutionConfigRegistry,
+)
 from observability.lambda_utils import check_lambda_timeout, require_env
 from observability.structured_logger import get_platform_logger
 
@@ -197,6 +203,12 @@ def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
     tick = msg.schedule_tick_iso or datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     exec_name = _build_execution_name(msg.tenant_code, msg.source_id, msg.entity_id, tick)
 
+    # --- Pin the configuration set once, at the run boundary (DL-CFG-01) ---
+    # Every `latest` pointer is resolved here and carried in the payload, so a publish landing
+    # mid-run cannot change behaviour under a stage that already started. Without this the run
+    # reads whatever `latest` means at the moment each stage happens to look.
+    pinned = _pin_configuration(msg)
+
     # --- Build Step Functions input payload ---
     sfn_input = json.dumps(
         {
@@ -206,6 +218,10 @@ def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
             "connector_params": msg.connector_params,
             "is_replay": msg.is_replay,
             "tenant_code": msg.tenant_code,
+            "pinned_config_versions": pinned.to_payload(),
+            # L14: seeds the checkpoint-resume loop's bound. `States.MathAdd($.resume_attempts, 1)`
+            # in the state machine needs the field to exist on the first pass.
+            "resume_attempts": 0,
         },
         separators=(",", ":"),
     )
@@ -244,3 +260,41 @@ def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
             error_code=error_code,
         )
         raise
+
+
+def _pin_configuration(msg: Any) -> PinnedConfigVersions:
+    """
+    Resolve every `latest` pointer this run will consume (DL-CFG-01).
+
+    Resolvers are deliberately forgiving: a capability this run does not consume contributes
+    nothing rather than failing the pin, because blocking a run on an unrelated capability's
+    registry being unavailable would trade a consistency guarantee for an availability loss.
+    """
+    # The Lambda runtime always sets AWS_REGION, so its absence means we are not in a Lambda.
+    # Read it rather than require it: failing the trigger on a missing pin would trade a
+    # consistency guarantee for an availability loss, and an unpinned run is still correct —
+    # just not protected against a mid-run publish (DL-CFG-01).
+    region_name = os.environ.get("AWS_REGION", "")
+    curated_bucket = os.environ.get("CURATED_S3_BUCKET", "")
+    if not region_name:
+        _logger.warning("config_pin_skipped_no_region", entity_id=msg.entity_id)
+        return PinnedConfigVersions(pinned_at=datetime.now(UTC).isoformat())
+
+    def _resolution_version(tenant_code: str, entity_key: str) -> str | None:
+        if not curated_bucket:
+            return None
+        try:
+            registry = ResolutionConfigRegistry(s3_bucket=curated_bucket, region_name=region_name)
+            return registry.resolved_version(tenant_code, entity_key)
+        except Exception as exc:
+            _logger.info(
+                "config_pin_resolver_unavailable",
+                capability=ConfigCapability.ENTITY_RESOLUTION.value,
+                tenant_code=tenant_code,
+                entity_key=entity_key,
+                error=str(exc),
+            )
+            return None
+
+    service = ConfigPinningService({ConfigCapability.ENTITY_RESOLUTION: _resolution_version})
+    return service.pin(msg.tenant_code, msg.entity_id)

@@ -82,6 +82,8 @@ def emit_golden_record_lineage(
     rule_set_version: str,
     survivorship_version: str,
     region_name: str,
+    tenant_code: str = "demo",
+    config_versions: str | None = None,
 ) -> None:
     """Persist an ENTITY_RESOLUTION lineage record (spec §9.1). Best-effort."""
     try:
@@ -96,6 +98,8 @@ def emit_golden_record_lineage(
             record_count=golden_record_count,
             rule_set_version=rule_set_version,
             survivorship_version=survivorship_version,
+            tenant_code=tenant_code,
+            config_versions=config_versions,
         )
         LineageEmitter(
             governance_s3_bucket=s3_governance_bucket,

@@ -33,8 +33,10 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 import boto3
+from botocore.exceptions import ClientError
 
 from contracts.identifier_policy import validate_tenant_code
+from contracts.platform_metrics import PlatformMetric
 from entity_resolution.matching_engine.match_rule_engine import (
     DeterministicMatchField,
     DeterministicMatchRule,
@@ -52,6 +54,7 @@ from entity_resolution.survivorship_policy import (
     SurvivorshipPolicy,
     SurvivorshipStrategy,
 )
+from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
@@ -75,6 +78,10 @@ class ResolutionConfigNotFoundError(Exception):
 
 class ResolutionConfigParseError(Exception):
     """Raised when a config JSON file is malformed or contains invalid values."""
+
+
+class ResolutionConfigVersionPinError(Exception):
+    """Raised when a pinned version no longer resolves (DL-CFG-02) — never falls back."""
 
 
 class ResolutionConfigRegistry:
@@ -114,18 +121,31 @@ class ResolutionConfigRegistry:
         tenant_code: str,
         match_rules_version: str = "latest",
         survivorship_version: str = "latest",
+        pinned: bool = False,
     ) -> ResolutionConfig:
         """
         Load match rules + survivorship config for the given tenant + entity type.
 
         Versions default to "latest".  Pass explicit version strings (e.g.
-        "v2") to pin to a specific config.
+        "v2") to pin to a specific config, with `pinned=True` so an absent
+        version fails closed instead of silently resolving `latest` (DL-CFG-02).
 
         Raises ResolutionConfigNotFoundError when the S3 object is absent.
         Raises ResolutionConfigParseError when the JSON is malformed.
         """
         _validate_entity_type(entity_type)
         tenant_code = validate_tenant_code(tenant_code)
+
+        if pinned and "latest" in (match_rules_version, survivorship_version):
+            # A pinned stage resolving `latest` means the pinning was bypassed somewhere, which
+            # is what ConfigVersionMismatchWithinRun pages on.
+            record_platform_metric(
+                PlatformMetric.CONFIG_VERSION_MISMATCH_WITHIN_RUN, 1.0, EntityType=entity_type
+            )
+            raise ResolutionConfigVersionPinError(
+                f"Pinned load for tenant={tenant_code!r} entity_type={entity_type!r} was given "
+                "'latest' for at least one version. A pinned stage must never resolve 'latest'."
+            )
 
         # Resolve "latest" pointers
         if match_rules_version == "latest" or survivorship_version == "latest":
@@ -137,17 +157,42 @@ class ResolutionConfigRegistry:
 
         cache_key = f"{tenant_code}/{entity_type}/{match_rules_version}/{survivorship_version}"
         if cache_key in self._cache:
+            if not pinned:
+                # The cache is version-keyed, so a hit on a key whose `latest` pointer has
+                # since moved means a warm container is serving a superseded generation.
+                pointer = self._load_latest_pointer(entity_type, tenant_code)
+                if pointer.get("match_rules_version", match_rules_version) != match_rules_version:
+                    record_platform_metric(
+                        PlatformMetric.CONFIG_CACHE_STALE_SERVED, 1.0, EntityType=entity_type
+                    )
             return self._cache[cache_key]
 
         _validate_version(match_rules_version)
         _validate_version(survivorship_version)
 
-        match_raw = self._load_json(
-            f"{tenant_code}/entity-resolution/{entity_type}/match_rules_{match_rules_version}.json"
-        )
-        survivorship_raw = self._load_json(
-            f"{tenant_code}/entity-resolution/{entity_type}/survivorship_{survivorship_version}.json"
-        )
+        try:
+            match_raw = self._load_json(
+                f"{tenant_code}/entity-resolution/{entity_type}/"
+                f"match_rules_{match_rules_version}.json"
+            )
+            survivorship_raw = self._load_json(
+                f"{tenant_code}/entity-resolution/{entity_type}/"
+                f"survivorship_{survivorship_version}.json"
+            )
+        except ResolutionConfigNotFoundError as exc:
+            if pinned:
+                # Distinguishable from "never existed" so the alarm can tell a rollback
+                # or deletion apart from an unconfigured entity type.
+                record_platform_metric(
+                    PlatformMetric.CONFIG_VERSION_PIN_FAILURES, 1.0, EntityType=entity_type
+                )
+                raise ResolutionConfigVersionPinError(
+                    f"Pinned resolution config version no longer resolves for "
+                    f"tenant={tenant_code!r} entity_type={entity_type!r} "
+                    f"(match_rules={match_rules_version!r}, "
+                    f"survivorship={survivorship_version!r})."
+                ) from exc
+            raise
 
         rule_set = _parse_match_rule_set(match_raw)
         policy = _parse_survivorship_policy(survivorship_raw)
@@ -207,9 +252,7 @@ class ResolutionConfigRegistry:
                 ContentType="application/json",
             )
 
-        # Trailing "/" avoids a false-positive match (e.g. "company" vs "company-extra").
-        cache_prefix = f"{tenant_code}/{entity_type}/"
-        self._cache = {k: v for k, v in self._cache.items() if not k.startswith(cache_prefix)}
+        self.invalidate_entity_type(entity_type, tenant_code)
 
         _logger.info(
             "resolution_config_published",
@@ -219,6 +262,72 @@ class ResolutionConfigRegistry:
             survivorship_version=sv_version,
         )
         return mr_key, sv_key
+
+    def version_exists(self, tenant_code: str, entity_type: str, version: str) -> bool:
+        """
+        Whether a specific match-rules version is still retained (DL-CFG-09).
+
+        A rollback target that no longer exists means the target is wrong, not that the rollback
+        should proceed to whatever is nearest — so this is checked before the pointer moves.
+        """
+        _validate_entity_type(entity_type)
+        tenant_code = validate_tenant_code(tenant_code)
+        _validate_version(version)
+        key = f"{tenant_code}/entity-resolution/{entity_type}/match_rules_{version}.json"
+        try:
+            self._s3.head_object(Bucket=self._bucket, Key=key)
+        except ClientError:
+            return False
+        return True
+
+    def repoint_latest(self, tenant_code: str, entity_type: str, match_rules_version: str) -> str:
+        """
+        Move the `latest` pointer to a prior retained version (DL-CFG-09).
+
+        Deliberately narrow: it writes the pointer and invalidates the cache, and it does *not*
+        write a config body — a rollback must reuse the retained version exactly, never
+        re-serialise a possibly-different in-memory copy of it.
+        """
+        _validate_entity_type(entity_type)
+        tenant_code = validate_tenant_code(tenant_code)
+        _validate_version(match_rules_version)
+        current = self._load_latest_pointer(entity_type, tenant_code)
+        ptr_key = f"{tenant_code}/entity-resolution/{entity_type}/latest.json"
+        self._s3.put_object(
+            Bucket=self._bucket,
+            Key=ptr_key,
+            Body=json.dumps(
+                {
+                    "match_rules_version": match_rules_version,
+                    # The survivorship pointer is untouched: rolling back match rules must not
+                    # silently change survivorship, which is a separately governed decision.
+                    "survivorship_version": current.get("survivorship_version", "v1"),
+                },
+                indent=2,
+            ).encode("utf-8"),
+            ContentType="application/json",
+        )
+        self.invalidate_entity_type(entity_type, tenant_code)
+        _logger.warning(
+            "resolution_config_pointer_rolled_back",
+            tenant_code=tenant_code,
+            entity_type=entity_type,
+            match_rules_version=match_rules_version,
+        )
+        return ptr_key
+
+    def invalidate_entity_type(self, entity_type: str, tenant_code: str) -> int:
+        """
+        Drop cached configs for one tenant/entity_type; returns the number evicted.
+
+        Wired to a real signal (`publish`), not decorative (DL-CFG-04). The trailing "/"
+        avoids a false-positive match ("company" vs "company-extra").
+        """
+        cache_prefix = f"{tenant_code}/{entity_type}/"
+        stale = [k for k in self._cache if k.startswith(cache_prefix)]
+        for key in stale:
+            del self._cache[key]
+        return len(stale)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -236,6 +345,17 @@ class ResolutionConfigRegistry:
             raise ResolutionConfigParseError(
                 f"Failed to parse resolution config at {key!r}: {exc}"
             ) from exc
+
+    def resolved_version(self, tenant_code: str, entity_type: str) -> str:
+        """
+        The version `latest` currently points at, for run-level pinning (DL-CFG-01).
+
+        Reads only the pointer, not the config body: the pin is taken at the run boundary for
+        every capability, and loading each full config there would multiply cold-start cost for
+        capabilities the run may never consume.
+        """
+        pointer = self._load_latest_pointer(entity_type, tenant_code)
+        return pointer["match_rules_version"]
 
     def _load_latest_pointer(self, entity_type: str, tenant_code: str) -> dict[str, str]:
         key = f"{tenant_code}/entity-resolution/{entity_type}/latest.json"

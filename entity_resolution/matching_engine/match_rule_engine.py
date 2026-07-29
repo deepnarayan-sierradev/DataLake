@@ -20,12 +20,17 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from collections import defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from contracts.platform_metrics import PlatformMetric
 from entity_resolution.matching_engine.record_blocker import BlockingStrategy, RecordBlocker
+from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
+from tenancy.scope_contract import ResolutionScope
+from tenancy.scope_predicate import SCOPE_UNIT_COLUMN
 
 _logger = get_platform_logger(__name__)
 
@@ -138,8 +143,39 @@ class MatchRuleEngine:
       # clusters is list[frozenset[str]] — each set is a group of matching IDs
     """
 
-    def __init__(self, rule_set: MatchRuleSet) -> None:
+    def __init__(
+        self, rule_set: MatchRuleSet, *, resolution_scope: ResolutionScope | None = None
+    ) -> None:
         self._rule_set = rule_set
+        # DL-SCOPE-08: threaded to the blocker so scope-unit-grained resolution cannot compare
+        # records across units, and enforced again below for the no-blocking-strategy path.
+        self._resolution_scope = resolution_scope or ResolutionScope.TENANT
+
+    def _build_blocks(self, records: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        """
+        Partition records into comparison blocks.
+
+        Blocking is what makes a cross-unit merge structurally impossible under unit-grained
+        resolution, so the unit partition applies even when no blocking strategy is declared —
+        a brute-force single block would span every unit (DL-SCOPE-08).
+        """
+        if self._rule_set.blocking_strategy is not None:
+            blocker = RecordBlocker(
+                self._rule_set.blocking_strategy, resolution_scope=self._resolution_scope
+            )
+            return blocker.partition(records)
+        if self._resolution_scope is ResolutionScope.SCOPE_UNIT:
+            by_unit: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for record in records:
+                by_unit[str(record.get(SCOPE_UNIT_COLUMN) or "__unattributed__")].append(record)
+            return list(by_unit.values())
+        return [records]
+
+    def _crosses_scope_units(self, record_a: dict[str, Any], record_b: dict[str, Any]) -> bool:
+        """True when two records belong to different scope units under unit-grained resolution."""
+        if self._resolution_scope is not ResolutionScope.SCOPE_UNIT:
+            return False
+        return record_a.get(SCOPE_UNIT_COLUMN) != record_b.get(SCOPE_UNIT_COLUMN)
 
     def compare(
         self,
@@ -195,15 +231,20 @@ class MatchRuleEngine:
         # Blocking: partition records before pairwise comparison.
         # Without a strategy, all records go into one block (brute-force).
         # With a strategy, only records sharing a blocking key are compared.
-        if self._rule_set.blocking_strategy is not None:
-            blocker = RecordBlocker(self._rule_set.blocking_strategy)
-            blocks = blocker.partition(records)
-        else:
-            blocks = [records]
+        blocks = self._build_blocks(records)
 
         for block in blocks:
             for rec_idx, rec_a in enumerate(block):
                 for rec_b in block[rec_idx + 1 :]:
+                    if self._crosses_scope_units(rec_a, rec_b):
+                        # Defence in depth: blocking already separated them, so reaching here
+                        # means a blocking defect. Count it and refuse rather than merge.
+                        record_platform_metric(
+                            PlatformMetric.RESOLUTION_SCOPE_VIOLATIONS,
+                            1.0,
+                            EntityId=str(rec_a.get("entity_id", "unknown")),
+                        )
+                        continue
                     decisions = self.compare(rec_a, rec_b, id_field)
                     all_decisions.extend(decisions)
                     if any(d.is_match for d in decisions):

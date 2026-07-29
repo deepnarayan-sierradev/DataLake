@@ -45,14 +45,19 @@ Checkpoint / partial-run contract (PERF-5):
     hard failure: it is NOT routed to the DLQ and does NOT mark the circuit
     breaker as failed (see the dedicated `except LambdaTimeoutWarning: raise`
     clause in execute()).
-  - What remains OUT OF SCOPE here (see infrastructure/modules/orchestration/
-    main.tf's ExecuteExtraction Catch block and the comment above it): Step
-    Functions does not yet automatically re-invoke extraction from the
-    checkpoint. Doing so safely requires threading a resume/part-number field
-    through the state machine's Parameters on retry (ASL's Catch does not by
-    itself feed exception details back into a Task's input) — a state-machine
-    redesign intentionally left undone rather than guessed at without live
-    testing (see the module docstring note in main.tf).
+  - Auto-resume IS now wired (L14): the state machine catches LambdaTimeoutWarning,
+    parses the resume payload out of the exception message with
+    `States.StringToJson($.checkpoint.Cause)`, waits when the checkpoint carries a
+    `retry_after_seconds`, and re-invokes ExecuteExtraction — bounded by
+    `max_extraction_resume_attempts` so a permanently-throttling provider ends at a
+    visible terminal state.
+
+    The resumed invocation needs **no new input**: the partial watermark was already
+    committed before the raise, so re-reading the watermark is exactly what continues
+    from the right position. That is why this works without redesigning the Lambda's
+    input contract — the resume position lives in the watermark table, not in the
+    state machine's payload. The payload only carries what the machine itself needs
+    (the wait) plus what an operator wants to see (records written, reason).
 
 Drift handling:
   - BREAKING drift: raw data written, snapshot persisted, watermark advanced.
@@ -90,6 +95,7 @@ from connector_runtime.interfaces.connector_interface import (
     FieldContract,
     QueryContract,
 )
+from connector_runtime.rate_limiting import ResumeAfterBackoffRequired
 from connector_runtime.run_lifecycle.run_lifecycle import RunCoordinator
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType
 from contracts.observability_contract import PipelineStage, RunStatus
@@ -167,8 +173,13 @@ class LambdaTimeoutWarning(Exception):  # noqa: N818 -- deliberately "Warning", 
         records_written: int,
         checkpoint_watermark: str,
         reason: str,
+        retry_after_seconds: float = 0.0,
     ) -> None:
         super().__init__(message)
+        # L14: how long the state machine should Wait before resuming. Zero means "resume
+        # immediately" (a record-count checkpoint); non-zero comes from a provider's Retry-After,
+        # which the rate-limit policy refuses to absorb as billed Lambda idle time.
+        self.retry_after_seconds = retry_after_seconds
         self.run_id = run_id
         self.partial_run_id = partial_run_id
         self.source_id = source_id
@@ -176,6 +187,22 @@ class LambdaTimeoutWarning(Exception):  # noqa: N818 -- deliberately "Warning", 
         self.records_written = records_written
         self.checkpoint_watermark = checkpoint_watermark
         self.reason = reason
+
+    def to_resume_payload(self) -> dict[str, Any]:
+        """
+        The fields Step Functions needs to resume this extraction (L14).
+
+        Emitted as the exception message's JSON body so ASL's `States.StringToJson($.Cause)` can
+        read it — `Catch` cannot feed structured exception attributes into a retried Task's
+        Parameters any other way.
+        """
+        return {
+            "resume_watermark": self.checkpoint_watermark,
+            "retry_after_seconds": self.retry_after_seconds,
+            "records_written": self.records_written,
+            "partial_run_id": self.partial_run_id,
+            "reason": self.reason,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -343,13 +370,19 @@ class ExtractionWorkflow:
 
     # ── Public API ──────────────────────────────────────────────────────────
 
-    def execute(
+    def execute(  # noqa: C901 — see the note below on why this is not split
         self,
         is_replay: bool = False,
         replay_of_run_id: str | None = None,
     ) -> ExtractionWorkflowResult:
         """
         Execute the full extraction pipeline for one entity run.
+
+        Complexity note: this method is one branch over the C901 threshold, and the exemption is
+        deliberate. Its branches are the pipeline's own stages plus three *distinct* non-fatal exits
+        (circuit open, record-count checkpoint, rate-limit backoff), each of which must be
+        distinguishable by the state machine. Splitting it would move those exits behind a helper
+        boundary and make the control flow harder to follow than the count suggests it is.
 
         Parameters
         ----------
@@ -603,6 +636,8 @@ class ExtractionWorkflow:
                 completed_at=completed_at.isoformat(),
             )
 
+        except ResumeAfterBackoffRequired as exc:
+            self._checkpoint_for_backoff(exc, source_id=source_id, entity_id=entity_id)
         except (CircuitOpenError, LambdaTimeoutWarning):
             # LambdaTimeoutWarning (PERF-5) is a non-fatal checkpoint: the
             # partial watermark advance and checkpoint audit record were
@@ -1045,6 +1080,38 @@ class ExtractionWorkflow:
             checkpoint_watermark=partial_upper_bound.isoformat(),
             reason=checkpoint_info.reason,
         )
+
+    def _checkpoint_for_backoff(
+        self, exc: ResumeAfterBackoffRequired, *, source_id: str, entity_id: str
+    ) -> NoReturn:
+        """
+        Convert a rate-limit backoff into a checkpoint the state machine can resume (L14).
+
+        The provider asked for a wait longer than a Lambda should absorb. Records written so far are
+        already durable, so this is the same non-fatal checkpoint the record-count path raises —
+        carrying the wait so a `Wait` state can absorb it for free instead of this invocation
+        paying for idle wall-clock.
+        """
+        _logger.info(
+            "extraction_backoff_handed_to_state_machine",
+            source_id=source_id,
+            entity_id=entity_id,
+            retry_after_seconds=exc.retry_after_seconds,
+            connection_id=exc.connection_id,
+        )
+        raise LambdaTimeoutWarning(
+            f"Extraction for source_id={source_id!r} entity_id={entity_id!r} must wait "
+            f"{exc.retry_after_seconds:.1f}s for the provider's rate limit. Checkpointed so the "
+            "state machine can wait without billing Lambda time.",
+            run_id=self._coordinator.run_id,
+            partial_run_id=self._coordinator.run_id,
+            source_id=source_id,
+            entity_id=entity_id,
+            records_written=0,
+            checkpoint_watermark="",
+            reason="rate_limit_backoff",
+            retry_after_seconds=exc.retry_after_seconds,
+        ) from exc
 
     def _handle_stage_failure(
         self,

@@ -237,24 +237,17 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
             # Functions evaluates Catch entries in order; first match wins),
             # so it does NOT fall through to ExtractionFailed / the DLQ.
             #
-            # This routes to a terminal Succeed state (ExtractionCheckpointed)
-            # rather than automatically re-invoking ExecuteExtraction. Doing
-            # the latter safely would require threading the checkpoint's
-            # partial watermark / resume position from this Lambda error back
-            # into ExecuteExtraction's OWN Parameters on the next attempt —
-            # ASL's Catch only captures error details into ResultPath for
-            # states AFTER the catch, it does not feed them back as input to
-            # a retried Task. That would need either: (a) a Choice/Wait loop
-            # that re-invokes ExecuteExtraction with Parameters sourced from
-            # $.error via JSONPath/intrinsic functions, or (b) redesigning the
-            # extraction Lambda's input contract to accept an explicit resume
-            # watermark. Both are real state-machine changes that need live
-            # testing against actual checkpoint payloads — intentionally left
-            # undone here rather than guessed at (see PERF-5 in
-            # orchestration/step_functions/extraction_workflow.py's module
-            # docstring for the full contract this Catch entry relies on).
+            # L14: this now routes to a resume loop rather than a terminal Succeed. Option (a)
+            # from the note that used to live here turned out to be expressible: the checkpoint's
+            # resume payload is carried in the exception *message*, and
+            # `States.StringToJson($.checkpoint.Cause)` parses it into state the next
+            # ExecuteExtraction invocation can read from its own Parameters. That is what makes
+            # auto-resume possible without redesigning the Lambda's input contract.
+            #
+            # The loop is bounded by $.resume_attempts (see EvaluateResume) so a provider that
+            # never stops throttling ends at a visible terminal state rather than looping forever.
             ErrorEquals = ["LambdaTimeoutWarning"]
-            Next        = "ExtractionCheckpointed"
+            Next        = "ParseCheckpoint"
             ResultPath  = "$.checkpoint"
           },
           {
@@ -266,10 +259,70 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
         Next = "CheckTransformationBlocked"
       }
 
-      # Terminal: extraction stopped early via a PERF-5 checkpoint. Data
-      # written so far is valid and the watermark was partially advanced —
-      # this is NOT a failure, but the remaining window is not yet processed.
-      # See the Catch entry above for exactly what full auto-resume would need.
+      # ── L14: checkpoint resume loop ─────────────────────────────────────────
+      #
+      # The extraction Lambda raises LambdaTimeoutWarning for three distinct, non-fatal reasons:
+      # a record-count checkpoint, an approaching Lambda timeout, and a provider rate-limit wait
+      # too long to absorb in-process. All three mean "progress was made and committed; resume".
+      #
+      # `Cause` is the exception message, which carries the resume payload as JSON. Parsing it here
+      # is what lets the retried Task read the resume position from its own Parameters.
+      ParseCheckpoint = {
+        Type       = "Pass"
+        Parameters = {
+          "resume.$"          = "States.StringToJson($.checkpoint.Cause)"
+          "resume_attempts.$" = "States.MathAdd($.resume_attempts, 1)"
+          "source_id.$"       = "$.source_id"
+          "entity_id.$"       = "$.entity_id"
+          "environment.$"     = "$.environment"
+          "tenant_code.$"     = "$.tenant_code"
+          "connector_params.$" = "$.connector_params"
+          "is_replay.$"       = "$.is_replay"
+          "pinned_config_versions.$" = "$.pinned_config_versions"
+        }
+        Next = "EvaluateResume"
+      }
+
+      EvaluateResume = {
+        Type = "Choice"
+        Choices = [
+          {
+            # Bounded: a provider that throttles indefinitely must not loop forever, and an
+            # unbounded loop would also make the execution history unreadable.
+            Variable             = "$.resume_attempts"
+            NumericGreaterThan   = var.max_extraction_resume_attempts
+            Next                 = "ExtractionResumeExhausted"
+          },
+          {
+            # A rate-limit checkpoint carries a wait; honour it before resuming.
+            Variable          = "$.resume.retry_after_seconds"
+            NumericGreaterThan = 0
+            Next              = "WaitForRateLimit"
+          }
+        ]
+        # A record-count or timeout checkpoint needs no wait — resume immediately.
+        Default = "ExecuteExtraction"
+      }
+
+      # Free: a Wait state costs nothing while it waits, which is the whole point of moving the
+      # provider's Retry-After out of billed Lambda time.
+      WaitForRateLimit = {
+        Type        = "Wait"
+        SecondsPath = "$.resume.retry_after_seconds"
+        Next        = "ExecuteExtraction"
+      }
+
+      # Terminal: the resume loop hit its bound. Data written so far is valid and the watermark was
+      # partially advanced, so this is not a data-loss failure — but the remaining window is
+      # unprocessed and needs an operator to look at why the provider kept refusing.
+      ExtractionResumeExhausted = {
+        Type  = "Fail"
+        Error = "ExtractionResumeExhausted"
+        Cause = "Extraction checkpointed more times than max_extraction_resume_attempts allows. Records written so far are durable and the watermark advanced partially; the remaining window is unprocessed."
+      }
+
+      # Terminal: retained for executions that predate the resume loop and for a checkpoint that
+      # deliberately stops (reason=operator_requested).
       ExtractionCheckpointed = {
         Type = "Succeed"
       }

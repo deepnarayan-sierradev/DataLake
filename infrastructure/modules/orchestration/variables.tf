@@ -131,3 +131,14 @@ variable "run_audit_log_table_name" {
   description = "Name of the DynamoDB run audit log table (used by DLQ processor)."
   type        = string
 }
+
+variable "max_extraction_resume_attempts" {
+  description = <<-EOT
+    How many times one extraction may checkpoint and resume before the execution fails visibly
+    (L14). Each resume is real progress — a committed partial watermark — so a generous bound is
+    safe; the bound exists so a provider that throttles indefinitely ends at a terminal state an
+    operator can see rather than looping forever and burying it in execution history.
+  EOT
+  type        = number
+  default     = 12
+}

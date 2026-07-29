@@ -36,10 +36,20 @@ from typing import Any, Final
 
 # Import adapter modules so their @connector_registry.register() decorators
 # and register_builder() calls execute at Lambda cold-start time.
+import connector_runtime.adapters.dialpad.dialpad_connector
+import connector_runtime.adapters.google_ads.google_ads_connector
+import connector_runtime.adapters.google_analytics.google_analytics_connector
+import connector_runtime.adapters.housecall_pro.housecall_pro_connector
+import connector_runtime.adapters.hubspot.hubspot_connector
+import connector_runtime.adapters.maid_central.maid_central_connector
+import connector_runtime.adapters.meta_ads.meta_ads_connector
 import connector_runtime.adapters.mysql_rds.mysql_rds_connector
 import connector_runtime.adapters.netsuite.netsuite_connector
 import connector_runtime.adapters.sage.sage_connector
-import connector_runtime.adapters.salesforce.salesforce_connector  # noqa: F401
+import connector_runtime.adapters.salesforce.salesforce_connector
+import connector_runtime.adapters.seniorplace.seniorplace_connector
+import connector_runtime.adapters.servman_pro.servman_pro_connector
+import connector_runtime.adapters.wellsky.wellsky_connector  # noqa: F401
 from connector_runtime.configuration_repository.configuration_repository import (
     ConfigurationRepositoryClient,
 )
@@ -47,13 +57,20 @@ from connector_runtime.registry import connector_registry
 from connector_runtime.run_lifecycle.run_lifecycle import RunCoordinator
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN
-from observability.lambda_utils import check_lambda_timeout, configure_xray, require_env
+from contracts.observability_contract import PipelineStage
+from observability.lambda_utils import check_lambda_timeout, require_env
 from observability.metrics_emitter import CloudWatchMetricsEmitter
+from observability.stage_execution import (
+    StageIdentity,
+    derive_correlation_id,
+    stage_execution,
+)
 from observability.structured_logger import get_platform_logger
 from orchestration.step_functions.extraction_retry_policy import ExtractionRetryPolicy
 from orchestration.step_functions.extraction_workflow import ExtractionWorkflow
 from schema_management.drift_evaluation.drift_evaluator import SchemaDriftEvaluator
 from schema_management.snapshot_repository.snapshot_repository import SchemaSnapshotRepository
+from tenancy.connection_keys import resolve_connection_id
 from watermark_management.watermark_repository.watermark_repository import WatermarkRepository
 
 _logger = get_platform_logger(__name__)
@@ -111,9 +128,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     # missing or malformed tenant_code must fail closed rather than silently
     # run as another tenant (OWASP A03); validated in _validate_event.
     tenant_code: str = str(event["tenant_code"])
-
-    # Instrument AWS SDK calls with X-Ray subsegments (§5.5).
-    configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id)
+    # DL-SCOPE-05: the connection is the identity dimension; for a single-connection source it
+    # equals source_id, which keeps pre-migration payloads working unchanged.
+    connection_id: str = resolve_connection_id(source_id, event.get("connection_id"))
 
     # ── Validate connector_params with per-connector Pydantic model (§2.2) ───
     _validate_connector_params(source_id, connector_params)
@@ -182,11 +199,26 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     )
 
     # ── Execute pipeline ─────────────────────────────────────────────────────
-
-    result = workflow.execute(
-        is_replay=is_replay,
-        replay_of_run_id=replay_of_run_id,
+    # DL-OPS-05/07: this handler previously bound no contextvars at all and had no failure record
+    # on a hard Lambda kill — the stage that most often hits the timeout was the least
+    # instrumented. The run id comes from the coordinator, which owns it, so no workflow contract
+    # changes.
+    identity = StageIdentity(
+        tenant_code=tenant_code,
+        source_id=source_id,
+        entity_id=entity_id,
+        run_id=coordinator.run_id,
+        environment=environment,
+        stage=PipelineStage.EXTRACTION.value,
+        correlation_id=derive_correlation_id(coordinator.run_id, replay_of_run_id),
+        connection_id=connection_id,
     )
+
+    with stage_execution(identity, region_name=region_name, lambda_context=context):
+        result = workflow.execute(
+            is_replay=is_replay,
+            replay_of_run_id=replay_of_run_id,
+        )
 
     _logger.info(
         "extraction_pipeline_handler_completed",

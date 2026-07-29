@@ -27,9 +27,16 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
+from contracts.identifier_policy import DEFAULT_TENANT_CODE, validate_tenant_code
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
+
+
+def lineage_s3_key(tenant_code: str, entity_id: str, run_id: str, stage: LineageStage) -> str:
+    """Tenant-prefixed lineage key, matching every other layer's convention (DL-SEC-04)."""
+    validate_tenant_code(tenant_code)
+    return f"{tenant_code}/lineage/{entity_id}/{run_id}/{stage.value}-lineage.json"
 
 
 class LineageStage(StrEnum):
@@ -66,6 +73,10 @@ class LineageRecord:
     record_count: int
     captured_at: str  # ISO-8601 UTC
     additional_context: dict[str, str]  # e.g., mapping_version, policy_version
+    # DL-SEC-04 (gap 10): lineage keys were the last layer with no tenant segment, so the
+    # prefix was not IAM-enforceable. Defaulted so existing callers stay valid.
+    tenant_code: str = DEFAULT_TENANT_CODE
+    connection_id: str | None = None
 
 
 class LineageEmitter:
@@ -88,8 +99,8 @@ class LineageEmitter:
         Returns the S3 key of the written record.
         Raises LineageEmissionError on S3 write failure.
         """
-        key = (
-            f"lineage/{record.entity_id}/{record.run_id}/{record.pipeline_stage.value}-lineage.json"
+        key = lineage_s3_key(
+            record.tenant_code, record.entity_id, record.run_id, record.pipeline_stage
         )
 
         payload = _serialise_lineage_record(record)
@@ -117,13 +128,19 @@ class LineageEmitter:
 
         return key
 
-    def load(self, run_id: str, entity_id: str, stage: LineageStage) -> LineageRecord:
+    def load(
+        self,
+        run_id: str,
+        entity_id: str,
+        stage: LineageStage,
+        tenant_code: str = DEFAULT_TENANT_CODE,
+    ) -> LineageRecord:
         """
         Load a previously emitted lineage record from S3.
 
         Raises LineageRecordNotFoundError if not present.
         """
-        key = f"lineage/{entity_id}/{run_id}/{stage.value}-lineage.json"
+        key = lineage_s3_key(tenant_code, entity_id, run_id, stage)
         try:
             response = self._s3.get_object(Bucket=self._governance_bucket, Key=key)
             raw: dict[str, Any] = json.loads(response["Body"].read().decode("utf-8"))
@@ -138,6 +155,13 @@ class LineageEmitter:
             raise
 
 
+def _with_config_versions(context: dict[str, str], config_versions: str | None) -> dict[str, str]:
+    """DL-CFG-03: every lineage record carries the run's full pinned configuration set."""
+    if not config_versions:
+        return context
+    return {**context, "config_versions": config_versions}
+
+
 def build_extraction_lineage(
     run_id: str,
     source_id: str,
@@ -146,6 +170,8 @@ def build_extraction_lineage(
     raw_s3_bucket: str,
     record_count: int,
     schema_version: str,
+    tenant_code: str = DEFAULT_TENANT_CODE,
+    config_versions: str | None = None,
 ) -> LineageRecord:
     """Factory: build a lineage record for an extraction stage."""
     return LineageRecord(
@@ -162,8 +188,11 @@ def build_extraction_lineage(
             data_layer="raw",
         ),
         record_count=record_count,
+        tenant_code=tenant_code,
         captured_at=datetime.now(UTC).isoformat(),
-        additional_context={"schema_version": schema_version, "source_id": source_id},
+        additional_context=_with_config_versions(
+            {"schema_version": schema_version, "source_id": source_id}, config_versions
+        ),
     )
 
 
@@ -177,6 +206,8 @@ def build_transformation_lineage(
     curated_s3_prefix: str,
     record_count: int,
     mapping_version: str,
+    tenant_code: str = DEFAULT_TENANT_CODE,
+    config_versions: str | None = None,
 ) -> LineageRecord:
     """Factory: build a lineage record for a transformation stage."""
     return LineageRecord(
@@ -197,8 +228,11 @@ def build_transformation_lineage(
             data_layer="curated",
         ),
         record_count=record_count,
+        tenant_code=tenant_code,
         captured_at=datetime.now(UTC).isoformat(),
-        additional_context={"mapping_version": mapping_version},
+        additional_context=_with_config_versions(
+            {"mapping_version": mapping_version}, config_versions
+        ),
     )
 
 
@@ -213,6 +247,8 @@ def build_entity_resolution_lineage(
     record_count: int,
     rule_set_version: str,
     survivorship_version: str,
+    tenant_code: str = DEFAULT_TENANT_CODE,
+    config_versions: str | None = None,
 ) -> LineageRecord:
     """Factory: build a lineage record for an entity resolution / golden record stage.
 
@@ -240,11 +276,15 @@ def build_entity_resolution_lineage(
             data_layer="analytics",
         ),
         record_count=record_count,
+        tenant_code=tenant_code,
         captured_at=datetime.now(UTC).isoformat(),
-        additional_context={
-            "rule_set_version": rule_set_version,
-            "survivorship_version": survivorship_version,
-        },
+        additional_context=_with_config_versions(
+            {
+                "rule_set_version": rule_set_version,
+                "survivorship_version": survivorship_version,
+            },
+            config_versions,
+        ),
     )
 
 
@@ -256,6 +296,8 @@ def build_serving_store_lineage(
     analytics_s3_prefix: str,
     table_name: str,
     record_count: int,
+    tenant_code: str = DEFAULT_TENANT_CODE,
+    config_versions: str | None = None,
 ) -> LineageRecord:
     """Factory: build a lineage record for a serving store load stage."""
     return LineageRecord(
@@ -276,8 +318,9 @@ def build_serving_store_lineage(
             data_layer="serving",
         ),
         record_count=record_count,
+        tenant_code=tenant_code,
         captured_at=datetime.now(UTC).isoformat(),
-        additional_context={"table_name": table_name},
+        additional_context=_with_config_versions({"table_name": table_name}, config_versions),
     )
 
 
@@ -290,6 +333,8 @@ def build_analytics_publication_lineage(
     analytics_s3_bucket: str,
     analytics_s3_prefix: str,
     record_count: int,
+    tenant_code: str = DEFAULT_TENANT_CODE,
+    config_versions: str | None = None,
 ) -> LineageRecord:
     """Factory: build a lineage record for an analytics layer publication stage."""
     return LineageRecord(
@@ -310,8 +355,9 @@ def build_analytics_publication_lineage(
             data_layer="analytics",
         ),
         record_count=record_count,
+        tenant_code=tenant_code,
         captured_at=datetime.now(UTC).isoformat(),
-        additional_context={},
+        additional_context=_with_config_versions({}, config_versions),
     )
 
 
@@ -338,6 +384,8 @@ def _serialise_lineage_record(record: LineageRecord) -> dict[str, Any]:
         "record_count": record.record_count,
         "captured_at": record.captured_at,
         "additional_context": record.additional_context,
+        "tenant_code": record.tenant_code,
+        "connection_id": record.connection_id,
     }
 
 
@@ -359,6 +407,8 @@ def _deserialise_lineage_record(raw: dict[str, Any]) -> LineageRecord:
         record_count=raw["record_count"],
         captured_at=raw["captured_at"],
         additional_context=raw.get("additional_context", {}),
+        tenant_code=raw.get("tenant_code", DEFAULT_TENANT_CODE),
+        connection_id=raw.get("connection_id"),
     )
 
 

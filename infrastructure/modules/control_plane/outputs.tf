@@ -32,3 +32,13 @@ output "control_plane_lambda_name" {
   description = "Name of the control-plane Lambda function."
   value       = aws_lambda_function.control_plane.function_name
 }
+
+output "api_stage_arn" {
+  description = <<-EOT
+    ARN of the API stage, in the form a WAF association requires.
+
+    apigatewayv2 does not expose an `arn` attribute on a stage, so the ARN is composed from
+    the api id and stage name rather than read from the resource.
+  EOT
+  value       = "arn:aws:apigateway:${data.aws_region.current.name}::/apis/${aws_apigatewayv2_api.control_plane.id}/stages/${aws_apigatewayv2_stage.default.name}"
+}

@@ -39,10 +39,14 @@ class TestCompile:
         req = SemanticQueryRequest(
             entity="company", metrics=("total_revenue", "company_count"), dimensions=("industry",)
         )
-        compiled = _COMPILER.compile(req, granted_access_tags=frozenset())
+        compiled = _COMPILER.compile(req, granted_access_tags=frozenset(), scope_predicate=None)
+        # Columns are view-qualified since DL-SEM-01: an unqualified column is ambiguous
+        # the moment a join is present.
         assert compiled.sql == (
-            "SELECT industry AS industry, SUM(annual_revenue) AS total_revenue, "
-            "COUNT(*) AS company_count FROM entity_data GROUP BY industry"
+            "SELECT entity_data.industry AS industry, "
+            "SUM(entity_data.annual_revenue) AS total_revenue, "
+            "COUNT(*) AS company_count FROM entity_data "
+            "GROUP BY entity_data.industry LIMIT 10000"
         )
         assert compiled.parameters == []
 
@@ -52,8 +56,8 @@ class TestCompile:
             metrics=("total_revenue",),
             filters=(SemanticFilter(dimension="industry", operator="eq", value="Tech"),),
         )
-        compiled = _COMPILER.compile(req, granted_access_tags=frozenset())
-        assert "WHERE industry = ?" in compiled.sql
+        compiled = _COMPILER.compile(req, granted_access_tags=frozenset(), scope_predicate=None)
+        assert "WHERE entity_data.industry = ?" in compiled.sql
         assert compiled.parameters == ["Tech"]
 
     def test_no_metrics_rejected(self):
@@ -61,6 +65,7 @@ class TestCompile:
             _COMPILER.compile(
                 SemanticQueryRequest(entity="company", metrics=()),
                 granted_access_tags=frozenset(),
+                scope_predicate=None,
             )
 
     def test_unknown_metric_rejected(self):
@@ -68,6 +73,7 @@ class TestCompile:
             _COMPILER.compile(
                 SemanticQueryRequest(entity="company", metrics=("nope",)),
                 granted_access_tags=frozenset(),
+                scope_predicate=None,
             )
 
     def test_unknown_entity_rejected(self):
@@ -75,6 +81,7 @@ class TestCompile:
             _COMPILER.compile(
                 SemanticQueryRequest(entity="ghost", metrics=("total_revenue",)),
                 granted_access_tags=frozenset(),
+                scope_predicate=None,
             )
 
     def test_access_tag_denied_without_grant(self):
@@ -82,13 +89,13 @@ class TestCompile:
             entity="company", metrics=("total_revenue",), dimensions=("country",)
         )
         with pytest.raises(AccessDeniedError):
-            _COMPILER.compile(req, granted_access_tags=frozenset())
+            _COMPILER.compile(req, granted_access_tags=frozenset(), scope_predicate=None)
 
     def test_access_tag_allowed_with_grant(self):
         req = SemanticQueryRequest(
             entity="company", metrics=("total_revenue",), dimensions=("country",)
         )
-        compiled = _COMPILER.compile(req, granted_access_tags=_ALL_TAGS)
+        compiled = _COMPILER.compile(req, granted_access_tags=_ALL_TAGS, scope_predicate=None)
         assert "billing_country AS country" in compiled.sql
 
     def test_access_tag_enforced_on_filter(self):
@@ -98,4 +105,4 @@ class TestCompile:
             filters=(SemanticFilter(dimension="country", operator="eq", value="US"),),
         )
         with pytest.raises(AccessDeniedError):
-            _COMPILER.compile(req, granted_access_tags=frozenset())
+            _COMPILER.compile(req, granted_access_tags=frozenset(), scope_predicate=None)

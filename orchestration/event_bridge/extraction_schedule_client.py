@@ -53,6 +53,7 @@ from botocore.exceptions import ClientError
 
 from contracts.identifier_policy import validate_tenant_code
 from observability.structured_logger import get_platform_logger
+from tenancy.connection_keys import resolve_connection_id
 
 _logger = get_platform_logger(__name__)
 
@@ -74,8 +75,17 @@ _MAX_SCHEDULE_NAME_LEN: Final[int] = 64
 # to a colliding value; a content hash of validated stable identifiers is not).
 _SCHEDULE_NAME_HASH_LEN: Final[int] = 10
 
-# EventBridge Scheduler flexible time window (OFF = exact schedule time).
+# EventBridge Scheduler flexible time window. Jitter is deliberately ON (DL-OPS-11,
+# gap 15): twelve connections per tenant means twelve times the schedules, and an exact
+# schedule time makes a thundering herd inevitable as connection count grows.
+DEFAULT_FLEXIBLE_WINDOW_MINUTES: Final[int] = 5
 _FLEXIBLE_WINDOW_OFF: Final[dict[str, str]] = {"Mode": "OFF"}
+
+
+def _flexible_window(minutes: int) -> dict[str, Any]:
+    if minutes <= 0:
+        return dict(_FLEXIBLE_WINDOW_OFF)
+    return {"Mode": "FLEXIBLE", "MaximumWindowInMinutes": minutes}
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +127,7 @@ class ExtractionScheduleClient:
         execution_role_arn: str,
         environment: str,
         region_name: str,
+        flexible_window_minutes: int = DEFAULT_FLEXIBLE_WINDOW_MINUTES,
     ) -> None:
         if not schedule_group_name:
             raise ValueError("schedule_group_name must not be empty.")
@@ -130,6 +141,7 @@ class ExtractionScheduleClient:
         self._target_arn = target_arn
         self._execution_role_arn = execution_role_arn
         self._environment = environment
+        self._flexible_window_minutes = flexible_window_minutes
         self._scheduler = boto3.client("scheduler", region_name=region_name)
 
     # ── Public API ──────────────────────────────────────────────────────────
@@ -142,6 +154,7 @@ class ExtractionScheduleClient:
         connector_params: dict[str, str],
         timezone: str = "UTC",
         tenant_code: str = "demo",
+        connection_id: str | None = None,
     ) -> str:
         """
         Create or update the extraction schedule for a source entity.
@@ -180,10 +193,11 @@ class ExtractionScheduleClient:
         _validate_stable_id("entity_id", entity_id)
         tenant_code = validate_tenant_code(tenant_code)
 
-        schedule_name = _build_schedule_name(tenant_code, source_id, entity_id)
+        schedule_name = _build_schedule_name(tenant_code, source_id, entity_id, connection_id)
         sfn_input = json.dumps(
             {
                 "source_id": source_id,
+                "connection_id": resolve_connection_id(source_id, connection_id),
                 "entity_id": entity_id,
                 "environment": self._environment,
                 "connector_params": connector_params,
@@ -203,7 +217,7 @@ class ExtractionScheduleClient:
             "Name": schedule_name,
             "ScheduleExpression": cron_expression,
             "ScheduleExpressionTimezone": timezone,
-            "FlexibleTimeWindow": _FLEXIBLE_WINDOW_OFF,
+            "FlexibleTimeWindow": _flexible_window(self._flexible_window_minutes),
             "Target": target,
             "State": "ENABLED",
         }
@@ -236,7 +250,13 @@ class ExtractionScheduleClient:
         )
         return schedule_arn
 
-    def delete_schedule(self, source_id: str, entity_id: str, tenant_code: str = "demo") -> None:
+    def delete_schedule(
+        self,
+        source_id: str,
+        entity_id: str,
+        tenant_code: str = "demo",
+        connection_id: str | None = None,
+    ) -> None:
         """
         Delete the extraction schedule for a source entity.
 
@@ -261,7 +281,7 @@ class ExtractionScheduleClient:
         _validate_stable_id("entity_id", entity_id)
         tenant_code = validate_tenant_code(tenant_code)
 
-        schedule_name = _build_schedule_name(tenant_code, source_id, entity_id)
+        schedule_name = _build_schedule_name(tenant_code, source_id, entity_id, connection_id)
         try:
             self._scheduler.delete_schedule(
                 GroupName=self._group_name,
@@ -282,7 +302,11 @@ class ExtractionScheduleClient:
         )
 
     def get_schedule(
-        self, source_id: str, entity_id: str, tenant_code: str = "demo"
+        self,
+        source_id: str,
+        entity_id: str,
+        tenant_code: str = "demo",
+        connection_id: str | None = None,
     ) -> dict[str, Any] | None:
         """
         Retrieve the current schedule configuration for a source entity.
@@ -305,7 +329,7 @@ class ExtractionScheduleClient:
         _validate_stable_id("entity_id", entity_id)
         tenant_code = validate_tenant_code(tenant_code)
 
-        schedule_name = _build_schedule_name(tenant_code, source_id, entity_id)
+        schedule_name = _build_schedule_name(tenant_code, source_id, entity_id, connection_id)
         try:
             response: dict[str, Any] = self._scheduler.get_schedule(
                 GroupName=self._group_name,
@@ -318,9 +342,16 @@ class ExtractionScheduleClient:
             raise
 
     @staticmethod
-    def build_schedule_name(source_id: str, entity_id: str, tenant_code: str = "demo") -> str:
-        """Return the deterministic schedule name for a tenant/source/entity tuple."""
-        return _build_schedule_name(validate_tenant_code(tenant_code), source_id, entity_id)
+    def build_schedule_name(
+        source_id: str,
+        entity_id: str,
+        tenant_code: str = "demo",
+        connection_id: str | None = None,
+    ) -> str:
+        """Return the deterministic schedule name for a tenant/connection/entity tuple."""
+        return _build_schedule_name(
+            validate_tenant_code(tenant_code), source_id, entity_id, connection_id
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +369,9 @@ def _validate_stable_id(field_name: str, value: str) -> None:
         )
 
 
-def _build_schedule_name(tenant_code: str, source_id: str, entity_id: str) -> str:
+def _build_schedule_name(
+    tenant_code: str, source_id: str, entity_id: str, connection_id: str | None = None
+) -> str:
     """
     Build the EventBridge Scheduler schedule name for a tenant/source/entity tuple.
 
@@ -357,7 +390,10 @@ def _build_schedule_name(tenant_code: str, source_id: str, entity_id: str) -> st
     which could make two distinct long-id tuples collide on the same
     truncated name.
     """
-    name = f"{tenant_code}{_SCHEDULE_NAME_SEP}{source_id}{_SCHEDULE_NAME_SEP}{entity_id}"
+    # DL-SCOPE-04: the middle component is the connection, which for a single-connection
+    # source is the source_id — so existing schedule names are unchanged.
+    key_id = resolve_connection_id(source_id, connection_id)
+    name = f"{tenant_code}{_SCHEDULE_NAME_SEP}{key_id}{_SCHEDULE_NAME_SEP}{entity_id}"
     if len(name) <= _MAX_SCHEDULE_NAME_LEN:
         return name
 

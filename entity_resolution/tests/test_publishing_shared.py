@@ -92,7 +92,7 @@ class TestEmitGoldenRecordLineage:
             region_name=_REGION,
         )
 
-        resp = s3.list_objects_v2(Bucket="gov-bucket", Prefix="lineage/")
+        resp = s3.list_objects_v2(Bucket="gov-bucket", Prefix="demo/lineage/")
         assert resp.get("KeyCount", 0) >= 1
 
     def test_emission_failure_is_swallowed(self):

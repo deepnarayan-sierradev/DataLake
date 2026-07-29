@@ -133,7 +133,7 @@ class ServingStoreLoader(ServingStoreLoaderInterface):
         placeholders = ", ".join([row_placeholder] * len(pk_tuples))
         # Identifiers validated by load_batches()/_ensure_table() above; values bound as params.
         sql = (
-            f"SELECT {pk_cols}, `_row_hash` FROM `{table_name}` "  # noqa: S608
+            f"SELECT {pk_cols}, `_row_hash` FROM `{table_name}` "  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
             f"WHERE ({pk_cols}) IN ({placeholders})"
         )
         params = [value for pk_tuple in pk_tuples for value in pk_tuple]

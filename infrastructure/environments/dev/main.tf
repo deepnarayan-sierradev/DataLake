@@ -560,3 +560,106 @@ module "glue" {
 
   depends_on = [module.storage]
 }
+
+# ---------------------------------------------------------------------------
+# SOW requirements programme additions (requirements/DL-01…DL-12)
+#
+# Wired identically into dev/staging/prod per infrastructure/CLAUDE.md. Each block names the
+# requirement it satisfies so a `terraform plan` reviewer can trace a resource to its clause.
+# ---------------------------------------------------------------------------
+
+# DL-SEC-13 (gap 7): WAF on the control plane. Starts in audit mode — DL-SEC-13 requires
+# alarming before blocking, and a managed rule set enforced blind will reject a legitimate
+# request shape sooner or later.
+module "waf" {
+  source      = "../../modules/waf"
+  environment = local.environment
+  region      = local.aws_region
+
+  api_gateway_stage_arn = module.control_plane.api_stage_arn
+  enforcement_mode      = var.waf_enforcement_mode
+  logs_kms_key_arn      = module.kms_logs.key_arn
+  alarm_sns_topic_arn   = module.observability.platform_alerts_topic_arn
+
+  tags = local.common_tags
+}
+
+# DL-SERV-01: the BI network path. Disabled until the customer decides on VPN topology —
+# an idle Client VPN endpoint bills hourly for something nobody connects to. Gap register
+# item 4 stays open while `enabled = false`, which the module's own output reports.
+module "client_vpn" {
+  source      = "../../modules/client_vpn"
+  environment = local.environment
+
+  enabled              = var.client_vpn_enabled
+  vpc_id               = module.networking.vpc_id
+  private_subnet_ids   = module.networking.private_subnet_ids
+  private_subnet_cidrs = var.private_subnet_cidrs
+
+  server_certificate_arn      = var.vpn_server_certificate_arn
+  client_root_certificate_arn = var.vpn_client_root_certificate_arn
+  tenant_access_groups        = var.vpn_tenant_access_groups
+  serving_store_port          = 3306
+
+  logs_kms_key_arn    = module.kms_logs.key_arn
+  alarm_sns_topic_arn = module.observability.platform_alerts_topic_arn
+
+  tags = local.common_tags
+}
+
+# DL-SERV-07 (gap 5): LF-Tags replacing the Athena/Glue wildcard grant. Required before a
+# second tenant's data lands in a shared environment.
+module "lake_formation" {
+  source      = "../../modules/lake_formation"
+  environment = local.environment
+
+  glue_database_name       = module.glue.analytics_database_name
+  tenant_codes             = var.lake_formation_tenant_codes
+  tenant_scoped_principals = var.lake_formation_tenant_scoped_principals
+  data_lake_admin_arns     = var.lake_formation_admin_arns
+
+  tags = local.common_tags
+
+  depends_on = [module.glue]
+}
+
+# ---------------------------------------------------------------------------
+# Platform Lambdas (S8/S9): webhook receiver, write-back, workflow runner, portability.
+#
+# Their handlers existed in code with no deployed function, so DL-CONN-14, DL-CONN-02, DL-06 and
+# DL-10 could not execute at all. Each gets its own execution role — see
+# `modules/iam/platform_lambda_roles.tf` for why sharing one would be a security regression.
+#
+# The webhook route and the workflow schedules are opt-in per environment: an unauthenticated
+# route that nothing uses is still attack surface, and a schedule firing against an empty
+# definition table only costs invocations.
+# ---------------------------------------------------------------------------
+
+module "platform_lambdas" {
+  source      = "../../modules/platform_lambdas"
+  environment = local.environment
+
+  lambda_package_s3_bucket   = var.lambda_package_s3_bucket
+  lambda_package_s3_key      = var.lambda_package_s3_key
+  lambda_package_source_hash = var.lambda_package_source_hash
+
+  webhook_receiver_role_arn = module.iam.webhook_receiver_role_arn
+  writeback_role_arn        = module.iam.writeback_role_arn
+  workflow_runner_role_arn  = module.iam.workflow_runner_role_arn
+  portability_role_arn      = module.iam.portability_role_arn
+
+  kms_key_arn      = module.kms_logs.key_arn
+  logs_kms_key_arn = module.kms_logs.key_arn
+
+  raw_s3_bucket_name       = module.storage.raw_layer_bucket_id
+  curated_s3_bucket_name   = module.storage.curated_layer_bucket_id
+  analytics_s3_bucket_name = module.storage.analytics_layer_bucket_id
+
+  # Opt-in surfaces: left off until a provider webhook and a published workflow exist.
+  control_plane_api_id            = ""
+  control_plane_api_execution_arn = ""
+  workflow_schedule_enabled       = false
+  tenant_codes                    = []
+
+  tags = local.common_tags
+}

@@ -182,6 +182,11 @@ class TestRunServingStoreLoad:
             def __init__(self, **kwargs: Any) -> None:
                 captured["init_kwargs"] = kwargs
 
+            def apply_statements(self, statements, tenant_code, table_name) -> int:
+                # DL-SERV-07: the loader applies the RLS policy after the table exists.
+                captured["rls_statements"] = list(statements)
+                return len(statements)
+
             def load_batches(self, record_batches, table_name, primary_keys, tenant_code, **kwargs):
                 captured["batches"] = list(record_batches)
                 captured["table_name"] = table_name
@@ -243,6 +248,9 @@ class TestRunServingStoreLoad:
 
             def __init__(self, **kwargs: Any) -> None:
                 pass
+
+            def apply_statements(self, statements, tenant_code, table_name) -> int:
+                return len(statements)
 
             def load_from_s3(self, bucket, prefix, table_name, primary_keys, tenant_code, **kwargs):
                 captured["bucket"] = bucket

@@ -53,21 +53,32 @@ from typing import Any, Final
 import boto3
 import pyarrow as pa
 import pyarrow.parquet as pq
-import structlog
 
 from contracts.identifier_policy import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN
+from contracts.observability_contract import PipelineStage
 from entity_resolution.entity_type_registry import EntityTypeRegistryClient
 from governance.data_catalog_registration import (
     CatalogDatasetSpec,
     DataCatalogRegistrationClient,
     DataLayer,
 )
-from observability.lambda_utils import check_lambda_timeout, configure_xray, require_env
+from observability.lambda_utils import check_lambda_timeout, require_env
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.s3_writer import S3ParquetWriter
+from observability.stage_execution import (
+    StageIdentity,
+    derive_correlation_id,
+    stage_execution,
+)
 from observability.structured_logger import get_platform_logger
+from observability.usage_metering import (
+    TenantUsageRepository,
+    aggregate_usage,
+    current_period,
+    read_audit_records_for_period,
+)
 
 _logger = get_platform_logger(__name__)
 
@@ -167,22 +178,21 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     _stage_start_ms = time.monotonic() * 1000
 
-    # Instrument AWS SDK calls with X-Ray subsegments (§5.5).
-    configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id, run_id=run_id)
-
-    # Bind run context to every log line emitted in this Lambda invocation.
-    # Cleared in the `finally` block below (OBS-1) — without this, a warm
-    # container's NEXT invocation could log under this run's stale run_id if
-    # it fails before rebinding (e.g. in _validate_event).
-    structlog.contextvars.bind_contextvars(
-        run_id=run_id,
+    # DL-OPS-05: the shared lifecycle replaces the hand-rolled bind/try/finally. It also covers
+    # the case this handler could not: a hard Lambda kill, where no `finally` runs at all and the
+    # run previously left no failure record behind.
+    identity = StageIdentity(
+        tenant_code=tenant_code,
         source_id=source_id,
         entity_id=entity_id,
-        tenant_code=tenant_code,
+        run_id=run_id,
+        environment=environment,
+        stage=PipelineStage.ANALYTICS_PUBLISH.value,
+        correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
     )
 
-    try:
-        return _run_analytics_publication(
+    with stage_execution(identity, region_name=require_env("AWS_REGION"), lambda_context=context):
+        result = _run_analytics_publication(
             source_id=source_id,
             entity_id=entity_id,
             environment=environment,
@@ -192,19 +202,15 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             run_started_at=run_started_at,
             stage_start_ms=_stage_start_ms,
         )
-    except Exception as exc:
-        _logger.error(
-            "analytics_publication_stage_failed",
-            source_id=source_id,
-            entity_id=entity_id,
-            run_id=run_id,
+        # L17: the analytics publish is where a run finishes, so it is where the period's usage
+        # can be recomputed from the audit log. Recomputed rather than incremented — see
+        # `TenantUsageRepository.save` for why an increment would double-count on a retry.
+        _record_tenant_usage(
+            tenant_code=tenant_code,
             environment=environment,
-            error=str(exc),
-            error_type=type(exc).__name__,
+            region_name=require_env("AWS_REGION"),
         )
-        raise
-    finally:
-        structlog.contextvars.clear_contextvars()
+        return result
 
 
 def _run_analytics_publication(
@@ -550,3 +556,27 @@ def _validate_event(event: dict[str, Any]) -> None:
     tenant_code = str(event["tenant_code"])
     if not TENANT_CODE_PATTERN.match(tenant_code):
         raise ValueError(f"tenant_code={tenant_code!r} does not conform to the tenant code format.")
+
+
+def _record_tenant_usage(*, tenant_code: str, environment: str, region_name: str) -> None:
+    """
+    Recompute this tenant's usage for the current period from the run audit log.
+
+    Never raises: metering is billing *input*, and a metering failure must not fail a pipeline run
+    that has already published its data. A missed period is recomputable from the audit log, which
+    is exactly why the audit log is the source of truth rather than a counter.
+    """
+    try:
+        period = current_period()
+        records = read_audit_records_for_period(
+            tenant_code=tenant_code, period=period, region_name=region_name
+        )
+        usage = aggregate_usage(records, tenant_code, period)
+        TenantUsageRepository(environment=environment, region_name=region_name).save(usage)
+    except Exception as exc:
+        _logger.warning(
+            "tenant_usage_metering_failed",
+            tenant_code=tenant_code,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )

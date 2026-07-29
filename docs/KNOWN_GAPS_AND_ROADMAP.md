@@ -1,6 +1,34 @@
 # Known Gaps and Roadmap
 
-**Last verified:** 2026-07-14, against the actual code (not inferred from older planning docs).
+**Last verified:** 2026-07-28, against the actual code (not inferred from older planning docs).
+
+**Second pass, 2026-07-28 (wiring).** An audit found that most of the programme's code had no
+deployed caller: the scope predicate was never constructed, the ten connectors were unreachable,
+DL-11 and DL-06 had no entry point, and a test parameterised over every consumption surface
+reported isolation working while four surfaces applied no filter. That has now been fixed, and
+**six gates in CI make the class of defect detectable** rather than relying on review:
+
+| Gate | Command | Catches |
+|---|---|---|
+| G1 reachability | `make reachability` | A production module with no production importer |
+| G2 registry | pytest | A source the extraction handler cannot resolve |
+| G3 call sites | pytest | A consumption surface that applies no scope predicate |
+| G4 fail-open | `make fail-open` | A security parameter defaulting to `None` |
+| G5 traceability | `make traceability` | A requirement uncited, unreachable, or falsely waived |
+| G6 absence alarms | Terraform | A control that publishes no metric because it never runs |
+
+G1 and G5 **fail on a stale waiver**, so `requirements/WAIVERS.md` cannot drift into fiction.
+
+Items below marked "closed in code" were re-checked against reachability during this pass; where
+the code existed but nothing called it, the item now says so.
+
+**Read this first.** The SOW requirements programme (`requirements/`, DL-01…DL-12 except the
+deferred DL-04 agent runtime and DL-05 ML platform) landed on 2026-07-28 and closed or changed
+many items below. Where an item says **Closed in code**, the code and Terraform exist and the test
+suite covers them, but **nothing below has been applied to a live AWS account beyond dev's
+pre-programme state** — `terraform apply` per environment is still outstanding, and an
+audit-then-enforce control counts as closed only once its enforce mode is switched on. Treat
+"closed in code" as "ready to deploy", never as "in force in production".
 
 This is the single place that tracks what's still missing, broken, or deferred in this platform.
 It replaces the old `architecture/GAP_ANALYSIS_FINDINGS.md` / `IMPROVEMENT_PLAN.md` /
@@ -21,7 +49,16 @@ smaller polish items.
 
 ## Security and correctness
 
-### 1. No IAM-enforced tenant boundary anywhere
+### 1. No IAM-enforced tenant boundary in force yet (**closed in code, audit mode, unapplied**)
+
+**Programme status:** `infrastructure/modules/iam/tenant_boundary.tf` now defines a deny-based
+tenant boundary across S3, DynamoDB, and Secrets Manager with a `tenant_boundary_mode` variable
+(`audit` → `enforce`) and a CloudTrail metric filter producing `CrossTenantAccessAttempts`. It
+ships in `audit` mode deliberately: flipping straight to `enforce` against live dev data would
+take the existing default tenant offline if any path construction disagrees with the policy. The
+gap is therefore **not closed operationally** until (a) it is applied, (b) `CrossTenantAccessAttempts`
+sits at zero for a sustained window, and (c) the mode is switched. The original description
+follows, and remains accurate for anything not yet applied.
 
 Tenant isolation for S3, Secrets Manager, and DynamoDB is entirely an application-level
 naming/prefix convention today — not backed by IAM. `infrastructure/modules/iam/main.tf` scopes
@@ -33,25 +70,35 @@ platform's single largest blocker to a credible multi-tenant security guarantee.
 properly is design-sized work — per-tenant IAM roles or resource-tag/prefix `Condition`s across
 three services, phased carefully so the existing default tenant doesn't break.
 
-### 2. Secrets Manager holds one shared credential per connector type, not per tenant
+### 2. ~~Secrets Manager holds one shared credential per connector type~~ (**closed in code**)
 
-Every tenant using, say, the Salesforce connector shares the same Secrets Manager entry
-(`edl/sources/{source_id}/credentials`) today. This only becomes a real problem once two tenants
-need *different* credentials for the same connector type — not yet exercised, since dev only runs
-one tenant. `tests/test_tenant_isolation.py` tracks this via a deliberately skipped placeholder
-test rather than a silent gap. Needs a per-tenant credential path convention plus a migration for
-any tenant already using shared credentials.
+Credentials are now **per connection**:
+`edl/tenants/{tenant_code}/connections/{connection_id}/credentials`, resolved through
+`connector_runtime/connection_credential_resolver.py::ConnectionCredentialPathResolver`. Write-back
+uses a separate `-writeback` secret with **no** legacy fallback, so a read-only deployment cannot
+mutate a source. The skipped placeholder in `tests/test_tenant_isolation.py` is gone, replaced by
+`TestSecretsManagerConnectionIsolation` with real assertions.
 
-### 3. The `entity-extraction-config` DynamoDB table isn't tenant-scoped at the key level
+**Outstanding operational step:** the legacy shared path is still read as a fallback *with a
+warning* so a partially-migrated environment cannot lose its only credential copy. Per environment:
+run `make migrate-credentials` (dry-run by default, then `--apply`), confirm no legacy-path warning
+appears in logs, and only then re-run with `--delete-legacy`.
 
-Its partition key is still bare `source_id`; `tenant_code` is only a plain attribute, checked
-after the read by an application-level guard
-(`connector_runtime/configuration_repository/configuration_repository.py::_enforce_tenant_match`).
-Because the guard fails closed, the practical symptom today is a 409 conflict blocking a second
-tenant's onboarding if they pick the same connector/entity combination as an existing tenant, not a
-live data leak. The same tenant-scoped-key pattern already exists twice elsewhere in the codebase
-(`watermark_repository.py`, `entity_type_registry.py`) to copy from — a contained, well-understood
-fix plus a companion GSI.
+### 3. ~~The `entity-extraction-config` DynamoDB table isn't tenant-scoped at the key level~~ (**closed**)
+
+The partition key now stores `tenant_scoped_key(tenant_code, connection_id)` (migration applied to
+dev on 2026-07-24), so two tenants configuring the same source/entity no longer collide. The
+application-level `_enforce_tenant_match` guard remains as defence in depth.
+
+The **connection** dimension went in with the same change (DL-12): the key component is
+`connection_id`, and for a single-connection source `connection_id == source_id`, which is what
+keeps every pre-existing key byte-identical. `scripts/migrate_to_connection_identity.py` (dry-run
+default, `--apply`, `--rollback`) registers the default connections and must run **before** the
+connection-aware code is deployed to an environment.
+
+What is *not* closed: `list_configs_for_tenant` is still a `Scan` — see item 13. A tenant-scoped
+partition key does not make a tenant listing efficient, because DynamoDB cannot prefix-match a
+partition key.
 
 ### 4. Serving store has no network path for BI tools to reach it
 
@@ -84,7 +131,15 @@ and is fragile against BI vendors' dynamic cloud egress IPs. This is new infrast
 config change; the serving store's Terraform is now deployed in dev, so this network path is the
 next blocker before any BI tool can consume the serving store.
 
-### 5. Glue/Athena analyst access is a wildcard grant across every tenant's data
+### 5. Glue/Athena analyst access is a wildcard grant across every tenant's data (**closed in code**)
+
+**Programme status:** `infrastructure/modules/lake_formation/` now defines per-tenant and
+per-department LF-Tags and replaces the wildcard grant; `aws_lakeformation_data_lake_settings`
+carries `principal = "IAM_ALLOWED_PRINCIPALS"` with empty permissions so nothing is implicitly
+granted. **Applying this revokes an existing grant three real dev principals depend on**, so it
+needs the account owner to name the principals and confirm before `terraform apply` — do not apply
+it as a side effect of another change. Original description follows.
+
 
 `infrastructure/modules/glue/main.tf` defines exactly two shared Glue databases (`edl_curated`,
 `edl_analytics`) for the whole platform. Tenant separation there is table-naming-convention only
@@ -97,16 +152,26 @@ applied. This is a separate, smaller-blast-radius concern than item 4 above (it'
 AWS analyst/admin principals, not end-tenant BI access) but should be resolved with per-tenant
 LF-Tags or data-cell filters before a second real tenant's data lands in a shared environment.
 
-### 6. Tenant provisioning has no admin-level authorization check
+### 6. ~~Tenant provisioning has no admin-level authorization check~~ (**closed by deletion, 2026-07-28**)
 
-`connector_runtime/api/control_plane_handler.py`'s `POST /tenants` route accepts any authenticated
-caller — the handler's own docstring says so explicitly, because there's no existing tenant to
-authorize against yet at that point in the flow. Once self-service multi-tenancy is actually live,
-any authenticated user from any existing tenant could provision new tenants. Needs an admin-scoped
-Cognito claim/authorizer that doesn't exist yet — small in code size, blocked on a design decision
-about how platform-admin identities get established.
+There is no tenant-provisioning route here any more, and there should never be one. `POST /tenants`,
+its handler, its request model, and the platform-admin capability were **deleted**: tenants, users,
+roles, and permissions are owned by the **Identity API**, and this repository is a
+configuration-driven processing system that only ever *consumes* a verified tenant claim. See the
+"System boundary" section of the root `CLAUDE.md`.
 
-### 7. The control-plane API was built with no WAF
+`connector_runtime/tests/test_control_plane_handler.py` asserts the route's **absence**, so it
+cannot be reintroduced by reflex. The corresponding requirement, DL-SEC-12, is marked **WITHDRAWN**
+in `requirements/DL-08-security-tenant-isolation.md`. Claim *validation* stayed — that is consuming
+identity, not owning it.
+
+### 7. The control-plane API was built with no WAF (**closed in code, audit mode**)
+
+**Programme status:** `infrastructure/modules/waf/` now exists (managed rule sets plus rate
+limiting) and is wired into all three environments, shipping in **audit** ("count") mode so a
+false positive cannot lock out the control plane on day one. Not closed operationally until the
+mode is switched to enforce after a review of counted matches. Original description follows.
+
 
 The original design called for an API Gateway + WAF (managed rule sets, per-tenant/per-IP rate
 limiting) in front of the control plane. No `aws_wafv2` resource and no WAF module exist anywhere
@@ -137,9 +202,16 @@ practice: no code-level evidence of any real traffic since it was deployed.
 These need a config-data fix (updating the seeded JSON), not a code change, and are separate from
 the code-level gaps elsewhere in this document.
 
-### 10. Lineage records and quality reports carry no tenant boundary in their S3 key
+### 10. ~~Lineage records and quality reports carry no tenant boundary in their S3 key~~ (**closed**)
 
-`governance/lineage_record.py` writes to `lineage/{entity_id}/{run_id}/{stage}-lineage.json` with
+Both writers now carry the `{tenant_code}/` prefix, matching every other data layer
+(`governance/lineage_record.py`, `transformation/transformation_pipeline.py`), and their tests
+assert the tenant-prefixed key rather than the old unscoped one. This was a prerequisite for the
+IAM conditions in item 1 — an unscoped prefix is not something an IAM policy can key on.
+
+Historical description, for anyone reading old S3 objects written before the change:
+
+`governance/lineage_record.py` wrote to `lineage/{entity_id}/{run_id}/{stage}-lineage.json` with
 no `tenant_code` segment and no tenant check on read at all. `transformation/transformation_pipeline.py`'s
 quality-report writer has the same gap
 (`quality-reports/{source_id}/{entity_id}/{run_id}/quality-report.json`). Because `run_id` is
@@ -171,7 +243,14 @@ It loads all golden records into one list, then builds a second full list compre
 internal entity-resolution fields before writing — two complete copies resident at once in a
 512MB Lambda. Fixable with a streaming/batched strip-and-write pass.
 
-### 13. Tenant-scoped list queries are full DynamoDB table scans
+### 13. ~~Tenant-scoped list queries are full DynamoDB table scans~~ (**closed in code**)
+
+Tenant-keyed GSIs are declared on `EdlEntityExtractionConfig` (`tenant-entity-index`, KEYS_ONLY)
+and `EdlRunAuditLog` (`tenant-started-index`), and `list_configs_for_tenant` queries the index when
+it exists, falling back to the Scan while an environment has not applied it. **Both tables are
+deployed, so adding a GSI is a live-data change and needs explicit approval before apply.**
+Original description follows.
+
 
 Both `configuration_repository.py::list_configs_for_tenant` and
 `control_plane_handler.py::_handle_list_runs` do a full `.scan()` with a tenant filter, because
@@ -186,12 +265,10 @@ every watermark row in an environment lands in one GSI partition regardless of t
 count, even though the base table's own primary key is correctly tenant-scoped. Needs a better GSI
 key shape — design-sized since changing a GSI key requires care around existing data.
 
-### 15. EventBridge schedules have zero jitter
+### 15. ~~EventBridge schedules have zero jitter~~ (**closed**)
 
-`orchestration/event_bridge/extraction_schedule_client.py` hardcodes `FlexibleTimeWindow` to
-`{"Mode": "OFF"}` for every schedule, so every tenant/source/entity sharing a common cron boundary
-fires at the exact same instant — a thundering-herd risk once many tenants share schedule times.
-Small fix: widen the flexible time window setting.
+`orchestration/event_bridge/extraction_schedule_client.py` now derives the window from
+`_flexible_window(self._flexible_window_minutes)` rather than hardcoding `{"Mode": "OFF"}`.
 
 ### 16. No true checkpoint-and-resume for Lambda's 900-second timeout
 
@@ -209,10 +286,14 @@ but the real remedy (keyset pagination on a monotonic column) isn't built. The i
 requires tightening each entity's watermark increment to keep a single run's result set under
 100,000 rows.
 
-### 18. DuckDB-accelerated code paths silently never run in any deployed Lambda
+### 18. ~~DuckDB-accelerated code paths silently never run in any deployed Lambda~~ (**closed in code**)
 
-The Lambda deployment package's dependency list (the `Makefile`'s `lambda-package` target) doesn't
-include `duckdb`, even though it's a declared project dependency. Every DuckDB-accelerated path
+`duckdb` is now in the `Makefile`'s `lambda-package` pip install list, so the accelerated paths
+execute in a freshly built package. Verify against a real deployment before treating the
+performance claims that depend on it as proven. Historical description:
+
+The Lambda deployment package's dependency list didn't include `duckdb`, even though it's a
+declared project dependency. Every DuckDB-accelerated path
 (SCD-merge, curated-load, cross-source entity-resolution join) has a graceful fallback to a slower,
 fully-materializing Python implementation — so nothing crashes, but several performance
 improvements documented elsewhere as complete quietly never execute as designed. Small fix: add
@@ -237,13 +318,17 @@ CloudWatch metrics stream.
 
 ## Smaller polish items
 
-- **Two correlation-ID mechanisms coexist.** Extraction/transformation thread `run_id` as an
-  explicit keyword argument; entity resolution/analytics publisher rely on `structlog.contextvars`
-  instead. Same guarantee, two mechanisms — a future refactor could silently drop one. Small,
-  mechanical fix to standardize on one approach across four handlers.
-- **No shared helper for Lambda handler boilerplate or test fixtures.** Logger/metrics/X-Ray wiring
-  and moto S3/DynamoDB test bootstrap are repeated independently across all four Lambda entrypoints
-  and 13+ test files. Not urgent, but maintenance cost scales with every new connector added.
+- **~~Two correlation-ID mechanisms coexist~~ (closed in code).** There is now one derivation,
+  `observability/stage_execution.py::derive_correlation_id(run_id, replay_of_run_id)`, and a replay
+  deliberately inherits the original run's id so one logical operation has one id. Handlers written
+  before the scaffold still thread `run_id` explicitly; migrating each remaining one to
+  `stage_execution(...)` is mechanical follow-up, not a correctness gap.
+- **~~No shared scaffold for Lambda handler boilerplate~~ (closed in code).**
+  `observability/stage_execution.py::StageExecution` is the template-method lifecycle: contextvars
+  bound then cleared, metrics flushed, stage duration emitted, and a failure record written on both
+  an exception and a hard Lambda kill (a `threading.Timer` watchdog fires just before the runtime
+  kills the process). Pre-existing handlers have not all been migrated to it yet. Shared *test*
+  fixtures are still duplicated across test modules — genuinely still open, and low priority.
 - **Sage's Intacct/X3 query engines remain separate from the shared query-builder pattern** used by
   Salesforce/NetSuite/MySQL. This is a deliberate decision (Sage builds JSON/OData request bodies,
   not SQL text — forcing it through the shared template would be a leaky abstraction), not
@@ -251,9 +336,11 @@ CloudWatch metrics stream.
 - **Lambda memory sizing is flat across all entity types.** A per-entity `lambda_memory_mb`
   override (for DuckDB-heavy merges vs. small entities) was proposed and explicitly deprioritized.
   Low priority at current data volumes.
-- **72 pre-existing mypy errors across 16 files** remain unaddressed (re-run the scoped command in
-  root `CLAUDE.md` to get the current count — it drifts slightly with incidental fixes in touched
-  files). Keeps the CI `typecheck` job red until separately remediated.
+- **~~72 pre-existing mypy errors~~ (closed 2026-07-28).** The CI `typecheck` scope — now 17
+  packages — is green, as is `bandit` (which had been red at `HEAD` on 20 pre-existing findings and
+  hard-fails on any). DL-SEC-18's exit gate is "CI fully green including typecheck", and a
+  permanently-red gate trains everyone to ignore gate failures. A mypy or bandit failure you see
+  now is almost certainly newly introduced; confirm against `HEAD` before calling it pre-existing.
 
 ---
 
@@ -264,3 +351,15 @@ CloudWatch metrics stream.
 - **Load testing** at the target scale (80–100 entities per tenant).
 - **Staging and prod environments are not provisioned yet** — only dev has been deployed. Both
   validate cleanly (`terraform validate`) and are ready to bootstrap when needed.
+- **Nothing from the SOW requirements programme has been applied to any AWS account.** 21 new
+  DynamoDB tables, the WAF, the LF-Tags, the IAM tenant boundary, the per-stage DLQs, and the
+  per-metric alarms all `terraform validate` cleanly in dev/staging/prod but exist only as code.
+  The two data migrations (`make migrate-connections`, `make migrate-credentials`) must run
+  **before** the corresponding code is deployed to each environment.
+- **Client VPN is deliberately `enabled = false`** (`infrastructure/modules/client_vpn/`) pending the
+  customer's answer on item 4's design decision. It is scaffolded, not chosen.
+- **The enterprise semantic model is published as a draft, not activated.** DL-SEM-04 requires a
+  named business owner's signature per KPI definition, and `scripts/seed_enterprise_semantic_model.py`
+  deliberately does not forge one — collect signatures, then `--sign`, `--approve` (a different
+  actor), and `--activate`.
+- **DL-04 (AI agent runtime) and DL-05 (ML platform) are deferred by agreement**, not missed.

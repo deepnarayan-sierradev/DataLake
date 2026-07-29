@@ -38,6 +38,7 @@ from connector_runtime.adapters.sage.products.intacct.intacct_auth import (
     IntacctAuthError,
     IntacctCredentialError,
 )
+from connector_runtime.tests.sage.request_assertions import _sent_request
 
 _TOKEN_URL = "https://api.intacct.com/ia/api/v1/auth/token"
 _BASE_URL = "https://api.intacct.com/ia/api/v1"
@@ -196,7 +197,7 @@ class TestBuildAuthHeaders:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         auth.get_access_token()
-        request = requests_mock.last_request
+        request = _sent_request(requests_mock)
         # Verify it was not a JSON body (must be form-encoded)
         assert "client_secret" not in (request.query or "")
         assert "super-secret-value" not in request.url

@@ -11,6 +11,7 @@ import pyarrow.parquet as pq
 import pytest
 from moto import mock_aws
 
+from tenancy.scope_contract import PartitionModel, TenantPartitionProfile
 from transformation.curated_layer_writer import CuratedLayerWriter
 from transformation.field_mapping.field_mapping_registry import (
     FieldMappingRegistryClient,
@@ -54,6 +55,13 @@ def _make_pipeline(mapping_registry_client, quality_policy=None):
     )
 
 
+# DL-SCOPE-07: the pipeline refuses to write curated rows it cannot attribute, so every context
+# declares a partition profile. `single` is the demo/dev shape — one implicit unit.
+_SINGLE_TENANT_PROFILE = TenantPartitionProfile(
+    tenant_code="demo", partition_model=PartitionModel.SINGLE
+)
+
+
 def _make_ctx(raw_prefix="raw/salesforce/salesforce-account/run-001/"):
     return TransformationContext(
         run_id=_RUN_ID,
@@ -66,6 +74,7 @@ def _make_ctx(raw_prefix="raw/salesforce/salesforce-account/run-001/"):
         curated_s3_bucket=_CURATED_BUCKET,
         region_name=_REGION,
         curated_date=date(2024, 1, 15),
+        partition_profile=_SINGLE_TENANT_PROFILE,
     )
 
 
@@ -909,6 +918,7 @@ class TestCuratedPartitionRegistration:
             region_name=_REGION,
             curated_date=date(2024, 3, 1),
             glue_catalog_database=self._DATABASE,
+            partition_profile=_SINGLE_TENANT_PROFILE,
         )
 
     def test_partition_registered_after_run(self) -> None:

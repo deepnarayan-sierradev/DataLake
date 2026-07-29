@@ -1,6 +1,6 @@
 # Platform Status — Enterprise Data Lake
 
-**Last updated:** 2026-07-14
+**Last updated:** 2026-07-28 (second pass — wiring)
 **Prepared by:** Platform Engineering
 
 > **Multi-tenancy note:** `tenant_code` is a first-class concept (default: `demo`, from
@@ -8,8 +8,15 @@
 > layer (raw, curated, analytics, schema snapshots), and genuinely key-scoped in the watermark and
 > entity-type-registry DynamoDB tables. See `docs/PIPELINE_FLOW.md`'s canonical isolation-model table
 > for the full layer-by-layer picture, and `docs/KNOWN_GAPS_AND_ROADMAP.md` for what's still open (no
-> IAM enforcement anywhere — S3 prefixing is write-path convention, not a bucket-policy boundary —
-> shared Secrets Manager credentials, Glue/Athena's wildcard grant).
+> IAM enforcement **in force** anywhere yet — S3 prefixing is write-path convention, not a
+> bucket-policy boundary; the deny-based IAM tenant boundary and the Lake Formation LF-Tags that
+> replace Glue/Athena's wildcard grant exist in Terraform but are unapplied, and the IAM boundary
+> ships in audit mode).
+>
+> **This document describes what is deployed.** The SOW requirements programme (2026-07-28) added a
+> large amount of code and Terraform that is **not applied anywhere** — see "Declared but not yet
+> applied" below, and `docs/KNOWN_GAPS_AND_ROADMAP.md` for the per-item status. Where the two
+> disagree, the deployed state in this document is the truth about the running system.
 
 ---
 
@@ -20,6 +27,77 @@
 | **Dev** | ✅ Infrastructure deployed, pipeline verified live | All 8 Lambda functions, Step Functions state machine, control-plane API (Cognito + API Gateway), DynamoDB tables, S3 buckets, SQS queues, EventBridge Scheduler group — deployed fresh on 2026-07-09 (an earlier "live" claim for this account had gone stale; the account was found empty and redeployed from scratch). Salesforce and MySQL RDS credentials are populated and the extraction → transformation → entity resolution → analytics pipeline has run end-to-end with real data (see Live Data below). Sage Intacct, Sage X3, and NetSuite credentials are still empty shells — those sources are code-complete but not connected. |
 | **Staging** | 🔲 Not provisioned | `terraform validate` is clean. No AWS account/credentials provisioned yet. |
 | **Production** | 🔲 Not provisioned | `terraform validate` is clean. Requires staging sign-off first per this repo's promotion policy. |
+
+---
+
+## Declared but not yet applied (SOW requirements programme, 2026-07-28)
+
+All of the following `terraform validate`s cleanly in dev, staging, and prod, and is covered by the
+test suite — and **none of it has been applied to any AWS account**. Nothing in the deployed-state
+sections below changed.
+
+### Wired vs declared-only — do not read "exists in code" as "runs"
+
+The distinction that matters is whether a **deployed entry point can reach the code**, not whether
+the code and its tests exist. `make wiring-gates` computes it; these numbers are from that command
+and are regenerated rather than hand-maintained:
+
+| Status | Count | Meaning |
+|---|---|---|
+| wired | 96 | Reachable from a Lambda handler, API route, or operator script |
+| infrastructure | 7 | Enforced by Terraform (KMS, TLS, LF-Tags), not by application code |
+| declared-only | 15 | Code and tests exist; **no deployed entry point reaches it** — each waived with the plan item that will wire it |
+| missing | 20 | No citation anywhere; process/deployment obligations, each waived with a reason |
+
+Every declared-only and missing item is listed in `requirements/WAIVERS.md` with its reason. The
+gates **fail on a stale waiver**, so that file cannot drift into fiction: when a module becomes
+reachable, CI breaks until the waiver is removed.
+
+### New Lambda functions declared in Terraform (not applied)
+
+`infrastructure/modules/platform_lambdas/` declares four functions whose handlers previously had no
+deployment at all: `EdlWebhookReceiver`, `EdlConnectorWriteback`, `EdlWorkflowRunner`,
+`EdlPortability`. Each has its **own** execution role
+(`infrastructure/modules/iam/platform_lambda_roles.tf`) — the write-back role reads only the
+`-writeback` secret suffix, and the portability role holds the only bulk `s3:DeleteObject` in the
+platform. The webhook API route and the workflow schedules are opt-in per environment and default
+to off.
+
+| Area | What exists in code | Terraform |
+|---|---|---|
+| Programme tables | 21 new DynamoDB tables (source connections, scope units, effective config, restatements, config governance, quality exceptions/policies, brands, data dictionary, semantic model versions, saved queries, workflow definitions/executions/idempotency/destinations, approval tasks, export requests, deletion requests, webhook dedup, PHI classifications) | `infrastructure/modules/metadata_persistence/programme_tables.tf` |
+| Per-metric alarms | One alarm per catalogued `PlatformMetric`, reconciled bidirectionally against the emitters by `observability/tests/test_alarm_emitter_reconciliation.py`; 5 metrics route to a paging SNS topic; Lambda Insights memory alarms | `infrastructure/modules/observability/platform_metric_alarms.tf` |
+| Per-stage DLQs | 9 per-stage dead-letter queues, a terminal `EdlStageReplayExhausted`, `EdlWebhookIngest.fifo`, `EdlReportDistribution`, plus depth alarms | `infrastructure/modules/orchestration/per_stage_dlq.tf` |
+| WAF | Managed rule sets + rate limiting in front of the control plane, **audit (count) mode** | `infrastructure/modules/waf/` |
+| IAM tenant boundary | Deny-based boundary across S3/DynamoDB/Secrets Manager, `tenant_boundary_mode = audit`, CloudTrail metric filter emitting `CrossTenantAccessAttempts` | `infrastructure/modules/iam/tenant_boundary.tf` |
+| Lake Formation | Per-tenant and per-department LF-Tags replacing the wildcard grant. **Applying this revokes a grant three real dev principals currently depend on** — confirm the principals with the account owner first | `infrastructure/modules/lake_formation/` |
+| Client VPN | Scaffolded with `enabled = false`, pending the customer's answer on the BI network-path decision | `infrastructure/modules/client_vpn/` |
+
+New Lambda entry points that exist in code but have no deployed function yet:
+`connector_runtime/webhook_receiver_handler.py` (provider webhooks) and
+`connector_runtime/writeback_handler.py` (bi-directional write-back).
+
+**Two data migrations must run before the corresponding code is deployed to an environment**, both
+dry-run by default:
+
+```bash
+make migrate-connections    # scripts/migrate_to_connection_identity.py — default connections (DL-12)
+make migrate-credentials    # scripts/migrate_credentials_to_connection_paths.py — per-connection secrets
+```
+
+Ten new sources (HubSpot, MaidCentral, ServMan Pro, WellSky, Housecall Pro, Dialpad, SeniorPlace,
+Google Ads, Google Analytics, Meta Ads) are implemented as declarative specs on the shared REST
+substrate.
+
+**Correction (2026-07-28):** an earlier version of this section said they were "code-complete in
+the same sense Sage and NetSuite are". That was wrong and materially so. Sage and NetSuite are
+imported by the extraction handler, so the registry can resolve them; the ten new adapters were
+imported only by their tests, which meant `resolve_builder()` raised `KeyError` for every one of
+them at runtime. They are now imported by the handler and
+`connector_runtime/tests/test_handler_connector_reachability.py` asserts — importing *only* the
+handler — that all fourteen resolve. **None has credentials, and none is connected**, which is the
+remaining and accurate statement. WellSky and SeniorPlace are marked PHI-bearing and are gated by
+`portability/phi_gate.py`, which fails closed on an unclassified field.
 
 ---
 
@@ -135,7 +213,7 @@ is not blocked the way it is for the other five.
 
 | Table | Purpose | Hash key | Terraform resource |
 |---|---|---|---|
-| `EdlEntityExtractionConfig` | Entity extraction configuration (source, watermark field, load type, tenant_code, etc.) | `source_id` + `entity_id` (range) | `aws_dynamodb_table.entity_extraction_config` |
+| `EdlEntityExtractionConfig` | Entity extraction configuration (source, watermark field, load type, tenant_code, etc.). The `source_id` attribute holds `tenant_scoped_key(tenant_code, connection_id)` — e.g. `"demo#salesforce"` — since the tenant-key migration was applied to dev on 2026-07-24; for a single-connection source `connection_id == source_id`, which is what kept every existing key byte-identical | `source_id` (tenant+connection-scoped composite) + `entity_id` (range) | `aws_dynamodb_table.entity_extraction_config` |
 | `EdlWatermarkRepository` | Per-entity watermark timestamps for incremental loads. The DynamoDB **key itself is tenant-scoped** — `WatermarkRepository` stores `tenant_scoped_key(tenant_code, source_id)` (e.g. `"demo#salesforce"`) as the `source_id` attribute, not just an application-level guard checked on read | `source_id` (tenant-scoped composite) + `entity_id` (range) | `aws_dynamodb_table.watermark_repository` |
 | `EdlRunAuditLog` | Immutable audit record of every pipeline run (including partial/checkpointed runs). `source-entity-time-index` GSI hash key (`source_entity_key`) is tenant-scoped as `{tenant_code}#{source_id}#{entity_id}`, populated for every run, not just DLQ-routed failures | `run_id` + `stage` (range) | `aws_dynamodb_table.run_audit_log` |
 | `EdlEntityTypeRegistry` | Tenant-scoped entity-type/entity-id registry (`entity_resolution/entity_type_registry.py::EntityTypeRegistryClient`) — supersedes the old hardcoded dicts, which remain as fallback seed data | `tenant_code` + `sk` (range) | `aws_dynamodb_table.entity_type_registry` |
@@ -154,7 +232,7 @@ is not blocked the way it is for the other five.
 | `EdlTransformationPipeline` | `transformation.transformation_pipeline_handler.lambda_handler` | Raw → curated layer (tenant-prefixed S3 keys) |
 | `EdlEntityResolutionPipeline` | `entity_resolution.entity_resolution_pipeline_handler.lambda_handler` | Curated → golden records; now streams curated records via DuckDB rather than fully materializing them, and resolves entity types via `EntityTypeRegistryClient` (DynamoDB) with fallback to hardcoded seed dicts |
 | `EdlAnalyticsLayerPublisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` | Golden records → analytics layer; emits an end-to-end pipeline SLA metric. |
-| `EdlControlPlane` | `connector_runtime.api.control_plane_handler.lambda_handler` | SaaS control-plane REST API behind a Cognito/JWT authorizer — tenant provisioning, entity registration/listing, pipeline trigger, run status. Deployed; end-to-end request flow against the live API Gateway + Cognito authorizer has not yet been exercised. |
+| `EdlControlPlane` | `connector_runtime.api.control_plane_handler.lambda_handler` | SaaS control-plane REST API behind a Cognito/JWT authorizer — entity registration/listing, pipeline trigger, run status, plus the config/semantic-governance routes in `api/config_governance_routes.py`. **No tenant/user/role provisioning route** — identity is owned by the Identity API (see the root `CLAUDE.md` system boundary); the deployed function still carries the older code until redeployed. Deployed; end-to-end request flow against the live API Gateway + Cognito authorizer has not yet been exercised. |
 | `EdlCredentialExpiryNotifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` | Daily check of all 5 source-credential secrets' age; publishes an SNS alert if rotation is overdue. |
 | `EdlPipelineTrigger` | `orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler` | Rate-limited SQS FIFO consumer that starts Step Functions executions — the single path both `scripts/trigger_extraction.py` and the control-plane API's pipeline-trigger route funnel through. |
 | `EdlDlqProcessor` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` | Processes the extraction-failure DLQ: writes an audit record, sends an SNS alert, and optionally auto-replays (`AUTO_REPLAY=false` by default). |

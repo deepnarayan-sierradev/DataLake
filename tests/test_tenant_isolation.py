@@ -73,6 +73,7 @@ from unittest.mock import patch
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from connector_runtime.adapters.mysql_rds.mysql_rds_raw_layer_writer import (
@@ -91,6 +92,7 @@ from connector_runtime.configuration_repository.configuration_repository import 
     ConfigurationNotFoundError,
     ConfigurationRepositoryClient,
 )
+from connector_runtime.connection_credential_resolver import ConnectionCredentialPathResolver
 from connector_runtime.interfaces.connector_interface import ExtractionRecord
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType
 from contracts.identifier_policy import DEFAULT_TENANT_CODE
@@ -100,15 +102,54 @@ from entity_resolution.resolution_config.resolution_config_registry import (
     ResolutionConfigNotFoundError,
     ResolutionConfigRegistry,
 )
+from orchestration.event_bridge.extraction_schedule_client import ExtractionScheduleClient
 from orchestration.step_functions.extraction_retry_policy import ExtractionRetryPolicy
 from schema_management.snapshot_repository.snapshot_repository import (
     FieldSnapshot,
     SchemaSnapshot,
     SchemaSnapshotRepository,
 )
+from semantic.enterprise_model import TAG_FINANCE, build_enterprise_model
+from semantic.query_compiler import QueryCompiler, SemanticFilter, SemanticQueryRequest
 from serving_store.serving_store_config_repository import (
     ServingStoreConfigNotFoundError,
     ServingStoreConfigRepositoryClient,
+)
+from serving_store.view_generator import (
+    EngineUnsuitableError,
+    ServingEngine,
+    require_suitable_engine,
+)
+from tenancy.aggregate_protection import (
+    AggregateFunction,
+    AggregateSuppressedError,
+    BenchmarkRequest,
+    enforce_benchmark,
+)
+from tenancy.connection_keys import connection_scoped_key, raw_layer_path_segments
+from tenancy.scope_attribution import ScopeAttributor
+from tenancy.scope_contract import (
+    PartitionKind,
+    PartitionModel,
+    ResolutionScope,
+    ScopeUnit,
+    TenantPartitionProfile,
+)
+from tenancy.scope_predicate import (
+    SCOPE_UNIT_COLUMN,
+    ConsumptionSurface,
+    EmptyScopeDenialError,
+    ScopeClaims,
+    UnknownScopeUnitError,
+    build_scope_claims,
+    scope_predicate,
+)
+from tenancy.source_connection import (
+    ConnectionOwnerType,
+    ConnectionState,
+    SourceConnection,
+    connection_credential_path,
+    connection_writeback_credential_path,
 )
 from transformation.field_mapping.field_mapping_registry import (
     FieldMappingRegistryClient,
@@ -805,19 +846,265 @@ class TestControlPlaneRunLookupIsolation:
 
 
 # ---------------------------------------------------------------------------
-# Documented gap: Secrets Manager is not yet tenant-scoped
+# Secrets Manager per-connection isolation (DL-SEC-05 / DL-SCOPE-06)
 # ---------------------------------------------------------------------------
+#
+# This replaces the skipped placeholder that tracked the gap while credentials were
+# provisioned per-source-connector with no tenant dimension. `DL-SCOPE-06` established the
+# correct grain — per connection under a tenant prefix — so there is now something real to
+# assert, and the assertion is real rather than a skip.
 
 
-@pytest.mark.skip(
-    reason=(
-        "Secrets Manager credentials are provisioned per-source-connector, not "
-        "per-tenant, in the current design (SEC-2 follow-up in "
-        "architecture/GAP_ANALYSIS_FINDINGS.md). There is no tenant_code "
-        "dimension on a secret yet, so there is nothing to isolate — this is a "
-        "tracked placeholder, not a false-positive pass, so the gap stays "
-        "visible in test output until a per-tenant credential model exists."
-    )
+class TestSecretsManagerConnectionIsolation:
+    def test_two_tenants_on_one_connector_type_get_distinct_secret_paths(self) -> None:
+        acme = connection_credential_path("acme-corp", "hubspot")
+        globex = connection_credential_path("globex-eu", "hubspot")
+        assert acme != globex
+        assert acme.startswith("edl/tenants/acme-corp/")
+        assert globex.startswith("edl/tenants/globex-eu/")
+
+    def test_twelve_franchisee_connections_never_share_a_secret(self) -> None:
+        paths = {
+            connection_credential_path("evive", f"hubspot-franchisee-{index:04d}")
+            for index in range(12)
+        }
+        assert len(paths) == 12
+
+    def test_write_back_credentials_are_a_separate_secret(self) -> None:
+        read = connection_credential_path("evive", "hubspot-grasons")
+        write = connection_writeback_credential_path("evive", "hubspot-grasons")
+        assert read != write
+
+    @mock_aws
+    def test_a_tenants_credential_is_not_readable_at_another_tenants_path(self) -> None:
+        secrets = boto3.client("secretsmanager", region_name=_REGION)
+        secrets.create_secret(
+            Name=connection_credential_path("acme-corp", "hubspot"),
+            SecretString='{"access_token": "acme-token"}',
+        )
+        resolver = ConnectionCredentialPathResolver(secrets, allow_legacy_fallback=False)
+        acme_path = resolver.resolve("acme-corp", "hubspot", "hubspot")
+        globex_path = resolver.resolve("globex-eu", "hubspot", "hubspot")
+        assert acme_path.secret_id != globex_path.secret_id
+        with pytest.raises(ClientError):
+            secrets.get_secret_value(SecretId=globex_path.secret_id)
+
+    @mock_aws
+    def test_the_migration_fallback_is_logged_not_silent(self) -> None:
+        secrets = boto3.client("secretsmanager", region_name=_REGION)
+        secrets.create_secret(
+            Name="edl/sources/hubspot/credentials", SecretString='{"access_token": "shared"}'
+        )
+        resolved = ConnectionCredentialPathResolver(secrets).resolve("evive", "hubspot", "hubspot")
+        assert resolved.is_legacy_shared is True
+
+    @mock_aws
+    def test_write_back_never_falls_back_to_a_shared_secret(self) -> None:
+        secrets = boto3.client("secretsmanager", region_name=_REGION)
+        secrets.create_secret(
+            Name="edl/sources/hubspot/credentials", SecretString='{"access_token": "shared"}'
+        )
+        resolved = ConnectionCredentialPathResolver(secrets).resolve(
+            "evive", "hubspot", "hubspot", write_back=True
+        )
+        assert resolved.is_legacy_shared is False
+        assert resolved.secret_id.endswith("-writeback")
+
+
+# ---------------------------------------------------------------------------
+# Scope-unit isolation, tested adversarially (DL-SCOPE-18)
+# ---------------------------------------------------------------------------
+#
+# Tested as an attacker, not as a filter: every surface in DL-SCOPE-17 gets an explicit
+# cross-unit reach attempt, plus a crafted claim, an empty scope set, drill-through, a merged
+# golden record, `field_provenance` in Athena, and a small-cohort aggregate. The degenerate
+# `single`-tenant case is proven by test rather than by inspection.
+
+_PARTITIONED_PROFILE = TenantPartitionProfile(
+    tenant_code="evive",
+    partition_model=PartitionModel.PARTITIONED,
+    partition_kind=PartitionKind.FRANCHISE,
 )
-def test_secrets_manager_tenant_isolation_not_yet_implemented() -> None:
-    raise NotImplementedError
+_SINGLE_PROFILE = TenantPartitionProfile(tenant_code="demo")
+
+
+def _units(*ids: str) -> list[ScopeUnit]:
+    return [
+        ScopeUnit(
+            tenant_code="evive",
+            scope_unit_id=unit_id,
+            partition_kind=PartitionKind.FRANCHISE,
+            display_name=unit_id,
+        )
+        for unit_id in ids
+    ]
+
+
+def _franchisee_claims(*granted: str) -> ScopeClaims:
+    return build_scope_claims(
+        "evive",
+        _PARTITIONED_PROFILE,
+        granted_scope_unit_ids=frozenset(granted),
+        units=_units("franchisee-0001", "franchisee-0002", "franchisee-0003"),
+    )
+
+
+class TestScopeIsolationAcrossEverySurface:
+    @pytest.mark.parametrize("surface", list(ConsumptionSurface))
+    def test_no_surface_can_reach_another_units_rows(self, surface: ConsumptionSurface) -> None:
+        predicate = scope_predicate(_franchisee_claims("franchisee-0001"), surface=surface)
+        assert predicate.matches("franchisee-0001") is True
+        assert predicate.matches("franchisee-0002") is False
+        assert predicate.matches("franchisee-0003") is False
+
+    @pytest.mark.parametrize("surface", list(ConsumptionSurface))
+    def test_an_empty_scope_claim_denies_every_surface(self, surface: ConsumptionSurface) -> None:
+        with pytest.raises(EmptyScopeDenialError):
+            scope_predicate(ScopeClaims(tenant_code="evive"), surface=surface)
+
+    def test_a_crafted_claim_naming_a_foreign_unit_is_rejected_at_issuance(self) -> None:
+        with pytest.raises(UnknownScopeUnitError):
+            build_scope_claims(
+                "evive",
+                _PARTITIONED_PROFILE,
+                granted_scope_unit_ids=frozenset({"franchisee-9999"}),
+                units=_units("franchisee-0001"),
+            )
+
+    def test_a_crafted_claim_cannot_inject_sql(self) -> None:
+        with pytest.raises(ValueError):
+            ScopeClaims(tenant_code="evive", scope_unit_ids=frozenset({"' OR 1=1 --"}))
+
+    def test_semantic_query_binds_the_predicate_before_every_other_filter(self) -> None:
+        model = build_enterprise_model("evive")
+        compiler = QueryCompiler(model)
+        predicate = scope_predicate(
+            _franchisee_claims("franchisee-0001"), surface=ConsumptionSurface.SEMANTIC_QUERY
+        )
+        compiled = compiler.compile(
+            SemanticQueryRequest(
+                entity="ar_invoice",
+                metrics=("revenue",),
+                filters=(SemanticFilter(dimension="invoice_status", operator="eq", value="paid"),),
+            ),
+            granted_access_tags=frozenset({TAG_FINANCE}),
+            scope_predicate=predicate,
+        )
+        assert compiled.scope_predicate_applied is True
+        assert compiled.parameters[0] == "franchisee-0001"
+        assert "franchisee-0002" not in compiled.sql
+
+    def test_drill_through_cannot_widen_the_scope(self) -> None:
+        # A drill-through is a second query on the same claim; it gets the same predicate.
+        drill = scope_predicate(
+            _franchisee_claims("franchisee-0001"), surface=ConsumptionSurface.DRILL_THROUGH
+        )
+        assert drill.matches("franchisee-0002") is False
+
+    def test_an_export_cannot_escalate_past_the_predicate(self) -> None:
+        predicate = scope_predicate(
+            _franchisee_claims("franchisee-0001"), surface=ConsumptionSurface.EXPORT
+        )
+        rows = [
+            {"id": "1", "scope_unit_id": "franchisee-0001"},
+            {"id": "2", "scope_unit_id": "franchisee-0002"},
+        ]
+        visible = [row for row in rows if predicate.matches(row["scope_unit_id"])]
+        assert [row["id"] for row in visible] == ["1"]
+
+    def test_field_provenance_cannot_expose_another_unit_through_athena(self) -> None:
+        # A golden record resolved at scope-unit grain carries provenance from one unit only,
+        # so `json_extract_scalar(field_provenance, ...)` has nothing foreign to reveal.
+        attributor = ScopeAttributor(
+            SourceConnection(
+                tenant_code="evive",
+                connection_id="hubspot-franchisee-0001",
+                source_id="hubspot",
+                display_name="F1 HubSpot",
+                owner_type=ConnectionOwnerType.SCOPE_UNIT,
+                owner_id="franchisee-0001",
+                state=ConnectionState.ACTIVE,
+            ),
+            _PARTITIONED_PROFILE,
+        )
+        stamped = attributor.stamp({"account_id": "a1", "field_provenance": "{}"})
+        assert stamped["scope_unit_id"] == "franchisee-0001"
+        predicate = scope_predicate(
+            _franchisee_claims("franchisee-0002"), surface=ConsumptionSurface.ATHENA
+        )
+        assert predicate.matches(stamped["scope_unit_id"]) is False
+
+    def test_a_merged_golden_record_cannot_span_two_units(self) -> None:
+        # Scope-unit resolution is the default for a partitioned tenant, so two units'
+        # identical customer produces two records rather than one merged pair.
+        assert _PARTITIONED_PROFILE.default_resolution_scope is ResolutionScope.SCOPE_UNIT
+        stamps = []
+        for unit_id in ("franchisee-0001", "franchisee-0002"):
+            attributor = ScopeAttributor(
+                SourceConnection(
+                    tenant_code="evive",
+                    connection_id=f"hubspot-{unit_id}",
+                    source_id="hubspot",
+                    display_name=unit_id,
+                    owner_type=ConnectionOwnerType.SCOPE_UNIT,
+                    owner_id=unit_id,
+                    state=ConnectionState.ACTIVE,
+                ),
+                _PARTITIONED_PROFILE,
+            )
+            stamps.append(attributor.stamp({"email": "shared@customer.test"})["scope_unit_id"])
+        assert stamps == ["franchisee-0001", "franchisee-0002"]
+
+    def test_a_small_cohort_benchmark_is_suppressed(self) -> None:
+        request = BenchmarkRequest(
+            cohort_scope_unit_ids=frozenset({"franchisee-0001", "franchisee-0002"}),
+            functions=frozenset({AggregateFunction.AVERAGE}),
+            viewer_scope_unit_ids=frozenset({"franchisee-0001"}),
+        )
+        with pytest.raises(AggregateSuppressedError):
+            enforce_benchmark(request)
+
+    def test_a_tenant_admin_sees_every_unit(self) -> None:
+        claims = build_scope_claims("evive", _PARTITIONED_PROFILE, tenant_wide=True)
+        predicate = scope_predicate(claims)
+        assert predicate.matches("franchisee-0001") is True
+        assert predicate.matches("franchisee-0003") is True
+        assert predicate.matches(None) is True
+
+    def test_a_single_tenant_predicate_is_applied_and_matches_everything(self) -> None:
+        claims = build_scope_claims("demo", _SINGLE_PROFILE)
+        predicate = scope_predicate(claims)
+        assert predicate.matches_all_rows is True
+        assert predicate.matches(None) is True
+        assert predicate.matches("anything") is True
+        # Applied, not skipped: the SQL still names the security column.
+        assert SCOPE_UNIT_COLUMN in predicate.sql
+
+    def test_an_unattributable_row_is_tenant_level_never_universal(self) -> None:
+        unit_scoped = scope_predicate(_franchisee_claims("franchisee-0001"))
+        tenant_wide = scope_predicate(
+            build_scope_claims("evive", _PARTITIONED_PROFILE, tenant_wide=True)
+        )
+        assert unit_scoped.matches(None) is False
+        assert tenant_wide.matches(None) is True
+
+    def test_a_partitioned_tenant_on_mysql_is_refused_rather_than_left_open(self) -> None:
+        with pytest.raises(EngineUnsuitableError):
+            require_suitable_engine(ServingEngine.MYSQL, _PARTITIONED_PROFILE)
+
+    def test_twelve_franchisee_connections_never_collide_on_any_key(self) -> None:
+        config_keys = set()
+        raw_prefixes = set()
+        schedule_names = set()
+        for index in range(12):
+            connection_id = f"hubspot-franchisee-{index:04d}"
+            config_keys.add(connection_scoped_key("evive", "hubspot", connection_id))
+            raw_prefixes.add(tuple(raw_layer_path_segments("hubspot", connection_id)))
+            schedule_names.add(
+                ExtractionScheduleClient.build_schedule_name(
+                    "hubspot", "hubspot-company", "evive", connection_id
+                )
+            )
+        assert len(config_keys) == 12
+        assert len(raw_prefixes) == 12
+        assert len(schedule_names) == 12

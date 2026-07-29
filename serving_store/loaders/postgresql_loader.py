@@ -175,7 +175,7 @@ class PostgreSqlLoader(ServingStoreLoaderInterface):
         # params. Postgres supports row-value IN natively — unlike SQL Server (see
         # sqlserver_loader.py's VALUES-join workaround for the non-portable case).
         sql = (
-            f'SELECT {pk_cols}, "_row_hash" FROM "{table_name}" '  # noqa: S608
+            f'SELECT {pk_cols}, "_row_hash" FROM "{table_name}" '  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
             f"WHERE ({pk_cols}) IN ({placeholders})"
         )
         params = [value for pk_tuple in pk_tuples for value in pk_tuple]
@@ -202,7 +202,7 @@ class PostgreSqlLoader(ServingStoreLoaderInterface):
         pk_cols = ", ".join(f'"{k}"' for k in primary_keys)
         # Identifiers validated by load_batches()/_ensure_table() above; values bound as params.
         sql = (
-            f'INSERT INTO "{table_name}" ({col_list}) VALUES ({placeholders}) '  # noqa: S608
+            f'INSERT INTO "{table_name}" ({col_list}) VALUES ({placeholders}) '  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
             f"ON CONFLICT ({pk_cols}) DO UPDATE SET {update_clause}"
         )
         now = datetime.now(UTC).isoformat()
