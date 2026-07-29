@@ -10,20 +10,24 @@
 # ---------------------------------------------------------------------------
 
 locals {
-  # `latency_class` selects the neglect threshold below:
-  #   blocking   — downstream stages cannot run until this one succeeds
-  #   downstream — consumes the golden record; a delay does not miss the business day
-  #   realtime    — near-real-time ingress, where lag is visible to the source system
+  # `latency_class` selects the neglect threshold below. Cut around the **critical path to the
+  # serving store**, because that is what the freshness commitment measures — not around which
+  # stages block which others:
+  #
+  #   critical_path — on the path to fresh curated/serving data; a delay here breaches the SLA
+  #   additive      — enriches but does not gate freshness (twin_build's own Catch routes straight
+  #                   to LoadServingStore, so its failure cannot delay the serving store)
+  #   realtime      — near-real-time ingress, where lag is visible to the source system
   pipeline_stages = {
-    extraction         = { visibility_timeout = 960, latency_class = "blocking" }
-    transformation     = { visibility_timeout = 960, latency_class = "blocking" }
-    entity_resolution  = { visibility_timeout = 960, latency_class = "blocking" }
-    analytics_publish  = { visibility_timeout = 420, latency_class = "downstream" }
-    serving_store_load = { visibility_timeout = 960, latency_class = "downstream" }
-    twin_build         = { visibility_timeout = 960, latency_class = "downstream" }
+    extraction         = { visibility_timeout = 960, latency_class = "critical_path" }
+    transformation     = { visibility_timeout = 960, latency_class = "critical_path" }
+    entity_resolution  = { visibility_timeout = 960, latency_class = "critical_path" }
+    analytics_publish  = { visibility_timeout = 420, latency_class = "critical_path" }
+    serving_store_load = { visibility_timeout = 960, latency_class = "critical_path" }
+    twin_build         = { visibility_timeout = 960, latency_class = "additive" }
+    workflow_action    = { visibility_timeout = 420, latency_class = "additive" }
     webhook_ingest     = { visibility_timeout = 120, latency_class = "realtime" }
     writeback          = { visibility_timeout = 420, latency_class = "realtime" }
-    workflow_action    = { visibility_timeout = 420, latency_class = "downstream" }
   }
 
   # ---------------------------------------------------------------------------
@@ -43,26 +47,38 @@ locals {
   # arriving and draining fine" from "one message stuck for three days", so it is used only as a
   # capacity guard. The primary signal is age: is anything being neglected?
   # ---------------------------------------------------------------------------
+  # Detection budget is derived from the freshness commitment, not chosen. With a 2-hour tight-end
+  # SLA and a happy-path pipeline of roughly one hour, the remaining hour must cover detect +
+  # acknowledge + triage + replay:
+  #
+  #     replay from the failed stage onward   ~30 min
+  #     acknowledge and triage                ~15 min
+  #     ---------------------------------------------
+  #     detection budget                      ~15 min   -> oldest_critical_path_seconds = 900
+  #
+  # An hour of detection (the first cut of this file) would have consumed the entire recovery
+  # budget on its own, leaving a breach unavoidable the moment a critical-path stage failed.
   dlq_alarm_defaults = {
     dev = {
-      oldest_blocking_seconds   = 900
-      oldest_downstream_seconds = 3600
-      oldest_realtime_seconds   = 300
-      arrival_spike_per_period  = 0
-      backlog_depth             = 0
+      oldest_critical_path_seconds = 900
+      oldest_additive_seconds      = 3600
+      oldest_realtime_seconds      = 300
+      arrival_spike_per_period     = 0
+      backlog_depth                = 0
     }
     staging = {
-      oldest_blocking_seconds   = 1800
-      oldest_downstream_seconds = 7200
-      oldest_realtime_seconds   = 600
-      arrival_spike_per_period  = 10
-      backlog_depth             = 200
+      oldest_critical_path_seconds = 900
+      oldest_additive_seconds      = 7200
+      oldest_realtime_seconds      = 600
+      arrival_spike_per_period     = 10
+      backlog_depth                = 200
     }
     prod = {
-      # Same-business-day notice for a blocking stage; 4h for downstream; 15m for ingress.
-      oldest_blocking_seconds   = 3600
-      oldest_downstream_seconds = 14400
-      oldest_realtime_seconds   = 900
+      # 15 min on the critical path so a failed run can still land inside the 2-hour commitment.
+      # Additive stages get an hour: a missing twin does not make curated data stale.
+      oldest_critical_path_seconds = 900
+      oldest_additive_seconds      = 3600
+      oldest_realtime_seconds      = 900
       # ~20 arrivals/stage/day is ~0.07 per 5-minute period, so 50 is a burst rather than routine
       # failure. Replace with a CloudWatch anomaly-detection band once ~2 weeks of real baseline
       # exists — a static number will drift as tenants onboard.
@@ -78,9 +94,9 @@ locals {
   )
 
   dlq_oldest_seconds = {
-    blocking   = local.dlq_alarms.oldest_blocking_seconds
-    downstream = local.dlq_alarms.oldest_downstream_seconds
-    realtime   = local.dlq_alarms.oldest_realtime_seconds
+    critical_path = local.dlq_alarms.oldest_critical_path_seconds
+    additive      = local.dlq_alarms.oldest_additive_seconds
+    realtime      = local.dlq_alarms.oldest_realtime_seconds
   }
 }
 

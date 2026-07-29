@@ -152,7 +152,7 @@ variable "dlq_alarm_overrides" {
     deviate from the environment's default — e.g. tightening a blocking-stage threshold for a
     tenant SLA — so the sized numbers stay in one place rather than being copied per environment.
 
-    Accepted keys: oldest_blocking_seconds, oldest_downstream_seconds, oldest_realtime_seconds,
+    Accepted keys: oldest_critical_path_seconds, oldest_additive_seconds, oldest_realtime_seconds,
     arrival_spike_per_period, backlog_depth.
   DESC
   type        = map(number)
@@ -160,8 +160,8 @@ variable "dlq_alarm_overrides" {
 
   validation {
     condition = length(setsubtract(keys(var.dlq_alarm_overrides), [
-      "oldest_blocking_seconds",
-      "oldest_downstream_seconds",
+      "oldest_critical_path_seconds",
+      "oldest_additive_seconds",
       "oldest_realtime_seconds",
       "arrival_spike_per_period",
       "backlog_depth",

@@ -68,18 +68,21 @@ means a control stopped running and therefore breaches.
 
 The neglect threshold is selected by a stage's `latency_class`, declared alongside its queue:
 
+Classes are cut around the **critical path to the serving store**, because that is what the
+freshness commitment measures — not around which stages block which others.
+
 | Class | Stages | Rationale |
 |---|---|---|
-| `blocking` | extraction, transformation, entity_resolution | Downstream stages cannot run until this succeeds |
-| `downstream` | analytics_publish, serving_store_load, twin_build, workflow_action | Consumes the golden record; a delay does not miss the business day |
-| `realtime` | webhook_ingest, writeback | Near-real-time paths where lag is visible to the source system |
+| `critical_path` | extraction, transformation, entity_resolution, analytics_publish, serving_store_load | On the path to fresh curated/serving data; a delay here breaches the SLA |
+| `additive` | twin_build, workflow_action | Enriches but does not gate freshness — `twin_build`'s own `Catch` routes straight to `LoadServingStore`, so its failure cannot delay the serving store |
+| `realtime` | webhook_ingest, writeback | Near-real-time ingress, where lag is visible to the source system |
 
 ### Values
 
 | Threshold | dev | staging | prod | Derivation |
 |---|---|---|---|---|
-| `oldest_blocking_seconds` | 900 | 1800 | **3600** | Same-business-day notice for a stage that blocks the pipeline |
-| `oldest_downstream_seconds` | 3600 | 7200 | **14400** | 4h still lands inside the business day |
+| `oldest_critical_path_seconds` | 900 | 900 | **900** | The recovery-budget calculation below |
+| `oldest_additive_seconds` | 3600 | 7200 | **3600** | A missing twin does not make curated data stale |
 | `oldest_realtime_seconds` | 300 | 600 | **900** | 15 min is already a visible ingress lag |
 | `arrival_spike_per_period` (5 min) | 0 | 10 | **50** | Baseline ≈20/stage/day ≈0.07 per 5-min period; 50 is a burst, not routine failure |
 | `backlog_depth` | 0 | 200 | **2000** | ~100 days of normal accumulation — triage has stopped, or something is systemic |
@@ -174,9 +177,51 @@ These are recorded rather than fixed, and each is a real gap:
 
 ---
 
-## The one number still to be decided
+## The freshness commitment, and the budget derived from it
 
-The `oldest_blocking_seconds = 3600` value assumes **same-business-day** time-to-notice. If a
-tenant SLA promises tighter curated-data freshness — say 4 hours — that threshold drops to roughly
-15 minutes, and the jitter window has to shrink with it, which pushes directly back on the
-concurrency plan in gap 5. That trade-off is a product decision, not an engineering one.
+**Agreed 2026-07-29: same business day, with an expectation of end-to-end completion in 2-4 hours.**
+
+This is the commitment every threshold above is derived from, and it is measured by exactly one
+alarm: `PipelineFreshnessSeconds`. That alarm was **86400s (24h) and non-paging** — 6-12x looser
+than the commitment, which made it decorative. It is now 7200s and paging in prod, 14400s in
+staging, and left at 24h in dev where there is no SLA.
+
+This matters more than any DLQ threshold: **a run that *succeeds* in five hours breaches the
+commitment and produces no DLQ message at all**, so no DLQ alarm can see it. Every alarm in the
+sections above measures failure *handling*; this one measures the promise.
+
+### Recovery budget
+
+Taking the tight end (2 hours) as the design point, so the loose end is margin rather than target,
+and assuming a happy-path pipeline of roughly one hour:
+
+| Phase | Budget |
+|---|---|
+| Happy-path pipeline | ~60 min |
+| Replay from the failed stage onward | ~30 min |
+| Acknowledge and triage | ~15 min |
+| **Detection** | **~15 min** |
+
+Hence `oldest_critical_path_seconds = 900` in every environment. The first cut of this file used
+3600s, which would have consumed the entire recovery budget on detection alone — a breach would
+have been unavoidable the moment a critical-path stage failed.
+
+### The consequence for scheduling, and the open question
+
+A 2-hour commitment bounds the **jitter window** at roughly `SLA − pipeline duration`, i.e. about
+one hour. Spreading 24,000 entities across 60 one-minute slots is ~400 starts/min, which at ~10
+minutes per extraction implies on the order of 4,000 concurrent Lambdas — several times the default
+1,000 per-region limit. Tightening freshness and flattening the concurrency peak pull in opposite
+directions, and the resolution depends on one thing that is still open:
+
+**Is the 2-4 hours measured from each run's own start, or is it an absolute daily deadline?**
+
+- **From run start** — per-tenant staggered windows solve concurrency for free. Tenant 20 starting
+  at 21:00 still completes within *its* 2 hours, and peak concurrency stays inside the default
+  limit.
+- **Absolute deadline** (e.g. "fresh by 06:00") — the jitter window is capped by
+  `deadline − duration`, and a concurrency limit increase to ~3,000-5,000 plus reserved-concurrency
+  partitioning per function becomes required, not optional.
+
+Until that is settled, gap 5's jitter window cannot be chosen, so the jitter change is deliberately
+not implemented.

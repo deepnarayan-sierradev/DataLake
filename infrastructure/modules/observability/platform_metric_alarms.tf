@@ -38,6 +38,23 @@ resource "aws_sns_topic_subscription" "platform_paging_pagerduty" {
 }
 
 locals {
+  # ---------------------------------------------------------------------------
+  # Pipeline freshness is the only alarm that measures the *commitment* rather than the failure
+  # handling: the agreed expectation (2026-07-29) is end-to-end completion within 2-4 hours, same
+  # business day. A run that *succeeds* in five hours breaches that and produces no DLQ message,
+  # so no DLQ alarm can see it.
+  #
+  # It was 86400s (24h) and non-paging — 6-12x looser than the commitment, which made it decorative.
+  # Set at the tight end of the range in prod so the loose end is margin, not the target.
+  # See docs/SCALE_AND_DLQ_THRESHOLDS.md.
+  # ---------------------------------------------------------------------------
+  pipeline_freshness_thresholds = {
+    dev     = { seconds = 86400, paging = false }
+    staging = { seconds = 14400, paging = false }
+    prod    = { seconds = 7200, paging = true }
+  }
+  pipeline_freshness = local.pipeline_freshness_thresholds[var.environment]
+
   # comparison: GreaterThanThreshold unless the metric is a "should be non-zero" signal.
   # missing_data: "notBreaching" for event counters (silence is normal); "breaching" only
   # where absence is itself the failure (an expected load producing nothing).
@@ -115,7 +132,7 @@ locals {
     SecretRetrievalFailures   = { threshold = 0, paging = false, statistic = "Sum" }
 
     # ── DL-09 operations ───────────────────────────────────────────────────
-    PipelineFreshnessSeconds = { threshold = 86400, paging = false, statistic = "Maximum" }
+    PipelineFreshnessSeconds = { threshold = local.pipeline_freshness.seconds, paging = local.pipeline_freshness.paging, statistic = "Maximum" }
     StageRetries             = { threshold = 20, paging = false, statistic = "Sum" }
     DlqDepth                 = { threshold = 0, paging = false, statistic = "Maximum" }
     ReplaySuccessRate        = { threshold = 90, paging = false, statistic = "Average", comparison = "LessThanThreshold" }
