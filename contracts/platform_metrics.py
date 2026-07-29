@@ -166,6 +166,10 @@ class PlatformMetric(StrEnum):
     # is countable. A rise here without a matching rise in definition-validation runs means a
     # request path has started reading unfiltered (DL-SCOPE-14).
     UNRESTRICTED_SCOPE_READS = "UnrestrictedScopeReads"
+    # Registered scope units with no Lake Formation row filter. Athena filters are static IaC
+    # over a runtime registry, so a franchisee can be onboarded and left unenforced; this is how
+    # that becomes visible rather than waiting to be noticed (DL-SEC-11).
+    SCOPE_FILTER_DRIFT = "ScopeFilterDrift"
     CONNECTION_HEALTH = "ConnectionHealth"
     CONNECTION_CREDENTIAL_FAILURES = "ConnectionCredentialFailures"
     CONNECTIONS_PER_TENANT = "ConnectionsPerTenant"

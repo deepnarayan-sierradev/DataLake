@@ -71,6 +71,11 @@ _INFRASTRUCTURE_PRODUCED: dict[str, str] = {
     # Emitted by the deploy pipeline and the post-deploy smoke suite, not by the runtime.
     "DeploymentDurationMs": "deployment pipeline",
     "PostDeploySmokeFailures": "post-deploy smoke suite",
+    # Emitted by `scripts/generate_scope_unit_filters.py --check`, which reconciles the runtime
+    # scope-unit registry against the committed Lake Formation filters. It is an operator/CI step
+    # rather than a runtime path because the filters are Terraform-owned — see that script's
+    # docstring for why the lifecycle mismatch exists at all.
+    "ScopeFilterDrift": "scope-filter reconciliation script",
     # Derived from the CloudWatch metric stream by the cost-attribution job (DL-OPS-13).
     "CostPerTenantUsd": "cost attribution job",
     # Serving-engine metrics read from the database's own CloudWatch namespace.

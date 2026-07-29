@@ -57,6 +57,11 @@ stays focused on repo-wide conventions.
 - `docs/WIRING_PASS_HANDOFF.md` — **session handoff** for the 2026-07-28 wiring pass: why the gates
   exist, what landed, the design notes not to re-derive, the ordering hazards, and the four items
   awaiting an approval before any `terraform apply`
+- `docs/ASSESSMENT_CLOSEOUT.md` — **read this before running another assessment.** The 2026-07-29
+  third pass, its 21 findings, the four root causes that accounted for fourteen of them, and the
+  **frozen exit list** that replaces open-ended assessment. It also records why each pass found
+  new things (an unbounded audit scope, plus gates that certified shape rather than effect) and
+  the one finding that is deliberately *not* closed (F1's 47-site session adoption).
 - `docs/REMEDIATION_PASS_HANDOFF.md` — **session handoff** for the 2026-07-29 remediation pass: what a
   second assessment found in the wiring pass (ten of sixteen findings were defects in it), the
   `.gitignore` rule that had excluded 14 source files and kept CI red for months, the two new gates,
@@ -77,7 +82,7 @@ Invoke tools via `.venv/bin/<tool>` explicitly rather than assuming an activated
 activation doesn't reliably persist across separate tool calls in an agent session.
 
 ```bash
-make wiring-gates                                                # G1/G4/G5 — see below
+make wiring-gates                                                # G1/G4/G5/G7/G8/G9 — see below
 .venv/bin/ruff check .                                          # lint — matches CI exactly
 .venv/bin/pytest -q                                              # full suite, enforces 80% coverage gate
 .venv/bin/pytest --no-cov -q                                     # faster loop, skip coverage
@@ -147,12 +152,26 @@ gate was rewritten because its `grep` used BRE alternation under `grep -E` and t
 fail**. Both have committed negative tests, including a positive control.
 
 ```bash
-make reachability   # G1: a production module with no production importer
-make fail-open      # G4: a security parameter defaulting to None (an omitted scope predicate
-                    #     silently returned tenant-wide rows for months)
-make traceability   # G5: a requirement uncited, unreachable, or covered by a stale waiver
-make wiring-gates   # all three
+make reachability            # G1: a production module with no production importer
+make fail-open               # G4: a security parameter that can be omitted, nullified, or skipped
+make traceability            # G5: a requirement uncited, unreachable, or covered by a stale waiver
+make security-columns        # G7: a scope filter reading a column no writer sets
+make paging-primitive        # G8: a hand-rolled DynamoDB paging loop outside persistence/
+make tenant-session-adoption # G9: clients built outside the IAM tenant boundary
+make wiring-gates            # all six
 ```
+
+**G4 checks three shapes, not one, and that is the lesson worth carrying.** Its first version
+checked for a `None` *default*; the fix that satisfied it made every guarded parameter positionally
+required while keeping `| None` and its early return, so the fail-open survived being fixed. It now
+rejects the default, the nullable annotation, and an `is None` comparison. Where a read legitimately
+has no caller claim, pass `tenancy.scope_predicate.unrestricted_predicate(reason)` — an affirmative,
+metered object rather than an absence.
+
+**G10** (`tests/test_capability_reachability.py`) closes G1's blind spot: G1 asks whether a *module*
+is imported, so a capability with no path from any entry point passes it. That is how
+`ExportService.execute` had no production caller through two audit passes while DL-PORT-01 read as
+delivered.
 
 Three more run as tests or infrastructure: **G2** asserts every supported source resolves while
 importing *only* the extraction handler; **G3** (`tests/test_scope_call_sites.py`) asserts each

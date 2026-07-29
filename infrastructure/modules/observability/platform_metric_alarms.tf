@@ -186,6 +186,9 @@ locals {
     # per request, so a sustained non-trivial rate means a *request* path has started reading
     # unfiltered. Threshold is deliberately low rather than zero: the legitimate producer is real.
     UnrestrictedScopeReads       = { threshold = 500, paging = false, statistic = "Sum" }
+    # A registered unit with no row filter is readable by anyone holding the tenant tag, which is
+    # the wildcard grant the data-cells filters replaced. Any non-zero value pages.
+    ScopeFilterDrift             = { threshold = 0, paging = true, statistic = "Maximum" }
     ConnectionHealth             = { threshold = 0, paging = false, statistic = "Minimum", comparison = "LessThanThreshold" }
     ConnectionCredentialFailures = { threshold = 0, paging = false, statistic = "Sum" }
     ConnectionsPerTenant         = { threshold = 100, paging = false, statistic = "Maximum" }
