@@ -95,6 +95,9 @@ resource "aws_subnet" "public" {
 # ---------------------------------------------------------------------------
 
 resource "aws_eip" "nat" {
+  # This EIP is associated with a NAT gateway, which is the whole point of it. The check looks
+  # for an EC2 instance or network-interface association and finds none.
+  #checkov:skip=CKV2_AWS_19:Allocated to a NAT gateway, not an instance.
   count  = var.single_nat_gateway ? 1 : length(var.availability_zones)
   domain = "vpc"
 

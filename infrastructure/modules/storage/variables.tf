@@ -49,3 +49,9 @@ variable "tags" {
   default     = {}
   description = "Additional resource tags merged with module-managed tags."
 }
+
+variable "replica_region" {
+  description = "Region holding the cross-region replicas. Informational; the aws.replica provider sets it."
+  type        = string
+  default     = ""
+}

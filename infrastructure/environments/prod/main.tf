@@ -13,6 +13,17 @@ locals {
 
 data "aws_caller_identity" "current" {}
 
+# ---------------------------------------------------------------------------
+# Lambda code signing (CKV_AWS_272). Warn, not Enforce: `make lambda-deploy` uploads an
+# unsigned locally-built zip, so Enforce would reject every deployment this repo can perform.
+# ---------------------------------------------------------------------------
+
+module "code_signing" {
+  source      = "../../modules/code_signing"
+  environment = local.environment
+  tags        = local.common_tags
+}
+
 module "kms_storage" {
   source                  = "../../modules/kms"
   environment             = local.environment
@@ -78,7 +89,13 @@ module "networking" {
 }
 
 module "storage" {
-  source                                = "../../modules/storage"
+  source = "../../modules/storage"
+  providers = {
+    aws         = aws
+    aws.replica = aws.replica
+  }
+
+  replica_region                        = var.replica_region
   environment                           = local.environment
   project_name                          = local.project_name
   storage_kms_key_arn                   = module.kms_storage.key_arn
@@ -119,6 +136,9 @@ module "serving_store_database" {
 
 module "secrets" {
   source                       = "../../modules/secrets"
+  code_signing_config_arn      = module.code_signing.code_signing_config_arn
+  vpc_id                       = module.networking.vpc_id
+  subnet_ids                   = module.networking.private_subnet_ids
   environment                  = local.environment
   secrets_kms_key_arn          = module.kms_secrets.key_arn
   logs_kms_key_arn             = module.kms_logs.key_arn
@@ -196,7 +216,12 @@ module "iam" {
 # ---------------------------------------------------------------------------
 
 module "audit_trail" {
-  source      = "../../modules/audit_trail"
+  source = "../../modules/audit_trail"
+
+  providers = {
+    aws         = aws
+    aws.replica = aws.replica
+  }
   environment = local.environment
   account_id  = data.aws_caller_identity.current.account_id
   region      = local.aws_region
@@ -257,8 +282,9 @@ module "glue" {
 # ---------------------------------------------------------------------------
 
 module "lambda_pipeline" {
-  source      = "../../modules/lambda_pipeline"
-  environment = local.environment
+  source                  = "../../modules/lambda_pipeline"
+  code_signing_config_arn = module.code_signing.code_signing_config_arn
+  environment             = local.environment
 
   kms_key_arn        = module.kms_logs.key_arn
   execution_role_arn = module.iam.extraction_runtime_role_arn
@@ -355,8 +381,9 @@ module "entity_resolution_lambda" {
 # ---------------------------------------------------------------------------
 
 module "analytics_publisher_lambda" {
-  source      = "../../modules/analytics_publisher_lambda"
-  environment = local.environment
+  source                  = "../../modules/analytics_publisher_lambda"
+  code_signing_config_arn = module.code_signing.code_signing_config_arn
+  environment             = local.environment
 
   kms_key_arn        = module.kms_logs.key_arn
   execution_role_arn = module.iam.analytics_publisher_runtime_role_arn
@@ -386,8 +413,9 @@ module "analytics_publisher_lambda" {
 # ---------------------------------------------------------------------------
 
 module "serving_store_lambda" {
-  source      = "../../modules/serving_store_lambda"
-  environment = local.environment
+  source                  = "../../modules/serving_store_lambda"
+  code_signing_config_arn = module.code_signing.code_signing_config_arn
+  environment             = local.environment
 
   kms_key_arn        = module.kms_logs.key_arn
   execution_role_arn = module.iam.serving_store_loader_runtime_role_arn
@@ -448,6 +476,10 @@ module "twin_build_lambda" {
   source      = "../../modules/twin_build_lambda"
   environment = local.environment
 
+  code_signing_config_arn = module.code_signing.code_signing_config_arn
+  vpc_id                  = module.networking.vpc_id
+  subnet_ids              = module.networking.private_subnet_ids
+
   kms_key_arn        = module.kms_logs.key_arn
   execution_role_arn = module.iam.twin_build_runtime_role_arn
 
@@ -466,7 +498,10 @@ module "twin_build_lambda" {
 }
 
 module "orchestration" {
-  source = "../../modules/orchestration"
+  source                  = "../../modules/orchestration"
+  code_signing_config_arn = module.code_signing.code_signing_config_arn
+  vpc_id                  = module.networking.vpc_id
+  subnet_ids              = module.networking.private_subnet_ids
 
   environment             = local.environment
   kms_key_arn             = module.kms_logs.key_arn
@@ -515,8 +550,11 @@ module "orchestration" {
 # ---------------------------------------------------------------------------
 
 module "control_plane" {
-  source      = "../../modules/control_plane"
-  environment = local.environment
+  source                  = "../../modules/control_plane"
+  code_signing_config_arn = module.code_signing.code_signing_config_arn
+  vpc_id                  = module.networking.vpc_id
+  subnet_ids              = module.networking.private_subnet_ids
+  environment             = local.environment
 
   kms_key_arn         = module.kms_logs.key_arn
   log_retention_days  = 365
@@ -617,8 +655,11 @@ module "lake_formation" {
 # ---------------------------------------------------------------------------
 
 module "platform_lambdas" {
-  source      = "../../modules/platform_lambdas"
-  environment = local.environment
+  source                  = "../../modules/platform_lambdas"
+  code_signing_config_arn = module.code_signing.code_signing_config_arn
+  vpc_id                  = module.networking.vpc_id
+  subnet_ids              = module.networking.private_subnet_ids
+  environment             = local.environment
 
   lambda_package_s3_bucket   = var.lambda_package_s3_bucket
   lambda_package_s3_key      = var.lambda_package_s3_key

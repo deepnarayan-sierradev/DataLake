@@ -259,3 +259,198 @@ resource "aws_cloudtrail" "platform" {
 
   tags = merge(var.tags, { Purpose = "platform-audit-trail" })
 }
+
+# ---------------------------------------------------------------------------
+# Cross-region replication of the audit archive (CKV_AWS_144). This bucket is the SOC 2
+# evidence, so a single-region loss is the one that matters most — the events it holds cannot
+# be regenerated. Versioning is enabled here because replication requires it.
+# ---------------------------------------------------------------------------
+
+resource "aws_s3_bucket" "trail_replica" {
+  provider = aws.replica
+
+  bucket = "${aws_s3_bucket.trail.id}-replica"
+
+  # The replication target does not replicate onward, and access logging and notifications
+  # belong on the primary that receives the traffic.
+  #checkov:skip=CKV_AWS_144:This is the replication target.
+  #checkov:skip=CKV_AWS_18:Access logging is on the primary.
+  #checkov:skip=CKV2_AWS_62:Event notifications are on the primary.
+
+  tags = merge(var.tags, { Purpose = "cloudtrail-archive-replica" })
+}
+
+resource "aws_s3_bucket_versioning" "trail_replica" {
+  provider = aws.replica
+
+  bucket = aws_s3_bucket.trail_replica.id
+  versioning_configuration { status = "Enabled" }
+}
+
+resource "aws_kms_key" "trail_replica" {
+  provider = aws.replica
+
+  description             = "Encrypts the replicated audit archive (${var.environment})."
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+  policy                  = data.aws_iam_policy_document.trail_replica_key.json
+  tags                    = var.tags
+}
+
+data "aws_iam_policy_document" "trail_replica_key" {
+  # A key policy's resource is the key itself; scoping is by principal.
+  #checkov:skip=CKV_AWS_109:Key policy resource is the key itself.
+  #checkov:skip=CKV_AWS_111:Key policy resource is the key itself; principals are enumerated.
+  #checkov:skip=CKV_AWS_356:A key policy cannot name its own ARN as a resource.
+  statement {
+    sid       = "AccountRootAdministration"
+    effect    = "Allow"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${var.account_id}:root"]
+    }
+  }
+
+  statement {
+    sid       = "ReplicationRoleEncrypt"
+    effect    = "Allow"
+    actions   = ["kms:Encrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.trail_replication.arn]
+    }
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "trail_replica" {
+  provider = aws.replica
+
+  bucket = aws_s3_bucket.trail_replica.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.trail_replica.arn
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "trail_replica" {
+  provider = aws.replica
+
+  bucket                  = aws_s3_bucket.trail_replica.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "trail_replica" {
+  provider = aws.replica
+
+  bucket = aws_s3_bucket.trail_replica.id
+  rule {
+    id     = "retain-then-expire"
+    status = "Enabled"
+    filter {}
+    expiration { days = var.retention_days }
+    noncurrent_version_expiration { noncurrent_days = 90 }
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
+  }
+}
+
+data "aws_iam_policy_document" "trail_replication_assume" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["s3.amazonaws.com"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "trail_replication" {
+  statement {
+    sid       = "ReadSourceForReplication"
+    effect    = "Allow"
+    actions   = ["s3:GetReplicationConfiguration", "s3:ListBucket"]
+    resources = [aws_s3_bucket.trail.arn]
+  }
+
+  statement {
+    sid    = "ReadSourceObjects"
+    effect = "Allow"
+    actions = [
+      "s3:GetObjectVersionForReplication",
+      "s3:GetObjectVersionAcl",
+      "s3:GetObjectVersionTagging",
+    ]
+    resources = ["${aws_s3_bucket.trail.arn}/*"]
+  }
+
+  statement {
+    sid       = "WriteReplicaObjects"
+    effect    = "Allow"
+    actions   = ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags"]
+    resources = ["${aws_s3_bucket.trail_replica.arn}/*"]
+  }
+
+  statement {
+    sid       = "DecryptSourceObjects"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt"]
+    resources = [var.kms_key_arn]
+  }
+
+  statement {
+    sid       = "EncryptReplicaObjects"
+    effect    = "Allow"
+    actions   = ["kms:Encrypt", "kms:GenerateDataKey"]
+    resources = [aws_kms_key.trail_replica.arn]
+  }
+}
+
+resource "aws_iam_role" "trail_replication" {
+  name               = "${local.trail_name}-replication"
+  assume_role_policy = data.aws_iam_policy_document.trail_replication_assume.json
+  tags               = var.tags
+}
+
+resource "aws_iam_role_policy" "trail_replication" {
+  name   = "replication"
+  role   = aws_iam_role.trail_replication.id
+  policy = data.aws_iam_policy_document.trail_replication.json
+}
+
+resource "aws_s3_bucket_replication_configuration" "trail" {
+  bucket = aws_s3_bucket.trail.id
+  role   = aws_iam_role.trail_replication.arn
+
+  rule {
+    id     = "replicate-audit-archive"
+    status = "Enabled"
+
+    filter {}
+
+    delete_marker_replication { status = "Enabled" }
+
+    source_selection_criteria {
+      sse_kms_encrypted_objects { status = "Enabled" }
+    }
+
+    destination {
+      bucket        = aws_s3_bucket.trail_replica.arn
+      storage_class = "STANDARD_IA"
+
+      encryption_configuration {
+        replica_kms_key_id = aws_kms_key.trail_replica.arn
+      }
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.trail, aws_s3_bucket_versioning.trail_replica]
+}

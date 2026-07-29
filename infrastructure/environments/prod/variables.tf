@@ -159,3 +159,14 @@ variable "lake_formation_admin_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "replica_region" {
+  description = "Region holding the cross-region S3 replicas. Must differ from aws_region."
+  type        = string
+  default     = "us-west-2"
+
+  validation {
+    condition     = var.replica_region != ""
+    error_message = "replica_region must be set; cross-region replication needs a second region."
+  }
+}

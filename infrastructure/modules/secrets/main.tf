@@ -73,6 +73,13 @@ resource "aws_secretsmanager_secret" "mysql_rds_credentials" {
 # SUPPORTED_SAGE_PRODUCTS). Bringing these under Terraform closes that gap.
 
 resource "aws_secretsmanager_secret" "sage_intacct_credentials" {
+  # Automatic rotation is not implementable for this credential: it is issued by a third party
+  # (Sage), and rotating it means a human obtaining new credentials from that vendor — there is no
+  # API this system can call. Attaching a rotation schedule would produce a Lambda that fails on
+  # every run, which is worse than no rotation because it looks like a working control.
+  # The compensating control is real and deployed: `credential_expiry_notifier` (SEC-6) sweeps
+  # daily and alerts before expiry, so a stale credential surfaces before it breaks ingestion.
+  #checkov:skip=CKV2_AWS_57:Vendor-issued credential; no programmatic rotation exists. See expiry notifier.
   name        = "edl/sources/sage/intacct/credentials"
   description = "Sage Intacct web services credentials for the extraction runtime."
   kms_key_id  = var.secrets_kms_key_arn
@@ -87,6 +94,13 @@ resource "aws_secretsmanager_secret" "sage_intacct_credentials" {
 }
 
 resource "aws_secretsmanager_secret" "sage_x3_credentials" {
+  # Automatic rotation is not implementable for this credential: it is issued by a third party
+  # (Sage), and rotating it means a human obtaining new credentials from that vendor — there is no
+  # API this system can call. Attaching a rotation schedule would produce a Lambda that fails on
+  # every run, which is worse than no rotation because it looks like a working control.
+  # The compensating control is real and deployed: `credential_expiry_notifier` (SEC-6) sweeps
+  # daily and alerts before expiry, so a stale credential surfaces before it breaks ingestion.
+  #checkov:skip=CKV2_AWS_57:Vendor-issued credential; no programmatic rotation exists. See expiry notifier.
   name        = "edl/sources/sage/x3/credentials"
   description = "Sage X3 API credentials for the extraction runtime."
   kms_key_id  = var.secrets_kms_key_arn
@@ -217,8 +231,28 @@ resource "aws_lambda_function" "credential_expiry_notifier" {
   s3_key           = var.lambda_package_s3_key
   source_code_hash = var.lambda_package_source_hash
 
-  handler     = "connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler"
-  runtime     = "python3.13"
+  handler                 = "connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler"
+  runtime                 = "python3.13"
+  code_signing_config_arn = var.code_signing_config_arn
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.async_dlq.arn
+  }
+
+
+  dynamic "vpc_config" {
+
+    for_each = var.vpc_id == null ? [] : [1]
+
+    content {
+
+      subnet_ids = var.subnet_ids
+
+      security_group_ids = concat(var.security_group_ids, aws_security_group.secrets_lambda[*].id)
+
+    }
+
+  }
   timeout     = 60
   memory_size = 256
 
@@ -294,4 +328,51 @@ locals {
     aws_secretsmanager_secret.sage_intacct_credentials.arn,
     aws_secretsmanager_secret.sage_x3_credentials.arn,
   ]
+}
+
+# ---------------------------------------------------------------------------
+# Async-invocation dead letter queue (CKV_AWS_116). An asynchronous Lambda failure with no
+# DLQ is discarded after the retries with nothing left to inspect. Named `EdlStageDlq-*` so
+# the existing `sqs:SendMessage` grant on that prefix covers it rather than adding a new one.
+# SSE-SQS rather than a CMK: no per-module KMS input exists, and the payload here is a failed
+# event envelope, not tenant data.
+# ---------------------------------------------------------------------------
+
+resource "aws_sqs_queue" "async_dlq" {
+  name                      = "EdlStageDlq-CredentialExpiryAsync"
+  message_retention_seconds = 1209600 # 14 days, the maximum — a DLQ that expires loses the evidence
+  sqs_managed_sse_enabled   = true
+
+  tags = merge(local.common_tags, { Name = "EdlStageDlq-CredentialExpiryAsync" })
+}
+
+# ---------------------------------------------------------------------------
+# The function runs inside the VPC (CKV_AWS_117) so its egress is attributable and
+# controllable. HTTPS only: S3 and DynamoDB go via gateway endpoints, the rest via the
+# interface endpoints and NAT the networking module already provisions.
+# ---------------------------------------------------------------------------
+
+resource "aws_security_group" "secrets_lambda" {
+  # Attached to this module's function(s) through the `vpc_config` block below. Checkov's graph
+  # does not traverse a dynamic block, so it reads the group as orphaned.
+  #checkov:skip=CKV2_AWS_5:Attached via dynamic vpc_config in this module.
+  count = var.vpc_id == null ? 0 : 1
+
+  name        = "CredentialExpiryNotifierLambdaSg"
+  description = "HTTPS egress only for the CredentialExpiryNotifier Lambda function(s)."
+  vpc_id      = var.vpc_id
+
+  egress {
+    description = "HTTPS egress to AWS service endpoints."
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, { Name = "CredentialExpiryNotifierLambdaSg" })
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }

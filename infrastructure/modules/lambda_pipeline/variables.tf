@@ -119,3 +119,9 @@ variable "audit_log_table_name" {
   description = "Name of the run audit log DynamoDB table. Passed to Lambda as AUDIT_LOG_TABLE."
   type        = string
 }
+
+variable "code_signing_config_arn" {
+  description = "Lambda code-signing configuration (CKV_AWS_272). Null leaves signing unattached."
+  type        = string
+  default     = null
+}

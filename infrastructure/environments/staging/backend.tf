@@ -38,3 +38,19 @@ provider "aws" {
     }
   }
 }
+
+# Cross-region S3 replica provider (CKV_AWS_144). The replicas and their CMK are created here;
+# every other resource stays in `var.aws_region`.
+provider "aws" {
+  alias  = "replica"
+  region = var.replica_region
+
+  default_tags {
+    tags = {
+      Project     = "enterprise-data-lake"
+      Environment = "staging"
+      ManagedBy   = "terraform"
+      CostCenter  = var.cost_center
+    }
+  }
+}

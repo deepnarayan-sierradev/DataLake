@@ -687,8 +687,28 @@ resource "aws_lambda_function" "pipeline_trigger" {
   s3_key           = var.lambda_package_s3_key
   source_code_hash = var.lambda_package_source_hash
 
-  handler     = "orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler"
-  runtime     = "python3.13"
+  handler                 = "orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler"
+  runtime                 = "python3.13"
+  code_signing_config_arn = var.code_signing_config_arn
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.async_dlq.arn
+  }
+
+
+  dynamic "vpc_config" {
+
+    for_each = var.vpc_id == null ? [] : [1]
+
+    content {
+
+      subnet_ids = var.subnet_ids
+
+      security_group_ids = concat(var.security_group_ids, aws_security_group.orchestration_lambda[*].id)
+
+    }
+
+  }
   timeout     = 60 # Short timeout — each invocation processes one message
   memory_size = 256
 
@@ -779,8 +799,28 @@ resource "aws_lambda_function" "dlq_processor" {
   s3_key           = var.lambda_package_s3_key
   source_code_hash = var.lambda_package_source_hash
 
-  handler     = "orchestration.dlq_processor.dlq_processor_handler.lambda_handler"
-  runtime     = "python3.13"
+  handler                 = "orchestration.dlq_processor.dlq_processor_handler.lambda_handler"
+  runtime                 = "python3.13"
+  code_signing_config_arn = var.code_signing_config_arn
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.async_dlq.arn
+  }
+
+
+  dynamic "vpc_config" {
+
+    for_each = var.vpc_id == null ? [] : [1]
+
+    content {
+
+      subnet_ids = var.subnet_ids
+
+      security_group_ids = concat(var.security_group_ids, aws_security_group.orchestration_lambda[*].id)
+
+    }
+
+  }
   timeout     = 60
   memory_size = 256
 
@@ -851,4 +891,51 @@ resource "aws_lambda_event_source_mapping" "dlq_processor_sqs" {
   # Partial-batch failure: only the failed messages are re-driven, which is what makes a batch
   # size above 1 safe here.
   function_response_types = ["ReportBatchItemFailures"]
+}
+
+# ---------------------------------------------------------------------------
+# Async-invocation dead letter queue (CKV_AWS_116). An asynchronous Lambda failure with no
+# DLQ is discarded after the retries with nothing left to inspect. Named `EdlStageDlq-*` so
+# the existing `sqs:SendMessage` grant on that prefix covers it rather than adding a new one.
+# SSE-SQS rather than a CMK: no per-module KMS input exists, and the payload here is a failed
+# event envelope, not tenant data.
+# ---------------------------------------------------------------------------
+
+resource "aws_sqs_queue" "async_dlq" {
+  name                      = "EdlStageDlq-OrchestrationAsync"
+  message_retention_seconds = 1209600 # 14 days, the maximum — a DLQ that expires loses the evidence
+  sqs_managed_sse_enabled   = true
+
+  tags = merge(local.common_tags, { Name = "EdlStageDlq-OrchestrationAsync" })
+}
+
+# ---------------------------------------------------------------------------
+# The function runs inside the VPC (CKV_AWS_117) so its egress is attributable and
+# controllable. HTTPS only: S3 and DynamoDB go via gateway endpoints, the rest via the
+# interface endpoints and NAT the networking module already provisions.
+# ---------------------------------------------------------------------------
+
+resource "aws_security_group" "orchestration_lambda" {
+  # Attached to this module's function(s) through the `vpc_config` block below. Checkov's graph
+  # does not traverse a dynamic block, so it reads the group as orphaned.
+  #checkov:skip=CKV2_AWS_5:Attached via dynamic vpc_config in this module.
+  count = var.vpc_id == null ? 0 : 1
+
+  name        = "OrchestrationLambdaSg"
+  description = "HTTPS egress only for the Orchestration Lambda function(s)."
+  vpc_id      = var.vpc_id
+
+  egress {
+    description = "HTTPS egress to AWS service endpoints."
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, { Name = "OrchestrationLambdaSg" })
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }

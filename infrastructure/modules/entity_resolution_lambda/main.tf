@@ -100,7 +100,16 @@ resource "aws_lambda_function" "entity_resolution_pipeline" {
   s3_key           = var.lambda_package_s3_key
   source_code_hash = var.lambda_package_source_hash
 
-  runtime     = "python3.13"
+  runtime = "python3.13"
+
+  code_signing_config_arn = var.code_signing_config_arn
+
+
+  dead_letter_config {
+
+    target_arn = aws_sqs_queue.async_dlq.arn
+
+  }
   handler     = "entity_resolution.entity_resolution_pipeline_handler.lambda_handler"
   role        = var.execution_role_arn
   memory_size = var.memory_size_mb
@@ -148,4 +157,20 @@ resource "aws_lambda_permission" "allow_step_functions" {
   function_name = aws_lambda_function.entity_resolution_pipeline.function_name
   principal     = "states.amazonaws.com"
   source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:EdlExtractionPipeline"
+}
+
+# ---------------------------------------------------------------------------
+# Async-invocation dead letter queue (CKV_AWS_116). An asynchronous Lambda failure with no
+# DLQ is discarded after the retries with nothing left to inspect. Named `EdlStageDlq-*` so
+# the existing `sqs:SendMessage` grant on that prefix covers it rather than adding a new one.
+# SSE-SQS rather than a CMK: no per-module KMS input exists, and the payload here is a failed
+# event envelope, not tenant data.
+# ---------------------------------------------------------------------------
+
+resource "aws_sqs_queue" "async_dlq" {
+  name                      = "EdlStageDlq-EntityResolutionAsync"
+  message_retention_seconds = 1209600 # 14 days, the maximum — a DLQ that expires loses the evidence
+  sqs_managed_sse_enabled   = true
+
+  tags = merge(local.common_tags, { Name = "EdlStageDlq-EntityResolutionAsync" })
 }

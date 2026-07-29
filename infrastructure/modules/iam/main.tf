@@ -1237,6 +1237,15 @@ resource "aws_iam_role" "pipeline_trigger" {
 }
 
 data "aws_iam_policy_document" "pipeline_trigger_permissions" {
+
+  # Async invocation failures land on this function's own DLQ (CKV_AWS_116). A DLQ the role
+  # cannot write to is inert, which is the failure mode this repo keeps finding.
+  statement {
+    sid       = "AsyncInvocationDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   statement {
     sid    = "ConsumePipelineTriggerQueue"
     effect = "Allow"
@@ -1419,6 +1428,15 @@ resource "aws_iam_role" "credential_expiry_notifier" {
 }
 
 data "aws_iam_policy_document" "credential_expiry_notifier_permissions" {
+
+  # Async invocation failures land on this function's own DLQ (CKV_AWS_116). A DLQ the role
+  # cannot write to is inert, which is the failure mode this repo keeps finding.
+  statement {
+    sid       = "AsyncInvocationDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   statement {
     sid       = "DescribeSourceCredentialSecrets"
     effect    = "Allow"
@@ -1538,6 +1556,15 @@ resource "aws_iam_role" "control_plane" {
 }
 
 data "aws_iam_policy_document" "control_plane_permissions" {
+
+  # Async invocation failures land on this function's own DLQ (CKV_AWS_116). A DLQ the role
+  # cannot write to is inert, which is the failure mode this repo keeps finding.
+  statement {
+    sid       = "AsyncInvocationDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   statement {
     sid       = "ReadWriteEntityConfig"
     effect    = "Allow"

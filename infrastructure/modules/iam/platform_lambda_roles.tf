@@ -270,6 +270,15 @@ resource "aws_iam_role" "portability" {
 }
 
 data "aws_iam_policy_document" "portability_permissions" {
+
+  # Async invocation failures land on this function's own DLQ (CKV_AWS_116). A DLQ the role
+  # cannot write to is inert, which is the failure mode this repo keeps finding.
+  statement {
+    sid       = "AsyncInvocationDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   statement {
     sid       = "WriteOwnLogs"
     effect    = "Allow"

@@ -105,7 +105,38 @@ resource "aws_lambda_function" "platform" {
   s3_key           = var.lambda_package_s3_key
   source_code_hash = var.lambda_package_source_hash
 
-  runtime     = "python3.13"
+  runtime = "python3.13"
+
+  code_signing_config_arn = var.code_signing_config_arn
+
+
+  dead_letter_config {
+
+    target_arn = aws_sqs_queue.async_dlq.arn
+
+  }
+
+
+
+  dynamic "vpc_config" {
+
+
+    for_each = var.vpc_id == null ? [] : [1]
+
+
+    content {
+
+
+      subnet_ids = var.subnet_ids
+
+
+      security_group_ids = concat(var.security_group_ids, aws_security_group.platform_lambdas_lambda[*].id)
+
+
+    }
+
+
+  }
   handler     = each.value.handler
   role        = each.value.role_arn
   memory_size = each.value.memory
@@ -223,4 +254,51 @@ resource "aws_lambda_permission" "workflow_scheduler_invoke" {
   # Without this, *any* schedule in the account could invoke this function, not only ours
   # (CKV_AWS_364). Scoped to this environment's scheduler group.
   source_arn = "arn:${data.aws_partition.current.partition}:scheduler:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:schedule/${var.scheduler_group_name}/*"
+}
+
+# ---------------------------------------------------------------------------
+# Async-invocation dead letter queue (CKV_AWS_116). An asynchronous Lambda failure with no
+# DLQ is discarded after the retries with nothing left to inspect. Named `EdlStageDlq-*` so
+# the existing `sqs:SendMessage` grant on that prefix covers it rather than adding a new one.
+# SSE-SQS rather than a CMK: no per-module KMS input exists, and the payload here is a failed
+# event envelope, not tenant data.
+# ---------------------------------------------------------------------------
+
+resource "aws_sqs_queue" "async_dlq" {
+  name                      = "EdlStageDlq-PlatformAsync"
+  message_retention_seconds = 1209600 # 14 days, the maximum — a DLQ that expires loses the evidence
+  sqs_managed_sse_enabled   = true
+
+  tags = merge(local.common_tags, { Name = "EdlStageDlq-PlatformAsync" })
+}
+
+# ---------------------------------------------------------------------------
+# The function runs inside the VPC (CKV_AWS_117) so its egress is attributable and
+# controllable. HTTPS only: S3 and DynamoDB go via gateway endpoints, the rest via the
+# interface endpoints and NAT the networking module already provisions.
+# ---------------------------------------------------------------------------
+
+resource "aws_security_group" "platform_lambdas_lambda" {
+  # Attached to this module's function(s) through the `vpc_config` block below. Checkov's graph
+  # does not traverse a dynamic block, so it reads the group as orphaned.
+  #checkov:skip=CKV2_AWS_5:Attached via dynamic vpc_config in this module.
+  count = var.vpc_id == null ? 0 : 1
+
+  name        = "PlatformLambdasLambdaSg"
+  description = "HTTPS egress only for the PlatformLambdas Lambda function(s)."
+  vpc_id      = var.vpc_id
+
+  egress {
+    description = "HTTPS egress to AWS service endpoints."
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, { Name = "PlatformLambdasLambdaSg" })
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }

@@ -54,7 +54,31 @@ resource "aws_lambda_function" "twin_builder" {
   s3_key           = var.lambda_package_s3_key
   source_code_hash = var.lambda_package_source_hash
 
-  runtime     = "python3.13"
+  runtime = "python3.13"
+
+  code_signing_config_arn = var.code_signing_config_arn
+
+
+  dead_letter_config {
+
+    target_arn = aws_sqs_queue.async_dlq.arn
+
+  }
+
+
+  dynamic "vpc_config" {
+
+    for_each = var.vpc_id == null ? [] : [1]
+
+    content {
+
+      subnet_ids = var.subnet_ids
+
+      security_group_ids = concat(var.security_group_ids, aws_security_group.twin_build_lambda[*].id)
+
+    }
+
+  }
   handler     = "knowledge.twin_build_handler.lambda_handler"
   role        = var.execution_role_arn
   memory_size = var.memory_size_mb
@@ -89,4 +113,41 @@ resource "aws_lambda_permission" "allow_step_functions" {
   function_name = aws_lambda_function.twin_builder.function_name
   principal     = "states.amazonaws.com"
   source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:EdlExtractionPipeline"
+}
+
+# ---------------------------------------------------------------------------
+# Async DLQ, and VPC egress, for the twin builder — missed in the first pass over the
+# Lambda modules because it is wired from the environment rather than the pipeline module.
+# ---------------------------------------------------------------------------
+
+resource "aws_sqs_queue" "async_dlq" {
+  name                      = "EdlStageDlq-TwinBuildAsync"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+
+  tags = merge(local.common_tags, { Name = "EdlStageDlq-TwinBuildAsync" })
+}
+
+resource "aws_security_group" "twin_build_lambda" {
+  count = var.vpc_id == null ? 0 : 1
+
+  # Attached via the dynamic vpc_config block; checkov's graph does not traverse one.
+  #checkov:skip=CKV2_AWS_5:Attached via dynamic vpc_config in this module.
+  name        = "TwinBuildLambdaSg"
+  description = "HTTPS egress only for the twin build Lambda."
+  vpc_id      = var.vpc_id
+
+  egress {
+    description = "HTTPS egress to AWS service endpoints."
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, { Name = "TwinBuildLambdaSg" })
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }

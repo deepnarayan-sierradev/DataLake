@@ -137,6 +137,10 @@ resource "aws_redshiftserverless_workgroup" "serving_store" {
 # ---------------------------------------------------------------------------
 
 resource "aws_secretsmanager_secret" "connection" {
+  # The Redshift cluster this connects to is customer-operated. Rotation would require this
+  # system to change a password on infrastructure it does not own, so it is the operator's
+  # action, surfaced by the same daily expiry sweep as the vendor credentials above.
+  #checkov:skip=CKV2_AWS_57:Credential for externally-operated Redshift; rotation is the operator's action.
   name       = "edl/serving-store/${var.environment}/redshift/connection"
   kms_key_id = var.secrets_kms_key_arn
   tags       = merge(local.common_tags, { Name = "${local.identifier}-connection" })

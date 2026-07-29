@@ -123,3 +123,27 @@ variable "reserved_concurrent_executions" {
   type        = number
   default     = 2
 }
+
+variable "code_signing_config_arn" {
+  description = "Lambda code-signing configuration (CKV_AWS_272). Null leaves signing unattached."
+  type        = string
+  default     = null
+}
+
+variable "vpc_id" {
+  description = "VPC the function's ENIs are created in (CKV_AWS_117). Null keeps the function outside a VPC."
+  type        = string
+  default     = null
+}
+
+variable "subnet_ids" {
+  description = "Private subnets for the function's ENIs. Empty keeps the function outside a VPC."
+  type        = list(string)
+  default     = []
+}
+
+variable "security_group_ids" {
+  description = "Additional security groups, alongside the one this module creates."
+  type        = list(string)
+  default     = []
+}
