@@ -456,3 +456,42 @@ CloudWatch alarms be the single notification path — there are currently two pa
 event. The `(Stage, TenantCode)` custom metric and the "one tenant dominates" alarm are also not yet
 implemented; because the alarm↔emitter reconciliation is bidirectional, the metric and its alarm
 have to land in the same change.
+
+## Checkov remediation and what it costs at apply time (2026-07-29)
+
+The checkov job had never executed — its action SHA did not resolve — and `make iac-scan` passed
+`--soft-fail` a value, which is a usage error, so the local target could not report a finding
+either. Between them, 102 findings had accumulated with two controls certifying nothing. All 102
+are now closed: 78 by real change, 24 by an inline skip carrying its reason.
+
+None of it is applied. These are the consequences the next `terraform apply` will produce, and each
+is deliberate rather than incidental:
+
+- **Dev RDS becomes Multi-AZ** and gains deletion protection. The conversion is not instant and
+  roughly doubles that instance's cost. Tearing dev down now needs an explicit
+  `deletion_protection = false` apply first.
+- **Performance Insights is enabled on `db.t3.micro`.** This was not verifiable offline. If that
+  instance class does not support PI, the dev apply fails on this attribute — check `terraform plan`
+  output before assuming the apply is clean, and either bump the class or gate PI on it.
+- **Six buckets start replicating cross-region**, each with a replica bucket and a replica-region
+  CMK. Ongoing replica storage plus per-object transfer. Replication is not retroactive: objects
+  written before the apply are not copied, which matters if this is ever relied on for recovery.
+- **Seven more Lambdas move inside the VPC.** Viable because the S3 and DynamoDB gateway endpoints,
+  the interface endpoints and NAT already exist — but an environment that trims those endpoints
+  breaks every outbound call from these functions.
+- **Log retention goes from 30/90 to 365 days everywhere**, which is a storage cost that scales with
+  volume.
+- **Twelve new SQS DLQs** appear, one per Lambda module, named `EdlStageDlq-*` so the existing
+  `sqs:SendMessage` grant covers them.
+
+Two things remain deliberately open rather than fixed:
+
+- **Code signing is `Warn`, not `Enforce`.** `make lambda-deploy` uploads an unsigned zip, so
+  Enforce would reject every deployment this repo can perform. Closing this means signing the
+  artefact in the build; the signing profile version ARN is already an output for that purpose.
+- **Secrets Manager rotation on the two Sage secrets and the Redshift connection secret** is
+  recorded as an inline exception, not implemented. All three are credentials for systems this
+  platform does not operate, so rotation means a human obtaining new credentials from that vendor —
+  there is no API to call, and a rotation schedule without working rotation logic would fail on
+  every run while looking like a working control. The compensating control is the deployed
+  `credential_expiry_notifier` (SEC-6), which sweeps daily and alerts before expiry.

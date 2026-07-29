@@ -36,7 +36,31 @@ init cleanly with no such error since they're not yet bootstrapped.
 Local checks mirror CI: `make iac-validate` (loops dev/staging/prod), `make iac-scan` (checkov),
 `terraform fmt -recursive -check infrastructure/`. CI additionally pins every third-party GitHub
 Action to a full commit SHA (OWASP A03 supply-chain hardening) — match that convention if you
-touch `.github/workflows/*.yml`.
+touch `.github/workflows/*.yml`. **Verify a pinned SHA actually resolves**: `setup-terraform` and
+`checkov-action` were both pinned to SHAs that do not exist (the terraform one a near-miss of the
+real v3.1.2), so neither job had ever run.
+
+**`terraform fmt -recursive -check` is a separate CI step from `terraform validate`.** Three files
+passed validate while failing fmt. Run both.
+
+**Checkov notes, learned the hard way on 2026-07-29:**
+
+- `make iac-scan` used to pass `--soft-fail false`. `--soft-fail` is a bare flag, so checkov exited
+  2 on a usage error and the target could never report a finding — 102 accumulated unseen. Hard
+  failure is the default; do not pass the flag a value.
+- **A clean local checkov run is not the same claim as a green checkov job.** The CI action pins its
+  own checkov build, which found four findings a local 3.3.8 did not (and vice versa). Expect a
+  second round; check the job, not just the local scan.
+- Suppress only with an inline `#checkov:skip=CKV_xxx:<reason>` inside the resource, never a blanket
+  skip list. The 120 current skips are all genuine inapplicability — KMS key policies whose resource
+  *is* the key, IAM actions AWS defines no resource-level permission for (X-Ray, `PutMetricData`,
+  `ec2:*NetworkInterface`), a webhook route authenticated by HMAC because a provider has no Cognito
+  token, and replication targets that do not replicate onward.
+- Checkov's graph does not resolve `for_each = <another resource>` or traverse a `dynamic` block, so
+  child resources keyed that way read as absent. Key off the same `local` map the parent uses —
+  that is a real fix, not a workaround.
+- Lambda code signing is deliberately `Warn`, not `Enforce`: `make lambda-deploy` uploads an
+  unsigned locally-built zip, and Enforce rejects every deployment this repo can perform.
 
 ## Hard rules
 
