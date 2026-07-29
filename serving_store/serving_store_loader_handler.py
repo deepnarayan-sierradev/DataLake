@@ -148,9 +148,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         dlq_stage=DlqStage.SERVING_STORE_LOAD,
         correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
     )
-    with stage_execution(
-        identity, region_name=require_env("AWS_REGION"), lambda_context=context
-    ):
+    with stage_execution(identity, region_name=require_env("AWS_REGION"), lambda_context=context):
         try:
             return _run_serving_store_load(
                 entity_id=entity_id,

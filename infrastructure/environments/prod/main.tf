@@ -187,7 +187,7 @@ module "iam" {
   # enforcing over untagged principals leaves S3 open and denies DynamoDB outright.
   tenant_session_tagging_adopted = false
 
-  tags                                        = local.common_tags
+  tags = local.common_tags
 }
 
 # ---------------------------------------------------------------------------

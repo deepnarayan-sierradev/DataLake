@@ -51,6 +51,7 @@ install:
 # ─── Code Quality ────────────────────────────────────────────────────────────
 lint:
 	ruff check .
+	ruff format --check .
 
 # Enforce naming standards: prohibited generic identifiers must not appear as class names,
 # function names, module filenames, or package directories (spec §10.4).

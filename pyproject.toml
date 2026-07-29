@@ -33,7 +33,7 @@ dev = [
     "pytest>=8.2",
     "pytest-cov>=5.0",
     "pytest-mock>=3.14",
-    "ruff>=0.5",
+    "ruff==0.16.0",  # pinned to the CI version; a formatter that drifts fails only on the runner
     "mypy>=1.10",
     "bandit[toml]>=1.7",
     "pip-audit>=2.7",
@@ -77,6 +77,9 @@ extend-exclude = [
     "pptx",
     "scripts/generate_presentation.py",
     "scripts/_gen_html.py",
+    # ruff 0.16 reformats Python blocks inside Markdown, which flattened deliberate column
+    # alignment in DEPLOYMENT_GUIDE.md. Documentation is not this linter's subject.
+    "*.md",
 ]
 
 [tool.ruff.lint]

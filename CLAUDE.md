@@ -84,7 +84,8 @@ activation doesn't reliably persist across separate tool calls in an agent sessi
 ```bash
 make wiring-gates                                                # G1/G4/G5/G7/G8/G9/G12 — see below
 make typecheck-scripts                                           # operational scripts (see below)
-.venv/bin/ruff check .                                          # lint — matches CI exactly
+.venv/bin/ruff check .                                          # lint
+.venv/bin/ruff format --check .                                  # CI runs this too — it is not optional
 .venv/bin/pytest -q                                              # full suite, enforces 80% coverage gate
 .venv/bin/pytest --no-cov -q                                     # faster loop, skip coverage
 .venv/bin/bandit -r . --exclude .venv,tests,dist -c pyproject.toml
@@ -129,7 +130,8 @@ skips"), the only permitted suppression is an inline `# nosec BXXX — <justific
 suppressions on the SQL generators all point at the allowlist validation bandit cannot see.
 
 For Terraform: `cd infrastructure/environments/<env> && terraform init -backend=false &&
-terraform validate`. All three environments (`dev`, `staging`, `prod`) validate cleanly as of
+terraform validate` — **and `cd infrastructure && terraform fmt -recursive -check`**, which is a
+separate CI step that `validate` does not cover; three files passed validate while failing fmt. All three environments (`dev`, `staging`, `prod`) validate cleanly as of
 2026-07-09 — the previously-tracked pre-existing `orchestration` module errors in
 `staging`/`prod` were fixed by commit `138b692` (2026-07-08); this note just hadn't been updated
 since. If you hit a validate error in staging/prod, treat it as new, not pre-existing debt.

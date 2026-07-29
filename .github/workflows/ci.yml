@@ -38,7 +38,9 @@ jobs:
           cache: pip
 
       - name: Install ruff
-        run: pip install "ruff>=0.5.0"
+        # Pinned, not `>=`: an unpinned formatter turns CI red on a release with no code change,
+        # and diverged from the local 0.15.17 while `ruff check` passed on both.
+        run: pip install "ruff==0.16.0"
 
       - name: Run ruff lint
         run: ruff check . --output-format=github

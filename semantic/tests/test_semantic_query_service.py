@@ -43,9 +43,7 @@ def _model() -> SemanticModel:
         entity_type="franchisee",
         dimensions=(Dimension(name="franchisee_name", column="franchisee_name"),),
     )
-    return SemanticModel(
-        tenant_code="demo", model_version="v1", entities=(entity, franchisee)
-    )
+    return SemanticModel(tenant_code="demo", model_version="v1", entities=(entity, franchisee))
 
 
 # The `demo` single-tenant predicate: applied, and matching everything because a single

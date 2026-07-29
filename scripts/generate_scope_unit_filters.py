@@ -101,9 +101,7 @@ def _load_units(environment: str, region_name: str) -> list[dict[str, str]]:
             continue
         if item.get("active") is False:
             continue
-        units.append(
-            {"tenant_code": str(item["tenant_code"]), "scope_unit_id": scope_unit_id}
-        )
+        units.append({"tenant_code": str(item["tenant_code"]), "scope_unit_id": scope_unit_id})
     return units
 
 
