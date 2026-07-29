@@ -53,7 +53,7 @@ def iter_parquet_batches(
                 continue
             raw = s3.get_object(Bucket=bucket, Key=obj["Key"])
             buffer = io.BytesIO(raw["Body"].read())
-            table = pq.read_table(buffer)  # type: ignore[no-untyped-call]
+            table = pq.read_table(buffer)
             for record_batch in table.to_batches(max_chunksize=batch_size):
                 columns = record_batch.to_pydict()
                 names = list(columns.keys())

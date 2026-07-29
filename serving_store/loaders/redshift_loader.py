@@ -211,7 +211,7 @@ class RedshiftLoader(ServingStoreLoaderInterface):
                 if not obj["Key"].endswith(".parquet"):
                     continue
                 raw = s3.get_object(Bucket=bucket, Key=obj["Key"])
-                parquet_file = pq.ParquetFile(io.BytesIO(raw["Body"].read()))  # type: ignore[no-untyped-call]
+                parquet_file = pq.ParquetFile(io.BytesIO(raw["Body"].read()))
                 return self._schema_to_column_types(parquet_file.schema_arrow)
         raise ServingStoreError(f"No Parquet objects found under s3://{bucket}/{clean}")
 

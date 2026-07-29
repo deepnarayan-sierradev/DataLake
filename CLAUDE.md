@@ -83,6 +83,7 @@ activation doesn't reliably persist across separate tool calls in an agent sessi
 
 ```bash
 make wiring-gates                                                # G1/G4/G5/G7/G8/G9 — see below
+make typecheck-scripts                                           # operational scripts (see below)
 .venv/bin/ruff check .                                          # lint — matches CI exactly
 .venv/bin/pytest -q                                              # full suite, enforces 80% coverage gate
 .venv/bin/pytest --no-cov -q                                     # faster loop, skip coverage
@@ -226,10 +227,14 @@ what produced the eighteen.
   hand-rolling that boilerplate** — it makes the clear, the flush, the duration metric, and a
   failure record on both an exception and a hard Lambda kill structurally impossible to forget
   (`connector_runtime/webhook_receiver_handler.py` and `writeback_handler.py` are the examples).
-- Every domain module owns its own `<module>/tests/`, registered in `pyproject.toml`'s
-  `testpaths` (and `[tool.coverage.run].source`, and `known-first-party` for isort) — if you add
-  a new module with tests, register it in all three or it silently never runs in CI. This exact
-  gap existed for `analytics_publisher/tests` and `connector_runtime/tests/sage` until 2026-07-07.
+- Every domain module owns its own `<module>/tests/`, and a new package must be registered in
+  **six** places: `pyproject.toml`'s `testpaths`, `[tool.coverage.run].source`, isort
+  `known-first-party`, the hatch wheel `packages` list, the `Makefile`'s `lambda-package` copy list,
+  and the CI `typecheck` mypy scope. `tests/test_package_registration.py` (G11) reconciles all six —
+  added after `persistence/` was registered in four of them and was consequently absent from both the
+  wheel and the Lambda package, which seventeen modules import. The suite stayed green because it
+  imports from the working tree, not the artefact. The older instance of the same gap was
+  `analytics_publisher/tests` and `connector_runtime/tests/sage`, unrun until 2026-07-07.
 - Top-level `tests/` is for cross-cutting integration tests only (e.g. tenant isolation) — not a
   dumping ground for module-specific tests, which belong under their own module's `tests/`.
 - **Metrics are declared once**, in `contracts/platform_metrics.py::PlatformMetric`, and

@@ -89,6 +89,15 @@ paging-primitive:
 tenant-session-adoption:
 	@python scripts/check_tenant_session_adoption.py
 
+# Regenerate the pinned dependency lock. Run after any change to pyproject dependencies.
+lock:
+	python -m piptools compile --generate-hashes --output-file=requirements.lock pyproject.toml
+
+# Operational scripts: bodies checked so a bad call is an error, annotations not demanded.
+# `scripts/` was unchecked entirely until 2026-07-29 and had two real defects sitting in it.
+typecheck-scripts:
+	@mypy scripts/ --check-untyped-defs --disable-error-code=no-untyped-def --disable-error-code=no-any-return --disable-error-code=type-arg --disable-error-code=no-untyped-call --exclude 'scripts/(generate_presentation|_gen_html)\.py'
+
 wiring-gates: reachability fail-open traceability security-columns paging-primitive tenant-session-adoption
 
 format:
@@ -96,7 +105,13 @@ format:
 	ruff check --fix .
 
 typecheck:
-	mypy .
+	@# NOT `mypy .` — that dies on a dist/ typing_extensions shadow and a scripts/pptx module-name
+	@# collision, which is why root CLAUDE.md says never to run it. This is the scoped form CI runs.
+	mypy -p connector_runtime -p transformation -p entity_resolution \
+		-p analytics_publisher -p orchestration -p observability -p watermark_management \
+		-p schema_management -p contracts -p governance -p tenancy -p config_propagation \
+		-p data_quality -p workflow_automation -p portability -p semantic -p serving_store \
+		-p knowledge -p persistence -p processing_engine
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
 test:
@@ -156,18 +171,24 @@ LAMBDA_BUILD_DIR := dist/lambda-build
 lambda-package:
 	@echo "Building Lambda deployment package..."
 	@rm -rf $(LAMBDA_BUILD_DIR) && mkdir -p $(LAMBDA_BUILD_DIR)
-	# Install production dependencies into the build directory
+	# Install production dependencies into the build directory, pinned by requirements.lock.
+	#
+	# Installed by name with no versions until 2026-07-29, which is why infrastructure/CLAUDE.md
+	# documented that two consecutive builds of unchanged source could differ by SHA-256 — the hash
+	# could not be an integrity control, and `pip-audit` described a resolution that need not match
+	# the artefact. `--require-hashes` makes both true.
 	pip install \
 		--quiet \
 		--target $(LAMBDA_BUILD_DIR) \
 		--platform manylinux2014_x86_64 \
 		--python-version 3.13 \
 		--only-binary=:all: \
-		pydantic boto3 botocore structlog python-dateutil requests pyarrow pymysql duckdb
+		--require-hashes \
+		-r requirements.lock
 	# Copy platform source packages into build directory. processing_engine/knowledge/
 	# semantic are imported by the control-plane Lambda (cold-start) and the twin builder;
 	# omitting them makes those Lambdas fail to import. agent ships for the deferred layer.
-	@for pkg in contracts connector_runtime schema_management watermark_management observability orchestration transformation governance entity_resolution analytics_publisher processing_engine knowledge semantic agent serving_store tenancy config_propagation data_quality workflow_automation portability; do \
+	@for pkg in contracts connector_runtime schema_management watermark_management observability orchestration transformation governance entity_resolution analytics_publisher processing_engine knowledge semantic agent serving_store tenancy config_propagation data_quality workflow_automation portability persistence; do \
 		cp -r $$pkg $(LAMBDA_BUILD_DIR)/$$pkg; \
 	done
 	@mkdir -p dist

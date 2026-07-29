@@ -395,7 +395,7 @@ def _to_parquet(rows: list[dict[str, Any]]) -> bytes:
 
     table = pa.Table.from_pylist(rows) if rows else pa.table({})
     buffer = io.BytesIO()
-    pq.write_table(table, buffer, compression="snappy")  # type: ignore[no-untyped-call]
+    pq.write_table(table, buffer, compression="snappy")
     return buffer.getvalue()
 
 

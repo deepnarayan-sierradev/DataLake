@@ -62,7 +62,7 @@ def handle_list_quality_exceptions(event: dict[str, Any], path_tenant: str) -> d
             start_key=decode_page_token(event, tenant_code),
         )
         records = page.items
-        next_token = encode_page_token(page.next_key)
+        next_token = encode_page_token(page.next_key, tenant_code)
 
     return json_response(
         200,

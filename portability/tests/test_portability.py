@@ -589,3 +589,100 @@ class TestInfrastructureHandover:
         rendered = source_integration_inventory(source_capability_registry.all_declarations())
         assert "hubspot" in rendered
         assert "| Source | Capabilities |" in rendered
+
+
+@mock_aws
+class TestDynamoDbSweepActuallyDeletes:
+    """
+    The sweep reported success while the tenant's audit rows survived (2026-07-29).
+
+    `EdlRunAuditLog` is keyed on `run_id`, so the deleter's `begins_with(run_id, "tenant#")` filter
+    matched nothing — and returning 0 with no error meant the saga counted the step complete and
+    issued the certificate. A certificate is a compliance artefact given to a customer; that one
+    would have asserted deletion of rows still present.
+
+    These read the table after deleting, which is the only assertion that could have caught it.
+    """
+
+    def _audit_table(self) -> object:
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        dynamodb.create_table(
+            TableName="EdlRunAuditLog",
+            KeySchema=[
+                {"AttributeName": "run_id", "KeyType": "HASH"},
+                {"AttributeName": "stage", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "run_id", "AttributeType": "S"},
+                {"AttributeName": "stage", "AttributeType": "S"},
+                {"AttributeName": "tenant_code", "AttributeType": "S"},
+                {"AttributeName": "started_at", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "tenant-started-index",
+                    "KeySchema": [
+                        {"AttributeName": "tenant_code", "KeyType": "HASH"},
+                        {"AttributeName": "started_at", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                }
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        table = dynamodb.Table("EdlRunAuditLog")
+        for index in range(4):
+            table.put_item(
+                Item={
+                    "run_id": f"run-{index}",
+                    "stage": "extraction",
+                    "tenant_code": "evive",
+                    "started_at": f"2026-07-29T0{index}:00:00Z",
+                }
+            )
+        table.put_item(
+            Item={
+                "run_id": "run-other",
+                "stage": "extraction",
+                "tenant_code": "acme-corp",
+                "started_at": "2026-07-29T09:00:00Z",
+            }
+        )
+        return table
+
+    def test_a_run_id_keyed_table_is_actually_swept(self) -> None:
+        from portability.deletion_workflow import dynamodb_tenant_item_deleter
+
+        table = self._audit_table()
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        deleted, detail = dynamodb_tenant_item_deleter(dynamodb, ("EdlRunAuditLog",))("evive")
+
+        assert deleted == 4
+        assert "verified" in detail
+        assert table.scan()["Count"] == 1  # only the other tenant's row
+
+    def test_another_tenants_rows_are_never_touched(self) -> None:
+        from portability.deletion_workflow import dynamodb_tenant_item_deleter
+
+        table = self._audit_table()
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        dynamodb_tenant_item_deleter(dynamodb, ("EdlRunAuditLog",))("evive")
+        survivors = {item["tenant_code"] for item in table.scan()["Items"]}
+        assert survivors == {"acme-corp"}
+
+    def test_an_unrecognised_key_shape_raises_rather_than_reporting_zero(self) -> None:
+        """A table the sweep cannot address must block the certificate, not pass silently."""
+        from portability.deletion_workflow import (
+            IncompleteDeletionError,
+            dynamodb_tenant_item_deleter,
+        )
+
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        dynamodb.create_table(
+            TableName="EdlMysteryTable",
+            KeySchema=[{"AttributeName": "widget_id", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "widget_id", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        with pytest.raises(IncompleteDeletionError, match="not a recognised tenant shape"):
+            dynamodb_tenant_item_deleter(dynamodb, ("EdlMysteryTable",))("evive")

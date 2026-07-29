@@ -134,7 +134,7 @@ class S3ParquetWriter:
     ) -> int:
         """Buffer Parquet output; choose single-PUT or multipart based on size."""
         buf = io.BytesIO()
-        writer = pq.ParquetWriter(buf, schema, compression=compression)  # type: ignore[no-untyped-call]
+        writer = pq.ParquetWriter(buf, schema, compression=compression)
         total_records = 0
 
         # Accumulate current batch
@@ -145,7 +145,7 @@ class S3ParquetWriter:
             if not batch_records:
                 return
             arrow_table = pa.Table.from_pylist(batch_records, schema=schema)
-            writer.write_table(arrow_table)  # type: ignore[no-untyped-call]
+            writer.write_table(arrow_table)
             total_records += len(batch_records)
             batch_records.clear()
 
@@ -155,7 +155,7 @@ class S3ParquetWriter:
                 _flush_batch()
 
         _flush_batch()
-        writer.close()  # type: ignore[no-untyped-call]
+        writer.close()
 
         parquet_bytes = buf.getvalue()
         buf.close()

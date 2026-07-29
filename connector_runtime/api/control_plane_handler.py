@@ -266,7 +266,7 @@ def _handle_list_entities(event: dict[str, Any], path_tenant_code: str) -> dict[
             "entities": entities,
             "count": len(entities),
             # Follow the token, never `count`: a page can be short while more pages remain.
-            "next_token": _encode_page_token(next_key),
+            "next_token": _encode_page_token(next_key, tenant_code),
         },
     )
 
@@ -540,24 +540,26 @@ def _handle_list_runs(event: dict[str, Any], path_tenant_code: str) -> dict[str,
             "tenant_code": tenant_code,
             "runs": runs,
             "count": len(runs),
-            "next_token": _encode_page_token(next_key),
+            "next_token": _encode_page_token(next_key, tenant_code),
         },
     )
 
 
 def _audit_row_key(item: dict[str, Any], use_index: bool) -> dict[str, Any]:
     """
-    The exclusive-start key for one audit row.
+    The exclusive-start key for one audit row: exactly the attributes DynamoDB accepts, no more.
 
-    A GSI read must carry the index key *and* the base-table key; a Scan carries only the base key.
-    `tenant_code` is included either way so `decode_page_token` can verify the cursor's owner.
+    A GSI read's key is the index key *plus* the base-table key; a Scan's is the base key alone.
+    This previously included `tenant_code` unconditionally so `decode_page_token` could verify
+    ownership — but on the Scan fallback `tenant_code` is not part of `EdlRunAuditLog`'s key schema,
+    and DynamoDB validates `ExclusiveStartKey` against that schema. The suite could not see it
+    because moto accepts non-key attributes there.
+
+    Ownership is now verified by the token envelope instead, so the key carries only key attributes.
     """
-    key = {
-        "run_id": item.get("run_id"),
-        "stage": item.get("stage"),
-        "tenant_code": item.get("tenant_code"),
-    }
+    key: dict[str, Any] = {"run_id": item.get("run_id"), "stage": item.get("stage")}
     if use_index:
+        key["tenant_code"] = item.get("tenant_code")
         key["started_at"] = item.get("started_at")
     return key
 
@@ -740,7 +742,7 @@ def _handle_list_twins(
             # Neither `total_visible` nor `hidden_by_scope`: a total requires draining every page,
             # and a suppressed count discloses how many peer entities exist. A page can be entirely
             # filtered out by scope while more pages remain, so follow `next_token`, never `count`.
-            "next_token": _encode_page_token(next_key),
+            "next_token": _encode_page_token(next_key, tenant_code),
         },
     )
 

@@ -27,6 +27,11 @@ from contracts.platform_metrics import PlatformMetric
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from persistence.dynamodb_paging import iter_items
+from persistence.tenant_tables import (
+    TENANT_ATTRIBUTED_INDEX,
+    TENANT_ATTRIBUTED_TABLES,
+    TENANT_SCOPED_KEY_TABLES,
+)
 
 _logger = get_platform_logger(__name__)
 
@@ -383,49 +388,90 @@ def s3_prefix_deleter(s3_client: Any, bucket: str, store: DeletionStore) -> Stor
     return delete
 
 
+def _key_projection(key_names: list[str]) -> dict[str, Any]:
+    """Project only the key attributes: a delete needs the key, not the row."""
+    return {
+        "ProjectionExpression": ", ".join(f"#{name}" for name in key_names),
+        "ExpressionAttributeNames": {f"#{name}": name for name in key_names},
+    }
+
+
+def _tenant_items(table: Any, table_name: str, tenant_code: str, key_names: list[str]) -> Any:
+    """
+    Every item belonging to one tenant, by whichever of the three key shapes this table uses.
+
+    The first version of this branched on `hash_key == "tenant_code"` and swept everything else with
+    `begins_with(hash_key, "tenant#")`. That covers tables keyed `tenant_code` and tables keyed
+    `tenant_scoped_key(...)` — but `EdlRunAuditLog` is keyed on `run_id`, which is neither, so the
+    filter matched nothing while the caller reported success. An unrecognised shape now raises: the
+    sweep must never be able to report zero because it looked in the wrong place.
+    """
+    hash_key = key_names[0]
+    if hash_key == "tenant_code":
+        return iter_items(
+            table,
+            KeyConditionExpression=Key("tenant_code").eq(tenant_code),
+            **_key_projection(key_names),
+        )
+    if table_name in TENANT_SCOPED_KEY_TABLES:
+        # `tenant_scoped_key(...)` stores `tenant#...`, which cannot be queried by equality.
+        return iter_items(
+            table,
+            use_query=False,
+            FilterExpression=f"begins_with(#{hash_key}, :prefix)",
+            ExpressionAttributeValues={":prefix": f"{tenant_code}#"},
+            **_key_projection(key_names),
+        )
+    if table_name in TENANT_ATTRIBUTED_TABLES:
+        # Keyed on something else entirely, with `tenant_code` as an ordinary attribute. Read
+        # through the tenant GSI, which exists for exactly this.
+        return iter_items(
+            table,
+            IndexName=TENANT_ATTRIBUTED_INDEX,
+            KeyConditionExpression=Key("tenant_code").eq(tenant_code),
+            **_key_projection(key_names),
+        )
+    raise IncompleteDeletionError(
+        f"{table_name}: hash key {hash_key!r} is not a recognised tenant shape, so this deleter "
+        "cannot prove it removed the tenant's rows. Declare the table in "
+        "persistence/tenant_tables.py rather than letting the sweep silently skip it."
+    )
+
+
 def dynamodb_tenant_item_deleter(
     dynamodb_resource: Any, table_names: tuple[str, ...]
 ) -> StoreDeleter:
     """
-    Delete every item under the tenant's partition across the platform's tenant-keyed tables.
+    Delete every item belonging to the tenant across the platform's tenant-scoped tables.
 
-    One deleter for all of them rather than one per table, because `DeletionStore` treats DynamoDB
-    as a single store and a certificate must not claim completeness for a subset. Each table is
-    queried for its own key schema, so a table keyed `tenant_code` and one keyed
-    `tenant_scoped_key(...)` are both covered without hardcoding either shape.
+    One deleter for all of them, because `DeletionStore` treats DynamoDB as a single store and a
+    certificate must not claim completeness for a subset.
+
+    **Verified, not trusted.** The first version returned 0 for `EdlRunAuditLog` — see
+    `_tenant_items` — and returning 0 with no error meant the saga counted the step complete and
+    issued the certificate. A deletion certificate is a compliance artefact handed to a customer
+    (SOW §24.7); that one asserted deletion of rows still present. Failing loudly, as this did
+    before any deleter existed, was strictly safer than succeeding wrongly. So the sweep re-reads
+    after deleting, exactly as `s3_prefix_deleter` does.
     """
 
     def delete(tenant_code: str) -> tuple[int, str]:
         deleted = 0
-        covered: list[str] = []
         for table_name in table_names:
             table = dynamodb_resource.Table(table_name)
             key_names = [element["AttributeName"] for element in table.key_schema]
-            hash_key = key_names[0]
-            # A tenant-scoped hash key stores `tenant#...`, so the partition cannot be queried by
-            # equality; those tables are swept by a scan bounded to the tenant's own prefix.
-            if hash_key == "tenant_code":
-                items = iter_items(
-                    table,
-                    KeyConditionExpression=Key("tenant_code").eq(tenant_code),
-                    ProjectionExpression=", ".join(f"#{name}" for name in key_names),
-                    ExpressionAttributeNames={f"#{name}": name for name in key_names},
-                )
-            else:
-                items = iter_items(
-                    table,
-                    use_query=False,
-                    FilterExpression=f"begins_with(#{hash_key}, :prefix)",
-                    ExpressionAttributeNames={f"#{name}": name for name in key_names},
-                    ExpressionAttributeValues={":prefix": f"{tenant_code}#"},
-                    ProjectionExpression=", ".join(f"#{name}" for name in key_names),
-                )
             with table.batch_writer() as batch:
-                for item in items:
+                for item in _tenant_items(table, table_name, tenant_code, key_names):
                     batch.delete_item(Key={name: item[name] for name in key_names})
                     deleted += 1
-            covered.append(table_name)
-        return deleted, f"{deleted} item(s) removed across {len(covered)} table(s)"
+            remaining = sum(1 for _ in _tenant_items(table, table_name, tenant_code, key_names))
+            if remaining:
+                raise IncompleteDeletionError(
+                    f"{table_name}: {remaining} item(s) for tenant {tenant_code!r} remain after "
+                    "deletion. No certificate is issued for a partial sweep."
+                )
+        tables = len(table_names)
+        return deleted, f"{deleted} item(s) removed and verified across {tables} table(s)"
 
     return delete
 

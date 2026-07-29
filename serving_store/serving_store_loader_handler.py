@@ -284,7 +284,7 @@ def _iter_parquet_batches(
                 continue
             raw = s3.get_object(Bucket=bucket, Key=obj["Key"])
             buf = io.BytesIO(raw["Body"].read())
-            table = pq.read_table(buf)  # type: ignore[no-untyped-call]
+            table = pq.read_table(buf)
             for record_batch in table.to_batches(max_chunksize=batch_size):
                 batch_dict = record_batch.to_pydict()
                 n = record_batch.num_rows

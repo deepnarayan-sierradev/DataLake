@@ -152,7 +152,7 @@ def build_parquet_bytes(records: list[ExtractionRecord], error_cls: type[Excepti
     table = pa.table(dict(zip(all_keys, arrays, strict=True)), schema=schema)
 
     buf = io.BytesIO()
-    pq.write_table(table, buf, compression="snappy")  # type: ignore[no-untyped-call]
+    pq.write_table(table, buf, compression="snappy")
     return buf.getvalue()
 
 

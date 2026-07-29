@@ -145,8 +145,14 @@ Non-negotiable, enforced by CI and hooks — see root `CLAUDE.md`:
 - `extra="forbid"` on config/params/API-boundary Pydantic models.
 - OWASP category cited in security-relevant comments (`OWASP A03`, etc.).
 - Canonical Lambda handler pattern with `finally: clear_contextvars()`.
-- New module ⇒ register in `pyproject.toml` `testpaths`, `[tool.coverage.run].source`, isort
-  `known-first-party`, and the hatch wheel `packages` list.
+- **New module ⇒ register in SIX places, not four.** `testpaths`, `[tool.coverage.run].source`,
+  isort `known-first-party`, the hatch wheel `packages` list, **the `Makefile`'s `lambda-package`
+  copy list**, and **the CI `typecheck` mypy scope**. `persistence/` was created on 2026-07-29 and
+  registered in four of the six; seventeen modules import it, and it was missing from both the wheel
+  and the Lambda copy list — so the deployed artefact would have raised `ModuleNotFoundError` on the
+  first invocation, with the whole suite green because the suite imports from the working tree.
+  `tests/test_package_registration.py` (G11) now reconciles all six, so counting is no longer the
+  control.
 - 80% coverage gate; `ruff`, scoped `mypy`, `bandit` clean.
 - **Comment density:** one line maximum above any function, class, or method. No prose docstring
   blocks on new code. Explain *why*, never *what*.

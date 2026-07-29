@@ -59,6 +59,10 @@ TENANT_SCOPED_KEY_TABLES: Final[tuple[str, ...]] = (
 # is not tenant-derived.
 TENANT_ATTRIBUTED_TABLES: Final[tuple[str, ...]] = ("EdlRunAuditLog",)
 
+# The GSI those tables expose for tenant-scoped reads. Named here beside the table list so a
+# sweep cannot fall back to a prefix scan that silently matches nothing.
+TENANT_ATTRIBUTED_INDEX: Final[str] = "tenant-started-index"
+
 # Holds the proof that a deletion happened; never swept by one.
 DELETION_EVIDENCE_TABLES: Final[tuple[str, ...]] = ("EdlDeletionCertificate",)
 

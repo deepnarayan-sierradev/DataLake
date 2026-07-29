@@ -96,7 +96,11 @@ def main() -> None:
     )
     print(f"SOW §4 KPIs covered: {len(SOW_KPI_MAP)}")
 
-    report = KpiValidationHarness(model, structural_expectations(model)).run()
+    # Structural validation only — it compiles every KPI definition and never reads a row, so
+    # there are no access tags to grant. Passed explicitly because the parameter is required.
+    report = KpiValidationHarness(model, structural_expectations(model)).run(
+        granted_access_tags=frozenset()
+    )
     print("\n" + report.render_summary())
     if not report.passed:
         raise SystemExit("KPI validation failed; refusing to publish.")

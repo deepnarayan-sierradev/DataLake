@@ -239,22 +239,23 @@ def decode_page_token(event: dict[str, Any], tenant_code: str) -> dict[str, Any]
     """
     Decode the caller's continuation token into a DynamoDB exclusive-start key (F7).
 
-    This carried a row *offset* until 2026-07-29, which made every page cost the same as the first:
-    the handler re-read the whole result set and sliced it. It was also unstable — a row inserted
-    or resolved between requests shifted the offset, silently skipping or duplicating rows.
+    The token is an **envelope**: `{"t": tenant_code, "k": <exclusive start key>}`. The tenant lives
+    beside the key rather than inside it, and that separation is the fix for a defect this function
+    caused on 2026-07-29.
 
-    Security (OWASP A01): the token now carries a key, so a caller could craft one naming another
-    tenant's partition. The `KeyConditionExpression` already pins `tenant_code`, but relying on
-    that implicitly is how the twin filter came to read a field that did not exist — so the key's
-    own `tenant_code` is checked here, and a mismatch is a 400 rather than a silent empty page.
+    The previous version required `tenant_code` to be a member of the *key itself* — which is true
+    for `EdlTwinIndex` and `EdlDataQualityException` but false for `EdlEntityExtractionConfig`
+    (keyed `source_id`/`entity_id`) and for `EdlRunAuditLog` on its Scan fallback (keyed
+    `run_id`/`stage`). So `/entities` handed clients a `next_token` that this function then rejected
+    as malformed, and `/runs` built an `ExclusiveStartKey` carrying an attribute outside the table's
+    key schema. A rule about "every token" was applied without checking every table it lands on.
 
-    The check requires the member to be **present**. It read `if token_tenant is not None`, which a
-    crafted token opted out of simply by omitting the field — a guard a caller can skip is not a
-    guard. Every table this decodes for is partitioned on `tenant_code`, so its absence is itself
-    malformed.
+    An envelope makes the tenant check total and schema-independent: the key passed to DynamoDB is
+    exactly what DynamoDB returned, and the tenant binding is verified regardless of key shape.
 
-    A malformed token is a 400, never a silent restart from zero: restarting silently would loop a
-    paginating client forever.
+    Security (OWASP A01): a crafted token naming another tenant is a 400 and increments
+    `CrossTenantAccessAttempts`. A malformed token is also a 400, never a silent restart from zero —
+    restarting silently would loop a paginating client forever.
     """
     raw = str((event.get("queryStringParameters") or {}).get("next_token") or "")
     if not raw:
@@ -265,23 +266,30 @@ def decode_page_token(event: dict[str, Any], tenant_code: str) -> dict[str, Any]
         # accept a hand-written payload and defeat the point of an opaque cursor.
         if not decoded.startswith(PAGE_TOKEN_PREFIX):
             raise ValueError("token is missing its marker")
-        key = json.loads(decoded[len(PAGE_TOKEN_PREFIX) :])
+        envelope = json.loads(decoded[len(PAGE_TOKEN_PREFIX) :])
     except (ValueError, UnicodeDecodeError, binascii.Error, json.JSONDecodeError) as exc:
         raise ValidationFailedError("next_token is not a valid continuation token.") from exc
 
+    if not isinstance(envelope, dict) or "t" not in envelope or "k" not in envelope:
+        raise ValidationFailedError("next_token is not a valid continuation token.")
+    key = envelope["k"]
     if not isinstance(key, dict) or not key:
         raise ValidationFailedError("next_token is not a valid continuation token.")
-    if "tenant_code" not in key:
-        raise ValidationFailedError("next_token is not a valid continuation token.")
-    if str(key["tenant_code"]) != tenant_code:
+    if str(envelope["t"]) != tenant_code:
         record_platform_metric(PlatformMetric.CROSS_TENANT_ACCESS_ATTEMPTS)
         raise ValidationFailedError("next_token does not belong to this tenant.")
     return {str(name): value for name, value in key.items()}
 
 
-def encode_page_token(next_key: dict[str, Any] | None) -> str | None:
-    """Encode a DynamoDB exclusive-start key as an opaque continuation token."""
+def encode_page_token(next_key: dict[str, Any] | None, tenant_code: str) -> str | None:
+    """
+    Encode a DynamoDB exclusive-start key as an opaque, tenant-bound continuation token.
+
+    `tenant_code` is required rather than derived from the key: deriving it is what tied this to
+    each table's key schema and broke `/entities`.
+    """
     if not next_key:
         return None
-    payload = f"{PAGE_TOKEN_PREFIX}{json.dumps(next_key, sort_keys=True, default=str)}"
+    envelope = {"t": tenant_code, "k": next_key}
+    payload = f"{PAGE_TOKEN_PREFIX}{json.dumps(envelope, sort_keys=True, default=str)}"
     return base64.urlsafe_b64encode(payload.encode("ascii")).decode("ascii")

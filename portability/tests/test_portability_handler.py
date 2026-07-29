@@ -63,6 +63,33 @@ def _dynamo_table(name: str, pk: str, sk: str | None = None) -> None:
     )
 
 
+def _audit_table_with_tenant_index() -> None:
+    boto3.client("dynamodb", region_name=_REGION).create_table(
+        TableName="EdlRunAuditLog",
+        KeySchema=[
+            {"AttributeName": "run_id", "KeyType": "HASH"},
+            {"AttributeName": "stage", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "run_id", "AttributeType": "S"},
+            {"AttributeName": "stage", "AttributeType": "S"},
+            {"AttributeName": "tenant_code", "AttributeType": "S"},
+            {"AttributeName": "started_at", "AttributeType": "S"},
+        ],
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "tenant-started-index",
+                "KeySchema": [
+                    {"AttributeName": "tenant_code", "KeyType": "HASH"},
+                    {"AttributeName": "started_at", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            }
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _environment(monkeypatch: Any) -> None:
     monkeypatch.setenv("AWS_REGION", _REGION)
@@ -218,7 +245,10 @@ class TestDeletionCoversEveryStore:
             if table_name in {"EdlExportJob", "EdlScopeUnit"}:
                 continue
             if table_name == "EdlRunAuditLog":
-                _dynamo_table(table_name, "run_id", "stage")
+                # With its tenant GSI: the sweep reads that index because the table is keyed on
+                # `run_id`, and without the index it now fails loudly rather than reporting a
+                # successful deletion of rows it never found.
+                _audit_table_with_tenant_index()
             elif table_name in {"EdlEntityExtractionConfig", "EdlWatermarkRepository"}:
                 _dynamo_table(table_name, "source_id", "entity_id")
             else:

@@ -119,6 +119,14 @@ jobs:
                -p workflow_automation -p portability -p semantic -p serving_store \
                -p knowledge -p persistence -p processing_engine
 
+      # Operational scripts are production surface — 14 are Makefile targets an operator runs
+      # against a live account, including the two data migrations that must run before code
+      # deploys. They were outside every check until 2026-07-29, when two real defects turned up:
+      # a call to a tightened signature, and a call to a method that has never existed. Bodies are
+      # checked (that is what catches those); annotations are not demanded across 27 scripts.
+      - name: Type check operational scripts
+        run: make typecheck-scripts
+
   # ──────────────────────────────────────────────────────────────────────────
   # Stage 3: Unit tests with coverage gate
   # ──────────────────────────────────────────────────────────────────────────
@@ -188,12 +196,15 @@ jobs:
           cache: pip
 
       - name: Install project dependencies and pip-audit
-        run: pip install -e ".[dev]" pip-audit>=2.7
+        run: pip install -e ".[dev]" pip-audit>=2.7 pip-tools>=7.4
 
+      # Audits requirements.lock — the exact pinned set the Lambda package installs — rather than
+      # whatever resolves today. A scan of a different resolution than the one you ship is not
+      # evidence about the artefact (OWASP A06/A08).
       - name: Run pip-audit
         # Scan the installed environment; --strict fails on any vulnerability.
         # Do NOT use process substitution (not portable in GitHub Actions runners).
-        run: pip-audit --strict
+        run: pip-audit --strict --require-hashes -r requirements.lock
 
   # ──────────────────────────────────────────────────────────────────────────
   # Stage 6: IaC security scan (checkov)

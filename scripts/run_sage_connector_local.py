@@ -64,6 +64,7 @@ from connector_runtime.configuration_repository.configuration_repository import 
 )
 from connector_runtime.interfaces.connector_interface import FieldContract  # noqa: E402
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType  # noqa: E402
+from contracts.identifier_policy import DEFAULT_TENANT_CODE  # noqa: E402
 from observability.structured_logger import get_platform_logger  # noqa: E402
 from watermark_management.watermark_repository.watermark_repository import (  # noqa: E402
     WatermarkRepository,
@@ -291,9 +292,14 @@ def main() -> None:
     # ── Load entity config from DynamoDB ─────────────────────────────────────
     print("Loading entity config from DynamoDB ...")
     config_client = ConfigurationRepositoryClient(environment=environment, region_name=region)
-    config: EntityExtractionConfig = config_client.load_entity_config(
+    # `load_entity_config` has never existed on this client — the method is `load_config`, and it
+    # requires the tenant the caller acts for. This is a local developer harness with no tenant
+    # argument, so it uses the platform default explicitly rather than implying one. Nothing
+    # caught either problem because `scripts/` was outside the type-check scope until 2026-07-29.
+    config: EntityExtractionConfig = config_client.load_config(
         source_id=_SOURCE_ID,
         entity_id=entity_id,
+        tenant_code=DEFAULT_TENANT_CODE,
     )
     if args.window_days is not None:
         # Patch the config to use the overridden window (useful for testing)

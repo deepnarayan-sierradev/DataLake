@@ -272,10 +272,16 @@ module "audit_trail" {
 # ---------------------------------------------------------------------------
 
 module "observability" {
-  # G6: alarm when a security or consistency control publishes nothing at all. Defaulted to
-  # false and set in no environment until 2026-07-29 — so the gate that exists to stop an
-  # unwired control looking healthy was itself unwired. Here: dev has run pipelines since 2026-07-09, so absence is a defect rather than expected.
-  enable_absence_alarms = true
+  # G6: alarm when a security or consistency control publishes nothing at all.
+  #
+  # Deliberately false until the programme Terraform is applied *and* one full pipeline run
+  # has completed in this environment. Several alarmed metrics have producers that read
+  # tables which do not exist yet — `EffectiveVersionTransitions` needs `EdlEffectiveConfig`,
+  # one of the 21 unapplied programme tables — and these alarms use
+  # `treat_missing_data = "breaching"`. Enabling them first puts them in permanent ALARM,
+  # which this module's own comment identifies as no more useful than an alarm that never
+  # fires. Flip it as the last step of the environment's first successful run.
+  enable_absence_alarms = false
 
   source      = "../../modules/observability"
   environment = local.environment

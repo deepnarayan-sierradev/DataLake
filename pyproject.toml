@@ -16,7 +16,10 @@ dependencies = [
     "structlog>=24.4,<26.0",
     "python-dateutil>=2.9,<3.0",
     "requests>=2.32,<3.0",
-    "pyarrow>=16.0,<19.0",
+    # >=23.0.1: PYSEC-2026-113 affects every pyarrow below it, and the previous `<19.0` ceiling
+    # made the fix unreachable. Surfaced by auditing requirements.lock rather than a fresh
+    # resolution — the whole point of pinning.
+    "pyarrow>=23.0.1,<24.0",
     "pymysql>=1.1,<2.0",
     "psycopg[binary]>=3.1,<4.0",
     "pymssql>=2.3,<3.0",
@@ -61,6 +64,7 @@ packages = [
     "data_quality",
     "workflow_automation",
     "portability",
+    "persistence",
 ]
 
 # ---------------------------------------------------------------------------
@@ -142,6 +146,25 @@ warn_return_any = true
 warn_unused_ignores = true
 no_implicit_reexport = true
 pretty = true
+
+[[tool.mypy.overrides]]
+# Operational scripts: type-checked, but not held to the annotation bar production packages are.
+#
+# `scripts/` was outside the type-check scope entirely until 2026-07-29, and it is production
+# surface — 14 of these are Makefile targets an operator runs against a live account, including the
+# two data migrations that must run *before* code deploys. Two real defects were sitting there:
+# `seed_enterprise_semantic_model.py` called `.run()` after a signature was tightened, and
+# `run_sage_connector_local.py` called a `load_entity_config` method that has never existed.
+#
+# `check_untyped_defs` is what catches those — it checks bodies, so a bad call is an error even in an
+# unannotated function. `disallow_untyped_defs` stays off: demanding full annotations across 27
+# scripts would be 300 errors of no value, and would have been the reason not to check them at all.
+module = ["scripts.*"]
+check_untyped_defs = true
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+warn_return_any = false
 
 [[tool.mypy.overrides]]
 module = ["moto.*", "boto3.*", "botocore.*", "pyarrow.*", "pymysql.*", "pymssql.*", "redshift_connector.*", "requests_mock.*"]

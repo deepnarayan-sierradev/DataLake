@@ -494,7 +494,7 @@ def _load_parquet_records(s3: Any, bucket: str, prefix: str) -> list[dict[str, A
                 continue
             raw = s3.get_object(Bucket=bucket, Key=obj["Key"])
             buf = io.BytesIO(raw["Body"].read())
-            table = pq.read_table(buf)  # type: ignore[no-untyped-call]
+            table = pq.read_table(buf)
             for batch in table.to_batches(max_chunksize=10_000):
                 batch_dict = batch.to_pydict()
                 n = batch.num_rows

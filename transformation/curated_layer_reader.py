@@ -187,7 +187,7 @@ def load_curated_records(
                 continue
             raw = s3.get_object(Bucket=bucket, Key=obj["Key"])
             buf = io.BytesIO(raw["Body"].read())
-            table = pq.read_table(buf)  # type: ignore[no-untyped-call]
+            table = pq.read_table(buf)
             # RecordBatch iteration (§2.3): 10K rows materialised at a time.
             for batch in table.to_batches(max_chunksize=10_000):
                 batch_dict = batch.to_pydict()

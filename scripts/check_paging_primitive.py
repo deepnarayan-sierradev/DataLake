@@ -54,13 +54,12 @@ def violations_in(path: Path) -> list[Violation]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     found: list[Violation] = []
     for node in ast.walk(tree):
-        marker: str | None = None
+        # `ast.walk` yields nodes with no guaranteed `lineno` (ast.Module has none), so the two
+        # shapes are narrowed separately rather than reading the attribute off the union.
         if isinstance(node, ast.Constant) and node.value in PAGING_MARKERS:
-            marker = str(node.value)
+            found.append(Violation(path=path, line=node.lineno, marker=str(node.value)))
         elif isinstance(node, ast.keyword) and node.arg in PAGING_MARKERS:
-            marker = str(node.arg)
-        if marker is not None:
-            found.append(Violation(path=path, line=node.lineno, marker=marker))
+            found.append(Violation(path=path, line=node.lineno, marker=str(node.arg)))
     return found
 
 
