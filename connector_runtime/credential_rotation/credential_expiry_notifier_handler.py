@@ -38,6 +38,7 @@ from datetime import UTC, datetime
 from typing import Any, Final
 
 import boto3
+import structlog
 
 from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
@@ -57,8 +58,19 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         Never raises for an individual secret's check failure — a single
         DescribeSecret error must not prevent checking the remaining secrets.
     """
-    region_name = require_env("AWS_REGION")
     environment = require_env("PLATFORM_ENVIRONMENT")
+    structlog.contextvars.bind_contextvars(
+        aws_request_id=getattr(context, "aws_request_id", ""), environment=environment
+    )
+    try:
+        return _notify_expiring_credentials(event, environment)
+    finally:
+        structlog.contextvars.clear_contextvars()
+
+
+def _notify_expiring_credentials(event: dict[str, Any], environment: str) -> dict[str, Any]:
+    """Check each configured secret's age and notify on those past the warning threshold."""
+    region_name = require_env("AWS_REGION")
     secret_arns_raw = require_env("SOURCE_CREDENTIAL_SECRET_ARNS")
     sns_topic_arn = require_env("ALERT_SNS_TOPIC_ARN")
 

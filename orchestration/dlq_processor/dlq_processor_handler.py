@@ -33,6 +33,7 @@ from datetime import UTC, datetime
 from typing import Any, Final
 
 import boto3
+import structlog
 from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field, field_validator
 
@@ -105,7 +106,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> None:
     SQS ESM is configured with batch_size=1.
     """
     check_lambda_timeout(context, min_remaining_ms=30_000)
+    # Bound and cleared here so every line carries the request id and nothing leaks into the next
+    # invocation on a warm container.
+    structlog.contextvars.bind_contextvars(aws_request_id=getattr(context, "aws_request_id", ""))
+    try:
+        _dispatch_dlq_records(event)
+    finally:
+        structlog.contextvars.clear_contextvars()
 
+
+def _dispatch_dlq_records(event: dict[str, Any]) -> None:
+    """Process each DLQ record in the batch."""
     audit_table_name = require_env("RUN_AUDIT_LOG_TABLE")
     alert_sns_topic_arn = require_env("ALERT_SNS_TOPIC_ARN")
     state_machine_arn = os.environ.get("STATE_MACHINE_ARN", "")
@@ -161,6 +172,9 @@ def _process_dlq_record(
         )
         raise ValueError(f"DLQ message {message_id!r} failed validation: {exc}") from exc
 
+    structlog.contextvars.bind_contextvars(
+        tenant_code=msg.tenant_code, run_id=msg.run_id, entity_id=msg.entity_id
+    )
     received_at = datetime.now(UTC).isoformat()
 
     _logger.info(

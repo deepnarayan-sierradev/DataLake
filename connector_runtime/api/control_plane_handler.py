@@ -66,6 +66,7 @@ from decimal import Decimal
 from typing import Any, Final
 
 import boto3
+import structlog
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 from pydantic import ValidationError as PydanticValidationError
@@ -259,6 +260,9 @@ def _authorize_path_tenant(event: dict[str, Any], path_tenant_code: str) -> str:
         raise AuthorizationError(
             "Authenticated tenant is not permitted to access this tenant_code path."
         )
+    # Bound only after the claim is verified, so a rejected request never stamps its logs with a
+    # tenant it was not entitled to name.
+    structlog.contextvars.bind_contextvars(tenant_code=tenant_code)
     return tenant_code
 
 
@@ -1386,6 +1390,16 @@ def _route(event: dict[str, Any]) -> dict[str, Any]:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """AWS Lambda entry point — API Gateway Lambda-proxy integration."""
+    # The API had no correlation context at all: fields were passed ad hoc per call site, so an
+    # API-initiated action could not be traced end to end and `tenant_code` appeared only where
+    # an author remembered it. Cleared in `finally` — a warm container would otherwise carry one
+    # caller's tenant into the next request's logs.
+    request_context = event.get("requestContext") or {}
+    structlog.contextvars.bind_contextvars(
+        request_id=str(request_context.get("requestId") or ""),
+        path=str(event.get("path") or ""),
+        method=str(event.get("httpMethod") or ""),
+    )
     try:
         return _route(event)
     except ApiError as exc:
@@ -1397,3 +1411,5 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             method=event.get("httpMethod"),
         )
         return _response(500, {"error": "An internal error occurred."})
+    finally:
+        structlog.contextvars.clear_contextvars()

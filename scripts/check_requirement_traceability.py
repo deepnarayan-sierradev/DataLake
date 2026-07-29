@@ -34,6 +34,11 @@ DEFERRED_DOCUMENTS: Final[frozenset[str]] = frozenset(
     {"DL-04-ai-agent-runtime.md", "DL-05-machine-learning-platform.md"}
 )
 
+# Infrastructure requirements backed by an executable assertion (a Terraform plan check or a
+# post-apply probe), not merely by the id appearing in a `.tf` file. Empty today, deliberately:
+# nothing in this repo yet asserts that a Terraform resource enforces what its requirement claims.
+ASSERTED_INFRASTRUCTURE: Final[frozenset[str]] = frozenset()
+
 _ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bDL-[A-Z]+-\d+\b")
 _WAIVER_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^\s*[-*]\s*`(?P<id>DL-[A-Z]+-\d+)`\s*[—-]\s*(?P<reason>.+\S)\s*$"
@@ -204,6 +209,35 @@ def _report(
         print(
             f"\nCite the requirement id in the code that implements it, or record the decision "
             f"in {WAIVER_FILE.name} as:\n  - `DL-XXX-00` — why it is not implemented"
+        )
+
+    _report_infrastructure(buckets["infrastructure"], declared)
+
+
+def _report_infrastructure(infrastructure: list[str], declared: dict[str, str]) -> None:
+    """
+    Separate infrastructure requirements that are *asserted* from those merely *cited*.
+
+    This bucket used to read as satisfied, which is how DL-SCOPE-14's Athena half passed for
+    months: the `scope_unit` LF-Tag was created, never assigned to a resource, and absent from
+    the permission expression — it appeared only in a `depends_on`. The requirement id was in a
+    `.tf` file, so the gate counted it. A citation is not enforcement.
+    """
+    cited_only = [rid for rid in infrastructure if rid not in ASSERTED_INFRASTRUCTURE]
+    asserted = len(infrastructure) - len(cited_only)
+    if asserted:
+        print(f"\nINFRASTRUCTURE, asserted by a test: {asserted}")
+    if cited_only:
+        print(
+            f"\nINFRASTRUCTURE, CITED ONLY — the id appears in Terraform, but nothing asserts the "
+            f"resource does what the requirement says ({len(cited_only)}):"
+        )
+        for rid in cited_only:
+            print(f"  - {rid}  [{declared[rid]}]")
+        print(
+            "\nNot a failure: Terraform cannot be unit-tested here. It is a standing reminder "
+            "that these are the requirements most likely to be green and unenforced. Add the id "
+            "to ASSERTED_INFRASTRUCTURE once a plan-level or post-apply check covers it."
         )
 
 

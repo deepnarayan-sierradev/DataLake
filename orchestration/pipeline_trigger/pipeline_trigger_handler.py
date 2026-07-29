@@ -51,6 +51,7 @@ from datetime import UTC, datetime
 from typing import Any, Final
 
 import boto3
+import structlog
 from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field, field_validator
 
@@ -131,7 +132,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> None:
     Raises on failure (SQS will retry the message after VisibilityTimeout).
     """
     check_lambda_timeout(context, min_remaining_ms=30_000)
+    # Bound and cleared here so every line this invocation emits carries the request id, and so
+    # nothing leaks into the next invocation on a warm container.
+    structlog.contextvars.bind_contextvars(aws_request_id=getattr(context, "aws_request_id", ""))
+    try:
+        _dispatch_records(event)
+    finally:
+        structlog.contextvars.clear_contextvars()
 
+
+def _dispatch_records(event: dict[str, Any]) -> None:
+    """Validate the ESM batch contract and start one execution per record."""
     state_machine_arn = require_env("STATE_MACHINE_ARN")
 
     records: list[dict[str, Any]] = event.get("Records", [])
@@ -191,6 +202,9 @@ def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
 
     try:
         msg = TriggerMessage.model_validate(body_dict)
+        structlog.contextvars.bind_contextvars(
+            tenant_code=msg.tenant_code, source_id=msg.source_id, entity_id=msg.entity_id
+        )
     except Exception as exc:
         _logger.error(
             "pipeline_trigger_validation_failed",
