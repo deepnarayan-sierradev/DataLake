@@ -34,7 +34,10 @@ code exists, and until the entry point lands it cannot run.
 - `workflow_automation.actions` — the registered handlers: the runner constructs the engine but
   the wired handler set is injected by the deployment, so no module imports them yet (S9 remainder)
 - `serving_store.credential_delivery` — blocked on the BI network-path decision (gap 4); there is
-  no point delivering a reader credential nobody can connect with
+  no point delivering a reader credential nobody can connect with. Note the RLS policy it would
+  deliver against is now correct as of 2026-07-29 (the loader is exempted by role, so applying the
+  policy no longer breaks the loader's own next upsert) — what remains is the network path and the
+  component that sets `edl.scope_units` on a BI connection.
 
 ### Deferred phase — DL-04 (AI agent runtime)
 

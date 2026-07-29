@@ -305,6 +305,9 @@ class RowSecurityPolicy:
     security_columns: tuple[str, ...] = field(default_factory=tuple)
 
 
+DEFAULT_LOADER_ROLE: Final[str] = "edl_loader"
+
+
 def generate_row_security_policy(
     table_name: str,
     engine: ServingEngine,
@@ -312,23 +315,45 @@ def generate_row_security_policy(
     session_scope_setting: str = "edl.scope_units",
     session_brand_setting: str = "edl.brand_codes",
     include_brand: bool = True,
+    loader_role: str = DEFAULT_LOADER_ROLE,
 ) -> RowSecurityPolicy:
     """
     Emit native RLS statements filtering on the scope unit and, optionally, the brand.
 
-    The predicate reads a **session setting** the connection pool sets from verified claims, not
-    a value the client supplies in the query — the same server-side-injection discipline the
-    semantic compiler uses.
+    The predicate reads a **session setting** the connection pool sets from verified claims, not a
+    value the client supplies in the query — the same server-side-injection discipline the semantic
+    compiler uses.
+
+    **The loader is exempted by role, and must be.** This previously emitted `ENABLE` + `FORCE ROW
+    LEVEL SECURITY` with a `FOR SELECT` policy and nothing else. Under RLS, PostgreSQL denies any
+    command that has no policy, and `FORCE` removes the table-owner exemption — so the *second*
+    incremental load into a table would have been refused, and the hash-diff read that decides what
+    changed would have returned zero rows first, making every row look new. A `FOR ALL` policy
+    scoped `TO <loader_role>` is preferred over granting `BYPASSRLS`, which is a
+    superuser-adjacent attribute the loader does not otherwise need (least privilege, OWASP A01).
+
+    `FORCE` is deliberately kept: without it the table owner reads unfiltered, and the owner is
+    reachable from any connection that happens to authenticate as it.
+
+    NULL `scope_unit_id` is excluded, and that is a writer contract rather than a filter gap:
+    attribution stamps `__tenant__` for a single-partition tenant, so a NULL is a data defect. The
+    Python predicate's `IS NULL` branch exists for pre-attribution rows in the *lake*; rows reaching
+    the serving store have been through attribution. Reconciled here on purpose so the two do not
+    silently diverge.
     """
     if engine not in NATIVE_RLS_ENGINES:
         raise EngineUnsuitableError(
             f"Engine {engine.value!r} has no native row-level security; use "
             "schema-per-scope-unit instead (DL-SCOPE-15)."
         )
+    if not SAFE_COLUMN_PATTERN.match(loader_role):
+        raise ValueError(f"loader_role {loader_role!r} is not an allowlisted identifier.")
+
     quoted_table = _quote_identifier(engine, table_name)
     scope_column = _quote_identifier(engine, SCOPE_UNIT_COLUMN)
     brand_column = _quote_identifier(engine, "brand_code")
     policy_name = f"rls_{table_name}"
+    loader_policy_name = f"rls_{table_name}_loader"
 
     statements: tuple[str, ...]
     if engine in (ServingEngine.POSTGRESQL, ServingEngine.REDSHIFT):
@@ -346,6 +371,11 @@ def generate_row_security_policy(
             f"ALTER TABLE {quoted_table} FORCE ROW LEVEL SECURITY;",
             f"DROP POLICY IF EXISTS {policy_name} ON {quoted_table};",
             f"CREATE POLICY {policy_name} ON {quoted_table} FOR SELECT USING ({predicate});",
+            # Without this the loader's own next upsert is refused: RLS denies any command with no
+            # policy, and FORCE removes the owner exemption.
+            f"DROP POLICY IF EXISTS {loader_policy_name} ON {quoted_table};",
+            f"CREATE POLICY {loader_policy_name} ON {quoted_table} FOR ALL "
+            f"TO {loader_role} USING (true) WITH CHECK (true);",
         )
     else:
         predicate_function = f"fn_{policy_name}_predicate"
@@ -353,7 +383,11 @@ def generate_row_security_policy(
             f"CREATE OR ALTER FUNCTION {predicate_function}(@scope_unit_id NVARCHAR(64)) "  # nosec B608 — identifiers pass the allowlist patterns
             "RETURNS TABLE WITH SCHEMABINDING AS RETURN "
             "SELECT 1 AS is_visible WHERE @scope_unit_id IN "
-            f"(SELECT value FROM STRING_SPLIT(SESSION_CONTEXT(N'{session_scope_setting}'), ','));",
+            f"(SELECT value FROM STRING_SPLIT(SESSION_CONTEXT(N'{session_scope_setting}'), ',')) "
+            # T-SQL has no per-command policy, so the loader exemption lives in the predicate. A
+            # filter predicate also constrains the read side of MERGE, which is what the loader
+            # uses to decide what changed.
+            f"OR IS_ROLEMEMBER('{loader_role}') = 1;",
             f"DROP SECURITY POLICY IF EXISTS {policy_name};",
             f"CREATE SECURITY POLICY {policy_name} ADD FILTER PREDICATE "
             f"{predicate_function}({scope_column}) ON {quoted_table} WITH (STATE = ON);",

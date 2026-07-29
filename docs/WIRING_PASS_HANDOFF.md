@@ -139,20 +139,28 @@ costs nothing.
 
 ## Awaiting a decision before any AWS change
 
-1. **`terraform apply`, naming the environment.** Nothing has been applied at any point.
-2. **Lake Formation principals must be named first** — applying revokes a grant three real dev
-   principals depend on, and the module now also adds a `scope_unit` LF-Tag.
-3. **Two GSIs on deployed tables** (`EdlEntityExtractionConfig`, `EdlRunAuditLog`). Online, but they
-   backfill and consume capacity. The code works either way — the Query path is conditional on the
-   index existing.
-4. **The backfill strategy** (`scripts/backfill_scope_attribution.py`): re-run transformation over
-   history, or refuse scope-partitioned queries against pre-backfill partitions. Defaults to
-   `--strategy report` so the scale can be measured first.
+**Updated 2026-07-29: the platform will be deployed to a brand-new AWS account within days.** That
+voids three of the four items recorded here, and the reasoning is worth keeping so nobody
+re-derives constraints that no longer apply:
+
+1. **`terraform apply`, naming the environment** — still required. Nothing has been applied at any
+   point.
+2. ~~**Lake Formation principals must be named first**~~ — the revocation hazard is void: a new
+   account has no existing grant to revoke. The principals are still needed to *populate*
+   `scope_unit_grants` and `scope_unit_row_filters`, but that is now a configuration step rather
+   than a destructive one. The module validates with both empty and enforces nothing until they are
+   filled in.
+3. ~~**Two GSIs on deployed tables**~~ — void. On an empty account there is nothing to backfill and
+   no capacity to consume.
+4. ~~**The backfill strategy**~~ — void. `scripts/backfill_scope_attribution.py` exists for an
+   environment with pre-attribution history; a new account has none. Every row will be stamped by
+   attribution from the first run, so the "refuse scope-partitioned queries against pre-backfill
+   partitions" branch is unreachable there. Keep the script for a future migration of the existing
+   dev account, if that is ever wanted.
 
 Two enforce-mode flips also remain — IAM tenant boundary and WAF — each needing its own observation
-window with `CrossTenantAccessAttempts` at zero before switching.
-
----
+window with `CrossTenantAccessAttempts` at zero before switching. A new account makes these *easier*
+(no legitimate traffic to break) but not automatic: the window still has to be observed.
 
 ## Still open
 
