@@ -29,7 +29,7 @@ import pytest
 import requests
 import requests_mock as requests_mock_lib
 
-from connector_runtime.adapters.sage.common.sage_http_client import (
+from connector_runtime.adapters.sage.substrate.sage_http_client import (
     SageAuthenticationError,
     SageHttpClient,
     SageHttpError,

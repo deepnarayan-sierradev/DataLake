@@ -40,7 +40,7 @@ from knowledge.relationship_rules_registry import (
 )
 from knowledge.twin_pipeline import RelationshipInput, TwinPipeline
 from knowledge.twin_repository import TwinRepository
-from observability.lambda_utils import check_lambda_timeout, configure_xray, require_env
+from observability.lambda_runtime import check_lambda_timeout, configure_xray, require_env
 from observability.structured_logger import get_platform_logger
 from processing_engine.registry import set_based_engine_registry
 

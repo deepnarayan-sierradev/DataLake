@@ -27,16 +27,16 @@ from unittest.mock import MagicMock
 import pytest
 import requests_mock as requests_mock_lib
 
-from connector_runtime.adapters.sage.common.sage_credential_manager import SageCredentialError
-from connector_runtime.adapters.sage.common.sage_http_client import (
-    SageHttpClient,
-)
 from connector_runtime.adapters.sage.products.intacct.intacct_auth import (
     _DEFAULT_TOKEN_TTL_SECONDS,
     _PROACTIVE_REFRESH_SECONDS,
     IntacctAuthClient,
     IntacctAuthError,
     IntacctCredentialError,
+)
+from connector_runtime.adapters.sage.substrate.sage_credential_provider import SageCredentialError
+from connector_runtime.adapters.sage.substrate.sage_http_client import (
+    SageHttpClient,
 )
 from connector_runtime.tests.sage.request_assertions import _sent_request
 

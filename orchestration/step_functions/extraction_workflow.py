@@ -100,7 +100,7 @@ from connector_runtime.run_lifecycle.run_lifecycle import RunCoordinator
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType
 from contracts.observability_contract import PipelineStage, RunStatus
 from contracts.pipeline_stage_contract import DriftClassification
-from observability.lambda_utils import check_lambda_timeout_periodic
+from observability.lambda_runtime import check_lambda_timeout_periodic
 from observability.structured_logger import get_platform_logger
 from orchestration.step_functions.extraction_retry_policy import (
     CircuitOpenError,

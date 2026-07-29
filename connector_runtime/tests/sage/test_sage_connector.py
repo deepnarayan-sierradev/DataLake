@@ -44,16 +44,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from connector_runtime.adapters.sage.common.sage_http_client import (
-    SageAuthenticationError,
-    SageInvalidRequestError,
-    SageNetworkError,
-    SageObjectNotFoundError,
-    SageRateLimitError,
-    SageServiceUnavailableError,
-    SageTimeoutError,
-)
-from connector_runtime.adapters.sage.common.sage_raw_layer_writer import SageRawLayerWriter
 from connector_runtime.adapters.sage.products.intacct.intacct_auth import (
     IntacctAuthError,
     IntacctCredentialError,
@@ -75,6 +65,16 @@ from connector_runtime.adapters.sage.sage_connector import (
     SageConnector,
     _build_sage,
 )
+from connector_runtime.adapters.sage.substrate.sage_http_client import (
+    SageAuthenticationError,
+    SageInvalidRequestError,
+    SageNetworkError,
+    SageObjectNotFoundError,
+    SageRateLimitError,
+    SageServiceUnavailableError,
+    SageTimeoutError,
+)
+from connector_runtime.adapters.sage.substrate.sage_raw_layer_writer import SageRawLayerWriter
 from connector_runtime.interfaces.connector_interface import (
     ExtractionErrorClassification,
     FieldContract,
@@ -222,7 +222,7 @@ class TestConstructorValidation:
     def test_valid_sage_product_accepted(self) -> None:
         """Valid product should instantiate without reaching AWS (mocked)."""
         with (
-            patch("connector_runtime.adapters.sage.sage_connector.SageCredentialManager"),
+            patch("connector_runtime.adapters.sage.sage_connector.SageCredentialProvider"),
             patch("connector_runtime.adapters.sage.sage_connector.SageHttpClient"),
         ):
             connector = SageConnector(
@@ -602,7 +602,7 @@ class TestBuildSageFactory:
 
     def test_valid_params_returns_connector_and_writer(self) -> None:
         with (
-            patch("connector_runtime.adapters.sage.sage_connector.SageCredentialManager"),
+            patch("connector_runtime.adapters.sage.sage_connector.SageCredentialProvider"),
             patch("connector_runtime.adapters.sage.sage_connector.SageHttpClient"),
         ):
             connector, writer = _build_sage(
@@ -620,7 +620,7 @@ class TestBuildSageFactory:
 
     def test_writer_has_correct_product(self) -> None:
         with (
-            patch("connector_runtime.adapters.sage.sage_connector.SageCredentialManager"),
+            patch("connector_runtime.adapters.sage.sage_connector.SageCredentialProvider"),
             patch("connector_runtime.adapters.sage.sage_connector.SageHttpClient"),
         ):
             _, writer = _build_sage(

@@ -1,5 +1,5 @@
 """
-Tests for curated_utils shared utility functions.
+Tests for curated_layer_reader shared utility functions.
 
 Coverage:
   - find_latest_curated_prefix: returns None when no partitions exist
@@ -27,7 +27,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from transformation.curated_utils import (
+from transformation.curated_layer_reader import (
     SAFE_S3_PREFIX_PATTERN,
     find_latest_curated_prefix,
     load_curated_records,
@@ -354,7 +354,7 @@ class TestFindLatestCuratedPrefixSecurity:
 
     def test_path_traversal_in_run_prefix_returns_none(self) -> None:
         """A run prefix containing '..' must be rejected (CWE-22)."""
-        from transformation.curated_utils import find_latest_curated_prefix
+        from transformation.curated_layer_reader import find_latest_curated_prefix
 
         mock_s3 = self._make_s3_mock_with_prefix(
             date_prefix="curated/sf/sf-account/curated_date=2026-07-07/",
@@ -366,7 +366,7 @@ class TestFindLatestCuratedPrefixSecurity:
 
     def test_leading_slash_in_run_prefix_returns_none(self) -> None:
         """A run prefix starting with '/' must be rejected."""
-        from transformation.curated_utils import find_latest_curated_prefix
+        from transformation.curated_layer_reader import find_latest_curated_prefix
 
         mock_s3 = self._make_s3_mock_with_prefix(
             date_prefix="curated/sf/sf-account/curated_date=2026-07-07/",
@@ -377,7 +377,7 @@ class TestFindLatestCuratedPrefixSecurity:
 
     def test_safe_prefix_returned_normally(self) -> None:
         """A normal safe run prefix must be returned unchanged."""
-        from transformation.curated_utils import find_latest_curated_prefix
+        from transformation.curated_layer_reader import find_latest_curated_prefix
 
         safe_run_prefix = "curated/sf/sf-account/curated_date=2026-07-07/run_id=run-20260707-001/"
         mock_s3 = self._make_s3_mock_with_prefix(

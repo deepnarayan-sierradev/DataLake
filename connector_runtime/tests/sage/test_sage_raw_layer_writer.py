@@ -35,7 +35,7 @@ import pyarrow.parquet as pq
 import pytest
 from moto import mock_aws
 
-from connector_runtime.adapters.sage.common.sage_raw_layer_writer import (
+from connector_runtime.adapters.sage.substrate.sage_raw_layer_writer import (
     SageRawLayerWriter,
     SageRawLayerWriterError,
     _records_to_parquet,

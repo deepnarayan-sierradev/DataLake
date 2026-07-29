@@ -94,7 +94,7 @@ so no consumer wiring is needed until a Lambda/endpoint uses them. **Agent table
 - **Twin store = relational adjacency** (DynamoDB index) first, not a graph DB. Value rollups (FR-1.5) and
   lifecycle *history* (SCD-2) deferred — current: edge-count rollups + current stage only.
 - **Semantic compiler = thin custom** (no Cube/dbt-metrics library). Saved-query filters deferred (metrics+dims only).
-- **Substrate tests mock `duckdb`** via `sys.modules` (repo convention, matching `curated_utils` tests) — no
+- **Substrate tests mock `duckdb`** via `sys.modules` (repo convention, matching `curated_layer_reader` tests) — no
   real-data integration test yet.
 
 ---

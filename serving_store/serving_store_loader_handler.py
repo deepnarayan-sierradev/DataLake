@@ -71,7 +71,7 @@ from contracts.identifier_policy import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFI
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
 from contracts.platform_metrics import PlatformMetric
-from observability.lambda_utils import (
+from observability.lambda_runtime import (
     check_lambda_timeout,
     check_lambda_timeout_periodic,
     configure_xray,

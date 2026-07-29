@@ -89,7 +89,7 @@ _UPPER_BOUND_PLACEHOLDER: Final[str] = "__SAGE_UPPER_BOUND__"
 # SageQueryBuildError is defined in common/sage_errors.py and re-exported here
 # so existing imports from this module keep working. Intentionally placed
 # after the module constants above rather than at top of file.
-from connector_runtime.adapters.sage.common.sage_errors import SageQueryBuildError  # noqa: E402
+from connector_runtime.adapters.sage.substrate.sage_errors import SageQueryBuildError  # noqa: E402
 
 
 class IntacctQueryEngine:

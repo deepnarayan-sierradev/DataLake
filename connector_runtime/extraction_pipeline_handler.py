@@ -58,7 +58,7 @@ from connector_runtime.run_lifecycle.run_lifecycle import RunCoordinator
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN
 from contracts.observability_contract import PipelineStage
-from observability.lambda_utils import check_lambda_timeout, require_env
+from observability.lambda_runtime import check_lambda_timeout, require_env
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.stage_execution import (
     StageIdentity,

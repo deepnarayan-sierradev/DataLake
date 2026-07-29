@@ -47,7 +47,7 @@ These are the Sage-specific gaps still open, roughly ordered by severity. Platfo
 ### Correctness
 
 - **Credential cache doesn't invalidate on a rejected-credentials auth failure.**
-  `SageCredentialManager` has a public `invalidate_cache()` method, but neither
+  `SageCredentialProvider` has a public `invalidate_cache()` method, but neither
   `IntacctAuthClient._refresh_token()` nor `X3AuthClient._refresh_token()` calls it when the token
   endpoint rejects the credentials. If Secrets Manager rotation fires mid-run, both products retry
   with a stale `client_secret` for up to the 3600s cache TTL. Fix: call

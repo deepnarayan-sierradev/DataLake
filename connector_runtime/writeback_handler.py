@@ -28,7 +28,7 @@ from connector_runtime.run_lifecycle.run_lifecycle import RunCoordinator, genera
 from contracts.identifier_policy import TENANT_CODE_PATTERN, validate_stable_id
 from contracts.observability_contract import PipelineStage, RunStatus
 from contracts.platform_metrics import PlatformMetric
-from observability.lambda_utils import check_lambda_timeout, require_env
+from observability.lambda_runtime import check_lambda_timeout, require_env
 from observability.stage_execution import StageIdentity, derive_correlation_id, stage_execution
 from observability.structured_logger import get_platform_logger
 from tenancy.connection_keys import resolve_connection_id

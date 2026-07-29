@@ -45,7 +45,7 @@ class SageProductStrategies:
     Holds the three strategy classes for a registered Sage product.
 
     Each class is instantiated by SageConnector at construction time with
-    the shared SageCredentialManager and SageHttpClient instances injected.
+    the shared SageCredentialProvider and SageHttpClient instances injected.
     Frozen so that registered strategies cannot be mutated after registration.
     """
 

@@ -19,13 +19,6 @@ from __future__ import annotations
 
 import pytest
 
-from connector_runtime.adapters.sage.common.sage_product_registry import (
-    SUPPORTED_SAGE_PRODUCTS,
-    SageProductRegistryError,
-    SageProductStrategies,
-    _register_product,
-    resolve_product_strategies,
-)
 from connector_runtime.adapters.sage.products.intacct.intacct_auth import IntacctAuthClient
 from connector_runtime.adapters.sage.products.intacct.intacct_metadata_client import (
     IntacctMetadataClient,
@@ -34,6 +27,13 @@ from connector_runtime.adapters.sage.products.intacct.intacct_query_engine impor
 from connector_runtime.adapters.sage.products.x3.x3_auth import X3AuthClient
 from connector_runtime.adapters.sage.products.x3.x3_metadata_client import X3MetadataClient
 from connector_runtime.adapters.sage.products.x3.x3_query_engine import X3QueryEngine
+from connector_runtime.adapters.sage.substrate.sage_product_registry import (
+    SUPPORTED_SAGE_PRODUCTS,
+    SageProductRegistryError,
+    SageProductStrategies,
+    _register_product,
+    resolve_product_strategies,
+)
 
 
 class TestSupportedProducts:

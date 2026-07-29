@@ -123,7 +123,7 @@ from entity_resolution.resolution_config.resolution_config_registry import (
     ResolutionConfigRegistry,
 )
 from knowledge.twin_repository import TwinNotFoundError, TwinRepository
-from observability.lambda_utils import require_env
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from processing_engine.registry import set_based_engine_registry

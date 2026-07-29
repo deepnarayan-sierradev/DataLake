@@ -64,7 +64,7 @@ from governance.data_catalog_registration import (
     DataCatalogRegistrationClient,
     DataLayer,
 )
-from observability.lambda_utils import check_lambda_timeout, require_env
+from observability.lambda_runtime import check_lambda_timeout, require_env
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.s3_writer import S3ParquetWriter
 from observability.stage_execution import (

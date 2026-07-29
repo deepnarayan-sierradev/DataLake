@@ -38,11 +38,11 @@ from __future__ import annotations
 import time
 from typing import Final
 
-from connector_runtime.adapters.sage.common.sage_credential_manager import (
+from connector_runtime.adapters.sage.substrate.sage_credential_provider import (
     SageCredentialError,
-    SageCredentialManager,
+    SageCredentialProvider,
 )
-from connector_runtime.adapters.sage.common.sage_http_client import (
+from connector_runtime.adapters.sage.substrate.sage_http_client import (
     SageAuthenticationError,
     SageHttpClient,
     SageHttpError,
@@ -89,7 +89,7 @@ class X3AuthClient:
     Usage::
 
         auth = X3AuthClient(
-            credential_manager=SageCredentialManager(...),
+            credential_manager=SageCredentialProvider(...),
             http_client=SageHttpClient(),
         )
         token = auth.get_access_token()   # returns or refreshes Bearer token
@@ -99,7 +99,7 @@ class X3AuthClient:
 
     def __init__(
         self,
-        credential_manager: SageCredentialManager,
+        credential_manager: SageCredentialProvider,
         http_client: SageHttpClient,
     ) -> None:
         self._credentials = credential_manager

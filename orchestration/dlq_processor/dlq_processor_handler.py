@@ -37,7 +37,7 @@ from botocore.exceptions import ClientError
 from pydantic import BaseModel, Field, field_validator
 
 from contracts.identifier_policy import STABLE_ID_PATTERN, TENANT_CODE_PATTERN
-from observability.lambda_utils import check_lambda_timeout, require_env
+from observability.lambda_runtime import check_lambda_timeout, require_env
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)

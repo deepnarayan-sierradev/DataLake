@@ -3,7 +3,7 @@ DuckDB-backed set-based query engine (FR-F0.1).
 
 Reads Parquet inputs and writes Parquet output directly in S3 via httpfs,
 following the duckdb.connect(":memory:") / INSTALL httpfs / SET s3_region
-pattern already established in transformation.curated_utils. Result rows are
+pattern already established in transformation.curated_layer_reader. Result rows are
 streamed in Arrow record batches (stream) or written straight to S3 with
 COPY (materialize) — the full result set never lands in Python memory.
 """

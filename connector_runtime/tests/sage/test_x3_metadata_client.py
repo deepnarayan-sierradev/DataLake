@@ -30,11 +30,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from connector_runtime.adapters.sage.common.sage_http_client import (
-    SageHttpClient,
-    SageHttpError,
-    SageObjectNotFoundError,
-)
 from connector_runtime.adapters.sage.products.intacct.intacct_metadata_client import (
     SageMetadataDeterministicError,
     SageMetadataTransientError,
@@ -42,6 +37,11 @@ from connector_runtime.adapters.sage.products.intacct.intacct_metadata_client im
 from connector_runtime.adapters.sage.products.x3.x3_metadata_client import (
     _X3_STATIC_SCHEMAS,
     X3MetadataClient,
+)
+from connector_runtime.adapters.sage.substrate.sage_http_client import (
+    SageHttpClient,
+    SageHttpError,
+    SageObjectNotFoundError,
 )
 from contracts.entity_configuration_contract import FieldMode
 

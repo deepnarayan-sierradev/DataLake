@@ -82,7 +82,7 @@ from connector_runtime.adapters.mysql_rds.mysql_rds_raw_layer_writer import (
 from connector_runtime.adapters.netsuite.netsuite_raw_layer_writer import (
     NetSuiteRawLayerWriter,
 )
-from connector_runtime.adapters.sage.common.sage_raw_layer_writer import SageRawLayerWriter
+from connector_runtime.adapters.sage.substrate.sage_raw_layer_writer import SageRawLayerWriter
 from connector_runtime.adapters.salesforce.salesforce_raw_layer_writer import (
     SalesforceRawLayerWriter,
 )

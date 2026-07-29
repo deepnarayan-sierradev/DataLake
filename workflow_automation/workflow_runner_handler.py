@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Any, Final
 
 from contracts.platform_metrics import PlatformMetric
-from observability.lambda_utils import require_env
+from observability.lambda_runtime import require_env
 from observability.stage_execution import StageIdentity, derive_correlation_id, stage_execution
 from observability.structured_logger import get_platform_logger
 from workflow_automation.action_registry import DestinationCircuitBreaker, IdempotencyGuard

@@ -57,8 +57,8 @@ if "AWS_DEFAULT_REGION" not in os.environ:
 # These imports must come after the sys.path manipulation above (this script
 # runs standalone, not as an installed package), hence noqa: E402 throughout.
 import connector_runtime.adapters.sage.sage_connector  # noqa: E402, F401
-from connector_runtime.adapters.sage.common.sage_http_client import SageHttpClient  # noqa: E402
 from connector_runtime.adapters.sage.sage_connector import SageConnector  # noqa: E402
+from connector_runtime.adapters.sage.substrate.sage_http_client import SageHttpClient  # noqa: E402
 from connector_runtime.configuration_repository.configuration_repository import (  # noqa: E402
     ConfigurationRepositoryClient,
 )
@@ -116,11 +116,13 @@ def test_connection(entity_id: str) -> tuple[bool, object]:
     print("\n[1/4] Fetching credentials from Secrets Manager ...")
     print(f"      Secret path: edl/sources/sage/{sage_product}/credentials")
 
-    from connector_runtime.adapters.sage.common.sage_credential_manager import SageCredentialManager
     from connector_runtime.adapters.sage.products.intacct.intacct_auth import IntacctAuthClient
+    from connector_runtime.adapters.sage.substrate.sage_credential_provider import (
+        SageCredentialProvider,
+    )
 
     required_keys = frozenset({"base_url", "token_url", "client_id", "client_secret", "company_id"})
-    credential_manager = SageCredentialManager(
+    credential_manager = SageCredentialProvider(
         environment=_ENVIRONMENT,
         region_name=_REGION,
         product_name=sage_product,

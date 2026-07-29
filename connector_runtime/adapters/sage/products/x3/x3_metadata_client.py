@@ -49,17 +49,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
 
-from connector_runtime.adapters.sage.common.sage_errors import (
+from connector_runtime.adapters.sage.products.x3.x3_auth import X3AuthClient
+from connector_runtime.adapters.sage.substrate.sage_errors import (
     SageMetadataDeterministicError,
     SageMetadataError,
     SageMetadataTransientError,
 )
-from connector_runtime.adapters.sage.common.sage_http_client import (
+from connector_runtime.adapters.sage.substrate.sage_http_client import (
     SageHttpClient,
     SageHttpError,
     SageObjectNotFoundError,
 )
-from connector_runtime.adapters.sage.products.x3.x3_auth import X3AuthClient
 from connector_runtime.interfaces.connector_interface import FieldContract, FieldDescriptor
 from contracts.entity_configuration_contract import FieldMode
 from observability.structured_logger import get_platform_logger

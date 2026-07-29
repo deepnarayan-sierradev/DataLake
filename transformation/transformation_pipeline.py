@@ -55,7 +55,7 @@ from governance.lineage_record import (
     LineageEmitter,
     build_transformation_lineage,
 )
-from observability.lambda_utils import check_lambda_timeout_periodic as _check_timeout
+from observability.lambda_runtime import check_lambda_timeout_periodic as _check_timeout
 from observability.metric_recorder import record_platform_metric
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
@@ -63,8 +63,8 @@ from tenancy.scope_attribution import ScopeAttributor
 from tenancy.scope_contract import PartitionModel, TenantPartitionProfile
 from tenancy.source_connection import SourceConnection
 from transformation.curated_accumulator import CuratedAccumulator
+from transformation.curated_layer_reader import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from transformation.curated_layer_writer import CuratedLayerWriter
-from transformation.curated_utils import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from transformation.field_mapping.field_mapping_registry import (
     FieldMappingApplicator,
     FieldMappingRegistryClient,
@@ -79,7 +79,7 @@ from transformation.quality_evaluation.quality_policy_evaluator import (
 
 _logger = get_platform_logger(__name__)
 
-# _SAFE_S3_PREFIX_PATTERN imported from curated_utils — single definition, no duplication.
+# _SAFE_S3_PREFIX_PATTERN imported from curated_layer_reader — single definition, no duplication.
 # Domain must be a lowercase safe identifier suitable for Glue table name construction (OWASP A03)
 _SAFE_DOMAIN_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 # Max prefix segment length to prevent S3 path traversal (OWASP A03)

@@ -75,7 +75,7 @@ from entity_resolution.resolution_config.resolution_config_registry import (
     ResolutionConfigNotFoundError,
     ResolutionConfigRegistry,
 )
-from observability.lambda_utils import check_lambda_timeout, require_env
+from observability.lambda_runtime import check_lambda_timeout, require_env
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.stage_execution import (
     StageIdentity,
@@ -84,11 +84,11 @@ from observability.stage_execution import (
 )
 from observability.structured_logger import get_platform_logger
 from tenancy.scope_unit_repository import ScopeUnitRepository
-from transformation.curated_utils import (
+from transformation.curated_layer_reader import (
     find_latest_curated_prefix,
     load_curated_records_duckdb,
 )
-from transformation.curated_utils import (
+from transformation.curated_layer_reader import (
     source_id_to_domain as _source_id_to_domain,
 )
 

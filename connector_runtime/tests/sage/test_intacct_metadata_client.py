@@ -28,15 +28,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from connector_runtime.adapters.sage.common.sage_http_client import (
-    SageHttpClient,
-    SageObjectNotFoundError,
-    SageRateLimitError,
-)
 from connector_runtime.adapters.sage.products.intacct.intacct_auth import IntacctAuthClient
 from connector_runtime.adapters.sage.products.intacct.intacct_metadata_client import (
     IntacctMetadataClient,
     SageMetadataError,
+)
+from connector_runtime.adapters.sage.substrate.sage_http_client import (
+    SageHttpClient,
+    SageObjectNotFoundError,
+    SageRateLimitError,
 )
 from contracts.entity_configuration_contract import FieldMode
 

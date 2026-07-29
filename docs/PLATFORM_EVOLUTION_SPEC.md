@@ -88,7 +88,7 @@ IAM-enforced anywhere**.
 - **AR-1 (H):** Write EP's IaC (DynamoDB, ECS, IAM least-privilege task role, observability) and a CI pipeline before any new surface — ARCH-07/08 are release blockers and gate the security posture.
 - **AR-2 (M):** Converge `entity_extraction_config` (and the audit GSI) onto the `tenant_scoped_key()` key-level model used by watermarks; keep `docs/PIPELINE_FLOW.md` as the single isolation reference.
 - **AR-3 (M):** Resolve `tenantId ↔ tenant_code` before GA (latent cross-tenant hazard behind a TODO).
-- **AR-4 (M):** Introduce a small **curated-layer read interface** in a shared location so entity-resolution (and the new relationship/semantic engines) depend on an interface, not `transformation.curated_utils`.
+- **AR-4 (M):** Introduce a small **curated-layer read interface** in a shared location so entity-resolution (and the new relationship/semantic engines) depend on an interface, not `transformation.curated_layer_reader`.
 - **AR-5 (M):** Add a **set-based data-processing substrate** (DuckDB-over-S3 / Athena / Glue) as a first-class architectural layer — the enabling change for relationships, semantic queries, and the agent (see Part B §B2).
 
 ## B. Design Patterns
@@ -130,7 +130,7 @@ event loop.
 | PERF-03 | M | DL | MySQL `ORDER BY watermark_field` on a possibly-unindexed column → filesort/full scan on source RDS each run | `mysql_incremental_extractor.py:213` |
 | PERF-04 | **H** | DL | Checkpoint auto-resume not wired; **full loads get no checkpoint at all** → a full load that can't finish in 900s fails hard every run with zero progress; checkpoints route to a terminal Succeed with no re-trigger | `extraction_workflow.py:706,726`, `orchestration/main.tf:216` |
 | PERF-05 | **H** | DL | Transformation streaming path is bypassed for any PII-bearing entity (auto-classification makes the policy non-None → `_execute_with_list`, full `list[dict]` + masked copy in RAM). **Verified:** even the `_execute_streaming` path accumulates the full canonical `list[dict]` (`:400`), so both paths materialize the output → OOM at scale | `transformation/transformation_pipeline.py:268,284,400,450,599` |
-| PERF-06 | **H** | DL | SCD merge round-trips the **full** merged current-state through a Python list rather than `COPY … TO 's3://'` from DuckDB → O(total state) memory | `transformation/curated_utils.py:306,425-430` |
+| PERF-06 | **H** | DL | SCD merge round-trips the **full** merged current-state through a Python list rather than `COPY … TO 's3://'` from DuckDB → O(total state) memory | `transformation/curated_layer_reader.py:306,425-430` |
 | PERF-07 | M | DL | Small-file proliferation (per-50k-chunk + per-run partition files, no compaction) → degraded Athena/Glue/DuckDB scans (the substrate for the semantic layer & agent) | `raw_layer_writer.py:277` |
 | PERF-08 | **H** | DL | Entity resolution holds the **entire cross-source candidate pool in memory** (`all_curated_records.extend(...)` → one `list[dict]`); single Lambda, ≤900s, ≤10GB; only a warn at 500k | `entity_resolution_pipeline_handler.py:351,434,441` |
 | PERF-09 | **H** | DL | Match audit trail retains **every pairwise `MatchDecision` in memory** before serializing → memory bomb independent of input size | `matching_engine/match_rule_engine.py:166,208` |
@@ -231,7 +231,7 @@ the current pattern.
 | ID | Sev | Repo | Finding | Evidence |
 |---|---|---|---|---|
 | REU-01 | **H** | DL | Lambda handler scaffolding copy-pasted across 5–6 handlers: 6 near-identical `_validate_event`, duplicated required-field/known-env constants, the **identical tenant_code fail-closed block+comment**, the `xray→bind_contextvars→try/except-log/finally-clear` shell, the metrics try/emit/flush block | `extraction/transformation/entity_resolution/analytics/serving` `*_handler.py` |
-| REU-02 | M | DL | `_SAFE_S3_PREFIX_PATTERN` regex independently defined in **5 files** — the exact drift risk `identifier_policy.py` exists to prevent | `analytics_publisher_handler.py`, `serving_store_loader_handler.py`, `transformation_pipeline.py`, `curated_utils.py`, `entity_resolution_pipeline_handler.py` |
+| REU-02 | M | DL | `_SAFE_S3_PREFIX_PATTERN` regex independently defined in **5 files** — the exact drift risk `identifier_policy.py` exists to prevent | `analytics_publisher_handler.py`, `serving_store_loader_handler.py`, `transformation_pipeline.py`, `curated_layer_reader.py`, `entity_resolution_pipeline_handler.py` |
 | REU-03 | L | DL | Postgres-family DDL (`_ensure_tenant_container`, `_provision_reader_credential`) near-identical between postgres & redshift loaders (justified for 2; factor a `PostgresFamilyLoader` base on the 3rd) | `postgresql_loader.py`, `redshift_loader.py` |
 | REU-04 | M | EP | Per-capability service CRUD/validate/publish triple ~80% identical (see DP-05); DI factories near-clone per capability | `services/*_service.py`, `providers.py` |
 | REU-05 | M | EP | CST-UI API clients repeat the same fetch idiom across **13** files; no `createConfigResource(basePath)` factory | `services/dataLakeConfig/*Api.ts` |

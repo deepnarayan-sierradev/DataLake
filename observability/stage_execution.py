@@ -19,7 +19,7 @@ from typing import Any, Final, Literal
 import structlog
 
 from contracts.platform_metrics import PlatformMetric
-from observability.lambda_utils import configure_xray
+from observability.lambda_runtime import configure_xray
 from observability.metric_recorder import platform_metric_recorder
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger

@@ -20,7 +20,7 @@ Credentials are NOT in connector_params.  They live in Secrets Manager at:
 
 Design principles enforced:
     1. No hardcoded field lists — fields discovered at runtime via metadata strategy.
-    2. No credentials in constructor args — SageCredentialManager fetches from Secrets Manager.
+    2. No credentials in constructor args — SageCredentialProvider fetches from Secrets Manager.
     3. Error taxonomy — every exception classified as TRANSIENT_* or DETERMINISTIC_*.
     4. Idempotent extraction — safe to replay without duplicates.
     5. Zero impact on existing connectors — only adds new registry entries.
@@ -39,31 +39,6 @@ import json
 from collections.abc import Iterator
 from typing import Any, Final, Literal
 
-from connector_runtime.adapters.sage.common.sage_credential_manager import (
-    SageCredentialError,
-    SageCredentialManager,
-)
-from connector_runtime.adapters.sage.common.sage_errors import (
-    SageMetadataDeterministicError,
-    SageMetadataError,
-    SageMetadataTransientError,
-    SageQueryBuildError,
-)
-from connector_runtime.adapters.sage.common.sage_http_client import (
-    SageAuthenticationError,
-    SageHttpClient,
-    SageInvalidRequestError,
-    SageNetworkError,
-    SageObjectNotFoundError,
-    SageRateLimitError,
-    SageServiceUnavailableError,
-    SageTimeoutError,
-)
-from connector_runtime.adapters.sage.common.sage_product_registry import (
-    SUPPORTED_SAGE_PRODUCTS,
-    resolve_product_strategies,
-)
-from connector_runtime.adapters.sage.common.sage_raw_layer_writer import SageRawLayerWriter
 from connector_runtime.adapters.sage.products.intacct.intacct_auth import (
     IntacctAuthError,
     IntacctCredentialError,
@@ -87,6 +62,31 @@ from connector_runtime.adapters.sage.protocols.sage_metadata_protocol import (
 )
 from connector_runtime.adapters.sage.protocols.sage_query_protocol import SageQueryProtocol
 from connector_runtime.adapters.sage.sage_params import SageConnectorParams
+from connector_runtime.adapters.sage.substrate.sage_credential_provider import (
+    SageCredentialError,
+    SageCredentialProvider,
+)
+from connector_runtime.adapters.sage.substrate.sage_errors import (
+    SageMetadataDeterministicError,
+    SageMetadataError,
+    SageMetadataTransientError,
+    SageQueryBuildError,
+)
+from connector_runtime.adapters.sage.substrate.sage_http_client import (
+    SageAuthenticationError,
+    SageHttpClient,
+    SageInvalidRequestError,
+    SageNetworkError,
+    SageObjectNotFoundError,
+    SageRateLimitError,
+    SageServiceUnavailableError,
+    SageTimeoutError,
+)
+from connector_runtime.adapters.sage.substrate.sage_product_registry import (
+    SUPPORTED_SAGE_PRODUCTS,
+    resolve_product_strategies,
+)
+from connector_runtime.adapters.sage.substrate.sage_raw_layer_writer import SageRawLayerWriter
 from connector_runtime.interfaces.connector_interface import (
     ConnectorCapabilities,
     ConnectorInterface,
@@ -106,7 +106,7 @@ _SOURCE_ID: Final[str] = "sage"
 # Required keys in connector_params (validated in __init__).
 _REQUIRED_CONNECTOR_PARAMS: Final[frozenset[str]] = frozenset({"sage_product", "object_path"})
 
-# Required credential keys shared by all Sage products (validated by SageCredentialManager).
+# Required credential keys shared by all Sage products (validated by SageCredentialProvider).
 # Product-specific required keys are declared in each auth client module.
 _INTACCT_REQUIRED_KEYS: Final[frozenset[str]] = frozenset(
     {"base_url", "token_url", "client_id", "client_secret", "company_id"}
@@ -137,7 +137,7 @@ class SageConnector(ConnectorInterface):
     class serves any Sage product without subclassing.
 
     Constructor args are NOT used for credentials — those come exclusively from
-    AWS Secrets Manager via SageCredentialManager.
+    AWS Secrets Manager via SageCredentialProvider.
     """
 
     def __init__(
@@ -164,7 +164,7 @@ class SageConnector(ConnectorInterface):
 
         # ── Instantiate shared infrastructure (one per extraction run) ────────
         required_keys = _PRODUCT_REQUIRED_CREDENTIAL_KEYS.get(sage_product, frozenset())
-        self._credential_manager = SageCredentialManager(
+        self._credential_manager = SageCredentialProvider(
             environment=environment,
             region_name=region_name,
             product_name=sage_product,

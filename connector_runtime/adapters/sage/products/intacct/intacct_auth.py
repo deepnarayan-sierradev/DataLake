@@ -3,7 +3,7 @@ Sage Intacct OAuth 2.0 authentication client.
 
 Implements SageAuthProtocol for Sage Intacct using the OAuth 2.0
 client_credentials grant.  Credentials are loaded exclusively from AWS
-Secrets Manager via SageCredentialManager — never from constructor arguments,
+Secrets Manager via SageCredentialProvider — never from constructor arguments,
 environment variables, or config files.
 
 Required secret keys (stored at edl/sources/sage/intacct/credentials):
@@ -37,11 +37,11 @@ from __future__ import annotations
 import time
 from typing import Final
 
-from connector_runtime.adapters.sage.common.sage_credential_manager import (
+from connector_runtime.adapters.sage.substrate.sage_credential_provider import (
     SageCredentialError,
-    SageCredentialManager,
+    SageCredentialProvider,
 )
-from connector_runtime.adapters.sage.common.sage_http_client import (
+from connector_runtime.adapters.sage.substrate.sage_http_client import (
     SageAuthenticationError,
     SageHttpClient,
     SageHttpError,
@@ -84,7 +84,7 @@ class IntacctAuthClient:
     Usage::
 
         auth = IntacctAuthClient(
-            credential_manager=SageCredentialManager(...),
+            credential_manager=SageCredentialProvider(...),
             http_client=SageHttpClient(),
         )
         token = auth.get_access_token()   # returns or refreshes Bearer token
@@ -93,7 +93,7 @@ class IntacctAuthClient:
 
     def __init__(
         self,
-        credential_manager: SageCredentialManager,
+        credential_manager: SageCredentialProvider,
         http_client: SageHttpClient,
     ) -> None:
         self._credentials = credential_manager

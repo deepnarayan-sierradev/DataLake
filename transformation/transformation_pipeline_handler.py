@@ -58,7 +58,7 @@ from connector_runtime.configuration_repository.configuration_repository import 
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
 from contracts.observability_contract import PipelineStage
-from observability.lambda_utils import (
+from observability.lambda_runtime import (
     check_lambda_timeout,
     require_env,
 )
@@ -74,8 +74,8 @@ from tenancy.scope_unit_repository import ScopeUnitRepository
 from tenancy.source_connection import SourceConnection
 from tenancy.source_connection_repository import SourceConnectionRepository
 from transformation.curated_accumulator import CuratedAccumulator
+from transformation.curated_layer_reader import source_id_to_domain as _source_id_to_domain
 from transformation.curated_layer_writer import CuratedLayerWriter
-from transformation.curated_utils import source_id_to_domain as _source_id_to_domain
 from transformation.field_mapping.field_mapping_registry import FieldMappingRegistryClient
 from transformation.quality_evaluation.quality_policy_evaluator import QualityPolicyEvaluator
 from transformation.transformation_pipeline import TransformationContext, TransformationPipeline

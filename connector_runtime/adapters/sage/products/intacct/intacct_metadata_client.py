@@ -33,12 +33,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
 
-from connector_runtime.adapters.sage.common.sage_http_client import (
+from connector_runtime.adapters.sage.products.intacct.intacct_auth import IntacctAuthClient
+from connector_runtime.adapters.sage.substrate.sage_http_client import (
     SageHttpClient,
     SageHttpError,
     SageObjectNotFoundError,
 )
-from connector_runtime.adapters.sage.products.intacct.intacct_auth import IntacctAuthClient
 from connector_runtime.interfaces.connector_interface import FieldContract, FieldDescriptor
 from contracts.entity_configuration_contract import FieldMode
 from observability.structured_logger import get_platform_logger
@@ -63,7 +63,7 @@ _NON_QUERYABLE_ATTRIBUTES: Final[frozenset[str]] = frozenset({"writeOnly", "depr
 # re-exported here so existing imports from this module keep working.
 # Intentionally placed after the module constants above, not at top of file,
 # since it is a re-export rather than a dependency of this module.
-from connector_runtime.adapters.sage.common.sage_errors import (  # noqa: E402
+from connector_runtime.adapters.sage.substrate.sage_errors import (  # noqa: E402
     SageMetadataDeterministicError,
     SageMetadataError,
     SageMetadataTransientError,

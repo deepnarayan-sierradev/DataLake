@@ -185,7 +185,7 @@ what produced the eighteen.
   private `_run_<thing>(...)` function → `try/except` logs a structured error event and re-raises
   → `finally: clear_contextvars()`. Skipping the `finally` leaks stale context into the next
   invocation on a warm container — this was a real, previously-fixed bug. Never trust bucket/table
-  names from the event payload; read them via `require_env(...)` from `observability.lambda_utils`.
+  names from the event payload; read them via `require_env(...)` from `observability.lambda_runtime`.
   **New handlers should use `observability/stage_execution.py::stage_execution(...)` instead of
   hand-rolling that boilerplate** — it makes the clear, the flush, the duration metric, and a
   failure record on both an exception and a hard Lambda kill structurally impossible to forget

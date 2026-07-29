@@ -31,7 +31,7 @@ Security (OWASP A03, A04):
   - pk_field and soft_delete_field originate from the server-side entity config
     (DynamoDB — validated by Pydantic) and are never derived from user-controlled
     Lambda event input.
-  - S3 prefix validation is delegated to load_curated_records() in curated_utils.
+  - S3 prefix validation is delegated to load_curated_records() in curated_layer_reader.
 
 Performance:
   - Previous state is loaded into a dict keyed by pk_value — O(1) lookup per
@@ -48,7 +48,7 @@ from typing import Any
 
 from contracts.identifier_policy import validate_tenant_code
 from observability.structured_logger import get_platform_logger
-from transformation.curated_utils import (
+from transformation.curated_layer_reader import (
     find_latest_curated_prefix,
     merge_with_duckdb,
 )

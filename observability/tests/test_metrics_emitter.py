@@ -286,27 +286,27 @@ class TestCheckLambdaTimeoutPeriodic:
         return ctx
 
     def test_sufficient_time_does_not_raise(self) -> None:
-        from observability.lambda_utils import check_lambda_timeout_periodic
+        from observability.lambda_runtime import check_lambda_timeout_periodic
 
         ctx = self._make_context(remaining_ms=300_000)  # 5 minutes
         check_lambda_timeout_periodic(ctx, min_remaining_ms=120_000, operation_name="test_op")
         # Should not raise
 
     def test_insufficient_time_raises(self) -> None:
-        from observability.lambda_utils import check_lambda_timeout_periodic
+        from observability.lambda_runtime import check_lambda_timeout_periodic
 
         ctx = self._make_context(remaining_ms=50_000)  # 50 seconds
         with pytest.raises(RuntimeError, match="test_op"):
             check_lambda_timeout_periodic(ctx, min_remaining_ms=120_000, operation_name="test_op")
 
     def test_none_context_is_noop(self) -> None:
-        from observability.lambda_utils import check_lambda_timeout_periodic
+        from observability.lambda_runtime import check_lambda_timeout_periodic
 
         # Should not raise even with tight threshold
         check_lambda_timeout_periodic(None, min_remaining_ms=1_000_000, operation_name="test")
 
     def test_error_message_includes_remaining_time(self) -> None:
-        from observability.lambda_utils import check_lambda_timeout_periodic
+        from observability.lambda_runtime import check_lambda_timeout_periodic
 
         ctx = self._make_context(remaining_ms=30_000)
         try:

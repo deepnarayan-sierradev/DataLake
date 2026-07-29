@@ -51,26 +51,17 @@ install:
 lint:
 	ruff check .
 
-# Enforce naming standards: prohibited generic identifiers must not appear as
-# class or function names in production source code (spec §10.4).
-# Permitted exceptions: test fixtures, scripts, and the checklist itself.
-BANNED_PATTERN := 'def helper\b\|def util\b\|def common\b\|class Helper\b\|class Util\b\|class Common\b\|class Manager\b'
-BANNED_EXCLUDE_PATHS := .venv scripts
+# Enforce naming standards: prohibited generic identifiers must not appear as class names,
+# function names, module filenames, or package directories (spec §10.4).
+#
+# This was a `grep` until 2026-07-29, and it could not fail: the pattern used BRE alternation
+# (\|) but ran under `grep -E`, where \| is a literal pipe, so it only matched the literal text
+# "def helper|def util|...". A file containing `def helper():` passed. The replacement is a
+# script so it can also match suffixes and filenames, and so it can be tested —
+# tests/test_prohibited_identifiers_gate.py feeds it known-bad input and asserts it fails.
 
 banned-names:
-	@echo "Checking for prohibited generic identifiers..."
-	@if grep -rn --include='*.py' \
-		--exclude-dir='.venv' \
-		--exclude-dir='tests' \
-		--exclude-dir='scripts' \
-		-E $(BANNED_PATTERN) .; then \
-		echo ""; \
-		echo "ERROR: Prohibited generic identifiers found (helper/util/common/manager)."; \
-		echo "Rename these to domain-specific identifiers per spec §10.4."; \
-		exit 1; \
-	else \
-		echo "OK — no prohibited generic identifiers found."; \
-	fi
+	@python scripts/check_prohibited_identifiers.py
 
 # ─── Wiring gates (G1, G4, G5, G7) ───────────────────────────────────────────
 # These exist because "module written + unit tests green" was the definition of done that let

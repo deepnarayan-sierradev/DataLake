@@ -32,7 +32,7 @@ from contracts.identifier_policy import (
     validate_stable_id,
 )
 from contracts.platform_metrics import PlatformMetric
-from observability.lambda_utils import require_env
+from observability.lambda_runtime import require_env
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.stage_execution import StageIdentity, derive_correlation_id, stage_execution
 from observability.structured_logger import get_platform_logger
