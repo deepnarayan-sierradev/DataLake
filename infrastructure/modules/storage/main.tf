@@ -63,6 +63,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
     status = "Enabled"
     filter { prefix = "" }
     expiration { days = var.access_logs_retention_days }
+    # A failed multipart upload leaves parts that are billed but invisible in the object list.
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
   }
 }
 
@@ -150,6 +152,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "raw_layer" {
       storage_class = "GLACIER"
     }
     noncurrent_version_expiration { noncurrent_days = var.raw_noncurrent_version_retention_days }
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
   }
 }
 
@@ -215,6 +218,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "curated_layer" {
     noncurrent_version_expiration {
       noncurrent_days = 90
     }
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
   }
 }
 
@@ -315,6 +319,57 @@ resource "aws_s3_bucket_logging" "schema_snapshots" {
 resource "aws_s3_bucket_policy" "schema_snapshots" {
   bucket = aws_s3_bucket.schema_snapshots.id
   policy = data.aws_iam_policy_document.enforce_tls["schema_snapshots"].json
+}
+
+# ---------------------------------------------------------------------------
+# Lifecycle for the two buckets that had none (CKV2_AWS_61, CKV_AWS_300).
+# Analytics output is republished from the curated layer, and a schema snapshot
+# is superseded by the next one — neither needs unbounded version history.
+# ---------------------------------------------------------------------------
+
+resource "aws_s3_bucket_lifecycle_configuration" "analytics_layer" {
+  bucket = aws_s3_bucket.analytics_layer.id
+  rule {
+    id     = "transition-analytics"
+    status = "Enabled"
+    filter { prefix = "" }
+    transition {
+      days          = 90
+      storage_class = "STANDARD_IA"
+    }
+    noncurrent_version_expiration { noncurrent_days = 90 }
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "schema_snapshots" {
+  bucket = aws_s3_bucket.schema_snapshots.id
+  rule {
+    id     = "expire-superseded-snapshots"
+    status = "Enabled"
+    filter { prefix = "" }
+    noncurrent_version_expiration { noncurrent_days = 365 }
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# EventBridge notifications (CKV2_AWS_62). Routing object events to EventBridge
+# rather than a hardwired Lambda/SQS target keeps the bucket free of a consumer
+# it does not own, and makes object-level activity observable at all.
+# ---------------------------------------------------------------------------
+
+resource "aws_s3_bucket_notification" "buckets" {
+  for_each = {
+    access_logs      = aws_s3_bucket.access_logs.id
+    curated_layer    = aws_s3_bucket.curated_layer.id
+    analytics_layer  = aws_s3_bucket.analytics_layer.id
+    schema_snapshots = aws_s3_bucket.schema_snapshots.id
+    raw_layer        = aws_s3_bucket.raw_layer.id
+  }
+
+  bucket      = each.value
+  eventbridge = true
 }
 
 # ---------------------------------------------------------------------------

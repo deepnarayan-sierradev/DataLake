@@ -36,7 +36,7 @@ variable "single_nat_gateway" {
 
 variable "flow_log_retention_days" {
   type        = number
-  default     = 90
+  default     = 365
   description = "CloudWatch log retention in days for VPC Flow Logs."
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.flow_log_retention_days)

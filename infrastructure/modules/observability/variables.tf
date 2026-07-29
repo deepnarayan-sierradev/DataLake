@@ -14,7 +14,7 @@ variable "logs_kms_key_arn" {
 
 variable "log_retention_days" {
   type        = number
-  default     = 90
+  default     = 365
   description = "CloudWatch log retention period in days for all platform service log groups."
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365], var.log_retention_days)

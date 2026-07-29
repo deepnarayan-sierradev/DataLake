@@ -67,7 +67,7 @@ variable "cloudwatch_log_group_arn" {
 variable "log_retention_days" {
   description = "Retention period in days for Lambda execution logs."
   type        = number
-  default     = 30
+  default     = 365
 }
 
 variable "memory_size_mb" {

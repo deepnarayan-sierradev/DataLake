@@ -45,7 +45,7 @@ variable "relationship_rules_s3_bucket_name" {
 variable "log_retention_days" {
   description = "Retention period in days for Lambda execution logs."
   type        = number
-  default     = 30
+  default     = 365
 }
 
 variable "memory_size_mb" {

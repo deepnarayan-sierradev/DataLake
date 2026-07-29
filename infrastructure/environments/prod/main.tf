@@ -199,6 +199,9 @@ module "audit_trail" {
   source      = "../../modules/audit_trail"
   environment = local.environment
   account_id  = data.aws_caller_identity.current.account_id
+  region      = local.aws_region
+
+  access_log_bucket_id = module.storage.access_logs_bucket_id
 
   kms_key_arn      = module.kms_logs.key_arn
   logs_kms_key_arn = module.kms_logs.key_arn

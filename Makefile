@@ -143,12 +143,14 @@ iac-validate:
 		cd ../../..; \
 	done
 
+# `--soft-fail` is a bare flag: presence means "never fail". Passing it a value made checkov exit 2
+# on a usage error, so this target could not report a finding for as long as it has existed.
+# Hard failure is the default — omit the flag entirely.
 iac-scan:
 	checkov -d infrastructure/ \
 		--framework terraform \
 		--output cli \
-		--compact \
-		--soft-fail false
+		--compact
 
 iac-fmt-check:
 	terraform fmt -recursive -check infrastructure/

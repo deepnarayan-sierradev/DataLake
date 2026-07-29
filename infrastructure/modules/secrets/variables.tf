@@ -102,7 +102,7 @@ variable "lambda_package_source_hash" {
 
 variable "log_retention_days" {
   type        = number
-  default     = 30
+  default     = 365
   description = "CloudWatch Logs retention in days for the notifier Lambda."
 }
 

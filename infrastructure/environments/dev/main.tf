@@ -76,7 +76,7 @@ module "networking" {
   public_subnet_cidrs  = ["10.0.128.0/20", "10.0.144.0/20"]
 
   single_nat_gateway      = true # Cost-optimised for dev
-  flow_log_retention_days = 30
+  flow_log_retention_days = 365
   flow_logs_kms_key_arn   = module.kms_logs.key_arn
 
   # Interface endpoints — all enabled for parity with staging/prod
@@ -142,9 +142,12 @@ module "serving_store_database" {
   storage_kms_key_arn = module.kms_database.key_arn
   secrets_kms_key_arn = module.kms_secrets.key_arn
 
-  instance_class               = "db.t3.micro" # dev-sized; revisit before staging/prod
-  multi_az                     = false
-  deletion_protection          = false # dev only — staging/prod should set true
+  instance_class = "db.t3.micro" # dev-sized; revisit before staging/prod
+  # Both were false for dev. Raised with the rest of the checkov remediation: Multi-AZ roughly
+  # doubles this instance's cost, and deletion protection means a dev teardown now needs an
+  # explicit `deletion_protection = false` apply first — deliberate, not incidental.
+  multi_az                     = true
+  deletion_protection          = true
   backup_retention_period_days = 1
 
   tags = local.common_tags
@@ -254,6 +257,9 @@ module "audit_trail" {
   source      = "../../modules/audit_trail"
   environment = local.environment
   account_id  = data.aws_caller_identity.current.account_id
+  region      = local.aws_region
+
+  access_log_bucket_id = module.storage.access_logs_bucket_id
 
   kms_key_arn      = module.kms_logs.key_arn
   logs_kms_key_arn = module.kms_logs.key_arn
@@ -287,7 +293,7 @@ module "observability" {
   environment = local.environment
 
   logs_kms_key_arn          = module.kms_logs.key_arn
-  log_retention_days        = 30
+  log_retention_days        = 365
   alert_email               = var.alert_email
   watermark_lag_slo_seconds = 172800 # 48h SLO in dev (more relaxed)
 
@@ -332,7 +338,7 @@ module "lambda_pipeline" {
   security_group_ids = []
 
   cloudwatch_log_group_arn = module.observability.log_group_arns["connector-runtime"]
-  log_retention_days       = 30
+  log_retention_days       = 365
   memory_size_mb           = 1024
   timeout_seconds          = 900 # Max Lambda timeout; most entities complete in < 120s
   # Reserved concurrency cap: prevents this function from consuming the full account pool.
@@ -374,7 +380,7 @@ module "transformation_lambda" {
   security_group_ids = []
 
   cloudwatch_log_group_arn = module.observability.log_group_arns["transformation"]
-  log_retention_days       = 30
+  log_retention_days       = 365
   memory_size_mb           = 2048 # Increased for DuckDB in-process merge (§3.1)
   timeout_seconds          = 900
   # Reserved concurrency: 300 per improvement plan §1.6, halved for dev's account quota
@@ -414,7 +420,7 @@ module "entity_resolution_lambda" {
   security_group_ids = []
 
   cloudwatch_log_group_arn = module.observability.log_group_arns["entity-resolution"]
-  log_retention_days       = 30
+  log_retention_days       = 365
   memory_size_mb           = 1024
   timeout_seconds          = 900
   # Reserved concurrency: 200 per improvement plan §1.6, halved for dev's account quota
@@ -444,7 +450,7 @@ module "analytics_publisher_lambda" {
   security_group_ids = []
 
   cloudwatch_log_group_arn = module.observability.log_group_arns["analytics-publisher"]
-  log_retention_days       = 30
+  log_retention_days       = 365
   memory_size_mb           = 512
   timeout_seconds          = 300
   # Reserved concurrency: 100 per improvement plan §1.6, halved for dev's account quota
@@ -474,7 +480,7 @@ module "serving_store_lambda" {
   security_group_ids = []
 
   cloudwatch_log_group_arn       = module.observability.log_group_arns["serving-store-loader"]
-  log_retention_days             = 30
+  log_retention_days             = 365
   memory_size_mb                 = 512
   timeout_seconds                = 300
   reserved_concurrent_executions = 10 # dev-sized; onboarded tenants are few at first
@@ -534,7 +540,7 @@ module "orchestration" {
   kms_key_arn             = module.kms_logs.key_arn
   step_functions_role_arn = module.iam.orchestration_step_functions_role_arn
   state_machine_type      = "STANDARD"
-  log_retention_days      = 30
+  log_retention_days      = 365
   alert_topic_arn         = module.observability.platform_alerts_topic_arn
   enable_xray_tracing     = true
 
@@ -583,7 +589,7 @@ module "control_plane" {
   environment = local.environment
 
   kms_key_arn         = module.kms_logs.key_arn
-  log_retention_days  = 30
+  log_retention_days  = 365
   enable_xray_tracing = true
 
   lambda_package_s3_bucket   = var.lambda_package_s3_bucket

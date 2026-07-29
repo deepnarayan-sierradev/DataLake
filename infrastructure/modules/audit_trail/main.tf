@@ -27,6 +27,8 @@ locals {
   trail_name = "${var.environment}-edl-audit-trail"
 }
 
+data "aws_partition" "current" {}
+
 resource "aws_s3_bucket" "trail" {
   bucket        = "edl-audit-trail-${var.environment}-${var.account_id}"
   force_destroy = false
@@ -84,7 +86,24 @@ resource "aws_s3_bucket_lifecycle_configuration" "trail" {
     expiration {
       days = var.retention_days
     }
+
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
   }
+}
+
+# Who read the audit archive is itself audit evidence (CKV_AWS_18).
+resource "aws_s3_bucket_logging" "trail" {
+  count = var.access_log_bucket_id == null ? 0 : 1
+
+  bucket        = aws_s3_bucket.trail.id
+  target_bucket = var.access_log_bucket_id
+  target_prefix = "audit-trail/"
+}
+
+# Object events to EventBridge rather than a hardwired consumer (CKV2_AWS_62).
+resource "aws_s3_bucket_notification" "trail" {
+  bucket      = aws_s3_bucket.trail.id
+  eventbridge = true
 }
 
 data "aws_iam_policy_document" "trail_bucket" {
@@ -174,9 +193,44 @@ resource "aws_iam_role_policy" "trail_to_logs" {
   policy = data.aws_iam_policy_document.trail_to_logs.json
 }
 
+# CloudTrail publishes here on every new log file, so a consumer can react to trail delivery
+# instead of polling the bucket (CKV_AWS_252).
+resource "aws_sns_topic" "trail_delivery" {
+  name              = "${local.trail_name}-delivery"
+  kms_master_key_id = var.kms_key_arn
+  tags              = merge(var.tags, { Purpose = "cloudtrail-delivery-notifications" })
+}
+
+data "aws_iam_policy_document" "trail_delivery" {
+  statement {
+    sid     = "AWSCloudTrailSNSPolicy"
+    effect  = "Allow"
+    actions = ["SNS:Publish"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudtrail.amazonaws.com"]
+    }
+
+    resources = [aws_sns_topic.trail_delivery.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceArn"
+      values   = ["arn:${data.aws_partition.current.partition}:cloudtrail:${var.region}:${var.account_id}:trail/${local.trail_name}"]
+    }
+  }
+}
+
+resource "aws_sns_topic_policy" "trail_delivery" {
+  arn    = aws_sns_topic.trail_delivery.arn
+  policy = data.aws_iam_policy_document.trail_delivery.json
+}
+
 resource "aws_cloudtrail" "platform" {
   name                          = local.trail_name
   s3_bucket_name                = aws_s3_bucket.trail.id
+  sns_topic_name                = aws_sns_topic.trail_delivery.arn
   kms_key_id                    = var.kms_key_arn
   include_global_service_events = true
   is_multi_region_trail         = true

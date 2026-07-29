@@ -65,7 +65,7 @@ module "networking" {
   public_subnet_cidrs  = ["10.1.128.0/20", "10.1.144.0/20", "10.1.160.0/20"]
 
   single_nat_gateway                    = false # HA: one NAT per AZ
-  flow_log_retention_days               = 90
+  flow_log_retention_days               = 365
   flow_logs_kms_key_arn                 = module.kms_logs.key_arn
   enable_secrets_manager_endpoint       = true
   enable_cloudwatch_logs_endpoint       = true
@@ -199,6 +199,9 @@ module "audit_trail" {
   source      = "../../modules/audit_trail"
   environment = local.environment
   account_id  = data.aws_caller_identity.current.account_id
+  region      = local.aws_region
+
+  access_log_bucket_id = module.storage.access_logs_bucket_id
 
   kms_key_arn      = module.kms_logs.key_arn
   logs_kms_key_arn = module.kms_logs.key_arn
@@ -227,7 +230,7 @@ module "observability" {
   source                    = "../../modules/observability"
   environment               = local.environment
   logs_kms_key_arn          = module.kms_logs.key_arn
-  log_retention_days        = 90
+  log_retention_days        = 365
   alert_email               = var.alert_email
   watermark_lag_slo_seconds = 86400 # 24h SLO for staging
   tags                      = local.common_tags
@@ -275,7 +278,7 @@ module "lambda_pipeline" {
   security_group_ids = []
 
   cloudwatch_log_group_arn = module.observability.log_group_arns["connector-runtime"]
-  log_retention_days       = 90
+  log_retention_days       = 365
   memory_size_mb           = 1024
   timeout_seconds          = 900
 
@@ -307,7 +310,7 @@ module "transformation_lambda" {
   security_group_ids = []
 
   cloudwatch_log_group_arn = module.observability.log_group_arns["transformation"]
-  log_retention_days       = 90
+  log_retention_days       = 365
   memory_size_mb           = 1024
   timeout_seconds          = 900
 
@@ -338,7 +341,7 @@ module "entity_resolution_lambda" {
   security_group_ids = []
 
   cloudwatch_log_group_arn = module.observability.log_group_arns["entity-resolution"]
-  log_retention_days       = 90
+  log_retention_days       = 365
   memory_size_mb           = 1024
   timeout_seconds          = 900
 
@@ -369,7 +372,7 @@ module "analytics_publisher_lambda" {
   security_group_ids = []
 
   cloudwatch_log_group_arn = module.observability.log_group_arns["analytics-publisher"]
-  log_retention_days       = 90
+  log_retention_days       = 365
   memory_size_mb           = 512
   timeout_seconds          = 300
 
@@ -400,7 +403,7 @@ module "serving_store_lambda" {
   security_group_ids = []
 
   cloudwatch_log_group_arn = module.observability.log_group_arns["serving-store-loader"]
-  log_retention_days       = 90
+  log_retention_days       = 365
   memory_size_mb           = 512
   timeout_seconds          = 300
 
@@ -469,7 +472,7 @@ module "orchestration" {
   kms_key_arn             = module.kms_logs.key_arn
   step_functions_role_arn = module.iam.orchestration_step_functions_role_arn
   state_machine_type      = "STANDARD"
-  log_retention_days      = 90
+  log_retention_days      = 365
   alert_topic_arn         = module.observability.platform_alerts_topic_arn
   enable_xray_tracing     = true
 
@@ -515,7 +518,7 @@ module "control_plane" {
   environment = local.environment
 
   kms_key_arn         = module.kms_logs.key_arn
-  log_retention_days  = 90
+  log_retention_days  = 365
   enable_xray_tracing = true
 
   lambda_package_s3_bucket   = var.lambda_package_s3_bucket

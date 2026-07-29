@@ -78,7 +78,7 @@ variable "cloudwatch_log_group_arn" {
 variable "log_retention_days" {
   description = "Retention period in days for Lambda execution logs."
   type        = number
-  default     = 30
+  default     = 365
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 731], var.log_retention_days)
     error_message = "log_retention_days must be a valid CloudWatch Logs retention value."

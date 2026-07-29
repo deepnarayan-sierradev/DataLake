@@ -42,7 +42,23 @@ variable "retention_days" {
 variable "log_group_retention_days" {
   description = "CloudWatch retention for trail events; the S3 copy is the long-term record."
   type        = number
-  default     = 90
+  default     = 365
+
+  validation {
+    condition     = var.log_group_retention_days >= 365
+    error_message = "log_group_retention_days must be at least 365 (CKV_AWS_338)."
+  }
+}
+
+variable "region" {
+  description = "Region the trail is created in; scopes the SNS topic policy to this trail's ARN."
+  type        = string
+}
+
+variable "access_log_bucket_id" {
+  description = "Bucket receiving S3 access logs for the trail archive. Null disables access logging."
+  type        = string
+  default     = null
 }
 
 variable "tags" {
