@@ -1,5 +1,6 @@
 .PHONY: install lint format typecheck test banned-names security-scan audit \
         reachability fail-open traceability security-columns wiring-gates \
+        workflow-integrity \
         iac-validate iac-scan iac-fmt-check iac-fmt \
         lambda-package lambda-upload lambda-deploy \
         seed-entity-config seed-serving-store-config seed-schedules \
@@ -18,7 +19,7 @@ help:
 	@echo "  fail-open           Fail if a security parameter defaults to None (G4)"
 	@echo "  traceability        Fail if a requirement is uncited or unreachable (G5)"
 	@echo "  security-columns    Fail if a filtered column has no writer or declaration (G7)"
-	@echo "  wiring-gates        Run all four wiring gates together"
+	@echo "  wiring-gates        Run all seven wiring gates together"
 	@echo "  typecheck           Run mypy strict type checking"
 	@echo "  test                Run test suite with coverage (≥80% required)"
 	@echo "  security-scan       Run bandit SAST security scan"
@@ -89,6 +90,9 @@ paging-primitive:
 tenant-session-adoption:
 	@python scripts/check_tenant_session_adoption.py
 
+workflow-integrity:
+	@python scripts/check_workflow_integrity.py
+
 # Regenerate the pinned dependency lock. Run after any change to pyproject dependencies.
 lock:
 	python -m piptools compile --generate-hashes --output-file=requirements.lock pyproject.toml
@@ -98,7 +102,7 @@ lock:
 typecheck-scripts:
 	@mypy scripts/ --check-untyped-defs --disable-error-code=no-untyped-def --disable-error-code=no-any-return --disable-error-code=type-arg --disable-error-code=no-untyped-call --exclude 'scripts/(generate_presentation|_gen_html)\.py'
 
-wiring-gates: reachability fail-open traceability security-columns paging-primitive tenant-session-adoption
+wiring-gates: reachability fail-open traceability security-columns paging-primitive tenant-session-adoption workflow-integrity
 
 format:
 	ruff format .

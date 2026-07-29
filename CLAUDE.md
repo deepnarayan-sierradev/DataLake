@@ -82,7 +82,7 @@ Invoke tools via `.venv/bin/<tool>` explicitly rather than assuming an activated
 activation doesn't reliably persist across separate tool calls in an agent session.
 
 ```bash
-make wiring-gates                                                # G1/G4/G5/G7/G8/G9 — see below
+make wiring-gates                                                # G1/G4/G5/G7/G8/G9/G12 — see below
 make typecheck-scripts                                           # operational scripts (see below)
 .venv/bin/ruff check .                                          # lint — matches CI exactly
 .venv/bin/pytest -q                                              # full suite, enforces 80% coverage gate
@@ -144,7 +144,7 @@ On 2026-07-28 eighteen modules shipped complete, unit-tested, and **unreachable*
 Lambda, route, or script could reach them. Every existing gate stayed green, because a unit test
 imports the module under test directly — which is precisely the import the handlers were missing.
 
-Six gates now make that class of defect detectable. Three run from the Makefile and CI:
+Seven gates now make that class of defect detectable. Three run from the Makefile and CI:
 
 Two more were added on 2026-07-29 after a second assessment found controls that were present and
 inert: **G7** (`make security-columns`) fails when a scope filter reads a column no record declares
@@ -159,7 +159,8 @@ make traceability            # G5: a requirement uncited, unreachable, or covere
 make security-columns        # G7: a scope filter reading a column no writer sets
 make paging-primitive        # G8: a hand-rolled DynamoDB paging loop outside persistence/
 make tenant-session-adoption # G9: clients built outside the IAM tenant boundary
-make wiring-gates            # all six
+make workflow-integrity      # G12: a workflow referencing what CI cannot resolve
+make wiring-gates            # all seven
 ```
 
 **G4 checks three shapes, not one, and that is the lesson worth carrying.** Its first version
@@ -168,6 +169,19 @@ required while keeping `| None` and its early return, so the fail-open survived 
 rejects the default, the nullable annotation, and an `is None` comparison. Where a read legitimately
 has no caller claim, pass `tenancy.scope_predicate.unrestricted_predicate(reason)` — an affirmative,
 metered object rather than an absence.
+
+**G12** (`make workflow-integrity`) exists because every other gate runs locally, and so cannot see a
+workflow referencing something the runner lacks. Two defects had CI red on `main` for months while
+all local checks passed: `.secrets.baseline` matched `.gitignore`'s `*secret*` and was never
+committed, so the secret-scan job failed on every run with `Invalid path`; and `requires-python` was
+capped at `<3.14` while ci.yml pins `3.14.6`, so `pip install -e .` failed before lint, typecheck,
+tests, or pip-audit executed a single assertion. **Gates in the `wiring-gates` job must import only
+the standard library** — that job installs no dependencies on purpose, so a gate importing `yaml`
+fails there and passes locally; `tests/test_workflow_integrity_gate.py` asserts this.
+
+Local green is not CI green. Before claiming a change is verified, check the actual run
+(`gh run list --branch <branch>`), because a job that dies during `Install dependencies` reports
+failure without having run one check.
 
 **G10** (`tests/test_capability_reachability.py`) closes G1's blind spot: G1 asks whether a *module*
 is imported, so a capability with no path from any entry point passes it. That is how

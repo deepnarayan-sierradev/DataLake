@@ -5,6 +5,10 @@ on:
     branches: ["**"]
   pull_request:
     branches: [main, staging, prod]
+  # `deploy-dev.yml` gates its plan/apply on this workflow via `uses:`, which only resolves when
+  # the callee declares `workflow_call`. Without it the whole deploy workflow is invalid, so the
+  # gate it depends on never ran and never reported.
+  workflow_call:
 
 permissions:
   contents: read
@@ -86,6 +90,12 @@ jobs:
 
       - name: Paging primitive is the only paging implementation (G8)
         run: python scripts/check_paging_primitive.py
+
+      - name: Clients are built inside the tenant boundary (G9)
+        run: python scripts/check_tenant_session_adoption.py
+
+      - name: CI can resolve what its workflows reference (G12)
+        run: python scripts/check_workflow_integrity.py
 
   # ──────────────────────────────────────────────────────────────────────────
   # Stage 2: Type checking
@@ -216,7 +226,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Run checkov
-        uses: bridgecrewio/checkov-action@57e50bed6e7e33266f1a9e5a7ad0b2b0b0c9f2f3  # v12.2847.0
+        uses: bridgecrewio/checkov-action@5fa28e9c4db2c0920ade6ae453c0e91745c6378a  # v12.2847.0
         with:
           directory: infrastructure/
           framework: terraform
@@ -236,7 +246,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269ef065  # v3.1.2
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3.1.2
         with:
           terraform_version: "~1.8"
 
@@ -275,11 +285,10 @@ jobs:
       - name: Install detect-secrets
         run: pip install "detect-secrets @ git+https://github.com/Yelp/detect-secrets@01886c8a910c64595c47f186ca1ffc0b77fa5458"
 
-      - name: Run detect-secrets scan against baseline
-        # `scan --baseline` re-scans and rewrites the baseline in place,
-        # preserving existing audited entries. If the rewritten baseline
-        # differs from the committed one, a new, unaudited potential secret
-        # was found — fail the build rather than let it merge silently.
-        run: |
-          detect-secrets scan --baseline .secrets.baseline
-          git diff --exit-code .secrets.baseline
+      - name: Run detect-secrets against the committed baseline
+        # `scan --baseline` rewrites the baseline and stamps a fresh `generated_at`, so the
+        # `git diff --exit-code` this replaces could never pass. `detect-secrets-hook` is the
+        # entry point pre-commit uses: it checks files and exits non-zero on a finding the
+        # baseline does not record, without rewriting it. Scans every tracked file — broader
+        # than the pre-commit hook, which excludes `tests/`.
+        run: git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline

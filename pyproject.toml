@@ -7,7 +7,7 @@ name = "enterprise-data-lake"
 version = "0.1.0"
 description = "Enterprise Data Lake Extraction Platform — metadata-driven, connector-based ingestion"
 readme = "README.md"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.13,<3.15"
 license = { text = "Proprietary" }
 dependencies = [
     "pydantic>=2.7,<3.0",

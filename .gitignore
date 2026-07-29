@@ -71,14 +71,19 @@ override.tf.json
 # passed on developer machines, where the files exist untracked on disk.
 #
 # Order matters: a file cannot be re-included while its parent directory is excluded, so the
-# directory negations must come first. Data files (.json/.env/.pem/.secrets.baseline) still match
-# the patterns above and stay ignored.
+# directory negations must come first. Real credential *data* (.json/.env/.pem) still matches the
+# patterns above and stays ignored.
 !*credential*/
 !*secret*/
 !*credential*.py
 !*secret*.py
 !*credential*.tf
 !*secret*.tf
+# `.secrets.baseline` was classed as data by the 2026-07-29 pass and left ignored. It is not data:
+# it holds detect-secrets' plugin set and an empty findings map, and the CI secret-scan job passes
+# it to `--baseline`. Untracked, that job failed on every run with `Invalid path: .secrets.baseline`
+# — the same local-passes/CI-fails shape as the source files above, one file later.
+!.secrets.baseline
 .env
 .env.*
 !.env.example
