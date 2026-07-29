@@ -75,6 +75,9 @@ resource "aws_iam_role_policy" "copy_s3_read" {
 # ---------------------------------------------------------------------------
 
 resource "aws_security_group" "redshift" {
+  # Attached to the Redshift Serverless workgroup by the caller, which also wires ingress from
+  # the loader Lambda's group — defining either side inside this module would be circular.
+  #checkov:skip=CKV2_AWS_5:Attached by the caller to the Redshift workgroup.
   name        = "${local.identifier}-sg"
   description = "Serving store Redshift Serverless. Ingress wired by the caller from the loader Lambda's SG."
   vpc_id      = var.vpc_id

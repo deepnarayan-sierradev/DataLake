@@ -52,11 +52,13 @@ variable "mysql_rds_rotation_lambda_arn" {
 
 variable "secret_rotation_days" {
   type        = number
-  default     = 90
+  default     = 60
   description = "Days between automatic rotations when a rotation Lambda is configured."
   validation {
-    condition     = var.secret_rotation_days >= 30 && var.secret_rotation_days <= 365
-    error_message = "secret_rotation_days must be between 30 and 365."
+    # Ceiling is 90, not 365: CKV_AWS_304 requires rotation within 90 days, and a variable whose
+    # allowed range exceeds the control lets the control be switched off by configuration.
+    condition     = var.secret_rotation_days >= 30 && var.secret_rotation_days <= 90
+    error_message = "secret_rotation_days must be between 30 and 90."
   }
 }
 
