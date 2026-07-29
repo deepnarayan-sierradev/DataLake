@@ -102,6 +102,13 @@ class TestFormatStrategies:
         assert key == "evive/exports/exp-1/company.csv"
 
 
+# A single-tenant EXPORT-surface predicate: the shape every production export must carry.
+_EXPORT_PREDICATE = scope_predicate(
+    build_scope_claims("evive", TenantPartitionProfile(tenant_code="evive")),
+    surface=ConsumptionSurface.EXPORT,
+)
+
+
 @mock_aws
 class TestExportService:
     def _service(self) -> ExportService:
@@ -122,9 +129,9 @@ class TestExportService:
             "entity_id": "company",
             "requested_by": "ops@example.test",
             "granted_capabilities": _CAPABILITIES,
-            # Stated, not defaulted: an export is the least recoverable place to omit the row
-            # filter, so the parameter is required (DL-SCOPE-14).
-            "scope_predicate": None,
+            # A real predicate, not None: an export is the least recoverable place to omit the
+            # row filter, so the parameter is non-nullable (DL-SCOPE-14).
+            "scope_predicate": _EXPORT_PREDICATE,
         }
         return service.request_export(**{**base, **overrides})
 
@@ -143,7 +150,9 @@ class TestExportService:
         service = self._service()
         job = self._request(service)
         completed = service.execute(
-            job, [{"id": "1", "scope_unit_id": "franchisee-0001"}], scope_predicate=None
+            job,
+            [{"id": "1", "scope_unit_id": "franchisee-0001"}],
+            scope_predicate=_EXPORT_PREDICATE,
         )
         assert completed.status is ExportJobStatus.COMPLETED
         assert completed.row_count == 1
@@ -201,7 +210,7 @@ class TestExportService:
         service = self._service()
         for export_format in (ExportFormat.JSON, ExportFormat.PARQUET):
             job = self._request(service, export_format=export_format)
-            completed = service.execute(job, [{"id": "1"}], scope_predicate=None)
+            completed = service.execute(job, [{"id": "1"}], scope_predicate=_EXPORT_PREDICATE)
             assert completed.status is ExportJobStatus.COMPLETED
 
     def test_signed_url_requires_a_completed_job(self):
@@ -212,7 +221,9 @@ class TestExportService:
 
     def test_signed_url_is_time_limited(self):
         service = self._service()
-        job = service.execute(self._request(service), [{"id": "1"}], scope_predicate=None)
+        job = service.execute(
+            self._request(service), [{"id": "1"}], scope_predicate=_EXPORT_PREDICATE
+        )
         url = service.signed_download_url(job)
         assert "X-Amz-Expires" in url or "Expires=" in url
 
@@ -220,7 +231,7 @@ class TestExportService:
         service = self._service()
         job = self._request(service, delivery_bucket="does-not-exist")
         with pytest.raises(Exception):
-            service.execute(job, [{"id": "1"}], scope_predicate=None)
+            service.execute(job, [{"id": "1"}], scope_predicate=_EXPORT_PREDICATE)
         stored = ExportJobRepository(environment="dev", region_name=_REGION).get(
             "evive", job.job_id
         )

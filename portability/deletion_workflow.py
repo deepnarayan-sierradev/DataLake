@@ -20,11 +20,13 @@ from enum import StrEnum
 from typing import Any, Final
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import iter_items
 
 _logger = get_platform_logger(__name__)
 
@@ -377,5 +379,147 @@ def s3_prefix_deleter(s3_client: Any, bucket: str, store: DeletionStore) -> Stor
                 f"{store.value}: {remaining} object(s) remain under {prefix!r} after deletion."
             )
         return deleted, f"s3://{bucket}/{prefix} verified empty"
+
+    return delete
+
+
+def dynamodb_tenant_item_deleter(
+    dynamodb_resource: Any, table_names: tuple[str, ...]
+) -> StoreDeleter:
+    """
+    Delete every item under the tenant's partition across the platform's tenant-keyed tables.
+
+    One deleter for all of them rather than one per table, because `DeletionStore` treats DynamoDB
+    as a single store and a certificate must not claim completeness for a subset. Each table is
+    queried for its own key schema, so a table keyed `tenant_code` and one keyed
+    `tenant_scoped_key(...)` are both covered without hardcoding either shape.
+    """
+
+    def delete(tenant_code: str) -> tuple[int, str]:
+        deleted = 0
+        covered: list[str] = []
+        for table_name in table_names:
+            table = dynamodb_resource.Table(table_name)
+            key_names = [element["AttributeName"] for element in table.key_schema]
+            hash_key = key_names[0]
+            # A tenant-scoped hash key stores `tenant#...`, so the partition cannot be queried by
+            # equality; those tables are swept by a scan bounded to the tenant's own prefix.
+            if hash_key == "tenant_code":
+                items = iter_items(
+                    table,
+                    KeyConditionExpression=Key("tenant_code").eq(tenant_code),
+                    ProjectionExpression=", ".join(f"#{name}" for name in key_names),
+                    ExpressionAttributeNames={f"#{name}": name for name in key_names},
+                )
+            else:
+                items = iter_items(
+                    table,
+                    use_query=False,
+                    FilterExpression=f"begins_with(#{hash_key}, :prefix)",
+                    ExpressionAttributeNames={f"#{name}": name for name in key_names},
+                    ExpressionAttributeValues={":prefix": f"{tenant_code}#"},
+                    ProjectionExpression=", ".join(f"#{name}" for name in key_names),
+                )
+            with table.batch_writer() as batch:
+                for item in items:
+                    batch.delete_item(Key={name: item[name] for name in key_names})
+                    deleted += 1
+            covered.append(table_name)
+        return deleted, f"{deleted} item(s) removed across {len(covered)} table(s)"
+
+    return delete
+
+
+def secrets_manager_tenant_deleter(secrets_client: Any) -> StoreDeleter:
+    """
+    Delete every secret under `edl/tenants/{tenant_code}/`, with no recovery window.
+
+    `ForceDeleteWithoutRecovery` is deliberate: a 7-30 day recovery window means the credential
+    still exists after the certificate says it does not, which would make the certificate false.
+    """
+
+    def delete(tenant_code: str) -> tuple[int, str]:
+        prefix = f"edl/tenants/{tenant_code}/"
+        deleted = 0
+        paginator = secrets_client.get_paginator("list_secrets")
+        for page in paginator.paginate(
+            Filters=[{"Key": "name", "Values": [prefix]}], MaxResults=100
+        ):
+            for secret in page.get("SecretList", []):
+                name = str(secret.get("Name", ""))
+                if not name.startswith(prefix):
+                    continue
+                secrets_client.delete_secret(SecretId=name, ForceDeleteWithoutRecovery=True)
+                deleted += 1
+        return deleted, f"{deleted} secret(s) removed under {prefix}"
+
+    return delete
+
+
+def cloudwatch_logs_tenant_deleter(
+    logs_client: Any, log_group_names: tuple[str, ...]
+) -> StoreDeleter:
+    """
+    Delete the tenant's log streams, not the shared log groups the platform still needs.
+
+    Streams are named with the tenant prefix; deleting the group would take every other tenant's
+    history with it, which is why this is a stream-level sweep.
+    """
+
+    def delete(tenant_code: str) -> tuple[int, str]:
+        deleted = 0
+        absent = 0
+        for group in log_group_names:
+            paginator = logs_client.get_paginator("describe_log_streams")
+            try:
+                for page in paginator.paginate(
+                    logGroupName=group, logStreamNamePrefix=f"{tenant_code}/"
+                ):
+                    for stream in page.get("logStreams", []):
+                        logs_client.delete_log_stream(
+                            logGroupName=group, logStreamName=stream["logStreamName"]
+                        )
+                        deleted += 1
+            except logs_client.exceptions.ResourceNotFoundException:
+                # A function that never ran in this environment has no log group, so it holds none
+                # of the tenant's data. Counted and reported rather than swallowed: the certificate
+                # must say what it covered, and this is a real zero rather than a failed step.
+                absent += 1
+        covered = len(log_group_names) - absent
+        return deleted, (
+            f"{deleted} log stream(s) removed across {covered} group(s); {absent} group(s) absent"
+        )
+
+    return delete
+
+
+def serving_store_tenant_deleter(drop_container: Any) -> StoreDeleter:
+    """
+    Drop the tenant's serving-store container (database or schema) via the engine's own loader.
+
+    Takes a callable rather than a connection so this module holds no engine driver: the loader
+    registry already resolves the right one per engine, and `decide_isolation()` already decides
+    whether the container is a database or a schema.
+    """
+
+    def delete(tenant_code: str) -> tuple[int, str]:
+        dropped = drop_container(tenant_code)
+        return int(dropped), f"serving-store container dropped for {tenant_code}"
+
+    return delete
+
+
+def no_artefacts_deleter(store: DeletionStore, reason: str) -> StoreDeleter:
+    """
+    A store that is complete because it holds nothing for this tenant, saying so explicitly.
+
+    Used for `ML_ARTEFACTS` while DL-05 is deferred: there is no ML platform, so there are no
+    artefacts to delete. That is a real, defensible zero — but it must be *stated*, because the
+    alternative is omitting the store from the deleter map, which makes the saga refuse to certify
+    and turns a complete deletion into a permanent failure.
+    """
+
+    def delete(_tenant_code: str) -> tuple[int, str]:
+        return 0, f"{store.value}: nothing to delete — {reason}"
 
     return delete

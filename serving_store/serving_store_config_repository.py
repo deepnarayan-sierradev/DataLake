@@ -34,6 +34,7 @@ from contracts.identifier_policy import ENTITY_TYPE_PATTERN as _ENTITY_TYPE_PATT
 from contracts.identifier_policy import validate_tenant_code
 from contracts.serving_store_config_contract import ServingStoreLoadConfig
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import iter_items
 
 _logger = get_platform_logger(__name__)
 
@@ -147,27 +148,17 @@ class ServingStoreConfigRepositoryClient:
         tenant_code = validate_tenant_code(tenant_code)
 
         configs: list[ServingStoreLoadConfig] = []
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": Key("tenant_code").eq(tenant_code)
-        }
-        while True:
-            response = self._table.query(**query_kwargs)
-            for item in response.get("Items", []):
-                record: dict[str, Any] = dict(item)
-                try:
-                    configs.append(
-                        self._validate(tenant_code, str(item.get("entity_type")), record)
-                    )
-                except ServingStoreConfigValidationError:
-                    _logger.warning(
-                        "serving_store_config_list_skipped_invalid_record",
-                        tenant_code=tenant_code,
-                        entity_type=item.get("entity_type"),
-                    )
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
+        for item in iter_items(
+            self._table, KeyConditionExpression=Key("tenant_code").eq(tenant_code)
+        ):
+            try:
+                configs.append(self._validate(tenant_code, str(item.get("entity_type")), item))
+            except ServingStoreConfigValidationError:
+                _logger.warning(
+                    "serving_store_config_list_skipped_invalid_record",
+                    tenant_code=tenant_code,
+                    entity_type=item.get("entity_type"),
+                )
         return configs
 
     # ── DynamoDB backend ───────────────────────────────────────────────────────

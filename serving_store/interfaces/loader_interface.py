@@ -360,6 +360,36 @@ class ServingStoreLoaderInterface(abc.ABC):
             connection.close()
         return executed
 
+    def drop_tenant_container(self, tenant_code: str) -> int:
+        """
+        Drop this tenant's whole container, for a certified deletion (DL-PORT-04, SOW §24.7).
+
+        Connects to the engine's administrative database rather than the tenant's own, because a
+        session cannot drop the container it is connected to. Returns 1 when the statement ran, so
+        an inert deletion is visible rather than assumed.
+        """
+        from serving_store.view_generator import (
+            drop_tenant_container_statements,
+            serving_engine_from_config,
+        )
+
+        engine = serving_engine_from_config(self.engine_id)
+        _container, statement = drop_tenant_container_statements(tenant_code, engine)
+        credentials = self._retrieve_credentials()
+        # Deliberately not `_select_container`: a session cannot drop the container it is in, so
+        # this connects to the fixed top-level database every loader already bootstraps into.
+        connection = self._connect(credentials, self.default_connection_database)
+        try:
+            cursor = connection.cursor()
+            try:
+                cursor.execute(statement)
+                connection.commit()
+            finally:
+                cursor.close()
+        finally:
+            connection.close()
+        return 1
+
     def _run_session(
         self,
         record_batches: Iterable[list[dict[str, Any]]],

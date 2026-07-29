@@ -439,6 +439,29 @@ def schema_per_scope_unit_statements(
     return tuple(statements)
 
 
+def drop_tenant_container_statements(tenant_code: str, engine: ServingEngine) -> tuple[str, str]:
+    """
+    The DROP that removes a tenant's whole serving-store container (DL-PORT-04).
+
+    Returns `(container_name, statement)`. Generated here rather than in the deletion saga for the
+    same reason every other statement is: the container name is derived from an allowlisted
+    identifier once, and no caller composes SQL (OWASP A03).
+
+    MySQL's container is a database; every other supported engine's is a schema, and `CASCADE` is
+    required there because the schema still holds the tenant's tables.
+    """
+    validate_tenant_code(tenant_code)
+    container = tenant_code.replace("-", "_")
+    if not SAFE_COLUMN_PATTERN.match(container):
+        raise EngineUnsuitableError(
+            f"tenant container {container!r} is not an allowlisted SQL identifier."
+        )
+    quoted = _quote_identifier(engine, container)
+    if engine is ServingEngine.MYSQL:
+        return container, f"DROP DATABASE IF EXISTS {quoted};"
+    return container, f"DROP SCHEMA IF EXISTS {quoted} CASCADE;"
+
+
 def serving_view_s3_key(tenant_code: str, version: str, engine: ServingEngine) -> str:
     """Versioned per dialect: `{tenant_code}/serving-views/{version}.{engine}.sql`."""
     validate_tenant_code(tenant_code)

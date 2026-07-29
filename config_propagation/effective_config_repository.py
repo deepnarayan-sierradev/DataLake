@@ -22,6 +22,7 @@ from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import iter_items
 from tenancy.scope_contract import IMPLICIT_SCOPE_UNIT_ID
 
 _logger = get_platform_logger(__name__)
@@ -152,18 +153,13 @@ class EffectiveConfigRepository:
                 "tenant_code = :tc AND begins_with(capability_key, :cap)"
             )
             query_kwargs["ExpressionAttributeValues"][":cap"] = f"{capability.value}#"
-        records: list[dict[str, Any]] = []
-        while True:
-            response = self._table.query(**query_kwargs)
-            records.extend(dict(item) for item in response.get("Items", []))
-            record_platform_metric(
-                PlatformMetric.PUBLISHES_NOT_YET_EFFECTIVE,
-                sum(1 for item in response.get("Items", []) if "published_at" not in item),
-            )
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
+        records = list(iter_items(self._table, **query_kwargs))
+        # Emitted once for the whole read rather than per page: the metric counts publishes that
+        # have not taken effect, and a per-page emission made the figure depend on page boundaries.
+        record_platform_metric(
+            PlatformMetric.PUBLISHES_NOT_YET_EFFECTIVE,
+            sum(1 for item in records if "published_at" not in item),
+        )
         return records
 
     def propagation_lag_seconds(

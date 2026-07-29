@@ -60,11 +60,26 @@ class TestCrossTenantForgeryIsRejected:
         with pytest.raises(ValidationFailedError, match="does not belong to this tenant"):
             cp.decode_page_token(_event(forged), "demo")
 
-    def test_a_key_without_a_tenant_is_allowed_through(self) -> None:
-        # Not every table's key carries tenant_code; the KeyConditionExpression still pins it, so
-        # this is accepted rather than rejected — but it is accepted *knowingly*.
+    def test_a_key_without_a_tenant_is_refused(self) -> None:
+        """
+        This asserted the opposite until 2026-07-29, on the reasoning that "not every table's key
+        carries tenant_code". Every table this function decodes for does: `EdlTwinIndex` and
+        `EdlDataQualityException` are both partitioned on `tenant_code`. So the omission was not a
+        legitimate shape being accommodated — it was an opt-out from the check, available to any
+        caller willing to leave the field off. A guard a caller can skip is not a guard.
+        """
         token = _forge(f"{cp.PAGE_TOKEN_PREFIX}{json.dumps({'sk': 'company#c-1'})}")
-        assert cp.decode_page_token(_event(token), "demo") == {"sk": "company#c-1"}
+        with pytest.raises(ValidationFailedError):
+            cp.decode_page_token(_event(token), "demo")
+
+    def test_positive_control_a_well_formed_own_tenant_key_is_accepted(self) -> None:
+        # Without this, a decoder that rejected everything would pass every test in this class.
+        token = cp.encode_page_token({"tenant_code": "demo", "sk": "company#c-1"})
+        assert token is not None
+        assert cp.decode_page_token(_event(token), "demo") == {
+            "tenant_code": "demo",
+            "sk": "company#c-1",
+        }
 
 
 class TestMalformedTokensAre400s:

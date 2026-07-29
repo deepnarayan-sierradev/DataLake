@@ -32,6 +32,7 @@ from contracts.observability_contract import PipelineStage
 from contracts.platform_metrics import PlatformMetric
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import iter_items
 
 _logger = get_platform_logger(__name__)
 
@@ -181,20 +182,16 @@ def read_audit_records_for_period(
     table_name = os.environ.get("AUDIT_LOG_TABLE") or "EdlRunAuditLog"
     table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
-    records: list[dict[str, Any]] = []
-    query_kwargs: dict[str, Any] = {
-        "IndexName": _AUDIT_TENANT_INDEX,
-        "KeyConditionExpression": ("tenant_code = :tc AND begins_with(started_at, :period)"),
-        "ExpressionAttributeValues": {":tc": tenant_code, ":period": period},
-    }
-    while True:
-        response = table.query(**query_kwargs)
-        records.extend(dict(item) for item in response.get("Items", []))
-        last_key = response.get("LastEvaluatedKey")
-        if not last_key:
-            break
-        query_kwargs["ExclusiveStartKey"] = last_key
-    return records
+    # Drains deliberately: a usage period must be metered whole, because an invoice built on a
+    # truncated read understates. This is the caller `iter_items` exists for.
+    return list(
+        iter_items(
+            table,
+            IndexName=_AUDIT_TENANT_INDEX,
+            KeyConditionExpression="tenant_code = :tc AND begins_with(started_at, :period)",
+            ExpressionAttributeValues={":tc": tenant_code, ":period": period},
+        )
+    )
 
 
 def current_period() -> str:

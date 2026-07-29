@@ -154,6 +154,10 @@ class PlatformMetric(StrEnum):
     TENANT_RECORDS_PROCESSED = "TenantRecordsProcessed"
     SCOPE_GRANT_EXPANSIONS = "ScopeGrantExpansions"
     EMPTY_SCOPE_DENIALS = "EmptyScopeDenials"
+    # An unscoped read is now an affirmative, named choice rather than a `None` predicate, so it
+    # is countable. A rise here without a matching rise in definition-validation runs means a
+    # request path has started reading unfiltered (DL-SCOPE-14).
+    UNRESTRICTED_SCOPE_READS = "UnrestrictedScopeReads"
     CONNECTION_HEALTH = "ConnectionHealth"
     CONNECTION_CREDENTIAL_FAILURES = "ConnectionCredentialFailures"
     CONNECTIONS_PER_TENANT = "ConnectionsPerTenant"

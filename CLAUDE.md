@@ -102,8 +102,15 @@ Per-package invocation (`mypy -p some_package`) also surfaces pre-existing, out-
 .venv/bin/mypy -p connector_runtime -p transformation -p entity_resolution \
   -p analytics_publisher -p orchestration -p observability -p watermark_management \
   -p schema_management -p contracts -p governance -p tenancy -p config_propagation \
-  -p data_quality -p workflow_automation -p portability -p semantic -p serving_store
+  -p data_quality -p workflow_automation -p portability -p semantic -p serving_store \
+  -p knowledge -p persistence -p processing_engine
 ```
+
+`knowledge`, `persistence`, and `processing_engine` were added on 2026-07-29. They had been
+registered in `testpaths`, `coverage.source`, and `known-first-party` — the three places the
+new-module checklist named — but **not** in this command, so the twin repository (which carries the
+`scope_unit_id` security column) and the shared paging primitive were never type-checked. `agent` is
+excluded deliberately while DL-04 is deferred. When you add a package, this is the fourth place.
 
 **That command is green as of 2026-07-28** — the long-standing pre-existing error backlog
 (29 errors in 11 files, previously tracked as remediation debt) was cleared as part of DL-SEC-18,

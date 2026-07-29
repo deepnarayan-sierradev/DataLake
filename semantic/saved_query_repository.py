@@ -1,8 +1,13 @@
 """
-Saved query repository (FR-3.4).
+Saved query repository (FR-3.4, DL-SEM-07).
 
-Persists SavedQuery records in DynamoDB (table EdlSavedQuery): PK tenant_code,
-SK query_id. Tenant-partitioned from creation.
+Persists SavedQuery records in DynamoDB (table EdlSavedQuery): PK tenant_code, SK query_id.
+Tenant-partitioned from creation.
+
+Serialisation goes through the Pydantic model rather than a hand-listed field set. The hand-listed
+version named five fields, so when `SavedQuery` gained filters, joins, and a time range, a saved
+query would have been *stored* without them and read back as unfiltered — the same class of silent
+loss as a filter that never applies, arriving by a different route.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from boto3.dynamodb.conditions import Key
 
 from contracts.identifier_policy import validate_tenant_code
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import iter_items
 from semantic.saved_query import SavedQuery
 
 _logger = get_platform_logger(__name__)
@@ -33,16 +39,10 @@ class SavedQueryRepository:
 
     def save(self, tenant_code: str, saved_query: SavedQuery) -> None:
         validate_tenant_code(tenant_code)
+        # `mode="json"` so dates and enums land as DynamoDB-safe scalars; the model is the single
+        # definition of what a saved query contains, so a new field cannot be dropped here.
         self._table.put_item(
-            Item={
-                "tenant_code": tenant_code,
-                "query_id": saved_query.query_id,
-                "name": saved_query.name,
-                "entity": saved_query.entity,
-                "metrics": list(saved_query.metrics),
-                "dimensions": list(saved_query.dimensions),
-                "created_by": saved_query.created_by,
-            }
+            Item={"tenant_code": tenant_code, **saved_query.model_dump(mode="json")}
         )
 
     def get(self, tenant_code: str, query_id: str) -> SavedQuery:
@@ -56,25 +56,17 @@ class SavedQueryRepository:
         return self._to_saved_query(item)
 
     def list_for_tenant(self, tenant_code: str) -> list[SavedQuery]:
+        """Every saved query for a tenant; drains through the shared paging primitive."""
         validate_tenant_code(tenant_code)
-        saved_queries: list[SavedQuery] = []
-        kwargs: dict[str, Any] = {"KeyConditionExpression": Key("tenant_code").eq(tenant_code)}
-        while True:
-            response = self._table.query(**kwargs)
-            saved_queries.extend(self._to_saved_query(item) for item in response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            kwargs["ExclusiveStartKey"] = last_key
-        return saved_queries
+        return [
+            self._to_saved_query(item)
+            for item in iter_items(
+                self._table, KeyConditionExpression=Key("tenant_code").eq(tenant_code)
+            )
+        ]
 
     @staticmethod
     def _to_saved_query(item: dict[str, Any]) -> SavedQuery:
-        return SavedQuery(
-            query_id=str(item["query_id"]),
-            name=str(item["name"]),
-            entity=str(item["entity"]),
-            metrics=tuple(str(metric) for metric in item.get("metrics", [])),
-            dimensions=tuple(str(dimension) for dimension in item.get("dimensions", [])),
-            created_by=str(item["created_by"]),
-        )
+        """Validate through the model, so every declared field round-trips or fails loudly."""
+        payload = {name: value for name, value in item.items() if name != "tenant_code"}
+        return SavedQuery.model_validate(payload)

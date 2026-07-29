@@ -112,9 +112,12 @@ class WorkflowEngine:
         environment: str,
         region_name: str,
         metric_resolver: MetricResolver,
-        # Required: optional at-most-once is no at-most-once. Pass None explicitly only for a
-        # dry-run engine that performs no external effect (DL-WF-07).
-        idempotency_guard: IdempotencyGuard | None,
+        # Non-nullable: optional at-most-once is no at-most-once (DL-WF-07). The previous comment
+        # justified `None` for "a dry-run engine that performs no external effect" — but
+        # `_execute_action` already returns SKIPPED_DRY_RUN *before* reaching the claim, so a dry
+        # run never consulted the guard and the exemption bought nothing. What it did buy was a
+        # live engine, constructed with `None`, retrying every external action on every retry.
+        idempotency_guard: IdempotencyGuard,
         circuit_breaker: DestinationCircuitBreaker | None = None,
     ) -> None:
         if not environment:
@@ -294,7 +297,7 @@ class WorkflowEngine:
             )
 
         key = idempotency_key(context.workflow_id, context.execution_id, action.action_id)
-        if self._idempotency is not None and not self._idempotency.claim(context.tenant_code, key):
+        if not self._idempotency.claim(context.tenant_code, key):
             return ActionResult(
                 action_id=action.action_id,
                 kind=action.kind,

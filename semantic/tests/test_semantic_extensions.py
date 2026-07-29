@@ -63,7 +63,13 @@ from semantic.semantic_model import (
     TimeGrain,
 )
 from tenancy.scope_contract import PartitionKind, PartitionModel, ScopeUnit, TenantPartitionProfile
-from tenancy.scope_predicate import ConsumptionSurface, build_scope_claims, scope_predicate
+from tenancy.scope_predicate import (
+    ConsumptionSurface,
+    UnrestrictedScopeReason,
+    build_scope_claims,
+    scope_predicate,
+    unrestricted_predicate,
+)
 
 _REGION = "us-east-1"
 _ALL_TAGS = frozenset({TAG_FINANCE, TAG_EXECUTIVE, "dept_operations", "dept_sales_marketing"})
@@ -153,6 +159,10 @@ def _model() -> SemanticModel:
     )
 
 
+# The audited stand-in for "no end-user claim applies here". Tests used `None`, which is the
+# fail-open this parameter was made non-nullable to remove.
+_UNSCOPED = unrestricted_predicate(UnrestrictedScopeReason.DEFINITION_VALIDATION)
+
 _COMPILER = QueryCompiler(_model())
 
 
@@ -240,7 +250,9 @@ class TestJoinsAndGrain:
             metrics=("order_count",),
             joined_dimensions=(("franchisee", "franchisee_name"),),
         )
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
         assert "LEFT JOIN franchisee AS j_0" in compiled.sql
         assert "j_0.franchisee_name AS franchisee_franchisee_name" in compiled.sql
 
@@ -251,7 +263,7 @@ class TestJoinsAndGrain:
             joined_dimensions=(("sales_order", "order_status"),),
         )
         with pytest.raises(SemanticQueryError, match="No declared join"):
-            _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+            _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED)
 
     def test_time_grain_truncates_and_groups(self):
         request = SemanticQueryRequest(
@@ -260,7 +272,9 @@ class TestJoinsAndGrain:
             time_dimension="booked_date",
             time_grain=TimeGrain.MONTH,
         )
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
         assert "date_trunc('month', entity_data.booked_date) AS booked_date" in compiled.sql
         assert "GROUP BY date_trunc('month', entity_data.booked_date)" in compiled.sql
 
@@ -273,7 +287,9 @@ class TestJoinsAndGrain:
                 time_dimension="booked_date", start=date(2026, 1, 1), end=date(2026, 1, 31)
             ),
         )
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
         assert compiled.parameters == ["2026-01-01", "2026-02-01"]
 
     def test_relative_range_resolves_against_today(self):
@@ -286,7 +302,10 @@ class TestJoinsAndGrain:
             ),
         )
         compiled = _COMPILER.compile(
-            request, granted_access_tags=_ALL_TAGS, today=date(2026, 7, 28), scope_predicate=None
+            request,
+            granted_access_tags=_ALL_TAGS,
+            today=date(2026, 7, 28),
+            scope_predicate=_UNSCOPED,
         )
         assert compiled.parameters == ["2026-07-22", "2026-07-29"]
 
@@ -299,7 +318,10 @@ class TestJoinsAndGrain:
             time_comparison=TimeComparison.PRIOR_YEAR,
         )
         compiled = _COMPILER.compile(
-            request, granted_access_tags=_ALL_TAGS, today=date(2026, 7, 28), scope_predicate=None
+            request,
+            granted_access_tags=_ALL_TAGS,
+            today=date(2026, 7, 28),
+            scope_predicate=_UNSCOPED,
         )
         # Fiscal year starts in April, so the prior fiscal year begins 2025-04-01.
         assert compiled.parameters == ["2025-04-01", "2026-04-01"]
@@ -311,14 +333,14 @@ class TestJoinsAndGrain:
             time_comparison=TimeComparison.PRIOR_YEAR,
         )
         with pytest.raises(SemanticQueryError, match="without naming a time dimension"):
-            _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+            _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED)
 
     def test_unknown_time_dimension_is_rejected(self):
         request = SemanticQueryRequest(
             entity="sales_order", metrics=("order_count",), time_dimension="nope"
         )
         with pytest.raises(SemanticQueryError, match="No time dimension"):
-            _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+            _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED)
 
     def test_reversed_absolute_range_is_rejected(self):
         request = SemanticQueryRequest(
@@ -330,7 +352,7 @@ class TestJoinsAndGrain:
             ),
         )
         with pytest.raises(SemanticQueryError, match="precedes its start"):
-            _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+            _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED)
 
 
 class TestFilters:
@@ -342,7 +364,9 @@ class TestFilters:
                 SemanticFilter(dimension="order_status", operator="in", values=("open", "closed")),
             ),
         )
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
         assert "entity_data.order_status IN (?, ?)" in compiled.sql
         assert compiled.parameters == ["open", "closed"]
 
@@ -354,7 +378,9 @@ class TestFilters:
                 SemanticFilter(dimension="order_status", operator="not_in", values=("void",)),
             ),
         )
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
         assert "NOT IN (?)" in compiled.sql
 
     def test_null_handling_takes_no_value(self):
@@ -363,7 +389,9 @@ class TestFilters:
             metrics=("order_count",),
             filters=(SemanticFilter(dimension="order_status", operator="is_null"),),
         )
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
         assert "entity_data.order_status IS NULL" in compiled.sql
         assert compiled.parameters == []
 
@@ -373,7 +401,9 @@ class TestFilters:
             metrics=("order_count",),
             filters=(SemanticFilter(dimension="order_status", operator="not_null"),),
         )
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
         assert "IS NOT NULL" in compiled.sql
 
     def test_empty_in_list_is_rejected(self):
@@ -404,7 +434,9 @@ class TestFilters:
 class TestDerivedMetrics:
     def test_ratio_guards_the_denominator(self):
         request = SemanticQueryRequest(entity="sales_order", metrics=("average_order_value",))
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
         assert "NULLIF(COUNT(DISTINCT entity_data.order_id), 0)" in compiled.sql
 
     def test_zero_denominator_behaviour_can_coalesce(self):
@@ -429,24 +461,28 @@ class TestDerivedMetrics:
         compiled = QueryCompiler(model).compile(
             SemanticQueryRequest(entity="x-entity", metrics=("ratio_metric",)),
             granted_access_tags=frozenset(),
-            scope_predicate=None,
+            scope_predicate=_UNSCOPED,
         )
         assert "COALESCE(" in compiled.sql
 
     def test_difference_metric_subtracts(self):
         request = SemanticQueryRequest(entity="sales_order", metrics=("margin",))
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
         assert " - " in compiled.sql
 
     def test_count_distinct_emits_distinct(self):
         request = SemanticQueryRequest(entity="sales_order", metrics=("order_count",))
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
         assert "COUNT(DISTINCT entity_data.order_id)" in compiled.sql
 
     def test_derived_metric_inherits_component_access_tags(self):
         request = SemanticQueryRequest(entity="sales_order", metrics=("average_order_value",))
         with pytest.raises(AccessDeniedError):
-            _COMPILER.compile(request, granted_access_tags=frozenset(), scope_predicate=None)
+            _COMPILER.compile(request, granted_access_tags=frozenset(), scope_predicate=_UNSCOPED)
 
 
 class TestScopePredicateInjection:
@@ -485,10 +521,24 @@ class TestScopePredicateInjection:
         assert compiled.sql.index("scope_unit_id IN") < compiled.sql.index("order_status =")
         assert compiled.parameters == ["franchisee-0001", "open"]
 
-    def test_no_predicate_leaves_the_flag_false(self):
+    def test_there_is_no_compilation_path_that_applies_no_predicate(self):
+        """
+        This asserted `scope_predicate_applied is False` for a `None` predicate — it pinned the
+        fail-open in place as expected behaviour. A statement that returned rows with no scope
+        clause is the defect, so the flag can no longer be False on a successful compile, and an
+        unscoped read is expressed as an audited tautology instead of an absence.
+        """
         request = SemanticQueryRequest(entity="sales_order", metrics=("order_count",))
-        compiled = _COMPILER.compile(request, granted_access_tags=_ALL_TAGS, scope_predicate=None)
-        assert compiled.scope_predicate_applied is False
+        compiled = _COMPILER.compile(
+            request, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED
+        )
+        assert compiled.scope_predicate_applied is True
+        assert "WHERE" in compiled.sql
+
+    def test_passing_no_predicate_is_a_type_error_not_a_wider_result(self):
+        request = SemanticQueryRequest(entity="sales_order", metrics=("order_count",))
+        with pytest.raises(TypeError):
+            _COMPILER.compile(request, granted_access_tags=_ALL_TAGS)  # type: ignore[call-arg]
 
 
 class TestFiscalCalendar:
@@ -830,7 +880,7 @@ class TestEnterpriseModelAndKpiHarness:
         compiler = QueryCompiler(model)
         request = SemanticQueryRequest(entity="ap_bill", metrics=("payables_amount",))
         with pytest.raises(AccessDeniedError):
-            compiler.compile(request, granted_access_tags=frozenset(), scope_predicate=None)
+            compiler.compile(request, granted_access_tags=frozenset(), scope_predicate=_UNSCOPED)
 
     def test_executive_tier_expands_to_every_department(self):
         expanded = expand_access_tags(frozenset({TAG_EXECUTIVE}))
@@ -867,7 +917,7 @@ class TestEnterpriseModelAndKpiHarness:
     def test_structural_harness_compiles_every_kpi(self):
         model = build_enterprise_model("evive")
         harness = KpiValidationHarness(model, structural_expectations(model))
-        report = harness.run(granted_access_tags=None)
+        report = harness.run(granted_access_tags=frozenset())
         assert report.passed is True
         assert report.compile_only_count == len(SOW_KPI_MAP)
         assert "compile-only" in report.render_summary()
@@ -888,7 +938,7 @@ class TestEnterpriseModelAndKpiHarness:
         harness = KpiValidationHarness(
             model, [expectation], executor=lambda sql, params: [{"revenue": "1005.00"}]
         )
-        report = harness.run(granted_access_tags=None)
+        report = harness.run(granted_access_tags=frozenset())
         assert report.passed is True
         assert report.value_checked_count == 1
 
@@ -907,7 +957,7 @@ class TestEnterpriseModelAndKpiHarness:
         harness = KpiValidationHarness(
             model, [expectation], executor=lambda sql, params: [{"revenue": "1500.00"}]
         )
-        report = harness.run(granted_access_tags=None)
+        report = harness.run(granted_access_tags=frozenset())
         assert report.passed is False
         assert report.failures[0].outcome is KpiCheckOutcome.FAILED
         assert "exceeds tolerance" in report.failures[0].detail
@@ -921,7 +971,7 @@ class TestEnterpriseModelAndKpiHarness:
             period_start=date(2026, 1, 1),
             period_end=date(2026, 1, 31),
         )
-        report = KpiValidationHarness(model, [expectation]).run(granted_access_tags=None)
+        report = KpiValidationHarness(model, [expectation]).run(granted_access_tags=frozenset())
         assert report.failures[0].outcome is KpiCheckOutcome.COMPILE_FAILED
 
     def test_executor_failure_is_reported(self):
@@ -941,7 +991,7 @@ class TestEnterpriseModelAndKpiHarness:
             raise RuntimeError("athena down")
 
         harness = KpiValidationHarness(model, [expectation], executor=boom)
-        report = harness.run(granted_access_tags=None)
+        report = harness.run(granted_access_tags=frozenset())
         assert "execution failed" in report.failures[0].detail
 
     def test_no_rows_is_a_failure_not_a_pass(self):
@@ -957,13 +1007,13 @@ class TestEnterpriseModelAndKpiHarness:
             required_access_tags=frozenset({TAG_FINANCE}),
         )
         harness = KpiValidationHarness(model, [expectation], executor=lambda s, p: [])
-        report = harness.run(granted_access_tags=None)
+        report = harness.run(granted_access_tags=frozenset())
         assert report.passed is False
 
     def test_json_report_is_machine_readable(self):
         model = build_enterprise_model("evive")
         harness = KpiValidationHarness(model, structural_expectations(model))
-        payload = harness.run(granted_access_tags=None).to_json()
+        payload = harness.run(granted_access_tags=frozenset()).to_json()
         assert '"kpi": "Revenue"' in payload
 
     def test_fiscal_year_start_is_tenant_configuration(self):

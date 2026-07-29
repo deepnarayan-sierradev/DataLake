@@ -40,9 +40,9 @@ class SemanticQueryService:
         engine: SetBasedQueryEngine,
         entity_uri_resolver: Callable[[str], str],
         granted_access_tags: frozenset[str],
-        # Required: see QueryCompiler.compile. The service holds it so no per-call site can
-        # omit it, but construction itself must supply one.
-        scope_predicate: ScopePredicate | None,
+        # Required and non-nullable: see QueryCompiler.compile. The service holds it so no
+        # per-call site can omit it, and construction cannot supply nothing.
+        scope_predicate: ScopePredicate,
         result_cache: SemanticResultCache | None = None,
     ) -> None:
         self._compiler = QueryCompiler(model)
@@ -100,7 +100,9 @@ class SemanticQueryService:
         rows = [
             row
             for batch in self._engine.stream(
-                sql=compiled.sql, inputs={_ENTITY_VIEW: entity_uri}, params=compiled.parameters
+                sql=compiled.sql,
+                inputs=self._inputs_for(request, entity_uri),
+                params=compiled.parameters,
             )
             for row in batch
         ]
@@ -119,6 +121,26 @@ class SemanticQueryService:
             EntityType=request.entity,
         )
         return SemanticQueryResult(sql=compiled.sql, rows=rows)
+
+    def _inputs_for(self, request: SemanticQueryRequest, entity_uri: str) -> dict[str, str]:
+        """
+        Register a relation for the base entity **and** for every joined entity.
+
+        Only `entity_data` was registered until 2026-07-29, while the compiler happily emitted
+        `LEFT JOIN <entity> AS j_0 ...` for any declared join — so a joined query compiled cleanly
+        and then failed at execution with "table does not exist". The join tests asserted the SQL
+        string and never ran it, which is why the whole of DL-03's entity-relationship surface was
+        broken without a red test.
+
+        The compiler names a joined relation by the entity's own name, so that is the view name
+        bound here; `validate_inputs` allowlists it, and the URI comes from the same resolver the
+        base entity uses.
+        """
+        inputs = {_ENTITY_VIEW: entity_uri}
+        for target_entity_name, _dimension in request.joined_dimensions:
+            if target_entity_name not in inputs:
+                inputs[target_entity_name] = self._resolve_uri(target_entity_name)
+        return inputs
 
 
 def _suppress_small_cohorts(

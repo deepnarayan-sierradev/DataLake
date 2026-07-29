@@ -83,7 +83,10 @@ traceability:
 security-columns:
 	@python scripts/check_security_column_writers.py
 
-wiring-gates: reachability fail-open traceability security-columns
+paging-primitive:
+	@python scripts/check_paging_primitive.py
+
+wiring-gates: reachability fail-open traceability security-columns paging-primitive
 
 format:
 	ruff format .

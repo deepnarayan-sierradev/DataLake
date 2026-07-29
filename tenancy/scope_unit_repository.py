@@ -5,6 +5,13 @@ The profile lives in the same table under a reserved sort key so a tenant's part
 model and its unit set are read in one place and can never disagree about which units
 exist. A tenant with no profile record is `single` — the safe default, because a
 `single` tenant's predicate matches only its own implicit unit.
+
+Security (OWASP A01): **absence and failure are different answers.** A read that fails must
+never be reported as "no record", because the default profile is `single`, and a `single`
+profile for a partitioned tenant produces a match-all predicate on every read surface and
+stamps `__tenant__` on its rows at ingestion. A throttle would therefore have silently widened
+a franchisee boundary. `_get_item` raises `ScopeStoreUnavailableError` and the caller fails
+closed.
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import iter_items
 from tenancy.scope_contract import (
     IMPLICIT_SCOPE_UNIT_ID,
     PartitionModel,
@@ -38,6 +46,10 @@ _PROFILE_SORT_KEY: Final[str] = "__profile__"
 def _as_payload(item: Any) -> dict[str, Any]:
     """DynamoDB attribute values deserialise to a broad union; Pydantic coerces from Any."""
     return {str(key): value for key, value in dict(item).items()}
+
+
+class ScopeStoreUnavailableError(Exception):
+    """Raised when the scope store cannot be read, so no partition answer can be trusted."""
 
 
 class ScopeUnitNotFoundError(Exception):
@@ -136,31 +148,25 @@ class ScopeUnitRepository:
     def list_scope_units(self, tenant_code: str, *, effective_only: bool = True) -> list[ScopeUnit]:
         tenant_code = validate_tenant_code(tenant_code)
         units: list[ScopeUnit] = []
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": "tenant_code = :tc",
-            "ExpressionAttributeValues": {":tc": tenant_code},
-        }
-        while True:
-            response = self._table.query(**query_kwargs)
-            for item in response.get("Items", []):
-                if item.get("scope_unit_id") == _PROFILE_SORT_KEY:
-                    continue
-                try:
-                    unit = ScopeUnit(**_as_payload(item))
-                except ValidationError:
-                    _logger.warning(
-                        "scope_unit_skipped_invalid_record",
-                        tenant_code=tenant_code,
-                        scope_unit_id=item.get("scope_unit_id"),
-                    )
-                    continue
-                if effective_only and not unit.is_effective_on():
-                    continue
-                units.append(unit)
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
+        for item in iter_items(
+            self._table,
+            KeyConditionExpression="tenant_code = :tc",
+            ExpressionAttributeValues={":tc": tenant_code},
+        ):
+            if item.get("scope_unit_id") == _PROFILE_SORT_KEY:
+                continue
+            try:
+                unit = ScopeUnit(**_as_payload(item))
+            except ValidationError:
+                _logger.warning(
+                    "scope_unit_skipped_invalid_record",
+                    tenant_code=tenant_code,
+                    scope_unit_id=item.get("scope_unit_id"),
+                )
+                continue
+            if effective_only and not unit.is_effective_on():
+                continue
+            units.append(unit)
         return sorted(units, key=lambda u: u.scope_unit_id)
 
     def save_scope_unit(self, unit: ScopeUnit) -> None:
@@ -188,18 +194,22 @@ class ScopeUnitRepository:
     # ── Private ───────────────────────────────────────────────────────────────
 
     def _get_item(self, tenant_code: str, scope_unit_id: str) -> dict[str, Any] | None:
+        """`None` means the record is absent; a failed read raises rather than imitating absence."""
         try:
             response = self._table.get_item(
                 Key={"tenant_code": tenant_code, "scope_unit_id": scope_unit_id},
                 ConsistentRead=True,
             )
         except ClientError as exc:
-            _logger.warning(
-                "scope_unit_lookup_failed",
+            _logger.error(
+                "scope_store_read_failed_failing_closed",
                 tenant_code=tenant_code,
                 scope_unit_id=scope_unit_id,
-                error=str(exc),
+                error_code=exc.response.get("Error", {}).get("Code", "Unknown"),
             )
-            return None
+            raise ScopeStoreUnavailableError(
+                f"The scope store could not be read for tenant {tenant_code!r}. Refusing to "
+                "assume a partition model: an unreadable profile is not a single-partition tenant."
+            ) from exc
         item = response.get("Item")
         return dict(item) if item else None

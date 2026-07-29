@@ -30,6 +30,7 @@ from connector_runtime.api.errors import (
     ApiError,
     AuthenticationError,
     AuthorizationError,
+    ScopeStoreUnavailableApiError,
     ValidationFailedError,
 )
 from contracts.identifier_policy import validate_tenant_code
@@ -41,10 +42,11 @@ from tenancy.scope_predicate import (
     ConsumptionSurface,
     EmptyScopeDenialError,
     ScopePredicate,
+    UnknownScopeUnitError,
     build_scope_claims,
     scope_predicate,
 )
-from tenancy.scope_unit_repository import ScopeUnitRepository
+from tenancy.scope_unit_repository import ScopeStoreUnavailableError, ScopeUnitRepository
 
 _logger = get_platform_logger(__name__)
 
@@ -195,25 +197,41 @@ def scope_predicate_for(
     """
     Build the row filter for this caller on this surface (DL-SCOPE-14).
 
-    One builder, used by every read path in this handler. An empty grant raises
-    `EmptyScopeDenialError`, which `error_response` renders as 403 — never as "no filter".
+    One builder, used by every read path in this handler. Every scope denial is a 403 and every
+    scope-store failure is a 503. Neither is ever "no filter", and neither is a 500: an
+    authorization decision reported as an internal error reads as an outage and invites a retry
+    loop against an answer that will not change, while a store failure reported as a denial hides
+    a real incident.
     """
     repository = ScopeUnitRepository(environment=environment(), region_name=region())
-    profile = repository.get_partition_profile(tenant_code)
-    claims = build_scope_claims(
-        tenant_code,
-        profile,
-        granted_scope_unit_ids=granted_scope_units(event),
-        tenant_wide=claims_grant_tenant_wide(event),
-        units=repository.list_scope_units(tenant_code),
-    )
     try:
+        profile = repository.get_partition_profile(tenant_code)
+        units = repository.list_scope_units(tenant_code)
+    except ScopeStoreUnavailableError as exc:
+        # Failing closed on an unreadable scope store: the alternative default is `single`, which
+        # is a match-all predicate for a partitioned tenant.
+        raise ScopeStoreUnavailableApiError(
+            "Scope configuration is temporarily unavailable, so no rows can be authorised."
+        ) from exc
+    try:
+        claims = build_scope_claims(
+            tenant_code,
+            profile,
+            granted_scope_unit_ids=granted_scope_units(event),
+            tenant_wide=claims_grant_tenant_wide(event),
+            units=units,
+        )
         return scope_predicate(claims, surface=surface)
     except EmptyScopeDenialError as exc:
-        # Empty grant means deny, and the caller is told so — a 500 here would read as an
-        # outage and invite a retry loop against a decision that will not change.
         raise AuthorizationError(
             "Your access grant names no scope units, so no rows are visible."
+        ) from exc
+    except UnknownScopeUnitError as exc:
+        # A grant naming a unit the tenant does not own is a denial, not a server fault. It was
+        # reaching the generic handler as a 500, which both mis-signalled it and buried the
+        # CrossScopeAccessAttempts event it had already recorded.
+        raise AuthorizationError(
+            "Your access grant names scope units that do not exist for this tenant."
         ) from exc
 
 
@@ -229,6 +247,11 @@ def decode_page_token(event: dict[str, Any], tenant_code: str) -> dict[str, Any]
     tenant's partition. The `KeyConditionExpression` already pins `tenant_code`, but relying on
     that implicitly is how the twin filter came to read a field that did not exist — so the key's
     own `tenant_code` is checked here, and a mismatch is a 400 rather than a silent empty page.
+
+    The check requires the member to be **present**. It read `if token_tenant is not None`, which a
+    crafted token opted out of simply by omitting the field — a guard a caller can skip is not a
+    guard. Every table this decodes for is partitioned on `tenant_code`, so its absence is itself
+    malformed.
 
     A malformed token is a 400, never a silent restart from zero: restarting silently would loop a
     paginating client forever.
@@ -248,8 +271,9 @@ def decode_page_token(event: dict[str, Any], tenant_code: str) -> dict[str, Any]
 
     if not isinstance(key, dict) or not key:
         raise ValidationFailedError("next_token is not a valid continuation token.")
-    token_tenant = key.get("tenant_code")
-    if token_tenant is not None and str(token_tenant) != tenant_code:
+    if "tenant_code" not in key:
+        raise ValidationFailedError("next_token is not a valid continuation token.")
+    if str(key["tenant_code"]) != tenant_code:
         record_platform_metric(PlatformMetric.CROSS_TENANT_ACCESS_ATTEMPTS)
         raise ValidationFailedError("next_token does not belong to this tenant.")
     return {str(name): value for name, value in key.items()}

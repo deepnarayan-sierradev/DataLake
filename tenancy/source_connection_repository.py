@@ -19,6 +19,7 @@ from contracts.identifier_policy import validate_stable_id, validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import iter_items
 from tenancy.source_connection import (
     ConnectionState,
     SourceConnection,
@@ -99,31 +100,25 @@ class SourceConnectionRepository:
     ) -> list[SourceConnection]:
         tenant_code = validate_tenant_code(tenant_code)
         connections: list[SourceConnection] = []
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": "tenant_code = :tc",
-            "ExpressionAttributeValues": {":tc": tenant_code},
-        }
-        while True:
-            response = self._table.query(**query_kwargs)
-            for item in response.get("Items", []):
-                try:
-                    connection = self._deserialise(dict(item))
-                except ValidationError:
-                    _logger.warning(
-                        "source_connection_skipped_invalid_record",
-                        tenant_code=tenant_code,
-                        connection_id=item.get("connection_id"),
-                    )
-                    continue
-                if source_id is not None and connection.source_id != source_id:
-                    continue
-                if not include_retired and connection.state is ConnectionState.RETIRED:
-                    continue
-                connections.append(connection)
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
+        for item in iter_items(
+            self._table,
+            KeyConditionExpression="tenant_code = :tc",
+            ExpressionAttributeValues={":tc": tenant_code},
+        ):
+            try:
+                connection = self._deserialise(item)
+            except ValidationError:
+                _logger.warning(
+                    "source_connection_skipped_invalid_record",
+                    tenant_code=tenant_code,
+                    connection_id=item.get("connection_id"),
+                )
+                continue
+            if source_id is not None and connection.source_id != source_id:
+                continue
+            if not include_retired and connection.state is ConnectionState.RETIRED:
+                continue
+            connections.append(connection)
         record_platform_metric(
             PlatformMetric.CONNECTIONS_PER_TENANT, len(connections), TenantCode=tenant_code
         )

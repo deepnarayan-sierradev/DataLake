@@ -35,18 +35,14 @@ def _sql(engine: ServingEngine, **kwargs: object) -> str:
 
 class TestLoaderCanStillWrite:
     @pytest.mark.parametrize("engine", _POSTGRES_LIKE)
-    def test_a_for_all_policy_is_emitted_for_the_loader_role(
-        self, engine: ServingEngine
-    ) -> None:
+    def test_a_for_all_policy_is_emitted_for_the_loader_role(self, engine: ServingEngine) -> None:
         # The assertion the previous implementation failed.
         sql = _sql(engine)
         assert "FOR ALL" in sql
         assert f"TO {DEFAULT_LOADER_ROLE}" in sql
 
     @pytest.mark.parametrize("engine", _POSTGRES_LIKE)
-    def test_the_loader_policy_permits_both_read_and_write(
-        self, engine: ServingEngine
-    ) -> None:
+    def test_the_loader_policy_permits_both_read_and_write(self, engine: ServingEngine) -> None:
         # USING governs rows read, WITH CHECK governs rows written. An upsert needs both.
         sql = _sql(engine)
         assert "USING (true) WITH CHECK (true)" in sql

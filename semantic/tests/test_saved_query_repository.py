@@ -83,3 +83,66 @@ class TestSavedQueryModel:
 
         with pytest.raises(ValidationError):
             _query(query_id="Bad ID!")
+
+
+class TestEveryDeclaredFieldRoundTrips:
+    """
+    Serialisation named five fields by hand, so a saved query gaining filters would have been
+    stored without them and read back as unfiltered — a filter that silently does not apply.
+    """
+
+    @mock_aws
+    def test_filters_and_time_range_survive_a_save_and_reload(self) -> None:
+        from datetime import date
+
+        from semantic.query_compiler import SemanticFilter, TimeRangeFilter
+        from semantic.semantic_model import TimeGrain
+
+        _create_table(boto3.resource("dynamodb", region_name=_REGION))
+        repo = SavedQueryRepository(region_name=_REGION)
+        stored = SavedQuery(
+            query_id="q-filtered",
+            name="Filtered",
+            entity="company",
+            metrics=("total_revenue",),
+            created_by="ops@example.test",
+            filters=(SemanticFilter(dimension="industry", operator="eq", value="Tech"),),
+            joined_dimensions=(("franchisee", "franchisee_name"),),
+            time_dimension="booked_date",
+            time_grain=TimeGrain.QUARTER,
+            time_range=TimeRangeFilter(
+                time_dimension="booked_date", start=date(2026, 1, 1), end=date(2026, 3, 31)
+            ),
+            row_limit=250,
+        )
+        repo.save("demo", stored)
+
+        reloaded = repo.get("demo", "q-filtered")
+        assert reloaded.filters == stored.filters
+        assert reloaded.joined_dimensions == stored.joined_dimensions
+        assert reloaded.time_grain is TimeGrain.QUARTER
+        assert reloaded.time_range == stored.time_range
+        assert reloaded.row_limit == 250
+        # And the request the compiler receives carries them too.
+        assert reloaded.to_request().filters == stored.filters
+
+    @mock_aws
+    def test_a_listing_returns_the_filters_as_well(self) -> None:
+        from semantic.query_compiler import SemanticFilter
+
+        _create_table(boto3.resource("dynamodb", region_name=_REGION))
+        repo = SavedQueryRepository(region_name=_REGION)
+        repo.save(
+            "demo",
+            SavedQuery(
+                query_id="q-listed",
+                name="Listed",
+                entity="company",
+                metrics=("total_revenue",),
+                created_by="ops@example.test",
+                filters=(SemanticFilter(dimension="industry", operator="in", values=("A", "B")),),
+            ),
+        )
+        listed = repo.list_for_tenant("demo")
+        assert len(listed) == 1
+        assert listed[0].filters[0].values == ("A", "B")

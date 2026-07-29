@@ -56,3 +56,11 @@ class ConflictError(ApiError):
     """The requested resource already exists."""
 
     status_code = 409
+
+
+class ScopeStoreUnavailableApiError(ApiError):
+    """The scope store could not be read, so no row-level authorisation answer can be trusted."""
+
+    # 503 rather than 500: retrying is the correct client behaviour, and unlike a scope *denial*
+    # this is a transient fault that will resolve without a grant change.
+    status_code = 503

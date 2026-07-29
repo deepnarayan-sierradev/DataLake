@@ -42,6 +42,12 @@ from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.platform_metrics import PlatformMetric
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import (
+    DEFAULT_PAGE_SIZE,
+    fetch_page,
+    index_available,
+    iter_items,
+)
 from tenancy.connection_keys import resolve_connection_id
 
 _logger = get_platform_logger(__name__)
@@ -108,8 +114,8 @@ class ConfigurationRepositoryClient:
             self._dynamodb = boto3.resource("dynamodb", region_name=region_name)
             self._table_name = os.environ.get("ENTITY_CONFIG_TABLE") or _DYNAMODB_TABLE_NAME
             self._table = self._dynamodb.Table(self._table_name)
-            # Resolved lazily on first listing; None means "not yet checked".
-            self._tenant_index_present: bool | None = None
+            # Shared per-instance cache for the GSI-presence probe (persistence.index_available).
+            self._index_presence: dict[str, bool] = {}
         else:
             if not s3_bucket:
                 raise ValueError("s3_bucket is required when backend is ConfigurationBackend.S3")
@@ -219,113 +225,103 @@ class ConfigurationRepositoryClient:
             )
             raise
 
+    def _read_kwargs_for_tenant(self, tenant_code: str, use_index: bool) -> dict[str, Any]:
+        """Query the tenant GSI when it exists; Scan while an environment has not applied it."""
+        if use_index:
+            return {
+                "IndexName": _TENANT_ENTITY_INDEX,
+                "KeyConditionExpression": "tenant_code = :tc",
+                "ExpressionAttributeValues": {":tc": tenant_code},
+            }
+        return {
+            "FilterExpression": "tenant_code = :tc",
+            "ExpressionAttributeValues": {":tc": tenant_code},
+        }
+
+    def _to_config(self, tenant_code: str, item: dict[str, Any]) -> EntityExtractionConfig | None:
+        """Validate one stored record; a malformed one is skipped, never fatal to the listing."""
+        record: dict[str, Any] = dict(item)
+        # The PK holds the tenant-scoped connection id; the stored `connection_id` attribute (when
+        # present) is authoritative for the plain source_id, carried separately as an attribute.
+        scoped = strip_tenant_prefix(tenant_code, str(record.get("source_id", "")))
+        record["source_id"] = str(record.pop("source_system_id", "") or scoped)
+        try:
+            return EntityExtractionConfig(**record)
+        except ValidationError:
+            _logger.warning(
+                "list_configs_skipped_invalid_record",
+                source_id=item.get("source_id"),
+                entity_id=item.get("entity_id"),
+            )
+            return None
+
     def list_configs_for_tenant(self, tenant_code: str) -> list[EntityExtractionConfig]:
         """
-        Return all validated EntityExtractionConfig records belonging to tenant_code.
+        Every validated config for a tenant, draining all pages. Internal callers only.
 
-        Implemented as a full table Scan with a FilterExpression on
-        tenant_code. The partition key *is* tenant-scoped
-        (`tenant_scoped_key(tenant_code, connection_id)`), but DynamoDB cannot
-        prefix-match a partition key, so listing one tenant still needs either
-        a tenant-keyed GSI or this Scan. Adequate at current table sizes;
-        the GSI is tracked as follow-up infra work in
-        docs/KNOWN_GAPS_AND_ROADMAP.md, not implemented speculatively here.
+        The `tenant-entity-index` projection is `ALL` as of 2026-07-29, so items come back whole.
+        It was `KEYS_ONLY`, and this method issued one `GetItem` per configured entity to rehydrate
+        each — serially, unbounded. At the stated target of 80-100 entities per tenant that made the
+        platform's most-used endpoint 100+ round trips, which is worse than the Scan the index was
+        introduced to replace.
 
-        Records that fail EntityExtractionConfig validation are skipped
-        (logged as a warning) rather than raised, so one malformed record
-        does not break the whole listing.
-
-        Raises:
-            NotImplementedError: When called against the S3 backend.
+        Request paths must use `page_configs_for_tenant`: this one grows with the tenant's entity
+        count and nothing bounds it.
         """
         if self._backend != ConfigurationBackend.DYNAMODB:
             raise NotImplementedError(
                 "list_configs_for_tenant is only implemented for the DynamoDB backend."
             )
         tenant_code = validate_tenant_code(tenant_code)
-
-        configs: list[EntityExtractionConfig] = []
-        # Query the tenant GSI when it exists; fall back to the Scan while an environment has not
-        # applied it yet. The fallback is not a permanent alternative — it is what stops the
-        # deploy ordering (code before Terraform) from breaking the listing (S12).
         use_index = self._tenant_index_available()
-        scan_kwargs: dict[str, Any] = (
-            {
-                "IndexName": _TENANT_ENTITY_INDEX,
-                "KeyConditionExpression": "tenant_code = :tc",
-                "ExpressionAttributeValues": {":tc": tenant_code},
-            }
-            if use_index
-            else {
-                "FilterExpression": "tenant_code = :tc",
-                "ExpressionAttributeValues": {":tc": tenant_code},
-            }
-        )
-        while True:
-            items: list[dict[str, Any]]
-            last_key: Any
-            if use_index:
-                # KEYS_ONLY projection: re-read each item by key to get the full config, which is
-                # one round trip per config rather than one Scan over every tenant's rows.
-                index_page = self._table.query(**scan_kwargs)
-                items = [
-                    item
-                    for key in index_page.get("Items", [])
-                    if (item := self._get_item_by_key(dict(key))) is not None
-                ]
-                last_key = index_page.get("LastEvaluatedKey")
-            else:
-                scan_page = self._table.scan(**scan_kwargs)
-                items = [dict(entry) for entry in scan_page.get("Items", [])]
-                last_key = scan_page.get("LastEvaluatedKey")
-            for item in items:
-                record: dict[str, Any] = dict(item)
-                # The PK holds the tenant-scoped connection id; the stored `connection_id`
-                # attribute (when present) is authoritative for the plain source_id, which
-                # is carried separately as an ordinary attribute.
-                scoped = strip_tenant_prefix(tenant_code, str(record.get("source_id", "")))
-                record["source_id"] = str(record.pop("source_system_id", "") or scoped)
-                try:
-                    configs.append(EntityExtractionConfig(**record))
-                except ValidationError:
-                    _logger.warning(
-                        "list_configs_skipped_invalid_record",
-                        source_id=item.get("source_id"),
-                        entity_id=item.get("entity_id"),
-                    )
-            if not last_key:
-                break
-            scan_kwargs["ExclusiveStartKey"] = last_key
+        configs = [
+            config
+            for item in iter_items(
+                self._table,
+                use_query=use_index,
+                **self._read_kwargs_for_tenant(tenant_code, use_index),
+            )
+            if (config := self._to_config(tenant_code, item)) is not None
+        ]
         return configs
 
-    def _tenant_index_available(self) -> bool:
+    def page_configs_for_tenant(
+        self,
+        tenant_code: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        start_key: dict[str, Any] | None = None,
+    ) -> tuple[list[EntityExtractionConfig], dict[str, Any] | None]:
         """
-        Whether the tenant GSI exists on this table.
+        One bounded page of configs plus the cursor to continue from (F9).
 
-        Cached per client instance: `describe_table` on every listing would add a round trip to
-        the very path this index exists to make cheaper.
+        A page can come back short — or empty, on the Scan fallback where a FilterExpression
+        discards a whole page — while more pages remain, so callers must follow the cursor rather
+        than treat a short page as the end.
         """
-        if self._tenant_index_present is None:
-            try:
-                description = self._table.meta.client.describe_table(TableName=self._table.name)
-                indexes = description["Table"].get("GlobalSecondaryIndexes") or []
-                self._tenant_index_present = any(
-                    index.get("IndexName") == _TENANT_ENTITY_INDEX for index in indexes
-                )
-            except ClientError:
-                self._tenant_index_present = False
-        return self._tenant_index_present
-
-    def _get_item_by_key(self, key: dict[str, Any]) -> dict[str, Any] | None:
-        """Re-read one item from the base table given a KEYS_ONLY index projection."""
-        try:
-            response = self._table.get_item(
-                Key={"source_id": key["source_id"], "entity_id": key["entity_id"]}
+        if self._backend != ConfigurationBackend.DYNAMODB:
+            raise NotImplementedError(
+                "page_configs_for_tenant is only implemented for the DynamoDB backend."
             )
-        except ClientError:
-            return None
-        item = response.get("Item")
-        return dict(item) if item else None
+        tenant_code = validate_tenant_code(tenant_code)
+        use_index = self._tenant_index_available()
+        page = fetch_page(
+            self._table,
+            limit=limit,
+            start_key=start_key,
+            use_query=use_index,
+            **self._read_kwargs_for_tenant(tenant_code, use_index),
+        )
+        configs = [
+            config
+            for item in page.items
+            if (config := self._to_config(tenant_code, item)) is not None
+        ]
+        return configs, page.next_key
+
+    def _tenant_index_available(self) -> bool:
+        """One shared probe, cached per client: the GSI may not exist yet in an environment."""
+        return index_available(self._table, _TENANT_ENTITY_INDEX, self._index_presence)
 
     # ── DynamoDB backend ───────────────────────────────────────────────────────
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from tenancy.scope_contract import (
@@ -14,6 +15,7 @@ from tenancy.scope_contract import (
     TenantPartitionProfile,
 )
 from tenancy.scope_unit_repository import (
+    ScopeStoreUnavailableError,
     ScopeUnitNotFoundError,
     ScopeUnitRepository,
     ScopeWideningNotApprovedError,
@@ -149,6 +151,31 @@ class TestScopeUnitRepository:
         profile = repo.get_partition_profile("brand-new")
         assert profile.partition_model is PartitionModel.SINGLE
         assert repo.known_unit_ids("brand-new") == frozenset({IMPLICIT_SCOPE_UNIT_ID})
+
+    def test_a_failed_read_is_not_reported_as_an_absent_profile(self):
+        """
+        The defect this pins: `_get_item` swallowed ClientError and returned None, which
+        `get_partition_profile` read as "no record" and answered `single`. For a partitioned
+        tenant that is a match-all predicate on every read surface and a `__tenant__` stamp on
+        every row at ingestion — so a DynamoDB throttle silently widened a franchisee boundary.
+        """
+        repo = self._repo()
+        self._partition(repo)
+
+        def _throttle(**_kwargs: object) -> None:
+            raise ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException"}}, "GetItem"
+            )
+
+        repo._table.get_item = _throttle  # type: ignore[method-assign]
+        with pytest.raises(ScopeStoreUnavailableError, match="not a single-partition tenant"):
+            repo.get_partition_profile("evive")
+
+    def test_positive_control_the_read_still_succeeds_when_dynamodb_is_healthy(self):
+        # Without this, a repository that always raised would pass the test above.
+        repo = self._repo()
+        self._partition(repo)
+        assert repo.get_partition_profile("evive").partition_model is PartitionModel.PARTITIONED
 
     def test_profile_round_trip(self):
         repo = self._repo()

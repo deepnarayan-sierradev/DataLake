@@ -274,17 +274,20 @@ class TestCircuitBreaker:
 
 @mock_aws
 class TestEngine:
-    def _engine(self, resolver=None, breaker=None, with_idempotency=False) -> WorkflowEngine:
+    def _engine(self, resolver=None, breaker=None) -> WorkflowEngine:
+        """
+        Always carries a real guard. The `with_idempotency=False` variant used to construct the
+        engine with `idempotency_guard=None`, which is the production configuration in which every
+        retry re-fires an external action — so most of this class exercised an engine that could
+        not have been deployed safely.
+        """
         _table("EdlWorkflowExecution", "tenant_code", "execution_key")
-        guard = None
-        if with_idempotency:
-            _table("EdlWorkflowIdempotency", "tenant_code", "idempotency_key")
-            guard = IdempotencyGuard(region_name=_REGION)
+        _table("EdlWorkflowIdempotency", "tenant_code", "idempotency_key")
         return WorkflowEngine(
             environment="dev",
             region_name=_REGION,
             metric_resolver=resolver or (lambda tenant, condition: (150.0, 100.0)),
-            idempotency_guard=guard,
+            idempotency_guard=IdempotencyGuard(region_name=_REGION),
             circuit_breaker=breaker,
         )
 
@@ -395,7 +398,7 @@ class TestEngine:
     def test_duplicate_trigger_produces_exactly_one_effect(self):
         handler = RecordingAction()
         action_registry.register(handler)
-        engine = self._engine(with_idempotency=True)
+        engine = self._engine()
         definition = _definition(status=WorkflowStatus.PUBLISHED)
         first = engine.execute(definition, execution_id="wex-fixed")
         second = engine.execute(definition, execution_id="wex-fixed")

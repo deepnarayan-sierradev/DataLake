@@ -241,9 +241,10 @@ class ExportService:
         *,
         requested_by: str,
         granted_capabilities: frozenset[str],
-        # Required: an export that silently omitted the predicate would ship every unit's
-        # rows in one file, which is the least recoverable form of the defect (DL-SCOPE-14).
-        scope_predicate: ScopePredicate | None,
+        # Non-nullable: an export that omitted the predicate ships every unit's rows in one file,
+        # which is the least recoverable form of the defect because the artefact leaves the
+        # platform (DL-SCOPE-14).
+        scope_predicate: ScopePredicate,
         delivery_bucket: str | None = None,
     ) -> ExportJob:
         """
@@ -257,7 +258,7 @@ class ExportService:
                 f"Export requires the {EXPORT_CAPABILITY!r} capability, which is distinct from "
                 "read. An export must never be a privilege-escalation path."
             )
-        if scope_predicate is not None and scope_predicate.surface is not ConsumptionSurface.EXPORT:
+        if scope_predicate.surface is not ConsumptionSurface.EXPORT:
             raise ValueError(
                 "The scope predicate supplied to an export must be built for the EXPORT "
                 "surface, so `ScopePredicateApplied{surface}` attributes correctly."
@@ -291,9 +292,8 @@ class ExportService:
         job: ExportJob,
         rows: Iterable[dict[str, Any]],
         *,
-        # Required: an export that silently omitted the predicate would ship every unit's
-        # rows in one file, which is the least recoverable form of the defect (DL-SCOPE-14).
-        scope_predicate: ScopePredicate | None,
+        # Non-nullable: see request_export.
+        scope_predicate: ScopePredicate,
     ) -> ExportJob:
         """
         Convert and upload the artefact, applying the scope predicate row by row.
@@ -400,19 +400,15 @@ def _to_parquet(rows: list[dict[str, Any]]) -> bytes:
 
 
 def _apply_scope(
-    rows: Iterable[dict[str, Any]], predicate: ScopePredicate | None
+    rows: Iterable[dict[str, Any]], predicate: ScopePredicate
 ) -> Iterator[dict[str, Any]]:
-    if predicate is None:
-        yield from rows
-        return
+    """Every row passes through `matches`; there is no branch that yields the input unfiltered."""
     for row in rows:
         if predicate.matches(row.get("scope_unit_id")):
             yield row
 
 
-def _predicate_signature(predicate: ScopePredicate | None) -> str:
-    if predicate is None:
-        return "unscoped"
+def _predicate_signature(predicate: ScopePredicate) -> str:
     return f"{predicate.sql}|{sorted(predicate.parameters.values())}"
 
 

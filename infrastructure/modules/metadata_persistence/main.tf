@@ -201,13 +201,17 @@ resource "aws_dynamodb_table" "entity_extraction_config" {
   # partition key, so listing a tenant still required scanning every tenant's rows — cost and
   # latency scaling with total table size rather than the caller's slice.
   #
-  # KEYS_ONLY, not ALL: the listing path re-reads each item by key anyway to get the validated
-  # config, and projecting every attribute would double the table's storage for no read saved.
+  # ALL, not KEYS_ONLY. The previous justification — "the listing path re-reads each item by key
+  # anyway" — was circular: it re-read each item *because* the projection was KEYS_ONLY. The effect
+  # was one GetItem per configured entity, serially, on the most-used tenant endpoint: at the stated
+  # target of 80-100 entities per tenant that is 100+ sequential round trips per request, worse than
+  # the Scan it replaced. Projecting every attribute costs a duplicate of a table holding a few
+  # hundred small config items per tenant, which is the cheaper side of that trade by a wide margin.
   global_secondary_index {
     name            = "tenant-entity-index"
     hash_key        = "tenant_code"
     range_key       = "entity_id"
-    projection_type = "KEYS_ONLY"
+    projection_type = "ALL"
   }
 
   server_side_encryption {

@@ -174,6 +174,11 @@ locals {
     UnattributedRowRate          = { threshold = 5, paging = false, statistic = "Maximum" }
     ScopeGrantExpansions         = { threshold = 100000, paging = false, statistic = "Sum" }
     EmptyScopeDenials            = { threshold = 10, paging = false, statistic = "Sum" }
+    # An unscoped read is legitimate in exactly one place — compiling a KPI definition, which has
+    # no caller to scope by. Definition validation runs on deploy and on the KPI smoke suite, not
+    # per request, so a sustained non-trivial rate means a *request* path has started reading
+    # unfiltered. Threshold is deliberately low rather than zero: the legitimate producer is real.
+    UnrestrictedScopeReads       = { threshold = 500, paging = false, statistic = "Sum" }
     ConnectionHealth             = { threshold = 0, paging = false, statistic = "Minimum", comparison = "LessThanThreshold" }
     ConnectionCredentialFailures = { threshold = 0, paging = false, statistic = "Sum" }
     ConnectionsPerTenant         = { threshold = 100, paging = false, statistic = "Maximum" }

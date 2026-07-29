@@ -167,11 +167,11 @@ from contracts.identifier_policy import (
 from knowledge.twin_repository import TwinNotFoundError, TwinRepository
 from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import PagingError, fetch_page, index_available
 from processing_engine.registry import set_based_engine_registry
 from semantic.query_compiler import (
     AccessDeniedError,
     SemanticQueryError,
-    SemanticQueryRequest,
 )
 from semantic.saved_query import SavedQuery
 from semantic.saved_query_repository import SavedQueryNotFoundError, SavedQueryRepository
@@ -187,10 +187,19 @@ from tenancy.scope_predicate import (
 
 _logger = get_platform_logger(__name__)
 
-# Upper bound on rows returned/scanned by the list-runs endpoint per request —
-# a defensive cap, not a pagination cursor (tracked as follow-up if a tenant
-# genuinely needs to page through more than this many runs).
+# Runs returned per page. This capped **audit rows**, not runs, until 2026-07-29 — and a single
+# extraction writes an item per stage (11 distinct `PipelineStage` values in the extraction workflow
+# alone, before transformation, entity resolution, analytics publish, serving-store load and twin
+# build add theirs). So a cap of 50 items returned roughly four runs, silently, behind a `count`
+# field that read as authoritative and with no cursor to reach the rest.
 _MAX_RUNS_LISTED: Final[int] = 50
+
+# One page of configured entities; the cursor carries the rest.
+_MAX_ENTITIES_LISTED: Final[int] = 100
+
+# Audit rows read per DynamoDB call while filling a page of runs. Sized above the per-run stage
+# count so a full page of runs is usually one or two reads rather than one read per run.
+_AUDIT_ROWS_PER_READ: Final[int] = 400
 
 _ENTITY_TYPE_REGISTRY_TABLE_NAME: Final[str] = "EdlEntityTypeRegistry"
 _AUDIT_LOG_TABLE_NAME: Final[str] = "EdlRunAuditLog"
@@ -225,10 +234,21 @@ def _configuration_repository() -> ConfigurationRepositoryClient:
 
 
 def _handle_list_entities(event: dict[str, Any], path_tenant_code: str) -> dict[str, Any]:
-    """GET /tenants/{tenant_code}/entities — list configured entities for a tenant."""
+    """
+    GET /tenants/{tenant_code}/entities — one page of configured entities.
+
+    Bounded and cursored since 2026-07-29. This drained every config for the tenant and, because
+    the GSI projected `KEYS_ONLY`, issued one `GetItem` per entity to rehydrate each — so the
+    platform's most-used endpoint made 100+ serial round trips at the target entity count, with no
+    cap and no way for a console to page.
+    """
     tenant_code = _authorize_path_tenant(event, path_tenant_code)
     repo = _configuration_repository()
-    configs = repo.list_configs_for_tenant(tenant_code)
+    configs, next_key = repo.page_configs_for_tenant(
+        tenant_code,
+        limit=_MAX_ENTITIES_LISTED,
+        start_key=_decode_page_token(event, tenant_code),
+    )
     entities = [
         {
             "source_id": config.source_id,
@@ -241,7 +261,14 @@ def _handle_list_entities(event: dict[str, Any], path_tenant_code: str) -> dict[
         for config in configs
     ]
     return _response(
-        200, {"tenant_code": tenant_code, "entities": entities, "count": len(entities)}
+        200,
+        {
+            "tenant_code": tenant_code,
+            "entities": entities,
+            "count": len(entities),
+            # Follow the token, never `count`: a page can be short while more pages remain.
+            "next_token": _encode_page_token(next_key),
+        },
     )
 
 
@@ -428,40 +455,26 @@ def _handle_get_run(event: dict[str, Any], path_tenant_code: str, run_id: str) -
     )
 
 
-def _tenant_started_index_available(table: Any) -> bool:
-    """Whether the tenant GSI exists; cached per container so listing costs no extra round trip."""
-    cached = _INDEX_PRESENCE.get(table.name)
-    if cached is not None:
-        return cached
-    try:
-        description = table.meta.client.describe_table(TableName=table.name)
-        indexes = description["Table"].get("GlobalSecondaryIndexes") or []
-        present = any(index.get("IndexName") == _AUDIT_TENANT_INDEX for index in indexes)
-    except ClientError:
-        present = False
-    _INDEX_PRESENCE[table.name] = present
-    return present
-
-
 def _handle_list_runs(event: dict[str, Any], path_tenant_code: str) -> dict[str, Any]:
     """
-    GET /tenants/{tenant_code}/runs — list recent runs for a tenant.
+    GET /tenants/{tenant_code}/runs — one page of recent runs for a tenant.
 
-    Queries `tenant-started-index` (hash `tenant_code`, range `started_at`, projection ALL). This
-    was a full-table Scan with a FilterExpression until 2026-07-29, and its docstring asserted no
-    tenant GSI existed — untrue since the index shipped in the same change set that added it for
-    usage metering. A Scan reads and bills every tenant's items to answer one tenant's request, so
-    the most-used tenant-facing endpoint degraded with total platform volume rather than with the
-    caller's own.
+    Queries `tenant-started-index` (hash `tenant_code`, range `started_at`, projection ALL), falling
+    back to a Scan while an environment has not applied the index, so code can deploy before the
+    Terraform does.
 
-    Falls back to the Scan when the index is absent, so code can deploy before the Terraform does.
-    `ScanIndexForward=False` also makes the cap keep the *most recent* runs; the Scan kept whatever
-    came back first and then sorted, so a capped response could omit newer runs than it returned.
+    **Pages by run, not by audit row.** A run writes one item per stage, so the previous cap of 50
+    *items* returned roughly four runs — and reported that as `count` with no cursor to reach the
+    rest. Rows are accumulated until `_MAX_RUNS_LISTED` distinct `run_id`s are complete, and the
+    cursor points at the next unread row so a client can page without re-reading.
+
+    `ScanIndexForward=False` keeps the *most recent* runs: the Scan fallback kept whatever came back
+    first and sorted afterwards, so a capped response could omit runs newer than the ones it showed.
     """
     tenant_code = _authorize_path_tenant(event, path_tenant_code)
 
     table = _run_audit_log_table()
-    use_index = _tenant_started_index_available(table)
+    use_index = index_available(table, _AUDIT_TENANT_INDEX, _INDEX_PRESENCE)
     read_kwargs: dict[str, Any] = (
         {
             "IndexName": _AUDIT_TENANT_INDEX,
@@ -474,45 +487,80 @@ def _handle_list_runs(event: dict[str, Any], path_tenant_code: str) -> dict[str,
             "ExpressionAttributeValues": {":tc": tenant_code},
         }
     )
-    items: list[dict[str, Any]] = []
+
+    runs_by_id: dict[str, dict[str, Any]] = {}
+    # Cursor for the row where this page stopped. Truncating the collected runs and reporting no
+    # cursor would drop runs silently — the same defect as the item-count cap, in a new shape — so
+    # the boundary is decided while reading, and the key of the first row of the first *excluded*
+    # run becomes the cursor. A run's audit rows all share its `started_at`, so on the GSI (ordered
+    # by tenant_code, started_at) a run's rows are contiguous and that boundary is exact.
+    next_key: dict[str, Any] | None = None
     try:
-        while True:
-            page = table.query(**read_kwargs) if use_index else table.scan(**read_kwargs)
-            items.extend(page.get("Items", []))
-            last_key = page.get("LastEvaluatedKey")
-            if not last_key or len(items) >= _MAX_RUNS_LISTED:
+        start_key = _decode_page_token(event, tenant_code)
+        stopped_early = False
+        while not stopped_early:
+            page = fetch_page(
+                table,
+                limit=_AUDIT_ROWS_PER_READ,
+                start_key=start_key,
+                use_query=use_index,
+                **read_kwargs,
+            )
+            for item in page.items:
+                run_id = str(item.get("run_id"))
+                if run_id not in runs_by_id and len(runs_by_id) >= _MAX_RUNS_LISTED:
+                    next_key = _audit_row_key(item, use_index)
+                    stopped_early = True
+                    break
+                existing = runs_by_id.get(run_id)
+                if existing is None or str(item.get("completed_at") or "") > str(
+                    existing.get("completed_at") or ""
+                ):
+                    runs_by_id[run_id] = {
+                        "run_id": run_id,
+                        "source_id": item.get("source_id"),
+                        "entity_id": item.get("entity_id"),
+                        "latest_stage": item.get("stage"),
+                        "status": item.get("status"),
+                        "completed_at": item.get("completed_at"),
+                    }
+            if stopped_early:
                 break
-            read_kwargs["ExclusiveStartKey"] = last_key
-    except ClientError as exc:
-        _logger.error(
-            "list_runs_read_failed",
-            tenant_code=tenant_code,
-            used_index=use_index,
-            error_code=exc.response["Error"]["Code"],
-        )
+            if page.next_key is None:
+                next_key = None
+                break
+            start_key = page.next_key
+    except PagingError as exc:
+        _logger.error("list_runs_read_failed", tenant_code=tenant_code, used_index=use_index)
         raise ApiError("Failed to list runs due to an internal error.") from exc
 
-    # Collapse to one summary row per run_id (a run has one item per stage);
-    # keep the item with the most recent completed_at as the run's latest state.
-    runs_by_id: dict[str, dict[str, Any]] = {}
-    for item in items:
-        run_id = str(item.get("run_id"))
-        existing = runs_by_id.get(run_id)
-        if existing is None or str(item.get("completed_at") or "") > str(
-            existing.get("completed_at") or ""
-        ):
-            runs_by_id[run_id] = {
-                "run_id": run_id,
-                "source_id": item.get("source_id"),
-                "entity_id": item.get("entity_id"),
-                "latest_stage": item.get("stage"),
-                "status": item.get("status"),
-                "completed_at": item.get("completed_at"),
-            }
-    runs = sorted(
-        runs_by_id.values(), key=lambda r: str(r.get("completed_at") or ""), reverse=True
-    )[:_MAX_RUNS_LISTED]
-    return _response(200, {"tenant_code": tenant_code, "runs": runs, "count": len(runs)})
+    runs = sorted(runs_by_id.values(), key=lambda r: str(r.get("completed_at") or ""), reverse=True)
+    return _response(
+        200,
+        {
+            "tenant_code": tenant_code,
+            "runs": runs,
+            "count": len(runs),
+            "next_token": _encode_page_token(next_key),
+        },
+    )
+
+
+def _audit_row_key(item: dict[str, Any], use_index: bool) -> dict[str, Any]:
+    """
+    The exclusive-start key for one audit row.
+
+    A GSI read must carry the index key *and* the base-table key; a Scan carries only the base key.
+    `tenant_code` is included either way so `decode_page_token` can verify the cursor's owner.
+    """
+    key = {
+        "run_id": item.get("run_id"),
+        "stage": item.get("stage"),
+        "tenant_code": item.get("tenant_code"),
+    }
+    if use_index:
+        key["started_at"] = item.get("started_at")
+    return key
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +615,22 @@ def _saved_query_to_dict(saved_query: Any) -> dict[str, Any]:
         "metrics": list(saved_query.metrics),
         "dimensions": list(saved_query.dimensions),
         "created_by": saved_query.created_by,
+        # Surfaced so a console can round-trip a saved query it did not create; without these the
+        # filters are stored, applied, and invisible.
+        "filters": [
+            {
+                "dimension": f.dimension,
+                "operator": f.operator,
+                "value": f.value,
+                "values": list(f.values),
+            }
+            for f in saved_query.filters
+        ],
+        "joined_dimensions": [list(pair) for pair in saved_query.joined_dimensions],
+        "time_dimension": saved_query.time_dimension,
+        "time_grain": saved_query.time_grain.value if saved_query.time_grain else None,
+        "time_comparison": saved_query.time_comparison.value,
+        "row_limit": saved_query.row_limit,
     }
 
 
@@ -594,7 +658,7 @@ def _semantic_query_service(
     )
 
 
-def _run_query(service: SemanticQueryService, request: SemanticQueryRequest) -> dict[str, Any]:
+def _run_query(service: SemanticQueryService, request: Any) -> dict[str, Any]:
     try:
         result = service.run(request)
     except AccessDeniedError as exc:
@@ -672,12 +736,13 @@ def _handle_run_semantic_query(event: dict[str, Any], path_tenant_code: str) -> 
         ) from exc
     model = _load_active_model(tenant_code)
     service = _semantic_query_service(event, tenant_code, model)
-    payload = _run_query(
-        service,
-        SemanticQueryRequest(
-            entity=body.entity, metrics=tuple(body.metrics), dimensions=tuple(body.dimensions)
-        ),
-    )
+    # The body now carries the compiler's full surface — filters, fiscal grain, period comparison,
+    # joins, row limit — rather than the entity/metrics/dimensions subset it was restricted to.
+    try:
+        request = body.to_request()
+    except SemanticQueryError as exc:
+        raise ValidationFailedError(str(exc)) from exc
+    payload = _run_query(service, request)
     return _response(200, {"tenant_code": tenant_code, **payload})
 
 
@@ -694,11 +759,22 @@ def _handle_create_saved_query(event: dict[str, Any], path_tenant_code: str) -> 
             metrics=tuple(body.metrics),
             dimensions=tuple(body.dimensions),
             created_by=_authenticated_user(event),
+            filters=tuple(filter_body.to_filter() for filter_body in body.filters),
+            joined_dimensions=tuple(
+                (joined.entity, joined.dimension) for joined in body.joined_dimensions
+            ),
+            time_dimension=body.time_dimension,
+            time_grain=body.time_grain,
+            time_comparison=body.time_comparison,
+            time_range=body.time_range.to_filter() if body.time_range else None,
+            row_limit=body.row_limit,
         )
     except PydanticValidationError as exc:
         raise ValidationFailedError(
             f"Saved query failed validation: {exc.error_count()} error(s)."
         ) from exc
+    except SemanticQueryError as exc:
+        raise ValidationFailedError(str(exc)) from exc
     _saved_query_repository().save(tenant_code, saved_query)
     _logger.info("saved_query_created", tenant_code=tenant_code, query_id=saved_query.query_id)
     return _response(

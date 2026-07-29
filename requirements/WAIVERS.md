@@ -169,5 +169,21 @@ a missing field is a type error, and edges are filtered by the target's owning u
 `connector_runtime/tests/test_twin_scope_isolation.py` drives both routes with two sibling
 franchisees rather than the single-partition `demo` tenant that hid this.
 
-- `DL-SEM-07` — filters on saved queries: implemented in `semantic/query_compiler.py`
-  (`SemanticFilter`, `RelativeDateRange`) but uncited; add the id rather than the code
+**DL-SEM-07 is closed, and how it was previously recorded here is the reason this file needs
+reading sceptically.** The entry said "filters on saved queries: implemented in
+`semantic/query_compiler.py` (`SemanticFilter`, `RelativeDateRange`) but uncited; **add the id
+rather than the code**" — advice that would have closed a requirement whose behaviour no caller
+could reach. `SemanticFilter` did exist in the compiler. But `SavedQuery` said *"Filters are
+deferred to a follow-up"* and carried none, and `SemanticQueryBody` accepted only
+entity/metrics/dimensions, so no request could express a filter, a date range, a fiscal grain, a
+period comparison, or a join. Joins were worse than unreachable: the compiler emitted
+`JOIN <entity>` while only `entity_data` was ever registered as an input, so a joined query
+compiled cleanly and failed at execution.
+
+Both halves are now real: `SemanticQueryShape` carries the compiler's full surface,
+`SavedQuery` persists it, and `SemanticQueryService._inputs_for` binds a relation per joined
+entity, asserted by a test that runs the query rather than reading its SQL.
+
+The general lesson: **"the code exists in some module" is not reachability.** G1 answers that at
+module granularity, so a capability with no path from any entry point passes it — which is why G1
+now also flags a public method with no production caller.

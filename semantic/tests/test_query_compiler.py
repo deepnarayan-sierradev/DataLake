@@ -12,6 +12,7 @@ from semantic.query_compiler import (
     SemanticQueryRequest,
 )
 from semantic.semantic_model import Dimension, Metric, SemanticEntity, SemanticModel
+from tenancy.scope_predicate import UnrestrictedScopeReason, unrestricted_predicate
 
 
 def _model() -> SemanticModel:
@@ -30,6 +31,10 @@ def _model() -> SemanticModel:
     return SemanticModel(tenant_code="demo", model_version="v1", entities=(entity,))
 
 
+# The audited stand-in for "no end-user claim applies here". Tests used `None`, which is the
+# fail-open this parameter was made non-nullable to remove.
+_UNSCOPED = unrestricted_predicate(UnrestrictedScopeReason.DEFINITION_VALIDATION)
+
 _COMPILER = QueryCompiler(_model())
 _ALL_TAGS = frozenset({"pii"})
 
@@ -39,13 +44,17 @@ class TestCompile:
         req = SemanticQueryRequest(
             entity="company", metrics=("total_revenue", "company_count"), dimensions=("industry",)
         )
-        compiled = _COMPILER.compile(req, granted_access_tags=frozenset(), scope_predicate=None)
+        compiled = _COMPILER.compile(
+            req, granted_access_tags=frozenset(), scope_predicate=_UNSCOPED
+        )
         # Columns are view-qualified since DL-SEM-01: an unqualified column is ambiguous
-        # the moment a join is present.
+        # the moment a join is present. Every statement now carries a scope clause — even an
+        # unrestricted read's tautology — so there is no compiled SQL with no WHERE.
         assert compiled.sql == (
             "SELECT entity_data.industry AS industry, "
             "SUM(entity_data.annual_revenue) AS total_revenue, "
             "COUNT(*) AS company_count FROM entity_data "
+            "WHERE (scope_unit_id IS NOT NULL OR scope_unit_id IS NULL) "
             "GROUP BY entity_data.industry LIMIT 10000"
         )
         assert compiled.parameters == []
@@ -56,8 +65,13 @@ class TestCompile:
             metrics=("total_revenue",),
             filters=(SemanticFilter(dimension="industry", operator="eq", value="Tech"),),
         )
-        compiled = _COMPILER.compile(req, granted_access_tags=frozenset(), scope_predicate=None)
-        assert "WHERE entity_data.industry = ?" in compiled.sql
+        compiled = _COMPILER.compile(
+            req, granted_access_tags=frozenset(), scope_predicate=_UNSCOPED
+        )
+        # The scope clause is prepended, so a caller's filter is ANDed after it — never before,
+        # and never in a position where it could shadow the scope clause.
+        assert "entity_data.industry = ?" in compiled.sql
+        assert compiled.sql.index("scope_unit_id") < compiled.sql.index("entity_data.industry = ?")
         assert compiled.parameters == ["Tech"]
 
     def test_no_metrics_rejected(self):
@@ -65,7 +79,7 @@ class TestCompile:
             _COMPILER.compile(
                 SemanticQueryRequest(entity="company", metrics=()),
                 granted_access_tags=frozenset(),
-                scope_predicate=None,
+                scope_predicate=_UNSCOPED,
             )
 
     def test_unknown_metric_rejected(self):
@@ -73,7 +87,7 @@ class TestCompile:
             _COMPILER.compile(
                 SemanticQueryRequest(entity="company", metrics=("nope",)),
                 granted_access_tags=frozenset(),
-                scope_predicate=None,
+                scope_predicate=_UNSCOPED,
             )
 
     def test_unknown_entity_rejected(self):
@@ -81,7 +95,7 @@ class TestCompile:
             _COMPILER.compile(
                 SemanticQueryRequest(entity="ghost", metrics=("total_revenue",)),
                 granted_access_tags=frozenset(),
-                scope_predicate=None,
+                scope_predicate=_UNSCOPED,
             )
 
     def test_access_tag_denied_without_grant(self):
@@ -89,13 +103,13 @@ class TestCompile:
             entity="company", metrics=("total_revenue",), dimensions=("country",)
         )
         with pytest.raises(AccessDeniedError):
-            _COMPILER.compile(req, granted_access_tags=frozenset(), scope_predicate=None)
+            _COMPILER.compile(req, granted_access_tags=frozenset(), scope_predicate=_UNSCOPED)
 
     def test_access_tag_allowed_with_grant(self):
         req = SemanticQueryRequest(
             entity="company", metrics=("total_revenue",), dimensions=("country",)
         )
-        compiled = _COMPILER.compile(req, granted_access_tags=_ALL_TAGS, scope_predicate=None)
+        compiled = _COMPILER.compile(req, granted_access_tags=_ALL_TAGS, scope_predicate=_UNSCOPED)
         assert "billing_country AS country" in compiled.sql
 
     def test_access_tag_enforced_on_filter(self):
@@ -105,4 +119,4 @@ class TestCompile:
             filters=(SemanticFilter(dimension="country", operator="eq", value="US"),),
         )
         with pytest.raises(AccessDeniedError):
-            _COMPILER.compile(req, granted_access_tags=frozenset(), scope_predicate=None)
+            _COMPILER.compile(req, granted_access_tags=frozenset(), scope_predicate=_UNSCOPED)

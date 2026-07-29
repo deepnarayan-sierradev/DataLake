@@ -148,3 +148,87 @@ class TestFallbackWhenIndexIsAbsent:
         response = cp.lambda_handler(_event(), None)
         assert response["statusCode"] == 200
         assert json.loads(response["body"])["count"] == 2
+
+
+def _seed_multi_stage(table: Any, tenant_code: str, runs: int, stages: int) -> None:
+    """Seed `runs` runs, each writing one audit item per stage — the real shape of the table."""
+    for run_index in range(runs):
+        for stage_index in range(stages):
+            table.put_item(
+                Item={
+                    "run_id": f"run-{tenant_code}-{run_index:03d}",
+                    "stage": f"stage-{stage_index:02d}",
+                    "tenant_code": tenant_code,
+                    "started_at": f"2026-07-29T{run_index:02d}:00:00Z",
+                    "completed_at": f"2026-07-29T{run_index:02d}:{stage_index:02d}:00Z",
+                    "status": "SUCCEEDED",
+                    "source_id": "salesforce",
+                    "entity_id": "account",
+                }
+            )
+
+
+class TestRunsArePagedByRunNotByAuditRow:
+    """
+    A run writes one audit item per stage, and the cap counted *items*. With 11 stages in the
+    extraction workflow alone, a cap of 50 returned roughly four runs — reported as `count`, with no
+    cursor to reach the rest. These drive the endpoint with the real multi-stage shape.
+    """
+
+    @mock_aws
+    def test_a_run_with_many_stages_collapses_to_one_run(self) -> None:
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        table = _create_table(dynamodb, with_index=True)
+        _seed_multi_stage(table, "demo", runs=1, stages=13)
+
+        body = json.loads(cp.lambda_handler(_event(), None)["body"])
+        assert body["count"] == 1
+        assert body["runs"][0]["run_id"] == "run-demo-000"
+
+    @mock_aws
+    def test_thirty_runs_of_thirteen_stages_all_appear(self) -> None:
+        # 390 audit rows. Under the old item-cap of 50 this returned about four runs.
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        table = _create_table(dynamodb, with_index=True)
+        _seed_multi_stage(table, "demo", runs=30, stages=13)
+
+        body = json.loads(cp.lambda_handler(_event(), None)["body"])
+        assert body["count"] == 30
+        assert len({run["run_id"] for run in body["runs"]}) == 30
+
+    @mock_aws
+    def test_the_page_is_bounded_and_offers_a_cursor(self) -> None:
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        table = _create_table(dynamodb, with_index=True)
+        _seed_multi_stage(table, "demo", runs=cp._MAX_RUNS_LISTED + 10, stages=3)
+
+        body = json.loads(cp.lambda_handler(_event(), None)["body"])
+        assert body["count"] == cp._MAX_RUNS_LISTED
+        # The rest must be reachable rather than silently dropped.
+        assert body["next_token"] is not None
+
+    @mock_aws
+    def test_following_the_cursor_reaches_runs_the_first_page_omitted(self) -> None:
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        table = _create_table(dynamodb, with_index=True)
+        _seed_multi_stage(table, "demo", runs=cp._MAX_RUNS_LISTED + 10, stages=3)
+
+        first = json.loads(cp.lambda_handler(_event(), None)["body"])
+        event = _event()
+        event["queryStringParameters"] = {"next_token": first["next_token"]}
+        second = json.loads(cp.lambda_handler(event, None)["body"])
+
+        assert second["count"] > 0
+        assert {run["run_id"] for run in second["runs"]} - {
+            run["run_id"] for run in first["runs"]
+        }, "the second page returned nothing the first page had not already shown"
+
+    @mock_aws
+    def test_the_last_page_advertises_no_cursor(self) -> None:
+        # Positive control: a cursor that is always present would make the test above vacuous.
+        dynamodb = boto3.resource("dynamodb", region_name=_REGION)
+        table = _create_table(dynamodb, with_index=True)
+        _seed_multi_stage(table, "demo", runs=2, stages=3)
+
+        body = json.loads(cp.lambda_handler(_event(), None)["body"])
+        assert body["next_token"] is None

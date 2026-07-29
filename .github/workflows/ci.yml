@@ -70,8 +70,8 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      # No dependency install needed: all three gates read source with the standard library
-      # only, so they run in seconds and cannot be broken by a dependency resolution failure.
+      # No dependency install needed: every gate reads source with the standard library only, so
+      # they run in seconds and cannot be broken by a dependency resolution failure.
       - name: Module reachability (G1)
         run: python scripts/check_module_reachability.py
 
@@ -83,6 +83,9 @@ jobs:
 
       - name: Filtered security columns are written (G7)
         run: python scripts/check_security_column_writers.py
+
+      - name: Paging primitive is the only paging implementation (G8)
+        run: python scripts/check_paging_primitive.py
 
   # ──────────────────────────────────────────────────────────────────────────
   # Stage 2: Type checking
@@ -113,7 +116,8 @@ jobs:
                -p analytics_publisher -p orchestration -p observability \
                -p watermark_management -p schema_management -p contracts -p governance \
                -p tenancy -p config_propagation -p data_quality \
-               -p workflow_automation -p portability -p semantic -p serving_store
+               -p workflow_automation -p portability -p semantic -p serving_store \
+               -p knowledge -p persistence -p processing_engine
 
   # ──────────────────────────────────────────────────────────────────────────
   # Stage 3: Unit tests with coverage gate

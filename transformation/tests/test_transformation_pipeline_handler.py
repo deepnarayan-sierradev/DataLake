@@ -55,6 +55,22 @@ def aws_env(monkeypatch):
             ],
             BillingMode="PAY_PER_REQUEST",
         )
+        # The scope table must exist: since 2026-07-29 an unreadable scope store raises rather
+        # than answering `single`, because `single` for a partitioned tenant stamps `__tenant__` on
+        # its rows. A missing table is exactly that unreadable case, so the fixture provisions it
+        # rather than letting the handler assume its way past it.
+        dynamodb.create_table(
+            TableName="EdlScopeUnit",
+            KeySchema=[
+                {"AttributeName": "tenant_code", "KeyType": "HASH"},
+                {"AttributeName": "scope_unit_id", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "tenant_code", "AttributeType": "S"},
+                {"AttributeName": "scope_unit_id", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
         yield s3, dynamodb
 
 

@@ -31,6 +31,7 @@ from semantic.query_compiler import (
     TimeRangeFilter,
 )
 from semantic.semantic_model import SemanticModel, TimeGrain
+from tenancy.scope_predicate import UnrestrictedScopeReason, unrestricted_predicate
 
 QueryExecutor = Callable[[str, list[Any]], list[dict[str, Any]]]
 """(sql, parameters) -> rows. Supplied by CI (fixture) or the smoke suite (real engine)."""
@@ -161,8 +162,10 @@ class KpiValidationHarness:
         self._expectations = list(expectations)
         self._executor = executor
 
-    def run(self, *, granted_access_tags: frozenset[str] | None) -> KpiValidationReport:
-        tags = expand_access_tags(granted_access_tags or frozenset())
+    def run(self, *, granted_access_tags: frozenset[str]) -> KpiValidationReport:
+        # Non-nullable: `None` and `frozenset()` meant the same thing here, so the union bought
+        # nothing and left a guarded parameter looking omittable (G4).
+        tags = expand_access_tags(granted_access_tags)
         results = [self._run_one(expectation, tags) for expectation in self._expectations]
         report = KpiValidationReport(results=tuple(results))
         record_platform_metric(PlatformMetric.KPI_VALIDATION_FAILURES, len(report.failures))
@@ -174,9 +177,12 @@ class KpiValidationHarness:
                 expectation.to_request(),
                 granted_access_tags=granted_tags | expectation.required_access_tags,
                 # Validation compiles the definition, not a caller's request: there is no
-                # end-user claim to scope by. Stated explicitly because the parameter is
-                # required precisely so this decision is visible (DL-SCOPE-14).
-                scope_predicate=None,
+                # end-user claim to scope by. Expressed as an affirmative, audited object rather
+                # than `None`, so this decision is countable in `UnrestrictedScopeReads` instead
+                # of being indistinguishable from a caller who forgot (DL-SCOPE-14).
+                scope_predicate=unrestricted_predicate(
+                    UnrestrictedScopeReason.DEFINITION_VALIDATION
+                ),
             )
         except SemanticQueryError as exc:
             return KpiCheckResult(

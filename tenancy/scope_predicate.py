@@ -44,6 +44,14 @@ class ConsumptionSurface(StrEnum):
     AGGREGATE = "aggregate"
 
 
+class UnrestrictedScopeReason(StrEnum):
+    """Why a read legitimately has no end-user claim to scope by; there are very few of these."""
+
+    # Compiling a KPI definition to check it parses and aggregates — there is no caller whose
+    # grant could scope it, because no caller is involved (DL-SEM-08).
+    DEFINITION_VALIDATION = "definition_validation"
+
+
 class EmptyScopeDenialError(PermissionError):
     """Raised when a claim carries neither a tenant-wide grant nor any scope unit."""
 
@@ -64,6 +72,10 @@ class ScopeClaims:
     tenant_code: str
     scope_unit_ids: frozenset[str] = frozenset()
     tenant_wide: bool = False
+    # Defaults to PARTITIONED, the stricter reading: only `build_scope_claims` may declare a
+    # tenant single, and only a declared-single claim is allowed the match-all implicit unit.
+    # A hand-constructed claim therefore cannot reach the widest predicate by omission.
+    partition_model: PartitionModel = PartitionModel.PARTITIONED
 
     def __post_init__(self) -> None:
         validate_tenant_code(self.tenant_code)
@@ -133,6 +145,12 @@ def build_scope_claims(
 
     A `single` tenant resolves to its one implicit unit whether or not the caller was
     granted anything specific — degenerate, not absent (DL-12 design decision D1).
+
+    For a `partitioned` tenant the unit set is **validated against `units`, always**. This
+    previously read `if known and u not in known`, so an empty `units` list — the state a
+    partitioned tenant is in before its units are seeded, and the state `effective_only`
+    filtering produces — skipped the check entirely and let a crafted `__tenant__` grant through
+    to a match-all predicate. An empty unit set is now a denial, not an unvalidated pass.
     """
     validate_tenant_code(tenant_code)
     if profile.partition_model is PartitionModel.SINGLE:
@@ -140,13 +158,23 @@ def build_scope_claims(
             tenant_code=tenant_code,
             scope_unit_ids=frozenset({IMPLICIT_SCOPE_UNIT_ID}),
             tenant_wide=tenant_wide,
+            partition_model=PartitionModel.SINGLE,
         )
 
     if tenant_wide:
         return ScopeClaims(tenant_code=tenant_code, tenant_wide=True)
 
+    if IMPLICIT_SCOPE_UNIT_ID in granted_scope_unit_ids:
+        # The sentinel is match-all by construction, so naming it against a partitioned tenant is
+        # a reach for every unit at once — rejected before any expansion.
+        record_platform_metric(PlatformMetric.CROSS_SCOPE_ACCESS_ATTEMPTS, 1.0)
+        raise UnknownScopeUnitError(
+            f"Scope grant for partitioned tenant {tenant_code!r} names the reserved implicit "
+            f"unit {IMPLICIT_SCOPE_UNIT_ID!r}, which exists only for single-partition tenants."
+        )
+
     known = {u.scope_unit_id for u in (units or [])}
-    unknown = {u for u in granted_scope_unit_ids if known and u not in known}
+    unknown = {u for u in granted_scope_unit_ids if u not in known}
     if unknown:
         # A claim naming a unit the tenant does not own is a cross-scope reach attempt,
         # whether crafted or a stale grant. Either way it pages.
@@ -155,11 +183,42 @@ def build_scope_claims(
             f"Scope grant names units that do not exist for tenant {tenant_code!r}: "
             f"{sorted(unknown)}."
         )
-    expanded = expand_scope_grant(granted_scope_unit_ids, units or [])
+    expanded = frozenset(
+        u for u in expand_scope_grant(granted_scope_unit_ids, units or []) if u in known
+    )
     record_platform_metric(PlatformMetric.SCOPE_GRANT_EXPANSIONS, len(expanded))
-    if known:
-        expanded = frozenset(u for u in expanded if u in known)
     return ScopeClaims(tenant_code=tenant_code, scope_unit_ids=expanded)
+
+
+def unrestricted_predicate(
+    reason: UnrestrictedScopeReason,
+    *,
+    surface: ConsumptionSurface = ConsumptionSurface.SEMANTIC_QUERY,
+    column: str = SCOPE_UNIT_COLUMN,
+) -> ScopePredicate:
+    """
+    The one way to obtain a predicate that filters nothing — an affirmative object, never `None`.
+
+    `None` used to be how a caller said "no scope applies here", and every consumer had an
+    `if predicate is None: return` branch that produced no log line, no metric, and no error. That
+    is indistinguishable from a caller who simply forgot, which is how a fail-open survives review.
+    This is the same tautological SQL a tenant-wide grant produces, so the predicate is still
+    *applied* at every call site; the difference is that choosing it is recorded, named, and
+    countable.
+    """
+    if not SAFE_COLUMN_PATTERN.match(column):
+        raise ValueError(f"scope column {column!r} is not an allowlisted identifier.")
+    record_platform_metric(
+        PlatformMetric.UNRESTRICTED_SCOPE_READS, 1.0, Surface=surface.value, Reason=reason.value
+    )
+    record_platform_metric(PlatformMetric.SCOPE_PREDICATE_APPLIED, 1.0, Surface=surface.value)
+    record_platform_metric(PlatformMetric.ROW_LEVEL_PREDICATE_APPLIED, 1.0, Surface=surface.value)
+    return ScopePredicate(
+        sql=f"({column} IS NOT NULL OR {column} IS NULL)",
+        parameters={},
+        surface=surface,
+        matches_all_rows=True,
+    )
 
 
 def scope_predicate(
@@ -202,6 +261,15 @@ def scope_predicate(
     placeholders = ", ".join(f":{name}" for name in parameters)
     in_clause = f"{column} IN ({placeholders})"
     if IMPLICIT_SCOPE_UNIT_ID in claims.scope_unit_ids:
+        if claims.partition_model is not PartitionModel.SINGLE:
+            # `matches_all_rows` below is only true because a single tenant owns every row it can
+            # read. Reaching this branch with a partitioned claim would make the in-process filter
+            # match every unit while the SQL still filtered — the two would diverge silently.
+            record_platform_metric(PlatformMetric.CROSS_SCOPE_ACCESS_ATTEMPTS, 1.0)
+            raise UnknownScopeUnitError(
+                f"Claim for tenant {claims.tenant_code!r} carries the implicit unit but is not "
+                "declared single-partition. Build claims through build_scope_claims()."
+            )
         # Degenerate single-tenant case: rows written before scope stamping carry NULL
         # and belong to the tenant's one implicit unit.
         return ScopePredicate(

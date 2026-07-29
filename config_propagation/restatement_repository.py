@@ -24,6 +24,7 @@ from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import iter_items
 
 _logger = get_platform_logger(__name__)
 
@@ -116,12 +117,5 @@ class RestatementRepository:
                 "tenant_code = :tc AND begins_with(restatement_key, :cap)"
             )
             query_kwargs["ExpressionAttributeValues"][":cap"] = f"{capability.value}#"
-        events: list[dict[str, Any]] = []
-        while True:
-            response = self._table.query(**query_kwargs)
-            events.extend(dict(item) for item in response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
+        events = list(iter_items(self._table, **query_kwargs))
         return sorted(events, key=lambda e: str(e.get("emitted_at", "")), reverse=True)

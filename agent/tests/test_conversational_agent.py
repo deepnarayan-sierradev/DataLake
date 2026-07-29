@@ -8,6 +8,8 @@ from agent.conversational_agent import ConversationalAgent
 from agent.proposer_interface import SemanticRequestProposer
 from semantic.query_compiler import SemanticQueryRequest
 from semantic.semantic_model import Dimension, Metric, SemanticEntity, SemanticModel
+from tenancy.scope_contract import TenantPartitionProfile
+from tenancy.scope_predicate import build_scope_claims, scope_predicate
 
 
 def _model() -> SemanticModel:
@@ -42,13 +44,20 @@ _TAGGED = SemanticQueryRequest(
 )
 
 
+# The `demo` single-tenant predicate: applied, and matching everything because a single
+# tenant owns every row it can read. Never `None`, which meant "apply nothing".
+_SINGLE_TENANT_PREDICATE = scope_predicate(
+    build_scope_claims("demo", TenantPartitionProfile(tenant_code="demo"))
+)
+
+
 def _agent(proposer, engine, granted=frozenset(), max_attempts=3):
     return ConversationalAgent(
         proposer=proposer,
         model=_model(),
         engine=engine,
         entity_uri_resolver=lambda name: f"s3://edl-analytics-1/demo/analytics/{name}",
-        scope_predicate=None,
+        scope_predicate=_SINGLE_TENANT_PREDICATE,
         granted_access_tags=granted,
         max_attempts=max_attempts,
     )

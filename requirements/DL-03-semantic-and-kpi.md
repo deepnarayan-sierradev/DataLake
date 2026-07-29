@@ -47,6 +47,11 @@ Engine gaps that block authoring real content:
   a constant — franchise finance calendars differ from the Gregorian year.
 - **DL-SEM-07** **Filters on saved queries and requests**, including relative date ranges, `IN`
   lists, and null handling. Values parameterised; identifiers allowlisted from the model.
+  *Closed 2026-07-29.* `connector_runtime/api/models.py::SemanticQueryShape` is the request surface
+  and `semantic/saved_query.py::SavedQuery` persists it; both carry filters, joined dimensions,
+  fiscal grain, period comparison, time range, and row limit. Until then the compiler could express
+  a filter and neither the API nor a saved query could carry one, so the requirement was recorded as
+  met on the strength of half of it — see the DL-SEM-07 note in `requirements/WAIVERS.md`.
 - **DL-SEM-09** **Derived and ratio metrics** with explicit null/zero-denominator semantics, so
   conversion rates and per-franchise averages are defined once.
 - **DL-SEM-10** **Metric lineage**: each metric records the physical columns, joins, and filters it

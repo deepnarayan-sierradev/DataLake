@@ -178,10 +178,12 @@ class QueryCompiler:
         request: SemanticQueryRequest,
         *,
         granted_access_tags: frozenset[str],
-        # Required, not optional: an omitted predicate returned tenant-wide rows silently
-        # until 2026-07-28. `None` remains expressible for a tenant-wide claim, but the caller
-        # must now say so rather than forget (DL-SCOPE-14).
-        scope_predicate: ScopePredicate | None,
+        # Non-optional in type as well as position. Making it positionally required (2026-07-28)
+        # did not close the hole: `| None` plus an early return meant a caller could still pass
+        # `None` and get tenant-wide rows with no error, no log line, and no metric — and writing
+        # `None` explicitly reads as deliberate, so review waved it through. A caller with no
+        # end-user claim now passes `unrestricted_predicate(...)`, which is audited (DL-SCOPE-14).
+        scope_predicate: ScopePredicate,
         today: date | None = None,
     ) -> CompiledQuery:
         if not request.metrics:
@@ -396,17 +398,17 @@ class QueryCompiler:
                 plan.add_where(f"{column} {_SQL_OPERATORS[operator]} ?", query_filter.value)
 
     @staticmethod
-    def _apply_scope_predicate(
-        scope_predicate: ScopePredicate | None, plan: _CompilationPlan
-    ) -> None:
+    def _apply_scope_predicate(scope_predicate: ScopePredicate, plan: _CompilationPlan) -> None:
         """
         Inject the scope predicate before every other filter (DL-SCOPE-14).
+
+        There is no early return. Every compiled statement carries a scope clause, even when that
+        clause is the tautology a tenant-wide or definition-validation read produces — so
+        `scope_predicate_applied` is never `False` on a path that returned rows.
 
         Positional binding means the predicate's named parameters are rewritten to `?` in a
         stable, sorted order — the values still travel as parameters, never inlined.
         """
-        if scope_predicate is None:
-            return
         sql = scope_predicate.sql
         ordered_names = sorted(scope_predicate.parameters)
         for name in ordered_names:
