@@ -226,6 +226,10 @@ resource "aws_lambda_function" "control_plane" {
   timeout     = 29
   memory_size = 512
 
+  # The control plane fronts every tenant's API calls; an unbounded burst from one tenant
+  # would otherwise consume the account pool and throttle the pipeline Lambdas too.
+  reserved_concurrent_executions = var.reserved_concurrent_executions
+
   role = var.control_plane_role_arn
 
   environment {

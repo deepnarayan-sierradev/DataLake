@@ -99,3 +99,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "reserved_concurrent_executions" {
+  description = "Per-function concurrency ceiling (CKV_AWS_115)."
+  type        = number
+  default     = 20
+}

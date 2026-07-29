@@ -222,6 +222,10 @@ resource "aws_lambda_function" "credential_expiry_notifier" {
   timeout     = 60
   memory_size = 256
 
+  # A daily expiry sweep needs almost no concurrency; a ceiling of 2 leaves headroom for a
+  # retry without letting a schedule storm consume the pool.
+  reserved_concurrent_executions = var.reserved_concurrent_executions
+
   role = var.credential_expiry_notifier_role_arn
 
   environment {
@@ -270,6 +274,7 @@ resource "aws_scheduler_schedule" "credential_expiry_notifier_daily" {
   }
 
   schedule_expression = "rate(1 day)"
+  kms_key_arn         = var.secrets_kms_key_arn
 
   target {
     arn      = aws_lambda_function.credential_expiry_notifier.arn

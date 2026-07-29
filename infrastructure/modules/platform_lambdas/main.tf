@@ -17,6 +17,7 @@
 
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
 
 locals {
   common_tags = merge(var.tags, {
@@ -112,6 +113,9 @@ resource "aws_lambda_function" "platform" {
 
   kms_key_arn = var.kms_key_arn
 
+  # Bounds one function's share of the account concurrency pool (CKV_AWS_115).
+  reserved_concurrent_executions = var.reserved_concurrent_executions
+
   environment {
     variables = merge(
       { PLATFORM_ENVIRONMENT = var.environment },
@@ -162,7 +166,9 @@ resource "aws_apigatewayv2_route" "webhook" {
   api_id    = var.control_plane_api_id
   route_key = "POST /webhooks/{tenant_code}/{source_id}/{connection_id}"
   target    = "integrations/${aws_apigatewayv2_integration.webhook[0].id}"
-  # No authorizer: the provider signature is the credential (see the comment above).
+  # No authorizer: the provider signature is the credential (see the comment above). A third-party
+  # webhook cannot present a Cognito JWT, so an authorizer here would reject every real delivery.
+  #checkov:skip=CKV_AWS_309:Authenticated by provider HMAC signature, verified fail-closed in the handler.
   authorization_type = "NONE"
 }
 
@@ -179,6 +185,7 @@ resource "aws_scheduler_schedule" "workflow_runner" {
   schedule_expression          = var.workflow_schedule_expression
   schedule_expression_timezone = "UTC"
   state                        = "ENABLED"
+  kms_key_arn                  = var.kms_key_arn
 
   flexible_time_window {
     mode                      = "FLEXIBLE"
@@ -212,4 +219,8 @@ resource "aws_lambda_permission" "workflow_scheduler_invoke" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.platform["workflow_runner"].function_name
   principal     = "scheduler.amazonaws.com"
+
+  # Without this, *any* schedule in the account could invoke this function, not only ours
+  # (CKV_AWS_364). Scoped to this environment's scheduler group.
+  source_arn = "arn:${data.aws_partition.current.partition}:scheduler:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:schedule/${var.scheduler_group_name}/*"
 }

@@ -223,3 +223,9 @@ variable "analytics_s3_bucket_name" {
   type        = string
   default     = ""
 }
+
+variable "reserved_concurrent_executions" {
+  description = "Per-function concurrency ceiling. Bounds one function's share of the account pool."
+  type        = number
+  default     = 10
+}

@@ -117,3 +117,9 @@ variable "rotation_warning_days" {
   default     = 14
   description = "Days before secret_rotation_days to start warning that a credential needs rotation."
 }
+
+variable "reserved_concurrent_executions" {
+  description = "Per-function concurrency ceiling (CKV_AWS_115)."
+  type        = number
+  default     = 2
+}

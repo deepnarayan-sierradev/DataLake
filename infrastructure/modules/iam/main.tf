@@ -54,6 +54,12 @@ resource "aws_iam_role" "extraction_runtime" {
 }
 
 data "aws_iam_policy_document" "extraction_runtime_permissions" {
+  # X-Ray (`PutTraceSegments`/`PutTelemetryRecords`), `cloudwatch:PutMetricData`, and the three
+  # `ec2:*NetworkInterface` actions a VPC-attached Lambda needs have no resource-level permissions
+  # in IAM: AWS rejects any ARN for them, so `"*"` is the only value that works. Every other
+  # statement in this document is ARN-scoped, which is the rule `infrastructure/CLAUDE.md` states.
+  #checkov:skip=CKV_AWS_111:AWS defines no resource-level permission for these actions.
+  #checkov:skip=CKV_AWS_356:Wildcard confined to actions that admit no ARN; all others are scoped.
 
   # Every stage now enqueues its own failures (gap item 20), so each producing role needs
   # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
@@ -263,6 +269,12 @@ resource "aws_iam_role" "transformation_runtime" {
 }
 
 data "aws_iam_policy_document" "transformation_runtime_permissions" {
+  # X-Ray (`PutTraceSegments`/`PutTelemetryRecords`), `cloudwatch:PutMetricData`, and the three
+  # `ec2:*NetworkInterface` actions a VPC-attached Lambda needs have no resource-level permissions
+  # in IAM: AWS rejects any ARN for them, so `"*"` is the only value that works. Every other
+  # statement in this document is ARN-scoped, which is the rule `infrastructure/CLAUDE.md` states.
+  #checkov:skip=CKV_AWS_111:AWS defines no resource-level permission for these actions.
+  #checkov:skip=CKV_AWS_356:Wildcard confined to actions that admit no ARN; all others are scoped.
 
   # Every stage now enqueues its own failures (gap item 20), so each producing role needs
   # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
@@ -414,6 +426,12 @@ resource "aws_iam_role" "entity_resolution_runtime" {
 }
 
 data "aws_iam_policy_document" "entity_resolution_runtime_permissions" {
+  # X-Ray (`PutTraceSegments`/`PutTelemetryRecords`), `cloudwatch:PutMetricData`, and the three
+  # `ec2:*NetworkInterface` actions a VPC-attached Lambda needs have no resource-level permissions
+  # in IAM: AWS rejects any ARN for them, so `"*"` is the only value that works. Every other
+  # statement in this document is ARN-scoped, which is the rule `infrastructure/CLAUDE.md` states.
+  #checkov:skip=CKV_AWS_111:AWS defines no resource-level permission for these actions.
+  #checkov:skip=CKV_AWS_356:Wildcard confined to actions that admit no ARN; all others are scoped.
 
   # Every stage now enqueues its own failures (gap item 20), so each producing role needs
   # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
@@ -538,6 +556,12 @@ resource "aws_iam_role" "analytics_publisher_runtime" {
 }
 
 data "aws_iam_policy_document" "analytics_publisher_runtime_permissions" {
+  # X-Ray (`PutTraceSegments`/`PutTelemetryRecords`), `cloudwatch:PutMetricData`, and the three
+  # `ec2:*NetworkInterface` actions a VPC-attached Lambda needs have no resource-level permissions
+  # in IAM: AWS rejects any ARN for them, so `"*"` is the only value that works. Every other
+  # statement in this document is ARN-scoped, which is the rule `infrastructure/CLAUDE.md` states.
+  #checkov:skip=CKV_AWS_111:AWS defines no resource-level permission for these actions.
+  #checkov:skip=CKV_AWS_356:Wildcard confined to actions that admit no ARN; all others are scoped.
 
   # Every stage now enqueues its own failures (gap item 20), so each producing role needs
   # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
@@ -667,6 +691,12 @@ resource "aws_iam_role" "serving_store_loader_runtime" {
 }
 
 data "aws_iam_policy_document" "serving_store_loader_runtime_permissions" {
+  # X-Ray (`PutTraceSegments`/`PutTelemetryRecords`), `cloudwatch:PutMetricData`, and the three
+  # `ec2:*NetworkInterface` actions a VPC-attached Lambda needs have no resource-level permissions
+  # in IAM: AWS rejects any ARN for them, so `"*"` is the only value that works. Every other
+  # statement in this document is ARN-scoped, which is the rule `infrastructure/CLAUDE.md` states.
+  #checkov:skip=CKV_AWS_111:AWS defines no resource-level permission for these actions.
+  #checkov:skip=CKV_AWS_356:Wildcard confined to actions that admit no ARN; all others are scoped.
 
   # Every stage now enqueues its own failures (gap item 20), so each producing role needs
   # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.

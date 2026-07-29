@@ -46,6 +46,11 @@ resource "aws_kms_alias" "this" {
 data "aws_caller_identity" "current" {}
 
 data "aws_iam_policy_document" "default_key_policy" {
+  # A KMS key policy is attached *to* the key, so `Resource = "*"` means "this key" and nothing
+  # wider — there is no ARN to narrow it to. Scoping is done by principal and condition below.
+  #checkov:skip=CKV_AWS_109:Key policy resource is the key itself.
+  #checkov:skip=CKV_AWS_111:Key policy resource is the key itself; principals are enumerated.
+  #checkov:skip=CKV_AWS_356:A key policy cannot name its own ARN as a resource.
   # Allow account root full access — required for key management
   statement {
     sid    = "AllowAccountRoot"

@@ -33,6 +33,17 @@ resource "aws_vpc" "this" {
   })
 }
 
+# AWS creates a default security group per VPC that permits all traffic between its own members.
+# It cannot be deleted, so the only way to make it deny is to adopt it and declare no rules — any
+# resource that lands on it by accident then has no connectivity rather than open connectivity.
+resource "aws_default_security_group" "this" {
+  vpc_id = aws_vpc.this.id
+
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-edl-default-deny-all"
+  })
+}
+
 # ---------------------------------------------------------------------------
 # Internet Gateway (for NAT Gateway egress; no public compute allowed)
 # ---------------------------------------------------------------------------

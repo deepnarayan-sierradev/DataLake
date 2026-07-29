@@ -523,8 +523,12 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
   })
 
   logging_configuration {
+    # `include_execution_data` stays false: state input/output carries source metadata, and this
+    # log group is not tenant-partitioned, so enabling it would put one tenant's payloads where
+    # any reader of the group can see them. Logging itself is on at level ALL.
+    #checkov:skip=CKV_AWS_285:Execution data excluded deliberately; see above. Logging is enabled.
     log_destination        = "${aws_cloudwatch_log_group.sfn_execution.arn}:*"
-    include_execution_data = false # Execution input/output excluded — may contain source metadata
+    include_execution_data = false
     level                  = "ALL"
   }
 
