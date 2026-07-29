@@ -124,7 +124,7 @@ resource "aws_lambda_function" "transformation_pipeline" {
       FIELD_MAPPING_S3_BUCKET = var.field_mapping_s3_bucket_name
       GOVERNANCE_S3_BUCKET    = var.governance_s3_bucket_name
       # DL-SERV-08: wired so curated-layer registration is live rather than dead code.
-      GLUE_CATALOG_DATABASE   = var.glue_catalog_database
+      GLUE_CATALOG_DATABASE = var.glue_catalog_database
     }
   }
 

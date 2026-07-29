@@ -430,6 +430,13 @@ module "orchestration" {
 
   pipeline_trigger_role_arn = module.iam.pipeline_trigger_role_arn
 
+  # ── DLQ alarms and processor sizing ──────────────────────────────────────
+  # Sized for 10-20 tenants x 5-12 sources x 100+ entities (~120 DLQ arrivals/day). Thresholds
+  # come from `environment`; see docs/SCALE_AND_DLQ_THRESHOLDS.md for the derivation and for the
+  # concurrency budget this batch size assumes.
+  dlq_processor_batch_size           = 10
+  dlq_processor_reserved_concurrency = 20
+
   # DLQ processor Lambda
   dlq_processor_role_arn     = module.iam.dlq_processor_role_arn
   extraction_failure_dlq_arn = module.metadata_persistence.extraction_failure_dlq_arn

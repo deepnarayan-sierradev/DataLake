@@ -142,3 +142,65 @@ variable "max_extraction_resume_attempts" {
   type        = number
   default     = 12
 }
+
+variable "dlq_alarm_overrides" {
+  description = <<-DESC
+    Per-key overrides for the DLQ alarm thresholds derived from `environment`.
+
+    Defaults live in `per_stage_dlq.tf`'s `dlq_alarm_defaults` and are sized for the 12-month
+    production target (10-20 tenants, 5-12 sources, 100+ entities per source). Override only to
+    deviate from the environment's default — e.g. tightening a blocking-stage threshold for a
+    tenant SLA — so the sized numbers stay in one place rather than being copied per environment.
+
+    Accepted keys: oldest_blocking_seconds, oldest_downstream_seconds, oldest_realtime_seconds,
+    arrival_spike_per_period, backlog_depth.
+  DESC
+  type        = map(number)
+  default     = {}
+
+  validation {
+    condition = length(setsubtract(keys(var.dlq_alarm_overrides), [
+      "oldest_blocking_seconds",
+      "oldest_downstream_seconds",
+      "oldest_realtime_seconds",
+      "arrival_spike_per_period",
+      "backlog_depth",
+    ])) == 0
+    error_message = "dlq_alarm_overrides accepts only the five documented threshold keys."
+  }
+}
+
+variable "dlq_processor_reserved_concurrency" {
+  description = <<-DESC
+    Reserved concurrent executions for the DLQ processor.
+
+    Reserved rather than unbounded so a failure flood cannot consume account concurrency and
+    starve the pipeline it is trying to help. It had none before 2026-07-29, while the pipeline
+    trigger reserved 50.
+  DESC
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.dlq_processor_reserved_concurrency >= 1 && var.dlq_processor_reserved_concurrency <= 100
+    error_message = "dlq_processor_reserved_concurrency must be between 1 and 100."
+  }
+}
+
+variable "dlq_processor_batch_size" {
+  description = <<-DESC
+    SQS batch size for the DLQ processor.
+
+    Was 1, justified as "clear per-message audit trail" — but the audit trail is one DynamoDB row
+    per message regardless of batch size, so the two were conflated. At the 12-month target a bad
+    deploy can fail one tenant's ~1,200 entities, which at batch_size 1 is 1,200 invocations.
+    `ReportBatchItemFailures` is enabled, so a partial failure re-drives only the failed messages.
+  DESC
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.dlq_processor_batch_size >= 1 && var.dlq_processor_batch_size <= 10
+    error_message = "dlq_processor_batch_size must be between 1 and 10."
+  }
+}

@@ -64,10 +64,10 @@ locals {
   # serves every tenant and derives its scope from verified JWT claims per request, so a
   # principal-tag condition would break it rather than protect anything.
   tenant_scoped_role_names = {
-    extraction           = aws_iam_role.extraction_runtime.name
-    transformation       = aws_iam_role.transformation_runtime.name
-    entity_resolution    = aws_iam_role.entity_resolution_runtime.name
-    analytics_publisher  = aws_iam_role.analytics_publisher_runtime.name
+    extraction          = aws_iam_role.extraction_runtime.name
+    transformation      = aws_iam_role.transformation_runtime.name
+    entity_resolution   = aws_iam_role.entity_resolution_runtime.name
+    analytics_publisher = aws_iam_role.analytics_publisher_runtime.name
   }
 
   tenant_boundary_enforced = var.tenant_boundary_mode == "enforce"

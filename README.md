@@ -20,6 +20,7 @@ form meant to survive across sessions.
 | [docs/PLATFORM_STATUS.md](docs/PLATFORM_STATUS.md) | Everyone | Current deployment state, live data, all AWS resource names |
 | [docs/PIPELINE_FLOW.md](docs/PIPELINE_FLOW.md) | Engineers, architects, on-call | Full pipeline architecture, stage-by-stage reference, canonical tenant-isolation model |
 | [docs/KNOWN_GAPS_AND_ROADMAP.md](docs/KNOWN_GAPS_AND_ROADMAP.md) | Engineers, architects | What's missing, broken, or deferred — the single source for open work |
+| [docs/SCALE_AND_DLQ_THRESHOLDS.md](docs/SCALE_AND_DLQ_THRESHOLDS.md) | Engineers, on-call, architects | The 12-month scale target (10–20 tenants × 5–12 sources × 100+ entities) and every DLQ alarm threshold derived from it — read before changing an alarm number |
 | [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Platform engineers | Environment deployment (staging/prod), field mapping, AWS settings |
 | [docs/PRODUCTION_INCIDENT_RUNBOOK.md](docs/PRODUCTION_INCIDENT_RUNBOOK.md) | On-call engineers | Incident response, runbooks per failure scenario, including cross-tenant incidents |
 | [docs/GO_LIVE_READINESS_CHECKLIST.md](docs/GO_LIVE_READINESS_CHECKLIST.md) | Platform engineers, leadership | Go-live gate checklist |

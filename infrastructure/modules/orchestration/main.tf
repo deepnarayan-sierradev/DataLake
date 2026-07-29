@@ -268,16 +268,16 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
       # `Cause` is the exception message, which carries the resume payload as JSON. Parsing it here
       # is what lets the retried Task read the resume position from its own Parameters.
       ParseCheckpoint = {
-        Type       = "Pass"
+        Type = "Pass"
         Parameters = {
-          "resume.$"          = "States.StringToJson($.checkpoint.Cause)"
-          "resume_attempts.$" = "States.MathAdd($.resume_attempts, 1)"
-          "source_id.$"       = "$.source_id"
-          "entity_id.$"       = "$.entity_id"
-          "environment.$"     = "$.environment"
-          "tenant_code.$"     = "$.tenant_code"
-          "connector_params.$" = "$.connector_params"
-          "is_replay.$"       = "$.is_replay"
+          "resume.$"                 = "States.StringToJson($.checkpoint.Cause)"
+          "resume_attempts.$"        = "States.MathAdd($.resume_attempts, 1)"
+          "source_id.$"              = "$.source_id"
+          "entity_id.$"              = "$.entity_id"
+          "environment.$"            = "$.environment"
+          "tenant_code.$"            = "$.tenant_code"
+          "connector_params.$"       = "$.connector_params"
+          "is_replay.$"              = "$.is_replay"
           "pinned_config_versions.$" = "$.pinned_config_versions"
         }
         Next = "EvaluateResume"
@@ -289,15 +289,15 @@ resource "aws_sfn_state_machine" "extraction_pipeline" {
           {
             # Bounded: a provider that throttles indefinitely must not loop forever, and an
             # unbounded loop would also make the execution history unreadable.
-            Variable             = "$.resume_attempts"
-            NumericGreaterThan   = var.max_extraction_resume_attempts
-            Next                 = "ExtractionResumeExhausted"
+            Variable           = "$.resume_attempts"
+            NumericGreaterThan = var.max_extraction_resume_attempts
+            Next               = "ExtractionResumeExhausted"
           },
           {
             # A rate-limit checkpoint carries a wait; honour it before resuming.
-            Variable          = "$.resume.retry_after_seconds"
+            Variable           = "$.resume.retry_after_seconds"
             NumericGreaterThan = 0
-            Next              = "WaitForRateLimit"
+            Next               = "WaitForRateLimit"
           }
         ]
         # A record-count or timeout checkpoint needs no wait — resume immediately.
@@ -780,6 +780,10 @@ resource "aws_lambda_function" "dlq_processor" {
   timeout     = 60
   memory_size = 256
 
+  # Reserved so a failure flood cannot consume account concurrency and starve the pipeline it is
+  # trying to help. Unbounded before 2026-07-29, while the pipeline trigger reserved 50.
+  reserved_concurrent_executions = var.dlq_processor_reserved_concurrency
+
   role = var.dlq_processor_role_arn
 
   environment {
@@ -816,8 +820,14 @@ resource "aws_cloudwatch_log_group" "dlq_processor" {
 resource "aws_lambda_event_source_mapping" "dlq_processor_sqs" {
   event_source_arn = var.extraction_failure_dlq_arn
   function_name    = aws_lambda_function.dlq_processor.arn
-  batch_size       = 1
+  batch_size       = var.dlq_processor_batch_size
   enabled          = true
 
+  # A short window so a batch fills before invoking, without adding meaningful latency to a
+  # message that is already a recorded failure.
+  maximum_batching_window_in_seconds = 20
+
+  # Partial-batch failure: only the failed messages are re-driven, which is what makes a batch
+  # size above 1 safe here.
   function_response_types = ["ReportBatchItemFailures"]
 }

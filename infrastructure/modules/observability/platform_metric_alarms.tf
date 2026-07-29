@@ -43,23 +43,23 @@ locals {
   # where absence is itself the failure (an expected load producing nothing).
   platform_metric_alarms = {
     # ── Extraction / pipeline core ──────────────────────────────────────────
-    ExtractionDurationMs        = { threshold = 600000, paging = false, statistic = "Maximum" }
-    RecordsSkipped              = { threshold = 100000, paging = false, statistic = "Sum" }
-    RetryCount                  = { threshold = 20, paging = false, statistic = "Sum" }
-    StageDurationMs             = { threshold = 600000, paging = false, statistic = "Maximum" }
-    GoldenRecordCount           = { threshold = 0, paging = false, statistic = "Sum", comparison = "LessThanOrEqualToThreshold", missing_data = "notBreaching" }
-    ClusterCount                = { threshold = 0, paging = false, statistic = "Sum", comparison = "LessThanOrEqualToThreshold", missing_data = "notBreaching" }
+    ExtractionDurationMs = { threshold = 600000, paging = false, statistic = "Maximum" }
+    RecordsSkipped       = { threshold = 100000, paging = false, statistic = "Sum" }
+    RetryCount           = { threshold = 20, paging = false, statistic = "Sum" }
+    StageDurationMs      = { threshold = 600000, paging = false, statistic = "Maximum" }
+    GoldenRecordCount    = { threshold = 0, paging = false, statistic = "Sum", comparison = "LessThanOrEqualToThreshold", missing_data = "notBreaching" }
+    ClusterCount         = { threshold = 0, paging = false, statistic = "Sum", comparison = "LessThanOrEqualToThreshold", missing_data = "notBreaching" }
 
     # ── DL-01 connectors ───────────────────────────────────────────────────
-    RateLimitHits              = { threshold = 50, paging = false, statistic = "Sum" }
-    RateLimitBackoffMs         = { threshold = 300000, paging = false, statistic = "Sum" }
-    PagesFetched               = { threshold = 100000, paging = false, statistic = "Sum" }
-    WebhookEventsReceived      = { threshold = 100000, paging = false, statistic = "Sum" }
-    WebhookSignatureFailures   = { threshold = 0, paging = false, statistic = "Sum" }
-    WritebackRecords           = { threshold = 100000, paging = false, statistic = "Sum" }
-    WritebackFailures          = { threshold = 0, paging = false, statistic = "Sum" }
-    SourceApiErrors            = { threshold = 25, paging = false, statistic = "Sum" }
-    CheckpointedRuns           = { threshold = 10, paging = false, statistic = "Sum" }
+    RateLimitHits            = { threshold = 50, paging = false, statistic = "Sum" }
+    RateLimitBackoffMs       = { threshold = 300000, paging = false, statistic = "Sum" }
+    PagesFetched             = { threshold = 100000, paging = false, statistic = "Sum" }
+    WebhookEventsReceived    = { threshold = 100000, paging = false, statistic = "Sum" }
+    WebhookSignatureFailures = { threshold = 0, paging = false, statistic = "Sum" }
+    WritebackRecords         = { threshold = 100000, paging = false, statistic = "Sum" }
+    WritebackFailures        = { threshold = 0, paging = false, statistic = "Sum" }
+    SourceApiErrors          = { threshold = 25, paging = false, statistic = "Sum" }
+    CheckpointedRuns         = { threshold = 10, paging = false, statistic = "Sum" }
 
     # ── DL-02 quality and reconciliation ───────────────────────────────────
     QualityViolations         = { threshold = 100, paging = false, statistic = "Sum" }
@@ -74,13 +74,13 @@ locals {
     BackfillRowsPerSecond     = { threshold = 10, paging = false, statistic = "Average", comparison = "LessThanThreshold" }
 
     # ── DL-03 semantic ─────────────────────────────────────────────────────
-    SemanticQueriesCompiled  = { threshold = 100000, paging = false, statistic = "Sum" }
-    SemanticQueryLatencyMs   = { threshold = 5000, paging = false, statistic = "Maximum" }
-    SemanticAccessDenied     = { threshold = 25, paging = false, statistic = "Sum" }
-    SemanticCacheHitRate     = { threshold = 20, paging = false, statistic = "Average", comparison = "LessThanThreshold" }
-    ModelPublishes           = { threshold = 20, paging = false, statistic = "Sum" }
-    ModelValidationFailures  = { threshold = 0, paging = false, statistic = "Sum" }
-    KpiValidationFailures    = { threshold = 0, paging = false, statistic = "Sum" }
+    SemanticQueriesCompiled = { threshold = 100000, paging = false, statistic = "Sum" }
+    SemanticQueryLatencyMs  = { threshold = 5000, paging = false, statistic = "Maximum" }
+    SemanticAccessDenied    = { threshold = 25, paging = false, statistic = "Sum" }
+    SemanticCacheHitRate    = { threshold = 20, paging = false, statistic = "Average", comparison = "LessThanThreshold" }
+    ModelPublishes          = { threshold = 20, paging = false, statistic = "Sum" }
+    ModelValidationFailures = { threshold = 0, paging = false, statistic = "Sum" }
+    KpiValidationFailures   = { threshold = 0, paging = false, statistic = "Sum" }
 
     # ── DL-06 workflow ─────────────────────────────────────────────────────
     WorkflowExecutions           = { threshold = 10000, paging = false, statistic = "Sum" }
@@ -94,15 +94,15 @@ locals {
     WorkflowDlqDepth             = { threshold = 0, paging = false, statistic = "Maximum" }
 
     # ── DL-07 serving ──────────────────────────────────────────────────────
-    ServingStoreLoadRows          = { threshold = 10000000, paging = false, statistic = "Sum" }
-    ServingStoreLoadDurationMs    = { threshold = 900000, paging = false, statistic = "Maximum" }
-    ServingStoreLoadFailures      = { threshold = 0, paging = false, statistic = "Sum" }
-    ServingStoreSkippedNoConfig   = { threshold = 0, paging = false, statistic = "Sum" }
-    ServingStoreConnectionErrors  = { threshold = 0, paging = false, statistic = "Sum" }
-    VpnClientConnections          = { threshold = 200, paging = false, statistic = "Maximum" }
-    VpnCertificateDaysToExpiry    = { threshold = 30, paging = false, statistic = "Minimum", comparison = "LessThanThreshold" }
-    ServingQueryLatencyMs         = { threshold = 5000, paging = false, statistic = "Maximum" }
-    ServingConcurrentConnections  = { threshold = 45, paging = false, statistic = "Maximum" }
+    ServingStoreLoadRows         = { threshold = 10000000, paging = false, statistic = "Sum" }
+    ServingStoreLoadDurationMs   = { threshold = 900000, paging = false, statistic = "Maximum" }
+    ServingStoreLoadFailures     = { threshold = 0, paging = false, statistic = "Sum" }
+    ServingStoreSkippedNoConfig  = { threshold = 0, paging = false, statistic = "Sum" }
+    ServingStoreConnectionErrors = { threshold = 0, paging = false, statistic = "Sum" }
+    VpnClientConnections         = { threshold = 200, paging = false, statistic = "Maximum" }
+    VpnCertificateDaysToExpiry   = { threshold = 30, paging = false, statistic = "Minimum", comparison = "LessThanThreshold" }
+    ServingQueryLatencyMs        = { threshold = 5000, paging = false, statistic = "Maximum" }
+    ServingConcurrentConnections = { threshold = 45, paging = false, statistic = "Maximum" }
 
     # ── DL-08 security ─────────────────────────────────────────────────────
     AuthenticationFailures    = { threshold = 25, paging = false, statistic = "Sum" }
@@ -136,20 +136,20 @@ locals {
     PhiGateBlocks           = { threshold = 0, paging = false, statistic = "Sum" }
 
     # ── DL-11 configuration propagation ────────────────────────────────────
-    ConfigPropagationLagSeconds              = { threshold = 3600, paging = false, statistic = "Maximum" }
-    ConfigVersionPinFailures                 = { threshold = 0, paging = false, statistic = "Sum" }
-    ConfigVersionMismatchWithinRun           = { threshold = 0, paging = true, statistic = "Sum" }
-    ConfigCacheStaleServed                   = { threshold = 0, paging = false, statistic = "Sum" }
-    EffectiveVersionTransitions              = { threshold = 500, paging = false, statistic = "Sum" }
-    ConfigRollbacks                          = { threshold = 0, paging = false, statistic = "Sum" }
-    ReprocessJobsStarted                     = { threshold = 50, paging = false, statistic = "Sum" }
-    ReprocessJobsCompleted                   = { threshold = 50, paging = false, statistic = "Sum" }
-    ReprocessJobsFailed                      = { threshold = 0, paging = false, statistic = "Sum" }
-    ReprocessRowsRecomputed                  = { threshold = 100000000, paging = false, statistic = "Sum" }
-    RestatementEventsEmitted                 = { threshold = 0, paging = false, statistic = "Sum" }
-    ConfigSchemaIncompatibilityRejections    = { threshold = 0, paging = false, statistic = "Sum" }
-    CredentialCachePropagationLagSeconds     = { threshold = 300, paging = false, statistic = "Maximum" }
-    PublishesNotYetEffective                 = { threshold = 25, paging = false, statistic = "Maximum" }
+    ConfigPropagationLagSeconds           = { threshold = 3600, paging = false, statistic = "Maximum" }
+    ConfigVersionPinFailures              = { threshold = 0, paging = false, statistic = "Sum" }
+    ConfigVersionMismatchWithinRun        = { threshold = 0, paging = true, statistic = "Sum" }
+    ConfigCacheStaleServed                = { threshold = 0, paging = false, statistic = "Sum" }
+    EffectiveVersionTransitions           = { threshold = 500, paging = false, statistic = "Sum" }
+    ConfigRollbacks                       = { threshold = 0, paging = false, statistic = "Sum" }
+    ReprocessJobsStarted                  = { threshold = 50, paging = false, statistic = "Sum" }
+    ReprocessJobsCompleted                = { threshold = 50, paging = false, statistic = "Sum" }
+    ReprocessJobsFailed                   = { threshold = 0, paging = false, statistic = "Sum" }
+    ReprocessRowsRecomputed               = { threshold = 100000000, paging = false, statistic = "Sum" }
+    RestatementEventsEmitted              = { threshold = 0, paging = false, statistic = "Sum" }
+    ConfigSchemaIncompatibilityRejections = { threshold = 0, paging = false, statistic = "Sum" }
+    CredentialCachePropagationLagSeconds  = { threshold = 300, paging = false, statistic = "Maximum" }
+    PublishesNotYetEffective              = { threshold = 25, paging = false, statistic = "Maximum" }
 
     # ── DL-12 connections and scope isolation ──────────────────────────────
     CrossScopeAccessAttempts     = { threshold = 0, paging = true, statistic = "Sum" }

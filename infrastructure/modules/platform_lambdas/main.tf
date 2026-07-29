@@ -73,12 +73,12 @@ locals {
       timeout     = 900
       memory      = 1024
       environment = {
-        EXPORT_ARTEFACT_BUCKET      = var.export_artefact_bucket_name
-        EXPORT_JOB_TABLE            = var.export_job_table_name
-        DELETION_CERTIFICATE_TABLE  = var.deletion_certificate_table_name
-        RAW_S3_BUCKET               = var.raw_s3_bucket_name
-        CURATED_S3_BUCKET           = var.curated_s3_bucket_name
-        ANALYTICS_S3_BUCKET         = var.analytics_s3_bucket_name
+        EXPORT_ARTEFACT_BUCKET     = var.export_artefact_bucket_name
+        EXPORT_JOB_TABLE           = var.export_job_table_name
+        DELETION_CERTIFICATE_TABLE = var.deletion_certificate_table_name
+        RAW_S3_BUCKET              = var.raw_s3_bucket_name
+        CURATED_S3_BUCKET          = var.curated_s3_bucket_name
+        ANALYTICS_S3_BUCKET        = var.analytics_s3_bucket_name
       }
     }
   }

@@ -363,3 +363,64 @@ CloudWatch metrics stream.
   deliberately does not forge one — collect signatures, then `--sign`, `--approve` (a different
   actor), and `--activate`.
 - **DL-04 (AI agent runtime) and DL-05 (ML platform) are deferred by agreement**, not missed.
+
+---
+
+## Scale gaps found while sizing the DLQ (2026-07-29)
+
+Full derivation and every threshold: [SCALE_AND_DLQ_THRESHOLDS.md](SCALE_AND_DLQ_THRESHOLDS.md).
+The target these are measured against is 10–20 prod tenants × 5–12 sources × 100+ entities per
+source at 12 months — roughly 24,000 runs/day and ~120 DLQ arrivals/day at the upper bound.
+
+### 20. Five of six pipeline stages enqueue nothing to any DLQ
+
+`RunCoordinator.enqueue_dlq_entry(...)` takes a `failed_stage` argument but hardcodes
+`_DLQ_NAME = "EdlExtractionFailureDlq"`, and its only production caller is
+`orchestration/step_functions/extraction_workflow.py`. Transformation, entity resolution, analytics
+publish, twin build and serving store load failures land in the Step Functions execution history and
+the audit table, but in no queue — so there is nothing to replay from and nothing for an alarm to
+observe. The fix is small and well-scoped: map `failed_stage` to the per-stage queue name (the
+argument already carries what is needed), and route the other stages through the same call —
+preferably from `observability/stage_execution.py`, so a new handler gets it structurally rather
+than by remembering.
+
+### 21. The nine per-stage DLQs have no producer and no consumer
+
+`EdlStageDlq-*` and `EdlStageReplayExhausted` are created, alarmed, and completely inert: the
+processor's event source mapping binds only to the single legacy `extraction_failure_dlq`, and no
+environment consumes the module's `stage_dlq_arns` output. Until item 20 lands, the per-stage alarms
+cannot fire, and `maxReceiveCount = 3` never counts because it only decrements on *receive*.
+
+Related: `maxReceiveCount` on a DLQ presumes a consumer that **re-drives**. Today's processor
+records and notifies but never replays, so `EdlStageReplayExhausted` stays empty regardless.
+
+### 22. Scheduled runs bypass the burst buffer
+
+`EdlPipelineTrigger.fifo` plus its Lambda exist to absorb simultaneous schedule fires — that is
+their documented purpose. But `scripts/seed_schedules.py` sets the EventBridge Scheduler target to
+the **state machine ARN**, so schedules call `StartExecution` directly and the queue is fed only by
+the control-plane manual trigger route. Either point schedules at the queue or delete the queue and
+its Lambda; do not keep documenting a buffer that is not in the path.
+
+### 23. Concurrency wall at the 12-month target
+
+Seeded crons are fixed times (`cron(0 2 * * ? *)`), so at 20 tenants that is 10,000–24,000
+`StartExecution` calls in a single minute against an account-level token-bucket throttle. Those
+throttles surface as failed *scheduler* invocations and land in the scheduler's own retry path,
+which makes them **invisible in every DLQ dashboard**. If extraction averages ~10 minutes,
+concurrent extraction Lambdas alone approach the default 1,000 per-region concurrency limit before
+any other stage takes its share.
+
+Mitigations in value order: deterministic cron jitter from a hash of `{tenant}#{source}#{entity}`
+across a 4-hour window (~100 entities/min instead of 24,000 in one minute); a concurrency limit
+increase with reserved concurrency partitioning per function; a wider window or per-tenant
+staggering if the increase is refused.
+
+### 24. The DLQ processor pages per message
+
+One SNS publish per message. At the target, one tenant's ~1,200 entities failing means 1,200 pages.
+It should publish a digest per `(stage, tenant)` per window, or stop publishing and let the
+CloudWatch alarms be the single notification path — there are currently two paths for the same
+event. The `(Stage, TenantCode)` custom metric and the "one tenant dominates" alarm are also not yet
+implemented; because the alarm↔emitter reconciliation is bidirectional, the metric and its alarm
+have to land in the same change.

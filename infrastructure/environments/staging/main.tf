@@ -430,6 +430,12 @@ module "orchestration" {
 
   pipeline_trigger_role_arn = module.iam.pipeline_trigger_role_arn
 
+  # ── DLQ alarms and processor sizing ──────────────────────────────────────
+  # Staging mirrors prod's shape at lower volume so a threshold change can be rehearsed here
+  # before prod. See docs/SCALE_AND_DLQ_THRESHOLDS.md.
+  dlq_processor_batch_size           = 10
+  dlq_processor_reserved_concurrency = 10
+
   # DLQ processor Lambda
   dlq_processor_role_arn     = module.iam.dlq_processor_role_arn
   extraction_failure_dlq_arn = module.metadata_persistence.extraction_failure_dlq_arn

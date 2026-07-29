@@ -496,6 +496,13 @@ module "orchestration" {
   # Halved for dev's account quota (see lambda_pipeline module block above).
   pipeline_trigger_reserved_concurrency = 25
 
+  # ── DLQ alarms and processor sizing ──────────────────────────────────────
+  # Thresholds come from `environment` (see per_stage_dlq.tf's dlq_alarm_defaults, sized for the
+  # 12-month prod target and derived in docs/SCALE_AND_DLQ_THRESHOLDS.md). dev keeps depth>0
+  # because volume is near zero here and any DLQ message is genuinely news.
+  dlq_processor_batch_size           = 1
+  dlq_processor_reserved_concurrency = 5
+
   # DLQ processor Lambda
   dlq_processor_role_arn     = module.iam.dlq_processor_role_arn
   extraction_failure_dlq_arn = module.metadata_persistence.extraction_failure_dlq_arn

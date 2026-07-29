@@ -10,16 +10,77 @@
 # ---------------------------------------------------------------------------
 
 locals {
+  # `latency_class` selects the neglect threshold below:
+  #   blocking   — downstream stages cannot run until this one succeeds
+  #   downstream — consumes the golden record; a delay does not miss the business day
+  #   realtime    — near-real-time ingress, where lag is visible to the source system
   pipeline_stages = {
-    extraction          = { visibility_timeout = 960 }
-    transformation      = { visibility_timeout = 960 }
-    entity_resolution   = { visibility_timeout = 960 }
-    analytics_publish   = { visibility_timeout = 420 }
-    serving_store_load  = { visibility_timeout = 960 }
-    twin_build          = { visibility_timeout = 960 }
-    webhook_ingest      = { visibility_timeout = 120 }
-    writeback           = { visibility_timeout = 420 }
-    workflow_action     = { visibility_timeout = 420 }
+    extraction         = { visibility_timeout = 960, latency_class = "blocking" }
+    transformation     = { visibility_timeout = 960, latency_class = "blocking" }
+    entity_resolution  = { visibility_timeout = 960, latency_class = "blocking" }
+    analytics_publish  = { visibility_timeout = 420, latency_class = "downstream" }
+    serving_store_load = { visibility_timeout = 960, latency_class = "downstream" }
+    twin_build         = { visibility_timeout = 960, latency_class = "downstream" }
+    webhook_ingest     = { visibility_timeout = 120, latency_class = "realtime" }
+    writeback          = { visibility_timeout = 420, latency_class = "realtime" }
+    workflow_action    = { visibility_timeout = 420, latency_class = "downstream" }
+  }
+
+  # ---------------------------------------------------------------------------
+  # DLQ alarm thresholds, per environment.
+  #
+  # Sized for the 12-month production target agreed 2026-07-29: 10-20 tenants, 5-12 sources per
+  # tenant, 100+ entities per source. At 20 tenants that is 10,000-24,000 runs/day and
+  # 60,000-144,000 stage executions/day; at a 0.5% transient failure rate, ~120 DLQ arrivals/day,
+  # or roughly 20 per stage per day. See docs/SCALE_AND_DLQ_THRESHOLDS.md for the derivation.
+  #
+  # Why this is keyed by environment rather than a constant: a `depth > 0` alarm is *correct* in
+  # dev, where volume is near zero and any DLQ message is genuinely news, and *wrong* in prod,
+  # where it would sit in permanent ALARM at ~120 arrivals/day and stop carrying information. An
+  # alarm that never clears is as uninformative as one that never fires.
+  #
+  # Depth is deliberately the weakest of the three signals. It cannot distinguish "1,000 messages
+  # arriving and draining fine" from "one message stuck for three days", so it is used only as a
+  # capacity guard. The primary signal is age: is anything being neglected?
+  # ---------------------------------------------------------------------------
+  dlq_alarm_defaults = {
+    dev = {
+      oldest_blocking_seconds   = 900
+      oldest_downstream_seconds = 3600
+      oldest_realtime_seconds   = 300
+      arrival_spike_per_period  = 0
+      backlog_depth             = 0
+    }
+    staging = {
+      oldest_blocking_seconds   = 1800
+      oldest_downstream_seconds = 7200
+      oldest_realtime_seconds   = 600
+      arrival_spike_per_period  = 10
+      backlog_depth             = 200
+    }
+    prod = {
+      # Same-business-day notice for a blocking stage; 4h for downstream; 15m for ingress.
+      oldest_blocking_seconds   = 3600
+      oldest_downstream_seconds = 14400
+      oldest_realtime_seconds   = 900
+      # ~20 arrivals/stage/day is ~0.07 per 5-minute period, so 50 is a burst rather than routine
+      # failure. Replace with a CloudWatch anomaly-detection band once ~2 weeks of real baseline
+      # exists — a static number will drift as tenants onboard.
+      arrival_spike_per_period = 50
+      # ~100 days of normal accumulation: means triage has stopped, or something systemic.
+      backlog_depth = 2000
+    }
+  }
+
+  dlq_alarms = merge(
+    local.dlq_alarm_defaults[var.environment],
+    var.dlq_alarm_overrides,
+  )
+
+  dlq_oldest_seconds = {
+    blocking   = local.dlq_alarms.oldest_blocking_seconds
+    downstream = local.dlq_alarms.oldest_downstream_seconds
+    realtime   = local.dlq_alarms.oldest_realtime_seconds
   }
 }
 
@@ -130,20 +191,29 @@ resource "aws_sqs_queue" "report_distribution" {
 }
 
 # ---------------------------------------------------------------------------
-# Depth alarms. A non-empty stage DLQ is a real failure that has already happened, so the
-# threshold is zero on every stage rather than a tolerance.
+# Three-tier DLQ alarms. Each answers a different operational question, and only the first is an
+# SLO: depth alone conflates arrival rate with drain rate.
+#
+#   1. neglect  — ApproximateAgeOfOldestMessage. "Is anything being ignored?" Self-clears on
+#                 drain, which a depth alarm does not.
+#   2. spike    — NumberOfMessagesSent. "Is the failure rate abnormal right now?"
+#   3. backlog  — ApproximateNumberOfMessagesVisible. "Are we failing to keep up?" Capacity guard.
+#
+# All three use treat_missing_data = "notBreaching": an empty queue publishes no data, and that is
+# the healthy state. This is the opposite of the G6 absence alarms, where silence means a control
+# stopped running and therefore breaches.
 # ---------------------------------------------------------------------------
 
-resource "aws_cloudwatch_metric_alarm" "stage_dlq_depth" {
+resource "aws_cloudwatch_metric_alarm" "stage_dlq_oldest_message" {
   for_each = var.alert_topic_arn == "" ? {} : local.pipeline_stages
 
-  alarm_name          = "EdlStageDlqDepth-${each.key}"
+  alarm_name          = "EdlStageDlqOldestMessage-${each.key}"
   namespace           = "AWS/SQS"
-  metric_name         = "ApproximateNumberOfMessagesVisible"
+  metric_name         = "ApproximateAgeOfOldestMessage"
   statistic           = "Maximum"
   period              = 300
-  evaluation_periods  = 1
-  threshold           = 0
+  evaluation_periods  = 2
+  threshold           = local.dlq_oldest_seconds[each.value.latency_class]
   comparison_operator = "GreaterThanThreshold"
   treat_missing_data  = "notBreaching"
 
@@ -152,13 +222,73 @@ resource "aws_cloudwatch_metric_alarm" "stage_dlq_depth" {
   }
 
   alarm_description = join(" ", [
-    "The ${each.key} stage DLQ is non-empty. Replay from this stage rather than re-running the",
-    "whole pipeline — that is what the per-stage queue exists for.",
+    "A ${each.key} failure has sat in its DLQ past the",
+    "${each.value.latency_class} neglect threshold",
+    "(${local.dlq_oldest_seconds[each.value.latency_class]}s).",
+    "Replay from this stage rather than re-running the whole pipeline.",
+  ])
+
+  alarm_actions = [var.alert_topic_arn]
+  ok_actions    = [var.alert_topic_arn]
+
+  tags = merge(var.tags, { Stage = each.key, Purpose = "stage-dlq-neglect" })
+}
+
+resource "aws_cloudwatch_metric_alarm" "stage_dlq_arrival_spike" {
+  for_each = var.alert_topic_arn == "" ? {} : local.pipeline_stages
+
+  alarm_name          = "EdlStageDlqArrivalSpike-${each.key}"
+  namespace           = "AWS/SQS"
+  metric_name         = "NumberOfMessagesSent"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = local.dlq_alarms.arrival_spike_per_period
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.stage_dlq[each.key].name
+  }
+
+  alarm_description = join(" ", [
+    "More than ${local.dlq_alarms.arrival_spike_per_period} ${each.key} failures arrived in five",
+    "minutes. This is a burst, not routine failure — suspect a bad deploy, an expired credential,",
+    "or one tenant's source being down. Check the TenantCode dimension before treating it as a",
+    "platform incident.",
   ])
 
   alarm_actions = [var.alert_topic_arn]
 
-  tags = merge(var.tags, { Stage = each.key, Purpose = "stage-dlq-depth" })
+  tags = merge(var.tags, { Stage = each.key, Purpose = "stage-dlq-arrival-rate" })
+}
+
+resource "aws_cloudwatch_metric_alarm" "stage_dlq_backlog" {
+  for_each = var.alert_topic_arn == "" ? {} : local.pipeline_stages
+
+  alarm_name          = "EdlStageDlqBacklog-${each.key}"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = local.dlq_alarms.backlog_depth
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.stage_dlq[each.key].name
+  }
+
+  alarm_description = join(" ", [
+    "The ${each.key} DLQ holds more than ${local.dlq_alarms.backlog_depth} messages. Capacity",
+    "guard, not an SLO — either triage has stopped or failures are arriving faster than they are",
+    "being cleared.",
+  ])
+
+  alarm_actions = [var.alert_topic_arn]
+
+  tags = merge(var.tags, { Stage = each.key, Purpose = "stage-dlq-backlog" })
 }
 
 resource "aws_cloudwatch_metric_alarm" "replay_exhausted_depth" {
