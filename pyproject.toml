@@ -127,6 +127,7 @@ known-first-party = [
     "data_quality",
     "workflow_automation",
     "portability",
+    "persistence",
 ]
 
 # ---------------------------------------------------------------------------
@@ -223,6 +224,7 @@ testpaths = [
     "data_quality/tests",
     "workflow_automation/tests",
     "portability/tests",
+    "persistence/tests",
     "tests",
 ]
 addopts = "--cov --cov-report=term-missing --cov-fail-under=80 -v"
@@ -250,6 +252,7 @@ source = [
     "data_quality",
     "workflow_automation",
     "portability",
+    "persistence",
 ]
 
 [tool.coverage.report]

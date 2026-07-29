@@ -44,6 +44,7 @@ GUARDED_PACKAGES: Final[tuple[str, ...]] = (
     "knowledge",
     "observability",
     "orchestration",
+    "persistence",
     "portability",
     "processing_engine",
     "schema_management",

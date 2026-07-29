@@ -27,6 +27,7 @@ from governance.data_classification_policy import (
     EntityClassificationPolicy,
 )
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import DEFAULT_PAGE_SIZE, Page, fetch_page, iter_items
 
 _logger = get_platform_logger(__name__)
 
@@ -197,50 +198,53 @@ class DataQualityExceptionRepository:
         """
         Every exception recorded for one run.
 
-        Paginated: a single `query` stops at DynamoDB's 1 MB page, and a partial list here is
-        indistinguishable from a clean run. A run with many violations would have reported only
-        the first page, and any caller deciding whether to promote on that basis would fail open.
+        Drains every page. A single `query` stops at DynamoDB's 1 MB limit, and a partial list is
+        indistinguishable from a clean run — any caller deciding whether to promote on that basis
+        would fail open. Bounded in practice by the run, not by the tenant's history.
         """
         tenant_code = validate_tenant_code(tenant_code)
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": "tenant_code = :tc AND begins_with(exception_key, :run)",
-            "ExpressionAttributeValues": {":tc": tenant_code, ":run": f"{run_id}#"},
-        }
-        records: list[dict[str, Any]] = []
-        while True:
-            response = self._table.query(**query_kwargs)
-            records.extend(dict(item) for item in response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
-        return records
+        return list(
+            iter_items(
+                self._table,
+                KeyConditionExpression=("tenant_code = :tc AND begins_with(exception_key, :run)"),
+                ExpressionAttributeValues={":tc": tenant_code, ":run": f"{run_id}#"},
+            )
+        )
 
-    def list_open(self, tenant_code: str) -> list[dict[str, Any]]:
-        """Open findings, for the operations dashboard and the triage inbox."""
+    def list_open(
+        self,
+        tenant_code: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        start_key: dict[str, Any] | None = None,
+    ) -> Page:
+        """
+        One page of open findings, for the operations dashboard and the triage inbox.
+
+        Returns a `Page`, not a list. This used to drain the tenant's entire exception history and
+        filter states in Python — and because the table's TTL is deliberately disabled to preserve
+        audit evidence, that history grows with data volume rather than with run count. At the
+        12-month target (see docs/SCALE_AND_DLQ_THRESHOLDS.md) that is a Lambda OOM waiting to
+        happen on a dashboard load.
+
+        Filtering server-side via `FilterExpression` means a page can come back empty while more
+        pages remain, so callers must follow `next_key` and never treat an empty page as the end.
+        """
         tenant_code = validate_tenant_code(tenant_code)
-        open_states = {
+        open_states = (
             ResolutionState.OPEN.value,
             ResolutionState.ASSIGNED.value,
             ResolutionState.IN_PROGRESS.value,
-        }
-        records: list[dict[str, Any]] = []
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": "tenant_code = :tc",
-            "ExpressionAttributeValues": {":tc": tenant_code},
-        }
-        while True:
-            response = self._table.query(**query_kwargs)
-            records.extend(
-                dict(item)
-                for item in response.get("Items", [])
-                if str(item.get("resolution_state")) in open_states
-            )
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
-        return records
+        )
+        placeholders = {f":s{index}": state for index, state in enumerate(open_states)}
+        return fetch_page(
+            self._table,
+            limit=limit,
+            start_key=start_key,
+            KeyConditionExpression="tenant_code = :tc",
+            FilterExpression=f"resolution_state IN ({', '.join(placeholders)})",
+            ExpressionAttributeValues={":tc": tenant_code, **placeholders},
+        )
 
     # `blocking_exceptions()` was removed on 2026-07-29. Its docstring called it "the input to
     # the promotion gate" and it had no production caller — only a unit test, which made dead

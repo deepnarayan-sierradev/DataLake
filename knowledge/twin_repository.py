@@ -20,6 +20,7 @@ from boto3.dynamodb.conditions import Key
 from contracts.identifier_policy import ENTITY_TYPE_PATTERN, validate_tenant_code
 from knowledge.twin import Twin, TwinEdge
 from observability.structured_logger import get_platform_logger
+from persistence.dynamodb_paging import DEFAULT_PAGE_SIZE, fetch_page, iter_items
 
 _logger = get_platform_logger(__name__)
 _DYNAMODB_TABLE_NAME = "EdlTwinIndex"
@@ -80,22 +81,47 @@ class TwinRepository:
         return self._to_twin(item)
 
     def list_twins(self, tenant_code: str, entity_type: str) -> list[Twin]:
+        """Every twin of one entity type. Drains all pages; for internal callers only."""
         validate_tenant_code(tenant_code)
         if not ENTITY_TYPE_PATTERN.match(entity_type):
             raise ValueError(f"Invalid entity_type {entity_type!r}.")
-        twins: list[Twin] = []
-        kwargs: dict[str, Any] = {
-            "KeyConditionExpression": Key("tenant_code").eq(tenant_code)
-            & Key("sk").begins_with(f"{entity_type}#")
-        }
-        while True:
-            response = self._table.query(**kwargs)
-            twins.extend(self._to_twin(item) for item in response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            kwargs["ExclusiveStartKey"] = last_key
-        return twins
+        return [
+            self._to_twin(item)
+            for item in iter_items(
+                self._table,
+                KeyConditionExpression=(
+                    Key("tenant_code").eq(tenant_code) & Key("sk").begins_with(f"{entity_type}#")
+                ),
+            )
+        ]
+
+    def page_twins(
+        self,
+        tenant_code: str,
+        entity_type: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        start_key: dict[str, Any] | None = None,
+    ) -> tuple[list[Twin], dict[str, Any] | None]:
+        """
+        One bounded page of twins plus the cursor to continue from.
+
+        Request-serving callers must use this rather than `list_twins`: the API previously drained
+        every twin for the entity type on every request and sliced the result, so page 50 cost
+        exactly as much as page 1.
+        """
+        validate_tenant_code(tenant_code)
+        if not ENTITY_TYPE_PATTERN.match(entity_type):
+            raise ValueError(f"Invalid entity_type {entity_type!r}.")
+        page = fetch_page(
+            self._table,
+            limit=limit,
+            start_key=start_key,
+            KeyConditionExpression=(
+                Key("tenant_code").eq(tenant_code) & Key("sk").begins_with(f"{entity_type}#")
+            ),
+        )
+        return [self._to_twin(item) for item in page.items], page.next_key
 
     @staticmethod
     def _to_twin(item: dict[str, Any]) -> Twin:

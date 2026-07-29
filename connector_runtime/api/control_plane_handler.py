@@ -762,34 +762,50 @@ def _run_query(service: SemanticQueryService, request: SemanticQueryRequest) -> 
     return {"sql": result.sql, "rows": result.rows, "row_count": len(result.rows)}
 
 
-def _page_offset(event: dict[str, Any]) -> int:
+def _decode_page_token(event: dict[str, Any], tenant_code: str) -> dict[str, Any] | None:
     """
-    Decode the caller's continuation token to a row offset (S12).
+    Decode the caller's continuation token into a DynamoDB exclusive-start key (F7).
 
-    Opaque and validated: a caller must not be able to send an arbitrary offset that would make
-    the response's `total_visible` inconsistent, and a malformed token is a 400 rather than a
-    silent restart from zero — restarting silently would loop a paginating client forever.
+    This carried a row *offset* until 2026-07-29, which made every page cost the same as the first:
+    the handler re-read the whole result set and sliced it. It was also unstable — a row inserted
+    or resolved between requests shifted the offset, silently skipping or duplicating rows.
+
+    Security (OWASP A01): the token now carries a key, so a caller could craft one naming another
+    tenant's partition. The `KeyConditionExpression` already pins `tenant_code`, but relying on
+    that implicitly is how the twin filter came to read a field that did not exist — so the key's
+    own `tenant_code` is checked here, and a mismatch is a 400 rather than a silent empty page.
+
+    A malformed token is a 400, never a silent restart from zero: restarting silently would loop a
+    paginating client forever.
     """
     raw = str((event.get("queryStringParameters") or {}).get("next_token") or "")
     if not raw:
-        return 0
+        return None
     try:
         decoded = base64.urlsafe_b64decode(raw.encode("ascii")).decode("ascii")
         # The prefix must be present: `removeprefix` is a no-op when it is absent, which would
-        # accept a hand-written bare integer and defeat the point of an opaque cursor.
+        # accept a hand-written payload and defeat the point of an opaque cursor.
         if not decoded.startswith(_PAGE_TOKEN_PREFIX):
             raise ValueError("token is missing its marker")
-        offset = int(decoded[len(_PAGE_TOKEN_PREFIX) :])
-    except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+        key = json.loads(decoded[len(_PAGE_TOKEN_PREFIX) :])
+    except (ValueError, UnicodeDecodeError, binascii.Error, json.JSONDecodeError) as exc:
         raise ValidationFailedError("next_token is not a valid continuation token.") from exc
-    if offset < 0:
+
+    if not isinstance(key, dict) or not key:
         raise ValidationFailedError("next_token is not a valid continuation token.")
-    return offset
+    token_tenant = key.get("tenant_code")
+    if token_tenant is not None and str(token_tenant) != tenant_code:
+        record_platform_metric(PlatformMetric.CROSS_TENANT_ACCESS_ATTEMPTS)
+        raise ValidationFailedError("next_token does not belong to this tenant.")
+    return {str(name): value for name, value in key.items()}
 
 
-def _encode_page_token(offset: int) -> str:
-    """Encode a row offset as an opaque continuation token."""
-    return base64.urlsafe_b64encode(f"{_PAGE_TOKEN_PREFIX}{offset}".encode("ascii")).decode("ascii")
+def _encode_page_token(next_key: dict[str, Any] | None) -> str | None:
+    """Encode a DynamoDB exclusive-start key as an opaque continuation token."""
+    if not next_key:
+        return None
+    payload = f"{_PAGE_TOKEN_PREFIX}{json.dumps(next_key, sort_keys=True, default=str)}"
+    return base64.urlsafe_b64encode(payload.encode("ascii")).decode("ascii")
 
 
 def _handle_get_twin(
@@ -818,36 +834,32 @@ def _handle_get_twin(
 def _handle_list_twins(
     event: dict[str, Any], path_tenant_code: str, entity_type: str
 ) -> dict[str, Any]:
-    """GET /tenants/{tenant_code}/twins/{entity_type} — twins for an entity type (capped)."""
+    """GET /tenants/{tenant_code}/twins/{entity_type} — one page of twins for an entity type."""
     tenant_code = _authorize_path_tenant(event, path_tenant_code)
     if not ENTITY_TYPE_PATTERN.match(entity_type):
         raise ValidationFailedError(f"entity_type {entity_type!r} is not valid.")
-    # DL-SCOPE-13: the fan-out itself discloses existence, so the listing is filtered by the
-    # caller's scope units before pagination — never after.
+    # DL-SCOPE-13: the fan-out itself discloses existence, so the page is filtered by the caller's
+    # scope units before it is returned — never after.
     predicate = _scope_predicate_for(event, tenant_code, ConsumptionSurface.TWIN_TRAVERSAL)
-    visible = [
-        twin
-        for twin in _twin_repository().list_twins(tenant_code, entity_type)
-        if predicate.matches(twin.scope_unit_id)
-    ]
-    # A silent truncation is indistinguishable from a complete list, so a caller building a
-    # dashboard on it under-reports without knowing (S12). The token says there is more.
-    offset = _page_offset(event)
-    twins = visible[offset : offset + _MAX_TWINS_LISTED]
-    next_token = (
-        _encode_page_token(offset + _MAX_TWINS_LISTED)
-        if offset + _MAX_TWINS_LISTED < len(visible)
-        else None
+    twins, next_key = _twin_repository().page_twins(
+        tenant_code,
+        entity_type,
+        limit=_MAX_TWINS_LISTED,
+        start_key=_decode_page_token(event, tenant_code),
     )
+    visible = [twin for twin in twins if predicate.matches(twin.scope_unit_id)]
     return _response(
         200,
         {
             "tenant_code": tenant_code,
             "entity_type": entity_type,
-            "twins": [_twin_to_dict(twin, predicate) for twin in twins],
-            "count": len(twins),
-            "total_visible": len(visible),
-            "next_token": next_token,
+            "twins": [_twin_to_dict(twin, predicate) for twin in visible],
+            "count": len(visible),
+            # `total_visible` is deliberately gone: reporting a total requires draining every page,
+            # which is the unbounded read this change removes. A page can also be entirely filtered
+            # out by scope while more pages remain, so follow `next_token`, never `count`.
+            "hidden_by_scope": len(twins) - len(visible),
+            "next_token": _encode_page_token(next_key),
         },
     )
 
@@ -1246,29 +1258,36 @@ def _handle_list_quality_exceptions(event: dict[str, Any], path_tenant: str) -> 
 
     Open findings only by default. The store had no reader at all before this route existed, so
     every exception the pipeline recorded was invisible to the operator expected to act on it.
+
+    Two different reads on purpose: a run-scoped request is bounded by the run and drains, while
+    the open-findings inbox is bounded by a cursor — the exception table has its TTL deliberately
+    disabled to preserve audit evidence, so its history grows with data volume and cannot be read
+    whole.
     """
     tenant_code = _authorize_path_tenant(event, path_tenant)
     repository = DataQualityExceptionRepository(environment=_environment(), region_name=_region())
     run_id = str((event.get("queryStringParameters") or {}).get("run_id") or "")
-    records = (
-        repository.list_for_run(tenant_code, run_id)
-        if run_id
-        else repository.list_open(tenant_code)
-    )
+
+    if run_id:
+        records = repository.list_for_run(tenant_code, run_id)
+        next_token = None
+    else:
+        page = repository.list_open(
+            tenant_code,
+            limit=_MAX_EXCEPTIONS_LISTED,
+            start_key=_decode_page_token(event, tenant_code),
+        )
+        records = page.items
+        next_token = _encode_page_token(page.next_key)
+
     return _response(
         200,
         {
             "tenant_code": tenant_code,
             "scope": "run" if run_id else "open",
-            "exceptions": records[
-                _page_offset(event) : _page_offset(event) + _MAX_EXCEPTIONS_LISTED
-            ],
-            "total_open": len(records),
-            "next_token": (
-                _encode_page_token(_page_offset(event) + _MAX_EXCEPTIONS_LISTED)
-                if _page_offset(event) + _MAX_EXCEPTIONS_LISTED < len(records)
-                else None
-            ),
+            "exceptions": records,
+            "count": len(records),
+            "next_token": next_token,
         },
     )
 

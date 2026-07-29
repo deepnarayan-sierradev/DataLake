@@ -467,9 +467,9 @@ class TestExceptionRepository:
     def test_open_listing_excludes_terminal_states(self):
         repository = self._repository()
         key = repository.record(self._exception())
-        assert len(repository.list_open("evive")) == 1
+        assert len(repository.list_open("evive").items) == 1
         repository.transition("evive", key, ResolutionState.RESOLVED, resolution_note="fixed")
-        assert repository.list_open("evive") == []
+        assert repository.list_open("evive").items == []
 
     def test_terminal_transition_requires_a_note(self):
         repository = self._repository()
@@ -481,7 +481,7 @@ class TestExceptionRepository:
         repository = self._repository()
         key = repository.record(self._exception())
         repository.transition("evive", key, ResolutionState.ASSIGNED, assignee="ops@example.test")
-        assert repository.list_open("evive")[0]["assignee"] == "ops@example.test"
+        assert repository.list_open("evive").items[0]["assignee"] == "ops@example.test"
 
 
 @mock_aws
