@@ -53,16 +53,12 @@ Required Lambda environment variables:
 
 from __future__ import annotations
 
-import base64
-import binascii
-import dataclasses
 import json
 import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
-from decimal import Decimal
+from datetime import UTC, datetime
 from typing import Any, Final
 
 import boto3
@@ -73,27 +69,13 @@ from pydantic import ValidationError as PydanticValidationError
 
 import processing_engine.engines.duckdb_engine  # noqa: F401  (registers "duckdb")
 from analytics_publisher.analytics_location import latest_partition_uri
-from config_propagation.capability import ConfigCapability
-from config_propagation.config_rollback import (
-    ConfigGovernanceService,
-    MakerCheckerViolationError,
-    RollbackRequest,
-)
-from config_propagation.effective_config_repository import EffectiveConfigRepository
-from config_propagation.restatement_repository import RestatementRepository
 from connector_runtime.api.config_governance_routes import (
     ConfigRoute,
-    ConfigRouteError,
-    ReprocessRequestParams,
-    RollbackRequestParams,
     build_config_routes,
     match_config_route,
-    parse_capability,
-    parse_entity_key,
 )
 from connector_runtime.api.errors import (
     ApiError,
-    AuthenticationError,
     AuthorizationError,
     ConflictError,
     NotFoundError,
@@ -103,6 +85,72 @@ from connector_runtime.api.models import (
     PipelineTriggerRequest,
     SavedQueryCreateBody,
     SemanticQueryBody,
+)
+from connector_runtime.api.request_context import (
+    authenticated_user as _authenticated_user,
+)
+from connector_runtime.api.request_context import (
+    authorize_path_tenant as _authorize_path_tenant,
+)
+from connector_runtime.api.request_context import (
+    decode_page_token as _decode_page_token,
+)
+from connector_runtime.api.request_context import (
+    encode_page_token as _encode_page_token,
+)
+from connector_runtime.api.request_context import (
+    environment as _environment,
+)
+from connector_runtime.api.request_context import (
+    error_response as _error_response,
+)
+from connector_runtime.api.request_context import (
+    granted_access_tags as _granted_access_tags,
+)
+from connector_runtime.api.request_context import (
+    json_response as _response,
+)
+from connector_runtime.api.request_context import (
+    parse_json_body as _parse_json_body,
+)
+from connector_runtime.api.request_context import (
+    region as _region,
+)
+from connector_runtime.api.request_context import (
+    scope_predicate_for as _scope_predicate_for,
+)
+from connector_runtime.api.routes.governance import (
+    handle_active_model as _handle_active_model,
+)
+from connector_runtime.api.routes.governance import (
+    handle_config_reprocess as _handle_config_reprocess,
+)
+from connector_runtime.api.routes.governance import (
+    handle_config_rollback as _handle_config_rollback,
+)
+from connector_runtime.api.routes.governance import (
+    handle_get_effective_config as _handle_get_effective_config,
+)
+from connector_runtime.api.routes.governance import (
+    handle_list_effective_config as _handle_list_effective_config,
+)
+from connector_runtime.api.routes.governance import (
+    handle_list_model_versions as _handle_list_model_versions,
+)
+from connector_runtime.api.routes.governance import (
+    handle_list_restatements as _handle_list_restatements,
+)
+from connector_runtime.api.routes.governance import (
+    handle_metric_lineage as _handle_metric_lineage,
+)
+from connector_runtime.api.routes.governance import (
+    load_active_model as _load_active_model,
+)
+from connector_runtime.api.routes.operations import (
+    handle_list_quality_exceptions as _handle_list_quality_exceptions,
+)
+from connector_runtime.api.routes.operations import (
+    handle_onboard_serving_entity as _handle_onboard_serving_entity,
 )
 from connector_runtime.configuration_repository.configuration_repository import (
     ConfigurationAlreadyExistsError,
@@ -115,21 +163,11 @@ from contracts.identifier_policy import (
     RUN_ID_PATTERN,
     STABLE_ID_PATTERN,
     validate_run_id,
-    validate_tenant_code,
-)
-from contracts.platform_metrics import PlatformMetric
-from contracts.serving_store_config_contract import ServingStoreLoadConfig
-from data_quality.exception_repository import DataQualityExceptionRepository
-from entity_resolution.resolution_config.resolution_config_registry import (
-    ResolutionConfigRegistry,
 )
 from knowledge.twin_repository import TwinNotFoundError, TwinRepository
 from observability.lambda_runtime import require_env
-from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from processing_engine.registry import set_based_engine_registry
-from semantic.metric_lineage import metric_lineage
-from semantic.model_governance import SemanticModelGovernance
 from semantic.query_compiler import (
     AccessDeniedError,
     SemanticQueryError,
@@ -139,19 +177,13 @@ from semantic.saved_query import SavedQuery
 from semantic.saved_query_repository import SavedQueryNotFoundError, SavedQueryRepository
 from semantic.semantic_model import SemanticModel
 from semantic.semantic_model_repository import (
-    SemanticModelNotFoundError,
     SemanticModelRepository,
 )
 from semantic.semantic_query_service import SemanticQueryService
-from serving_store.serving_store_config_repository import ServingStoreConfigRepositoryClient
 from tenancy.scope_predicate import (
     ConsumptionSurface,
-    EmptyScopeDenialError,
     ScopePredicate,
-    build_scope_claims,
-    scope_predicate,
 )
-from tenancy.scope_unit_repository import ScopeUnitRepository
 
 _logger = get_platform_logger(__name__)
 
@@ -167,19 +199,6 @@ _AUDIT_TENANT_INDEX: Final[str] = "tenant-started-index"
 # Per-container cache of GSI presence, keyed by table name — `describe_table` on every listing
 # would add a round trip to the path the index exists to make cheaper.
 _INDEX_PRESENCE: dict[str, bool] = {}
-
-
-# ---------------------------------------------------------------------------
-# Environment / client helpers
-# ---------------------------------------------------------------------------
-
-
-def _region() -> str:
-    return os.environ.get("AWS_REGION", "us-east-1")
-
-
-def _environment() -> str:
-    return require_env("PLATFORM_ENVIRONMENT")
 
 
 def _entity_type_registry_table() -> Any:
@@ -198,113 +217,6 @@ def _configuration_repository() -> ConfigurationRepositoryClient:
     return ConfigurationRepositoryClient(
         environment=_environment(), region_name=_region(), backend=ConfigurationBackend.DYNAMODB
     )
-
-
-# ---------------------------------------------------------------------------
-# Authentication / authorization (OWASP A01)
-# ---------------------------------------------------------------------------
-
-
-def _extract_claims(event: dict[str, Any]) -> dict[str, Any] | None:
-    """
-    Extract the authorizer claims dict from an API Gateway proxy event.
-
-    Checks both plausible shapes so this works regardless of which API
-    Gateway / authorizer combination fronts the Lambda:
-      - REST API / HTTP API (payload format 1.0) + Cognito User Pools
-        authorizer: requestContext.authorizer.claims
-      - HTTP API (payload format 2.0) + JWT authorizer:
-        requestContext.authorizer.jwt.claims
-    """
-    authorizer = (event.get("requestContext") or {}).get("authorizer") or {}
-    claims = authorizer.get("claims")
-    if isinstance(claims, dict):
-        return claims
-    jwt_claims = (authorizer.get("jwt") or {}).get("claims")
-    if isinstance(jwt_claims, dict):
-        return jwt_claims
-    return None
-
-
-def _authenticated_tenant_code(event: dict[str, Any]) -> str:
-    """
-    Extract and validate the authenticated tenant_code from the authorizer context.
-
-    Fails closed: absence of authorizer claims (Cognito authorizer not wired
-    up, or a local/manual invocation) is always rejected with 401 — the
-    `{tenant_code}` path parameter is NEVER trusted as a fallback.
-    """
-    claims = _extract_claims(event)
-    if not claims:
-        record_platform_metric(PlatformMetric.AUTHENTICATION_FAILURES)
-        raise AuthenticationError(
-            "Request is missing authenticated identity context. This API requires "
-            "a valid authenticated request."
-        )
-    tenant_claim = claims.get("custom:tenant_code") or claims.get("tenant_code")
-    if not tenant_claim:
-        record_platform_metric(PlatformMetric.AUTHENTICATION_FAILURES)
-        raise AuthenticationError("Authenticated identity does not carry a tenant_code claim.")
-    return validate_tenant_code(str(tenant_claim))
-
-
-def _authorize_path_tenant(event: dict[str, Any], path_tenant_code: str) -> str:
-    """Validate path_tenant_code's format and cross-check it against the authenticated tenant."""
-    tenant_code = validate_tenant_code(path_tenant_code)
-    authenticated = _authenticated_tenant_code(event)
-    if authenticated != tenant_code:
-        # A caller reaching for another tenant's path is a cross-tenant attempt whether the
-        # cause is a bug or an attack, so it pages either way.
-        record_platform_metric(PlatformMetric.CROSS_TENANT_ACCESS_ATTEMPTS)
-        record_platform_metric(PlatformMetric.AUTHORIZATION_DENIALS, 1.0, Capability="tenant_path")
-        raise AuthorizationError(
-            "Authenticated tenant is not permitted to access this tenant_code path."
-        )
-    # Bound only after the claim is verified, so a rejected request never stamps its logs with a
-    # tenant it was not entitled to name.
-    structlog.contextvars.bind_contextvars(tenant_code=tenant_code)
-    return tenant_code
-
-
-# ---------------------------------------------------------------------------
-# Response helpers
-# ---------------------------------------------------------------------------
-
-
-def _json_default(value: Any) -> Any:
-    """
-    json.dumps default= hook: DynamoDB numeric attributes deserialize as
-    decimal.Decimal via the boto3 resource API, which the stdlib json module
-    cannot serialize natively.
-    """
-    if isinstance(value, Decimal):
-        return int(value) if value == value.to_integral_value() else float(value)
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
-
-
-def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body, separators=(",", ":"), default=_json_default),
-    }
-
-
-def _error_response(exc: ApiError) -> dict[str, Any]:
-    return _response(exc.status_code, {"error": exc.message})
-
-
-def _parse_json_body(event: dict[str, Any]) -> dict[str, Any]:
-    body_str = event.get("body") or "{}"
-    try:
-        parsed = json.loads(body_str)
-    except json.JSONDecodeError as exc:
-        raise ValidationFailedError("Request body is not valid JSON.") from exc
-    if not isinstance(parsed, dict):
-        raise ValidationFailedError("Request body must be a JSON object.")
-    return parsed
 
 
 # ---------------------------------------------------------------------------
@@ -612,8 +524,6 @@ _MAX_TWINS_LISTED: Final[int] = 200
 # Triage is a working list, not an export: an operator cannot act on thousands at once, and the
 # response says when it truncated rather than implying completeness.
 _MAX_EXCEPTIONS_LISTED: Final[int] = 200
-# Prefix makes a token recognisable in a log line and stops a bare integer from being accepted.
-_PAGE_TOKEN_PREFIX: Final[str] = "edl-page:"  # noqa: S105 — a page marker, not a secret
 
 
 def _twin_repository() -> TwinRepository:
@@ -626,67 +536,6 @@ def _saved_query_repository() -> SavedQueryRepository:
 
 def _semantic_model_repository() -> SemanticModelRepository:
     return SemanticModelRepository(region_name=_region())
-
-
-def _authenticated_user(event: dict[str, Any]) -> str:
-    claims = _extract_claims(event) or {}
-    return str(
-        claims.get("sub") or claims.get("email") or claims.get("cognito:username") or "unknown"
-    )
-
-
-def _granted_access_tags(event: dict[str, Any]) -> frozenset[str]:
-    # OWASP A01: data-level access tags come from verified authorizer claims, never the body.
-    claims = _extract_claims(event) or {}
-    raw = str(claims.get("custom:access_tags") or claims.get("access_tags") or "")
-    return frozenset(tag.strip() for tag in raw.split(",") if tag.strip())
-
-
-def _granted_scope_units(event: dict[str, Any]) -> frozenset[str]:
-    """
-    Scope units this caller was granted, from the verified claim only (OWASP A01).
-
-    Never read from the body or a query string: the whole point of DL-12 is that the caller
-    cannot choose which franchisee's data it sees.
-    """
-    claims = _extract_claims(event) or {}
-    raw = str(claims.get("custom:scope_units") or claims.get("scope_units") or "")
-    return frozenset(unit.strip().lower() for unit in raw.split(",") if unit.strip())
-
-
-def _claims_grant_tenant_wide(event: dict[str, Any]) -> bool:
-    """A tenant-wide grant is explicit; absence of scope units is never read as "everything"."""
-    claims = _extract_claims(event) or {}
-    raw = str(claims.get("custom:scope_tenant_wide") or claims.get("scope_tenant_wide") or "")
-    return raw.strip().lower() in {"1", "true", "yes"}
-
-
-def _scope_predicate_for(
-    event: dict[str, Any], tenant_code: str, surface: ConsumptionSurface
-) -> ScopePredicate:
-    """
-    Build the row filter for this caller on this surface (DL-SCOPE-14).
-
-    One builder, used by every read path in this handler. An empty grant raises
-    `EmptyScopeDenialError`, which `_error_response` renders as 403 — never as "no filter".
-    """
-    repository = ScopeUnitRepository(environment=_environment(), region_name=_region())
-    profile = repository.get_partition_profile(tenant_code)
-    claims = build_scope_claims(
-        tenant_code,
-        profile,
-        granted_scope_unit_ids=_granted_scope_units(event),
-        tenant_wide=_claims_grant_tenant_wide(event),
-        units=repository.list_scope_units(tenant_code),
-    )
-    try:
-        return scope_predicate(claims, surface=surface)
-    except EmptyScopeDenialError as exc:
-        # Empty grant means deny, and the caller is told so — a 500 here would read as an
-        # outage and invite a retry loop against a decision that will not change.
-        raise AuthorizationError(
-            "Your access grant names no scope units, so no rows are visible."
-        ) from exc
 
 
 def _twin_to_dict(twin: Any, predicate: ScopePredicate) -> dict[str, Any]:
@@ -721,13 +570,6 @@ def _saved_query_to_dict(saved_query: Any) -> dict[str, Any]:
     }
 
 
-def _load_active_model(tenant_code: str) -> SemanticModel:
-    try:
-        return _semantic_model_repository().load_active(tenant_code)
-    except SemanticModelNotFoundError as exc:
-        raise NotFoundError("No active semantic model is published for this tenant.") from exc
-
-
 def _semantic_query_service(
     event: dict[str, Any], tenant_code: str, model: SemanticModel
 ) -> SemanticQueryService:
@@ -760,52 +602,6 @@ def _run_query(service: SemanticQueryService, request: SemanticQueryRequest) -> 
     except SemanticQueryError as exc:
         raise ValidationFailedError(str(exc)) from exc
     return {"sql": result.sql, "rows": result.rows, "row_count": len(result.rows)}
-
-
-def _decode_page_token(event: dict[str, Any], tenant_code: str) -> dict[str, Any] | None:
-    """
-    Decode the caller's continuation token into a DynamoDB exclusive-start key (F7).
-
-    This carried a row *offset* until 2026-07-29, which made every page cost the same as the first:
-    the handler re-read the whole result set and sliced it. It was also unstable — a row inserted
-    or resolved between requests shifted the offset, silently skipping or duplicating rows.
-
-    Security (OWASP A01): the token now carries a key, so a caller could craft one naming another
-    tenant's partition. The `KeyConditionExpression` already pins `tenant_code`, but relying on
-    that implicitly is how the twin filter came to read a field that did not exist — so the key's
-    own `tenant_code` is checked here, and a mismatch is a 400 rather than a silent empty page.
-
-    A malformed token is a 400, never a silent restart from zero: restarting silently would loop a
-    paginating client forever.
-    """
-    raw = str((event.get("queryStringParameters") or {}).get("next_token") or "")
-    if not raw:
-        return None
-    try:
-        decoded = base64.urlsafe_b64decode(raw.encode("ascii")).decode("ascii")
-        # The prefix must be present: `removeprefix` is a no-op when it is absent, which would
-        # accept a hand-written payload and defeat the point of an opaque cursor.
-        if not decoded.startswith(_PAGE_TOKEN_PREFIX):
-            raise ValueError("token is missing its marker")
-        key = json.loads(decoded[len(_PAGE_TOKEN_PREFIX) :])
-    except (ValueError, UnicodeDecodeError, binascii.Error, json.JSONDecodeError) as exc:
-        raise ValidationFailedError("next_token is not a valid continuation token.") from exc
-
-    if not isinstance(key, dict) or not key:
-        raise ValidationFailedError("next_token is not a valid continuation token.")
-    token_tenant = key.get("tenant_code")
-    if token_tenant is not None and str(token_tenant) != tenant_code:
-        record_platform_metric(PlatformMetric.CROSS_TENANT_ACCESS_ATTEMPTS)
-        raise ValidationFailedError("next_token does not belong to this tenant.")
-    return {str(name): value for name, value in key.items()}
-
-
-def _encode_page_token(next_key: dict[str, Any] | None) -> str | None:
-    """Encode a DynamoDB exclusive-start key as an opaque continuation token."""
-    if not next_key:
-        return None
-    payload = f"{_PAGE_TOKEN_PREFIX}{json.dumps(next_key, sort_keys=True, default=str)}"
-    return base64.urlsafe_b64encode(payload.encode("ascii")).decode("ascii")
 
 
 def _handle_get_twin(
@@ -988,138 +784,6 @@ class _Route:
 # ---------------------------------------------------------------------------
 
 
-def _effective_config_repository() -> EffectiveConfigRepository:
-    return EffectiveConfigRepository(environment=_environment(), region_name=_region())
-
-
-def _handle_list_effective_config(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
-    """GET /tenants/{t}/config/effective — every capability's in-effect version."""
-    tenant_code = _authorize_path_tenant(event, path_tenant)
-    records = _effective_config_repository().list_effective(tenant_code)
-    return _response(200, {"tenant_code": tenant_code, "effective": records})
-
-
-def _handle_get_effective_config(
-    event: dict[str, Any], path_tenant: str, raw_capability: str, raw_entity: str
-) -> dict[str, Any]:
-    """GET /tenants/{t}/config/effective/{capability}/{entity_key} — one capability."""
-    tenant_code = _authorize_path_tenant(event, path_tenant)
-    try:
-        capability = parse_capability(raw_capability)
-        entity_key = parse_entity_key(raw_entity)
-    except ConfigRouteError as exc:
-        raise ValidationFailedError(str(exc)) from exc
-    repository = _effective_config_repository()
-    record = repository.get_effective(tenant_code, capability, entity_key)
-    if record is None:
-        raise NotFoundError(
-            f"No version of {capability.value!r} has been consumed for {entity_key!r} yet."
-        )
-    return _response(
-        200,
-        {
-            "tenant_code": tenant_code,
-            "effective": record,
-            "propagation_lag_seconds": repository.propagation_lag_seconds(
-                tenant_code, capability, entity_key
-            ),
-        },
-    )
-
-
-def _handle_list_restatements(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
-    """GET /tenants/{t}/config/restatements — why a historical figure changed (DL-CFG-13)."""
-    tenant_code = _authorize_path_tenant(event, path_tenant)
-    events = RestatementRepository(
-        environment=_environment(), region_name=_region()
-    ).list_restatements(tenant_code)
-    return _response(200, {"tenant_code": tenant_code, "restatements": events})
-
-
-def _handle_config_rollback(
-    event: dict[str, Any], path_tenant: str, raw_capability: str, raw_entity: str
-) -> dict[str, Any]:
-    """POST /tenants/{t}/config/{capability}/{entity_key}/rollback — audited, maker-checker."""
-    tenant_code = _authorize_path_tenant(event, path_tenant)
-    body = _parse_json_body(event)
-    try:
-        params = RollbackRequestParams(
-            capability=parse_capability(raw_capability),
-            entity_key=parse_entity_key(raw_entity),
-            target_version=str(body.get("target_version") or ""),
-            requested_by=str(body.get("requested_by") or ""),
-            approved_by=str(body.get("approved_by") or ""),
-        )
-    except ConfigRouteError as exc:
-        # Maker-checker violations surface as 400 rather than 403: the request is malformed
-        # (it names one actor for both roles), not unauthorized.
-        raise ValidationFailedError(str(exc)) from exc
-
-    service = ConfigGovernanceService(
-        environment=_environment(),
-        region_name=_region(),
-        pointer_store=_resolution_pointer_store(),
-    )
-    try:
-        result = service.rollback(
-            RollbackRequest(
-                tenant_code=tenant_code,
-                capability=params.capability,
-                entity_key=params.entity_key,
-                target_version=params.target_version,
-                requested_by=params.requested_by,
-                approved_by=params.approved_by,
-                correlation_id=str(event.get("requestContext", {}).get("requestId", "")),
-            )
-        )
-    except MakerCheckerViolationError as exc:
-        raise ValidationFailedError(str(exc)) from exc
-    except ValueError as exc:
-        raise NotFoundError(str(exc)) from exc
-    return _response(
-        200,
-        {
-            "tenant_code": tenant_code,
-            "rollback_id": result.rollback_id,
-            "previous_version": result.previous_version,
-            "target_version": result.target_version,
-        },
-    )
-
-
-def _handle_metric_lineage(
-    event: dict[str, Any], path_tenant: str, metric_name: str
-) -> dict[str, Any]:
-    """GET /tenants/{t}/semantic/metrics/{metric}/lineage — columns, joins, filters (DL-SEM-10)."""
-    tenant_code = _authorize_path_tenant(event, path_tenant)
-    model = _load_active_model(tenant_code)
-    for entity in model.entities:
-        for metric in entity.metrics:
-            if metric.name == metric_name:
-                return _response(
-                    200,
-                    {
-                        "tenant_code": tenant_code,
-                        "lineage": dataclasses.asdict(
-                            metric_lineage(model, entity.name, metric_name)
-                        ),
-                    },
-                )
-    raise NotFoundError(f"Metric {metric_name!r} is not in the active semantic model.")
-
-
-def _handle_list_model_versions(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
-    """GET /tenants/{t}/semantic/model/versions — publish history and status."""
-    tenant_code = _authorize_path_tenant(event, path_tenant)
-    governance = SemanticModelGovernance(
-        environment=_environment(), region_name=_region(), s3_bucket=_curated_bucket()
-    )
-    return _response(
-        200, {"tenant_code": tenant_code, "versions": governance.list_versions(tenant_code)}
-    )
-
-
-# Intelligence-layer routes kept in a table so _route stays within the complexity gate.
 _INTELLIGENCE_ROUTES: tuple[_Route, ...] = (
     _Route("GET", 5, "twins", None, lambda e, s: _handle_get_twin(e, s[1], s[3], s[4])),
     _Route("GET", 4, "twins", None, lambda e, s: _handle_list_twins(e, s[1], s[3])),
@@ -1143,190 +807,6 @@ _INTELLIGENCE_ROUTES: tuple[_Route, ...] = (
         lambda e, s: _handle_onboard_serving_entity(e, s[1]),
     ),
 )
-
-
-def _curated_bucket() -> str:
-    return require_env("CURATED_S3_BUCKET")
-
-
-def _resolution_pointer_store() -> Any:
-    """
-    Adapt the resolution-config registry to the `PointerStore` protocol a rollback needs.
-
-    Only entity-resolution pointers are rollback-able today, because it is the only capability
-    whose versions this system stores. A rollback naming another capability fails on
-    `version_exists`, which is the correct answer rather than a silent no-op.
-    """
-    registry = ResolutionConfigRegistry(s3_bucket=_curated_bucket(), region_name=_region())
-
-    class _RegistryPointerStore:
-        def read_pointer(self, tenant_code: str, capability: ConfigCapability, key: str) -> str:
-            return registry.resolved_version(tenant_code, key)
-
-        def write_pointer(
-            self, tenant_code: str, capability: ConfigCapability, key: str, version: str
-        ) -> None:
-            registry.repoint_latest(tenant_code, key, version)
-
-        def version_exists(
-            self, tenant_code: str, capability: ConfigCapability, key: str, version: str
-        ) -> bool:
-            return registry.version_exists(tenant_code, key, version)
-
-    return _RegistryPointerStore()
-
-
-def _handle_active_model(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
-    """GET /tenants/{t}/semantic/model — the active model's shape, for the console."""
-    tenant_code = _authorize_path_tenant(event, path_tenant)
-    model = _load_active_model(tenant_code)
-    return _response(
-        200,
-        {
-            "tenant_code": tenant_code,
-            "model_version": model.model_version,
-            "entities": [
-                {
-                    "name": entity.name,
-                    "entity_type": entity.entity_type,
-                    "metrics": [metric.name for metric in entity.metrics],
-                    "dimensions": [dimension.name for dimension in entity.dimensions],
-                }
-                for entity in model.entities
-            ],
-        },
-    )
-
-
-def _handle_config_reprocess(
-    event: dict[str, Any], path_tenant: str, raw_capability: str, raw_entity: str
-) -> dict[str, Any]:
-    """
-    POST /tenants/{t}/config/{capability}/{entity_key}/reprocess — bounded historical replay.
-
-    Validated and recorded here; the replay itself is a pipeline run, so the response returns the
-    accepted window rather than pretending the recompute finished synchronously.
-    """
-    tenant_code = _authorize_path_tenant(event, path_tenant)
-    body = _parse_json_body(event)
-    try:
-        params = ReprocessRequestParams(
-            capability=parse_capability(raw_capability),
-            entity_key=parse_entity_key(raw_entity),
-            window_start=date.fromisoformat(str(body.get("window_start") or "")),
-            window_end=date.fromisoformat(str(body.get("window_end") or "")),
-            reason=str(body.get("reason") or ""),
-            pinned_config_version=str(body.get("pinned_config_version") or ""),
-        )
-    except (ConfigRouteError, ValueError) as exc:
-        raise ValidationFailedError(str(exc)) from exc
-
-    retention_days = body.get("retention_days")
-    try:
-        params.guard_retention(int(retention_days) if retention_days is not None else None)
-    except Exception as exc:
-        raise ValidationFailedError(str(exc)) from exc
-
-    _logger.warning(
-        "config_reprocess_accepted",
-        tenant_code=tenant_code,
-        capability=params.capability.value,
-        entity_key=params.entity_key,
-        window_days=params.window_days,
-        pinned_config_version=params.pinned_config_version,
-        reason=params.reason,
-    )
-    record_platform_metric(
-        PlatformMetric.ADMIN_ACTIONS, 1.0, Capability=f"reprocess_{params.capability.value}"
-    )
-    return _response(
-        202,
-        {
-            "tenant_code": tenant_code,
-            "capability": params.capability.value,
-            "entity_key": params.entity_key,
-            "window_days": params.window_days,
-            "pinned_config_version": params.pinned_config_version,
-            "status": "accepted",
-        },
-    )
-
-
-def _handle_list_quality_exceptions(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
-    """
-    GET /tenants/{t}/quality/exceptions — the triage inbox (DL-DQ-13).
-
-    Open findings only by default. The store had no reader at all before this route existed, so
-    every exception the pipeline recorded was invisible to the operator expected to act on it.
-
-    Two different reads on purpose: a run-scoped request is bounded by the run and drains, while
-    the open-findings inbox is bounded by a cursor — the exception table has its TTL deliberately
-    disabled to preserve audit evidence, so its history grows with data volume and cannot be read
-    whole.
-    """
-    tenant_code = _authorize_path_tenant(event, path_tenant)
-    repository = DataQualityExceptionRepository(environment=_environment(), region_name=_region())
-    run_id = str((event.get("queryStringParameters") or {}).get("run_id") or "")
-
-    if run_id:
-        records = repository.list_for_run(tenant_code, run_id)
-        next_token = None
-    else:
-        page = repository.list_open(
-            tenant_code,
-            limit=_MAX_EXCEPTIONS_LISTED,
-            start_key=_decode_page_token(event, tenant_code),
-        )
-        records = page.items
-        next_token = _encode_page_token(page.next_key)
-
-    return _response(
-        200,
-        {
-            "tenant_code": tenant_code,
-            "scope": "run" if run_id else "open",
-            "exceptions": records,
-            "count": len(records),
-            "next_token": next_token,
-        },
-    )
-
-
-def _handle_onboard_serving_entity(event: dict[str, Any], path_tenant: str) -> dict[str, Any]:
-    """
-    POST /tenants/{t}/serving-store/entities — onboard an entity into the serving store.
-
-    DL-SERV-03: `scripts/seed_serving_store_config.py` covered the operator path; this is the API
-    the enterprise-platform's console (EP-04) drives, so onboarding does not require shell access
-    to this account.
-    """
-    tenant_code = _authorize_path_tenant(event, path_tenant)
-    body = _parse_json_body(event)
-    try:
-        config = ServingStoreLoadConfig.model_validate({**body, "tenant_code": tenant_code})
-    except PydanticValidationError as exc:
-        raise ValidationFailedError(
-            f"Serving-store config failed validation: {exc.error_count()} error(s)."
-        ) from exc
-    ServingStoreConfigRepositoryClient(
-        environment=_environment(), region_name=_region()
-    ).save_config(config, overwrite=bool(body.get("overwrite", False)))
-    _logger.info(
-        "serving_store_entity_onboarded",
-        tenant_code=tenant_code,
-        entity_type=config.entity_type,
-        target_engine=config.target_engine.value,
-        enabled=config.enabled,
-    )
-    return _response(
-        201,
-        {
-            "tenant_code": tenant_code,
-            "entity_type": config.entity_type,
-            "target_engine": config.target_engine.value,
-            "enabled": config.enabled,
-        },
-    )
 
 
 _GOVERNANCE_ROUTES: tuple[ConfigRoute, ...] = build_config_routes(
