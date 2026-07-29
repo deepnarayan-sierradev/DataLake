@@ -16,6 +16,7 @@ import structlog
 
 from contracts.platform_metrics import PlatformMetric
 from observability.metric_recorder import platform_metric_recorder, record_platform_metric
+from contracts.dlq_routing import DlqStage
 from observability.stage_execution import (
     StageExecution,
     StageIdentity,
@@ -30,6 +31,7 @@ _IDENTITY = StageIdentity(
     run_id="run-0001",
     environment="dev",
     stage="extraction",
+    dlq_stage=DlqStage.EXTRACTION,
 )
 
 

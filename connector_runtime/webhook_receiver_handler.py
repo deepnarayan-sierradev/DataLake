@@ -26,6 +26,7 @@ from connector_runtime.webhook_signature import (
     spec_for_source,
     verify_webhook_signature,
 )
+from contracts.dlq_routing import DlqStage
 from contracts.identifier_policy import (
     STABLE_ID_PATTERN,
     TENANT_CODE_PATTERN,
@@ -74,6 +75,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         run_id=request["event_key"],
         environment=environment,
         stage="webhook_ingest",
+        dlq_stage=DlqStage.WEBHOOK_INGEST,
         correlation_id=derive_correlation_id(request["event_key"]),
         connection_id=request["connection_id"],
     )

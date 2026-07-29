@@ -55,6 +55,7 @@ from connector_runtime.configuration_repository.configuration_repository import 
     ConfigurationRepositoryClient,
     ConfigurationValidationError,
 )
+from contracts.dlq_routing import DlqStage
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
 from contracts.observability_contract import PipelineStage
@@ -143,6 +144,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         run_id=run_id,
         environment=environment,
         stage=PipelineStage.TRANSFORMATION.value,
+        dlq_stage=DlqStage.TRANSFORMATION,
         correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
         connection_id=connection_id,
     )

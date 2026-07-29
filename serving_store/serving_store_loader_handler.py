@@ -57,7 +57,6 @@ from typing import Any, Final
 
 import boto3
 import pyarrow.parquet as pq
-import structlog
 
 # Import every engine adapter module so its @serving_store_registry.register()
 # decorator runs before resolve() is ever called — mirrors
@@ -66,19 +65,25 @@ import serving_store.loaders.mysql_rds_loader
 import serving_store.loaders.postgresql_loader
 import serving_store.loaders.redshift_loader
 import serving_store.loaders.sqlserver_loader  # noqa: F401
+from contracts.dlq_routing import DlqStage
 from contracts.identifier_policy import ENTITY_TYPE_PATTERN as _ENTITY_TYPE_PATTERN
 from contracts.identifier_policy import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
+from contracts.observability_contract import PipelineStage
 from contracts.platform_metrics import PlatformMetric
 from observability.lambda_runtime import (
     check_lambda_timeout,
     check_lambda_timeout_periodic,
-    configure_xray,
     require_env,
 )
 from observability.metric_recorder import record_platform_metric
 from observability.metrics_emitter import CloudWatchMetricsEmitter
+from observability.stage_execution import (
+    StageIdentity,
+    derive_correlation_id,
+    stage_execution,
+)
 from observability.structured_logger import get_platform_logger
 from serving_store.interfaces.loader_interface import (
     TransientServingError,
@@ -128,42 +133,40 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     tenant_code: str = str(event["tenant_code"])
     analytics_s3_prefix: str = event["analytics_s3_prefix"]
 
-    configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id, run_id=run_id)
-    structlog.contextvars.bind_contextvars(
-        run_id=run_id,
+    # Migrated to `stage_execution` on 2026-07-29. This is the last stage on the critical path to
+    # the serving store, so its failure is what a freshness breach looks like — and it had no DLQ
+    # producer, leaving `EdlStageDlq-ServingStoreLoad` inert with a 900s detection budget on a queue
+    # nothing could write to. The engine-specific failure classification stays: it distinguishes a
+    # connection failure from a load failure, which the generic scaffold cannot know.
+    identity = StageIdentity(
+        tenant_code=tenant_code,
         source_id=source_id,
         entity_id=entity_id,
-        entity_type=entity_type,
-        tenant_code=tenant_code,
+        run_id=run_id,
+        environment=environment,
+        stage=PipelineStage.TARGET_DB_LOAD.value,
+        dlq_stage=DlqStage.SERVING_STORE_LOAD,
+        correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
     )
-
-    try:
-        return _run_serving_store_load(
-            entity_id=entity_id,
-            entity_type=entity_type,
-            environment=environment,
-            run_id=run_id,
-            tenant_code=tenant_code,
-            analytics_s3_prefix=analytics_s3_prefix,
-            context=context,
-        )
-    except Exception as exc:
-        record_load_failure(
-            entity_type,
-            connection_error=isinstance(exc, ConnectionError | TimeoutError | OSError),
-        )
-        _logger.error(
-            "serving_store_load_stage_failed",
-            entity_id=entity_id,
-            entity_type=entity_type,
-            run_id=run_id,
-            environment=environment,
-            error=str(exc),
-            error_type=type(exc).__name__,
-        )
-        raise
-    finally:
-        structlog.contextvars.clear_contextvars()
+    with stage_execution(
+        identity, region_name=require_env("AWS_REGION"), lambda_context=context
+    ):
+        try:
+            return _run_serving_store_load(
+                entity_id=entity_id,
+                entity_type=entity_type,
+                environment=environment,
+                run_id=run_id,
+                tenant_code=tenant_code,
+                analytics_s3_prefix=analytics_s3_prefix,
+                context=context,
+            )
+        except Exception as exc:
+            record_load_failure(
+                entity_type,
+                connection_error=isinstance(exc, ConnectionError | TimeoutError | OSError),
+            )
+            raise
 
 
 def _run_serving_store_load(

@@ -27,6 +27,7 @@ from collections.abc import Iterator
 from typing import Any, Final
 
 from analytics_publisher.analytics_location import latest_partition_uri
+from contracts.dlq_routing import DlqStage
 from contracts.platform_metrics import PlatformMetric
 from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
@@ -77,6 +78,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         run_id=run_id,
         environment=environment,
         stage=_STAGE,
+        # Deliberately not replayable: automatically retrying a deletion or an export is wrong, and
+        # the deletion certificate (or the failed job record) is already the evidence. Declared
+        # rather than omitted, so a handler that simply forgot to route remains a build error.
+        dlq_stage=DlqStage.NOT_REPLAYABLE,
         correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
     )
 

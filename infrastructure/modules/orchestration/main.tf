@@ -817,6 +817,23 @@ resource "aws_cloudwatch_log_group" "dlq_processor" {
   })
 }
 
+# Per-stage mappings (gap item 21). The processor bound only to the single legacy queue, so the nine
+# per-stage queues had no consumer as well as no producer — `maxReceiveCount = 3` never counted,
+# because it only decrements on *receive*. One mapping per stage rather than one shared queue keeps
+# each stage's visibility timeout matched to its own Lambda timeout, which is what
+# CreateEventSourceMapping validates against (see infrastructure/CLAUDE.md).
+resource "aws_lambda_event_source_mapping" "dlq_processor_stage_queues" {
+  for_each = aws_sqs_queue.stage_dlq
+
+  event_source_arn = each.value.arn
+  function_name    = aws_lambda_function.dlq_processor.arn
+  batch_size       = var.dlq_processor_batch_size
+  enabled          = true
+
+  maximum_batching_window_in_seconds = 20
+  function_response_types            = ["ReportBatchItemFailures"]
+}
+
 resource "aws_lambda_event_source_mapping" "dlq_processor_sqs" {
   event_source_arn = var.extraction_failure_dlq_arn
   function_name    = aws_lambda_function.dlq_processor.arn

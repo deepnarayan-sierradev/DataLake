@@ -39,6 +39,12 @@ from typing import Any, Final
 import boto3
 from botocore.exceptions import ClientError
 
+from contracts.dlq_routing import (
+    LEGACY_EXTRACTION_DLQ,
+    DlqStage,
+    dlq_queue_name,
+    dlq_stage_for,
+)
 from contracts.observability_contract import PipelineStage, RunStatus, scrub_sensitive_values
 from contracts.pipeline_stage_contract import DriftClassification, PipelineStageContract
 from contracts.platform_metrics import PlatformMetric
@@ -48,7 +54,8 @@ from observability.structured_logger import get_platform_logger
 _logger = get_platform_logger(__name__)
 
 _AUDIT_TABLE_NAME: Final[str] = "EdlRunAuditLog"
-_DLQ_NAME: Final[str] = "EdlExtractionFailureDlq"
+# The legacy single queue now lives in contracts/dlq_routing.py alongside the per-stage names,
+# so the routing and the names cannot drift apart.
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +166,9 @@ class RunCoordinator:
         self._sqs = boto3.client("sqs", region_name=region_name)
         self._region = region_name
         # DLQ URL cached after first successful resolution to avoid redundant API calls.
-        self._dlq_url: str | None = None
+        # Keyed by queue name: one coordinator routes to a stage queue and, for extraction, the
+        # legacy queue as well during the migration window.
+        self._dlq_urls: dict[str, str] = {}
 
     @property
     def run_id(self) -> str:
@@ -300,23 +309,27 @@ class RunCoordinator:
         failed_stage: PipelineStage,
     ) -> None:
         """
-        Route a terminal failure entry to the SQS DLQ.
+        Route a terminal failure to the failed stage's own DLQ.
 
-        The DLQ message body contains only run metadata and error code — no
-        field values, credentials, or PII.  Message content is governed by
-        PipelineStageContract validators (auto-scrubbed).
+        `failed_stage` was accepted and then ignored: the queue name was hardcoded to
+        `EdlExtractionFailureDlq`, so the five non-extraction stages had nowhere to enqueue and the
+        nine per-stage queues had no producer. The argument already carried the routing; only the
+        lookup was missing (see `contracts/dlq_routing.py`).
 
-        Failures to resolve the DLQ URL or send the SQS message are logged
-        as errors but do not propagate — the extraction run has already failed
-        and raising here would mask the original error.
+        The DLQ message body contains only run metadata and error code — no field values,
+        credentials, or PII. Message content is governed by PipelineStageContract validators
+        (auto-scrubbed).
+
+        Failures to resolve a queue URL or send the message are logged as errors but do not
+        propagate — the run has already failed, and raising here would mask the original error.
         """
-        dlq_url = self._resolve_dlq_url()
-        if dlq_url is None:
-            _logger.error(
-                "dlq_url_resolution_failed",
+        dlq_stage = dlq_stage_for(failed_stage)
+        if dlq_stage is DlqStage.NOT_REPLAYABLE:
+            # An affirmative decision, not a missing route: replaying a run-completion or a
+            # DLQ-enqueue failure is meaningless, and the audit record already holds the evidence.
+            _logger.info(
+                "dlq_enqueue_skipped_not_replayable",
                 run_id=self._run_id,
-                source_id=self._source_id,
-                entity_id=self._entity_id,
                 failed_stage=str(failed_stage),
             )
             return
@@ -328,25 +341,51 @@ class RunCoordinator:
             "environment": self._environment,
             "tenant_code": self._tenant_code,
             "failed_stage": str(failed_stage),
+            "dlq_stage": dlq_stage.value,
             "error_code": error_code,
             # Scrub before enqueue — the payload bypasses PipelineStageContract
             # validators, so sensitive patterns must be removed here explicitly.
             "error_message": scrub_sensitive_values(error_message),
             "enqueued_at": datetime.now(tz=UTC).isoformat(),
         }
-        try:
-            self._sqs.send_message(
-                QueueUrl=dlq_url,
-                MessageBody=json.dumps(payload, separators=(",", ":")),
-            )
-        except ClientError:
-            _logger.error(
-                "dlq_enqueue_failed",
-                run_id=self._run_id,
-                source_id=self._source_id,
-                entity_id=self._entity_id,
-                failed_stage=str(failed_stage),
-            )
+
+        # Extraction writes to both its per-stage queue and the legacy queue until the processor's
+        # per-stage event-source mappings are applied and observed. Switching a live failure path in
+        # one step would leave no way to compare the two.
+        queue_names = [dlq_queue_name(dlq_stage)]
+        if dlq_stage is DlqStage.EXTRACTION:
+            queue_names.append(LEGACY_EXTRACTION_DLQ)
+
+        delivered = 0
+        for queue_name in queue_names:
+            dlq_url = self._resolve_dlq_url(queue_name)
+            if dlq_url is None:
+                _logger.error(
+                    "dlq_url_resolution_failed",
+                    run_id=self._run_id,
+                    source_id=self._source_id,
+                    entity_id=self._entity_id,
+                    failed_stage=str(failed_stage),
+                    queue_name=queue_name,
+                )
+                continue
+            try:
+                self._sqs.send_message(
+                    QueueUrl=dlq_url, MessageBody=json.dumps(payload, separators=(",", ":"))
+                )
+                delivered += 1
+            except ClientError:
+                _logger.error(
+                    "dlq_enqueue_failed",
+                    run_id=self._run_id,
+                    source_id=self._source_id,
+                    entity_id=self._entity_id,
+                    failed_stage=str(failed_stage),
+                    queue_name=queue_name,
+                )
+        record_platform_metric(
+            PlatformMetric.DLQ_MESSAGES_ENQUEUED, float(delivered), Stage=dlq_stage.value
+        )
 
     # ── Private ────────────────────────────────────────────────────────────────
 
@@ -365,16 +404,17 @@ class RunCoordinator:
                 stage=str(contract.stage),
             )
 
-    def _resolve_dlq_url(self) -> str | None:
-        if self._dlq_url is not None:
-            return self._dlq_url
-        dlq_name = _DLQ_NAME
+    def _resolve_dlq_url(self, queue_name: str) -> str | None:
+        """Cached per queue name: one coordinator can route to more than one stage's queue."""
+        cached = self._dlq_urls.get(queue_name)
+        if cached is not None:
+            return cached
         try:
-            response = self._sqs.get_queue_url(QueueName=dlq_name)
-            self._dlq_url = response["QueueUrl"]
-            return self._dlq_url
+            url = str(self._sqs.get_queue_url(QueueName=queue_name)["QueueUrl"])
         except ClientError:
             return None
+        self._dlq_urls[queue_name] = url
+        return url
 
 
 # ---------------------------------------------------------------------------

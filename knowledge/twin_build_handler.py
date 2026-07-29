@@ -24,14 +24,15 @@ from __future__ import annotations
 from typing import Any, Final
 
 import boto3
-import structlog
 
 import processing_engine.engines.duckdb_engine  # noqa: F401  (registers "duckdb")
 from analytics_publisher.analytics_location import latest_partition_uri
+from contracts.dlq_routing import DlqStage
 from contracts.identifier_policy import (
     STABLE_ID_PATTERN,
     TENANT_CODE_PATTERN,
 )
+from contracts.observability_contract import PipelineStage
 from entity_resolution.entity_type_registry import EntityTypeRegistryClient
 from knowledge.relationship_resolver import RelationshipResolver
 from knowledge.relationship_rules_registry import (
@@ -40,7 +41,12 @@ from knowledge.relationship_rules_registry import (
 )
 from knowledge.twin_pipeline import RelationshipInput, TwinPipeline
 from knowledge.twin_repository import TwinRepository
-from observability.lambda_runtime import check_lambda_timeout, configure_xray, require_env
+from observability.lambda_runtime import check_lambda_timeout, require_env
+from observability.stage_execution import (
+    StageIdentity,
+    derive_correlation_id,
+    stage_execution,
+)
 from observability.structured_logger import get_platform_logger
 from processing_engine.registry import set_based_engine_registry
 
@@ -63,11 +69,23 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     run_id = str(event["run_id"])
     tenant_code = str(event["tenant_code"])
 
-    configure_xray(tenant_code=tenant_code, source_id=source_id, entity_id=entity_id, run_id=run_id)
-    structlog.contextvars.bind_contextvars(
-        run_id=run_id, source_id=source_id, entity_id=entity_id, tenant_code=tenant_code
+    # Migrated to `stage_execution` on 2026-07-29. The hand-rolled bind/try/finally worked, but it
+    # carried no DLQ routing — twin build was one of the five stages whose failures reached the Step
+    # Functions history and nothing else, so `EdlStageDlq-TwinBuild` had no producer. The scaffold
+    # makes the clear, the flush, the duration metric, and the DLQ entry structural.
+    identity = StageIdentity(
+        tenant_code=tenant_code,
+        source_id=source_id,
+        entity_id=entity_id,
+        run_id=run_id,
+        environment=environment,
+        stage=PipelineStage.GOLDEN_RECORD_PUBLISH.value,
+        dlq_stage=DlqStage.TWIN_BUILD,
+        correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
     )
-    try:
+    with stage_execution(
+        identity, region_name=require_env("AWS_REGION"), lambda_context=context
+    ):
         return _run_twin_build(
             entity_id=entity_id,
             environment=environment,
@@ -76,17 +94,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             rule_set_version=str(event.get("rule_set_version") or "latest"),
             lifecycle_field=event.get("lifecycle_field"),
         )
-    except Exception as exc:
-        _logger.error(
-            "twin_build_stage_failed",
-            entity_id=entity_id,
-            run_id=run_id,
-            error=str(exc),
-            error_type=type(exc).__name__,
-        )
-        raise
-    finally:
-        structlog.contextvars.clear_contextvars()
 
 
 def _run_twin_build(

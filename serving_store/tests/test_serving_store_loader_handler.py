@@ -84,6 +84,15 @@ class TestValidateEventFields:
 
 
 class TestContextvarsAndErrorHandling:
+    """
+    The handler routes through `stage_execution` since 2026-07-29 (it was one of five stages with no
+    DLQ producer), so it now reads AWS_REGION to build the SQS client that enqueues a failure.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _region(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("AWS_REGION", _REGION)
+
     def setup_method(self, method: object = None) -> None:
         structlog.contextvars.clear_contextvars()
 

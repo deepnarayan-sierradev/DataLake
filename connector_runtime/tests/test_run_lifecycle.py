@@ -413,6 +413,9 @@ class TestDlqScrubbing:
         )
         sqs = boto3.client("sqs", region_name=_REGION)
         sqs.create_queue(QueueName=_DLQ_NAME)
+        # Extraction now routes to its own per-stage queue as well as the legacy one, so the cache
+        # is keyed by queue name rather than holding a single URL.
+        sqs.create_queue(QueueName="EdlStageDlq-Extraction")
 
         coord = RunCoordinator(
             environment=_ENV,
@@ -420,12 +423,15 @@ class TestDlqScrubbing:
             source_id="salesforce",
             entity_id="salesforce-account",
         )
-        # First enqueue — resolves and caches the URL
+        # First enqueue — resolves and caches both URLs
         coord.enqueue_dlq_entry("error one", "unknown", PipelineStage.EXTRACTION)
-        first_cached = coord._dlq_url
-        # Second enqueue — should use cached URL
+        first_cached = dict(coord._dlq_urls)
+        assert set(first_cached) == {"EdlStageDlq-Extraction", _DLQ_NAME}
+        # Second enqueue — same two queues, served from the cache
         coord.enqueue_dlq_entry("error two", "unknown", PipelineStage.RAW_WRITE)
-        assert coord._dlq_url is first_cached  # same string object (cached)
+        assert coord._dlq_urls == first_cached
+        for queue_name, url in first_cached.items():
+            assert coord._dlq_urls[queue_name] is url  # same string object (cached)
 
 
 # ---------------------------------------------------------------------------

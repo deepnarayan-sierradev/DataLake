@@ -372,27 +372,40 @@ Full derivation and every threshold: [SCALE_AND_DLQ_THRESHOLDS.md](SCALE_AND_DLQ
 The target these are measured against is 10–20 prod tenants × 5–12 sources × 100+ entities per
 source at 12 months — roughly 24,000 runs/day and ~120 DLQ arrivals/day at the upper bound.
 
-### 20. Five of six pipeline stages enqueue nothing to any DLQ
+### 20. ~~Five of six pipeline stages enqueue nothing to any DLQ~~ (**closed 2026-07-29**)
 
-`RunCoordinator.enqueue_dlq_entry(...)` takes a `failed_stage` argument but hardcodes
-`_DLQ_NAME = "EdlExtractionFailureDlq"`, and its only production caller is
-`orchestration/step_functions/extraction_workflow.py`. Transformation, entity resolution, analytics
-publish, twin build and serving store load failures land in the Step Functions execution history and
-the audit table, but in no queue — so there is nothing to replay from and nothing for an alarm to
-observe. The fix is small and well-scoped: map `failed_stage` to the per-stage queue name (the
-argument already carries what is needed), and route the other stages through the same call —
-preferably from `observability/stage_execution.py`, so a new handler gets it structurally rather
-than by remembering.
+`RunCoordinator.enqueue_dlq_entry` took a `failed_stage` argument and discarded it in favour of a
+hardcoded `_DLQ_NAME`. The routing now lives in `contracts/dlq_routing.py`, which maps every
+`PipelineStage` to its queue, and `observability/stage_execution.py` enqueues from its failure path —
+so a stage gets replayability from the scaffold rather than from an author remembering.
 
-### 21. The nine per-stage DLQs have no producer and no consumer
+`knowledge/twin_build_handler.py` and `serving_store/serving_store_loader_handler.py` were migrated to
+`stage_execution` in the same change, because they were two of the five silent stages and had no
+scaffold to route from.
 
-`EdlStageDlq-*` and `EdlStageReplayExhausted` are created, alarmed, and completely inert: the
-processor's event source mapping binds only to the single legacy `extraction_failure_dlq`, and no
-environment consumes the module's `stage_dlq_arns` output. Until item 20 lands, the per-stage alarms
-cannot fire, and `maxReceiveCount = 3` never counts because it only decrements on *receive*.
+`DlqStage.NOT_REPLAYABLE` is an affirmative value, not an omission: a deletion or an export must not
+be automatically replayed, and the certificate is already the record. A handler that simply forgot to
+declare a route is still a build error, because the field is required.
 
-Related: `maxReceiveCount` on a DLQ presumes a consumer that **re-drives**. Today's processor
-records and notifies but never replays, so `EdlStageReplayExhausted` stays empty regardless.
+**Proven behaviourally**, not by wiring inspection: `observability/tests/test_stage_dlq_delivery.py`
+drives each of the five previously-silent stages and reads its queue. The old unit tests all passed
+while the defect was live, because they asserted a message reached the extraction queue — which it did.
+
+### 21. ~~The nine per-stage DLQs have no producer and no consumer~~ (**closed 2026-07-29**)
+
+Producers: item 20. Consumer: `aws_lambda_event_source_mapping.dlq_processor_stage_queues` binds the
+processor to every stage queue via `for_each`, so `maxReceiveCount = 3` now counts (it only decrements
+on *receive*). Each producing role gained `sqs:SendMessage` on `EdlStageDlq-*`, and the processor
+role gained receive on the stage queues plus the terminal queue.
+
+`observability/tests/test_dlq_routing_reconciliation.py` reconciles Terraform's `pipeline_stages`
+against `DlqStage` **bidirectionally** — no queue without a producer, no producer without a queue —
+in the same style as the alarm/emitter reconciliation, because an empty queue and a queue nothing can
+write to look identical on a dashboard.
+
+Still open, and deliberately so: the processor **records and notifies; it does not re-drive.** So
+`EdlStageReplayExhausted` stays empty until an automatic replay exists. Item 24 covers the notification
+half.
 
 ### 22. Scheduled runs bypass the burst buffer
 

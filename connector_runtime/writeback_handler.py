@@ -25,6 +25,7 @@ from connector_runtime.connection_credential_resolver import ConnectionCredentia
 from connector_runtime.credential_client import SecretsManagerCredentialClient
 from connector_runtime.rate_limiting import rate_limit_policy_registry, telemetry_for
 from connector_runtime.run_lifecycle.run_lifecycle import RunCoordinator, generate_run_id
+from contracts.dlq_routing import DlqStage
 from contracts.identifier_policy import TENANT_CODE_PATTERN, validate_stable_id
 from contracts.observability_contract import PipelineStage, RunStatus
 from contracts.platform_metrics import PlatformMetric
@@ -67,6 +68,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         run_id=run_id,
         environment=environment,
         stage=PipelineStage.EXTRACTION.value.replace("extraction", "writeback"),
+        dlq_stage=DlqStage.WRITEBACK,
         correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
         connection_id=connection_id,
     )

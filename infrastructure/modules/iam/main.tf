@@ -54,6 +54,15 @@ resource "aws_iam_role" "extraction_runtime" {
 }
 
 data "aws_iam_policy_document" "extraction_runtime_permissions" {
+
+  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
+  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
+  statement {
+    sid       = "SendToStageDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   # Write to raw layer — scoped to raw bucket prefix only
   statement {
     sid    = "WriteRawLayer"
@@ -254,6 +263,15 @@ resource "aws_iam_role" "transformation_runtime" {
 }
 
 data "aws_iam_policy_document" "transformation_runtime_permissions" {
+
+  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
+  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
+  statement {
+    sid       = "SendToStageDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   # DynamoDB — read entity extraction config to determine merge behaviour.
   # Scoped to the single entity-extraction-config table for this environment.
   # GetItem only — transformation never writes configuration records.
@@ -396,6 +414,15 @@ resource "aws_iam_role" "entity_resolution_runtime" {
 }
 
 data "aws_iam_policy_document" "entity_resolution_runtime_permissions" {
+
+  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
+  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
+  statement {
+    sid       = "SendToStageDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   # Read curated layer — canonical Parquet + entity resolution config JSON files.
   statement {
     sid     = "ReadCuratedLayer"
@@ -511,6 +538,15 @@ resource "aws_iam_role" "analytics_publisher_runtime" {
 }
 
 data "aws_iam_policy_document" "analytics_publisher_runtime_permissions" {
+
+  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
+  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
+  statement {
+    sid       = "SendToStageDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   # Read and write analytics layer — golden records are read, BI Parquet is written.
   statement {
     sid     = "ReadWriteAnalyticsLayer"
@@ -631,6 +667,15 @@ resource "aws_iam_role" "serving_store_loader_runtime" {
 }
 
 data "aws_iam_policy_document" "serving_store_loader_runtime_permissions" {
+
+  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
+  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
+  statement {
+    sid       = "SendToStageDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   # Read analytics layer Parquet — the loader never writes to this bucket.
   statement {
     sid       = "ReadAnalyticsLayer"
@@ -742,6 +787,15 @@ resource "aws_iam_role" "twin_build_runtime" {
 }
 
 data "aws_iam_policy_document" "twin_build_runtime_permissions" {
+
+  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
+  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
+  statement {
+    sid       = "SendToStageDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   # Read analytics golden records; write intermediate edge Parquet back to the same bucket.
   statement {
     sid       = "ReadAnalyticsLayer"
@@ -1244,7 +1298,16 @@ data "aws_iam_policy_document" "dlq_processor_permissions" {
       "sqs:GetQueueAttributes",
       "sqs:ChangeMessageVisibility",
     ]
-    resources = [var.dlq_arn]
+    # The legacy queue plus the nine per-stage queues and the terminal replay-exhausted queue. Named
+    # by prefix rather than passed as ten ARNs: the queue set is derived from a Terraform `for_each`
+    # over the stage list, so an ARN list here would be a second place for that list to drift.
+    resources = concat(
+      [var.dlq_arn],
+      [
+        "arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*",
+        "arn:aws:sqs:${local.region}:${local.account_id}:EdlStageReplayExhausted",
+      ],
+    )
   }
 
   statement {

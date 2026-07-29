@@ -135,11 +135,15 @@ locals {
     PipelineFreshnessSeconds = { threshold = local.pipeline_freshness.seconds, paging = local.pipeline_freshness.paging, statistic = "Maximum" }
     StageRetries             = { threshold = 20, paging = false, statistic = "Sum" }
     DlqDepth                 = { threshold = 0, paging = false, statistic = "Maximum" }
-    ReplaySuccessRate        = { threshold = 90, paging = false, statistic = "Average", comparison = "LessThanThreshold" }
-    CostPerTenantUsd         = { threshold = 5000, paging = false, statistic = "Maximum" }
-    LambdaMemoryUtilization  = { threshold = 90, paging = false, statistic = "Maximum" }
-    DeploymentDurationMs     = { threshold = 1800000, paging = false, statistic = "Maximum" }
-    PostDeploySmokeFailures  = { threshold = 0, paging = true, statistic = "Sum" }
+    # Messages this platform enqueues, dimensioned by stage — distinct from DlqDepth, which is SQS's
+    # own gauge. The per-stage age alarms in per_stage_dlq.tf carry the detection budget, so this is
+    # a volume signal rather than a page.
+    DlqMessagesEnqueued     = { threshold = 200, paging = false, statistic = "Sum" }
+    ReplaySuccessRate       = { threshold = 90, paging = false, statistic = "Average", comparison = "LessThanThreshold" }
+    CostPerTenantUsd        = { threshold = 5000, paging = false, statistic = "Maximum" }
+    LambdaMemoryUtilization = { threshold = 90, paging = false, statistic = "Maximum" }
+    DeploymentDurationMs    = { threshold = 1800000, paging = false, statistic = "Maximum" }
+    PostDeploySmokeFailures = { threshold = 0, paging = true, statistic = "Sum" }
 
     # ── DL-10 portability and compliance ───────────────────────────────────
     ExportJobsRequested     = { threshold = 1000, paging = false, statistic = "Sum" }
@@ -169,11 +173,11 @@ locals {
     PublishesNotYetEffective              = { threshold = 25, paging = false, statistic = "Maximum" }
 
     # ── DL-12 connections and scope isolation ──────────────────────────────
-    CrossScopeAccessAttempts     = { threshold = 0, paging = true, statistic = "Sum" }
-    ScopePredicateApplied        = { threshold = 10000000, paging = false, statistic = "Sum" }
-    UnattributedRowRate          = { threshold = 5, paging = false, statistic = "Maximum" }
-    ScopeGrantExpansions         = { threshold = 100000, paging = false, statistic = "Sum" }
-    EmptyScopeDenials            = { threshold = 10, paging = false, statistic = "Sum" }
+    CrossScopeAccessAttempts = { threshold = 0, paging = true, statistic = "Sum" }
+    ScopePredicateApplied    = { threshold = 10000000, paging = false, statistic = "Sum" }
+    UnattributedRowRate      = { threshold = 5, paging = false, statistic = "Maximum" }
+    ScopeGrantExpansions     = { threshold = 100000, paging = false, statistic = "Sum" }
+    EmptyScopeDenials        = { threshold = 10, paging = false, statistic = "Sum" }
     # An unscoped read is legitimate in exactly one place — compiling a KPI definition, which has
     # no caller to scope by. Definition validation runs on deploy and on the KPI smoke suite, not
     # per request, so a sustained non-trivial rate means a *request* path has started reading

@@ -110,6 +110,10 @@ class PlatformMetric(StrEnum):
     PIPELINE_FRESHNESS_SECONDS = "PipelineFreshnessSeconds"
     STAGE_RETRIES = "StageRetries"
     DLQ_DEPTH = "DlqDepth"
+    # Counts messages this platform *enqueues*, dimensioned by stage — distinct from DlqDepth,
+    # which is SQS's own gauge. Absence-alarmable: a stage that never enqueues is either
+    # perfectly healthy or has no producer at all, and for five of six stages it was the latter.
+    DLQ_MESSAGES_ENQUEUED = "DlqMessagesEnqueued"
     REPLAY_SUCCESS_RATE = "ReplaySuccessRate"
     COST_PER_TENANT_USD = "CostPerTenantUsd"
     LAMBDA_MEMORY_UTILIZATION = "LambdaMemoryUtilization"

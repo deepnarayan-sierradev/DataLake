@@ -62,6 +62,7 @@ import boto3
 from config_propagation.capability import ConfigCapability
 from config_propagation.pin_consumption import consume_pinned_config
 from config_propagation.pinned_versions import PinnedConfigVersions
+from contracts.dlq_routing import DlqStage
 from contracts.identifier_policy import SAFE_S3_PREFIX_PATTERN as _SAFE_S3_PREFIX_PATTERN
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN
@@ -152,6 +153,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         run_id=run_id,
         environment=environment,
         stage=PipelineStage.ENTITY_RESOLUTION.value,
+        dlq_stage=DlqStage.ENTITY_RESOLUTION,
         correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
     )
 

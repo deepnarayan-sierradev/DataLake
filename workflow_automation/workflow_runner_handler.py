@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Final
 
+from contracts.dlq_routing import DlqStage
 from contracts.platform_metrics import PlatformMetric
 from observability.lambda_runtime import require_env
 from observability.stage_execution import StageIdentity, derive_correlation_id, stage_execution
@@ -63,6 +64,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         run_id=run_id,
         environment=environment,
         stage=_STAGE,
+        dlq_stage=DlqStage.WORKFLOW_ACTION,
         correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
     )
 

@@ -8,19 +8,23 @@ every stage entrypoint with one template-method lifecycle that cannot forget the
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from types import TracebackType
 from typing import Any, Final, Literal
 
 import structlog
+from botocore.exceptions import ClientError
 
+from contracts.dlq_routing import DlqStage, dlq_queue_name
 from contracts.platform_metrics import PlatformMetric
 from observability.lambda_runtime import configure_xray
-from observability.metric_recorder import platform_metric_recorder
+from observability.metric_recorder import platform_metric_recorder, record_platform_metric
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.structured_logger import get_platform_logger
 
@@ -36,6 +40,68 @@ def derive_correlation_id(run_id: str, replay_of_run_id: str | None = None) -> s
     return replay_of_run_id or run_id
 
 
+def enqueue_stage_failure(
+    identity: StageIdentity,
+    *,
+    error_code: str,
+    error_message: str,
+    region_name: str,
+) -> int:
+    """
+    Send one failure message to the stage's own DLQ; returns the number delivered (0 or 1).
+
+    Lives here rather than in `RunCoordinator` because the stages that had no DLQ producer are
+    precisely the ones with no coordinator — transformation, entity resolution, analytics publish,
+    twin build and serving-store load each own their Lambda. Routing from the shared scaffold is
+    what makes a *new* handler replayable without the author remembering.
+
+    The body carries run metadata and an error code only. `scrub_sensitive_values` runs over the
+    message because this payload does not pass through `PipelineStageContract`'s validators.
+    """
+    import boto3
+
+    from contracts.observability_contract import scrub_sensitive_values
+
+    queue_name = dlq_queue_name(identity.dlq_stage)
+    sqs = boto3.client("sqs", region_name=region_name)
+    try:
+        queue_url = str(sqs.get_queue_url(QueueName=queue_name)["QueueUrl"])
+    except ClientError:
+        _logger.error(
+            "stage_dlq_url_resolution_failed", stage=identity.stage, queue_name=queue_name
+        )
+        record_platform_metric(
+            PlatformMetric.DLQ_MESSAGES_ENQUEUED, 0.0, Stage=identity.dlq_stage.value
+        )
+        return 0
+
+    payload = {
+        "run_id": identity.run_id,
+        "correlation_id": identity.correlation_id or identity.run_id,
+        "source_id": identity.source_id,
+        "entity_id": identity.entity_id,
+        "environment": identity.environment,
+        "tenant_code": identity.tenant_code,
+        "failed_stage": identity.stage,
+        "dlq_stage": identity.dlq_stage.value,
+        "error_code": error_code,
+        "error_message": scrub_sensitive_values(error_message),
+        "enqueued_at": datetime.now(tz=UTC).isoformat(),
+    }
+    try:
+        sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(payload, separators=(",", ":")))
+    except ClientError:
+        _logger.error("stage_dlq_enqueue_failed", stage=identity.stage, queue_name=queue_name)
+        record_platform_metric(
+            PlatformMetric.DLQ_MESSAGES_ENQUEUED, 0.0, Stage=identity.dlq_stage.value
+        )
+        return 0
+    record_platform_metric(
+        PlatformMetric.DLQ_MESSAGES_ENQUEUED, 1.0, Stage=identity.dlq_stage.value
+    )
+    return 1
+
+
 @dataclass(frozen=True)
 class StageIdentity:
     """The dimensions every stage log line, metric, and audit record carries."""
@@ -46,6 +112,10 @@ class StageIdentity:
     run_id: str
     environment: str
     stage: str
+    # Which replay queue this stage's failures belong to. Required, and `NOT_REPLAYABLE` is an
+    # explicit value rather than an omission: five of six stages enqueued to no queue at all
+    # because the routing was a hardcoded name rather than a declared property of the stage.
+    dlq_stage: DlqStage
     correlation_id: str = ""
     connection_id: str | None = None
     scope_unit_id: str | None = None
@@ -197,12 +267,37 @@ class StageExecution:
             error_code=error_code,
             error=error_message,
         )
+        self._enqueue_dlq_entry(error_code, error_message)
         if self.on_failure_record is None:
             return
         try:
             self.on_failure_record(error_code, error_message)
         except Exception as exc:
             _logger.error("stage_failure_record_write_failed", error=str(exc))
+
+    def _enqueue_dlq_entry(self, error_code: str, error_message: str) -> None:
+        """
+        Enqueue to this stage's DLQ, so a new handler gets replayability structurally.
+
+        Every stage that reaches this scaffold now produces a DLQ message. Before this, only the
+        extraction workflow called `enqueue_dlq_entry`, so transformation, entity resolution,
+        analytics publish, twin build and serving-store load failures had nothing to replay from —
+        and the nine per-stage queues, with their derived alarm thresholds, had no producer.
+
+        Best-effort by construction: the stage has already failed, and raising here would replace
+        the real error with a queueing error.
+        """
+        if self.identity.dlq_stage is DlqStage.NOT_REPLAYABLE:
+            return
+        try:
+            enqueue_stage_failure(
+                self.identity,
+                error_code=error_code,
+                error_message=error_message,
+                region_name=self.region_name,
+            )
+        except Exception as exc:
+            _logger.error("stage_dlq_enqueue_failed", stage=self.identity.stage, error=str(exc))
 
     def _arm_hard_kill_watchdog(self) -> None:
         remaining_ms = _remaining_time_ms(self.lambda_context)

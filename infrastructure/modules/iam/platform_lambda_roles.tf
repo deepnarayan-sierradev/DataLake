@@ -45,6 +45,15 @@ resource "aws_iam_role" "webhook_receiver" {
 }
 
 data "aws_iam_policy_document" "webhook_receiver_permissions" {
+
+  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
+  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
+  statement {
+    sid       = "SendToStageDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   statement {
     sid       = "WriteOwnLogs"
     effect    = "Allow"
@@ -101,6 +110,15 @@ resource "aws_iam_role" "writeback" {
 }
 
 data "aws_iam_policy_document" "writeback_permissions" {
+
+  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
+  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
+  statement {
+    sid       = "SendToStageDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   statement {
     sid       = "WriteOwnLogs"
     effect    = "Allow"
@@ -155,6 +173,15 @@ resource "aws_iam_role" "workflow_runner" {
 }
 
 data "aws_iam_policy_document" "workflow_runner_permissions" {
+
+  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
+  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
+  statement {
+    sid       = "SendToStageDlq"
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+  }
   statement {
     sid       = "WriteOwnLogs"
     effect    = "Allow"
