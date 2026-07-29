@@ -23,8 +23,12 @@ locals {
   # Route table for the control-plane HTTP API. Each entry maps a stable
   # for_each key to an API Gateway v2 route_key ("METHOD /path"), matching
   # the endpoints implemented in connector_runtime/api/control_plane_handler.py.
+  # `POST /tenants` is deliberately absent: tenants are owned by the Identity API, and this
+  # system only ever consumes a verified claim. It was provisioned here for months while the
+  # handler correctly refused it — the Python test asserted a 404 and could not see Terraform
+  # publishing the route regardless. `tests/test_control_plane_route_boundary.py` now checks
+  # this map directly.
   routes = {
-    create_tenant      = "POST /tenants"
     list_entities      = "GET /tenants/{tenant_code}/entities"
     create_entity      = "POST /tenants/{tenant_code}/entities"
     trigger_pipeline   = "POST /tenants/{tenant_code}/pipelines/trigger"

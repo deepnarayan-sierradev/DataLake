@@ -12,7 +12,9 @@ on:
 
 permissions:
   contents: read
-  security-events: write  # Required for uploading SARIF results
+  # No `security-events: write`: nothing here uploads SARIF (checkov emits `cli`), and a called
+  # workflow may not request more than its caller holds — `deploy-dev.yml` grants only
+  # contents/id-token, so requesting it failed the whole deploy at startup.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
