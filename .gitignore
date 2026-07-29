@@ -61,6 +61,24 @@ override.tf.json
 *credential*
 *_secrets.json
 *_credentials.json
+
+# The two glob patterns above are for credential/secret *data*. Until 2026-07-29 they also
+# matched *source*, and silently excluded from the repository: 11 Python modules — including
+# `credential_client.py` (the shared base class), `connection_credential_resolver.py`, and the
+# `credential_expiry_notifier_handler` Lambda — plus the whole `infrastructure/modules/secrets`
+# Terraform module that all three environments reference. A fresh clone could not import and
+# `terraform validate` could not run, so CI had failed on every run for months while every check
+# passed on developer machines, where the files exist untracked on disk.
+#
+# Order matters: a file cannot be re-included while its parent directory is excluded, so the
+# directory negations must come first. Data files (.json/.env/.pem/.secrets.baseline) still match
+# the patterns above and stay ignored.
+!*credential*/
+!*secret*/
+!*credential*.py
+!*secret*.py
+!*credential*.tf
+!*secret*.tf
 .env
 .env.*
 !.env.example
