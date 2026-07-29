@@ -158,9 +158,10 @@ window with `CrossTenantAccessAttempts` at zero before switching.
 
 `requirements/WAIVERS.md` is the authoritative list. The substantive ones:
 
-- **DL-SCOPE-13 partially done** — the twin *API* filters, but edge fan-out from a tenant-scoped node
-  is unfiltered, so enumerating a shared vendor's edges can still reveal another unit has a
-  relationship to it. Needs the twin builder to record each edge's owning scope unit.
+- ~~**DL-SCOPE-13 partially done**~~ — **closed 2026-07-29, and this entry was wrong.** It claimed
+  the twin API filtered and only edge fan-out was open. The model carried no `scope_unit_id`, so
+  the node filter never worked either. Both halves are now real, guarded by gate G7 and by
+  partitioned-tenant route tests. See `requirements/DL-12-connections-and-scope-isolation.md`.
 - **DL-CFG-06 partially done** — TTL bound and `force_refresh()` exist; the observed
   propagation-lag metric is not emitted for the *credential* cache.
 - **L15** — see design note 3 above.

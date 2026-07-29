@@ -21,6 +21,7 @@ from knowledge.twin import Twin, TwinEdge
 from knowledge.twin_repository import TwinRepository
 from semantic.semantic_model import Dimension, Metric, SemanticEntity, SemanticModel
 from semantic.semantic_model_repository import SemanticModelRepository
+from tenancy.scope_contract import IMPLICIT_SCOPE_UNIT_ID
 
 _REGION = "us-east-1"
 
@@ -113,9 +114,10 @@ class TestTwinRoutes:
                 entity_type="company",
                 golden_id="c-1",
                 attributes={},
-                edges=(TwinEdge("signed_by", "contract", "k-1"),),
+                edges=(TwinEdge("signed_by", "contract", "k-1", IMPLICIT_SCOPE_UNIT_ID),),
                 lifecycle_stage="active",
                 rollups={"signed_by_count": 1},
+                scope_unit_id=IMPLICIT_SCOPE_UNIT_ID,
             ),
         )
         resp = cp.lambda_handler(_event("GET", "/tenants/demo/twins/company/c-1"), None)
@@ -145,6 +147,7 @@ class TestTwinRoutes:
                     edges=(),
                     lifecycle_stage=None,
                     rollups={},
+                    scope_unit_id=IMPLICIT_SCOPE_UNIT_ID,
                 ),
             )
         resp = cp.lambda_handler(_event("GET", "/tenants/demo/twins/company"), None)

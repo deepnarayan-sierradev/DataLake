@@ -81,6 +81,9 @@ jobs:
       - name: Requirement traceability (G5)
         run: python scripts/check_requirement_traceability.py
 
+      - name: Filtered security columns are written (G7)
+        run: python scripts/check_security_column_writers.py
+
   # ──────────────────────────────────────────────────────────────────────────
   # Stage 2: Type checking
   # ──────────────────────────────────────────────────────────────────────────

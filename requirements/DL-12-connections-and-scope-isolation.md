@@ -192,12 +192,27 @@ until confirmed.
   never cluster, and every resulting golden record carries exactly one `scope_unit_id`. Changing an
   entity type's resolution scope is **reprocess-eligible** under `DL-CFG-10` and requires
   re-resolution of history — the mechanism already exists in `DL-CFG-11`.
-- **DL-SCOPE-13** **Twin edges respect the boundary.** **Partially implemented 2026-07-28:** the
-  twin API (`GET /tenants/{t}/twins/...`) now builds the scope predicate and filters both the list
-  and the single-twin read, returning 404 rather than 403 for a foreign unit's twin. **Still open:**
-  edge fan-out from a tenant-scoped node is unfiltered, so enumerating a shared vendor's edges can
-  still reveal that another unit has a relationship to it. Closing it needs the twin builder to
-  record each edge's owning scope unit at build time. An edge between two scope-unit-scoped entities
+- **DL-SCOPE-13** **Twin edges respect the boundary.** **Implemented 2026-07-29.** `Twin` and
+  `TwinEdge` carry `scope_unit_id`; the twin builder takes the node's unit from the golden record's
+  stamped column and the edge's unit from `to_scope_unit_id`, which the relationship resolver now
+  selects from the target side of the join. The API filters nodes by direct attribute access — not
+  `getattr(..., None)`, so a missing field is a type error — returns 404 rather than 403 for a
+  foreign unit's twin, and filters edges by the target's owning unit, reporting the suppressed
+  count as `edges_hidden_by_scope`.
+
+  **Correction to the 2026-07-28 record, which claimed this was partially done.** The API filter
+  was described as working with only edge fan-out open. In fact no part of it worked: the model
+  carried no `scope_unit_id` at all, so the node filter always evaluated `matches(None)` —
+  match-all for a `single` tenant, deny-all for a partitioned one. Two mechanisms now prevent a
+  repeat: gate **G7** (`scripts/check_security_column_writers.py`) fails when a filtered column has
+  no declaration or no writer, and `connector_runtime/tests/test_twin_scope_isolation.py` drives
+  both routes with two sibling franchisees instead of the single-partition `demo` tenant whose
+  claim contains `__tenant__` and therefore cannot fail a scope check.
+
+  Twins written before this change carry no unit and stay invisible to a unit-scoped caller
+  (fails closed); the entity's next twin build restamps them, so no backfill script is needed.
+  The edge query now requires `scope_unit_id` on analytics datasets, which is governed by the
+  pending scope-attribution backfill decision. An edge between two scope-unit-scoped entities
   is permitted only within one unit. Edges to tenant-scoped entities (a shared vendor) are permitted
   from any unit, but traversal from a tenant-scoped node must not enumerate other units' entities —
   the fan-out itself discloses existence.

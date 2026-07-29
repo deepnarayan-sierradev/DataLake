@@ -25,6 +25,11 @@ _logger = get_platform_logger(__name__)
 _DYNAMODB_TABLE_NAME = "EdlTwinIndex"
 
 
+def _optional_text(value: Any) -> str | None:
+    """Normalise an absent or empty DynamoDB attribute to None rather than the string 'None'."""
+    return None if value is None or value == "" else str(value)
+
+
 class TwinNotFoundError(Exception):
     """Raised when no twin index entry exists for the given tenant/entity/golden_id."""
 
@@ -47,11 +52,13 @@ class TwinRepository:
             "entity_type": twin.entity_type,
             "golden_id": twin.golden_id,
             "rollups": twin.rollups,
+            "scope_unit_id": twin.scope_unit_id,
             "edges": [
                 {
                     "relationship_type": edge.relationship_type,
                     "to_entity_type": edge.to_entity_type,
                     "to_golden_id": edge.to_golden_id,
+                    "scope_unit_id": edge.scope_unit_id,
                 }
                 for edge in twin.edges
             ],
@@ -97,6 +104,7 @@ class TwinRepository:
                 relationship_type=str(edge["relationship_type"]),
                 to_entity_type=str(edge["to_entity_type"]),
                 to_golden_id=str(edge["to_golden_id"]),
+                scope_unit_id=_optional_text(edge.get("scope_unit_id")),
             )
             for edge in item.get("edges", [])
         )
@@ -109,4 +117,7 @@ class TwinRepository:
             edges=edges,
             lifecycle_stage=str(lifecycle_stage) if lifecycle_stage is not None else None,
             rollups=rollups,
+            # Items written before DL-SCOPE-13 carry no unit; they stay invisible to a
+            # unit-scoped caller until the entity's next twin build restamps them.
+            scope_unit_id=_optional_text(item.get("scope_unit_id")),
         )

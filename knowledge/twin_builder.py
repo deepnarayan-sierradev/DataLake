@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from knowledge.twin import Twin, TwinEdge
+from tenancy.scope_predicate import SCOPE_UNIT_COLUMN
 
 
 class TwinBuilder:
@@ -28,11 +29,13 @@ class TwinBuilder:
         edges_by_source: dict[str, list[TwinEdge]] = {}
         for edge in edges:
             source_id = str(edge["from_golden_id"])
+            target_unit = edge.get("to_scope_unit_id")
             edges_by_source.setdefault(source_id, []).append(
                 TwinEdge(
                     relationship_type=str(edge["relationship_type"]),
                     to_entity_type=str(edge["to_entity_type"]),
                     to_golden_id=str(edge["to_golden_id"]),
+                    scope_unit_id=None if target_unit is None else str(target_unit),
                 )
             )
 
@@ -48,6 +51,7 @@ class TwinBuilder:
             lifecycle_stage: str | None = None
             if lifecycle_field and attributes.get(lifecycle_field) is not None:
                 lifecycle_stage = str(attributes[lifecycle_field])
+            node_unit = attributes.get(SCOPE_UNIT_COLUMN)
             twins.append(
                 Twin(
                     entity_type=entity_type,
@@ -56,6 +60,7 @@ class TwinBuilder:
                     edges=node_edges,
                     lifecycle_stage=lifecycle_stage,
                     rollups=rollups,
+                    scope_unit_id=None if node_unit is None else str(node_unit),
                 )
             )
         return twins

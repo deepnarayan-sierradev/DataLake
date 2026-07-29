@@ -29,14 +29,17 @@ def _create_table(dynamodb: Any) -> Any:
     )
 
 
-def _twin(golden_id: str, *, stage: str | None = "ramp") -> Twin:
+def _twin(
+    golden_id: str, *, stage: str | None = "ramp", scope_unit_id: str | None = "franchisee-0001"
+) -> Twin:
     return Twin(
         entity_type="company",
         golden_id=golden_id,
         attributes={"full_name": "Acme"},
-        edges=(TwinEdge("contract_of_company", "contract", "k1"),),
+        edges=(TwinEdge("contract_of_company", "contract", "k1", scope_unit_id),),
         lifecycle_stage=stage,
         rollups={"contract_of_company_count": 1},
+        scope_unit_id=scope_unit_id,
     )
 
 
@@ -53,7 +56,8 @@ class TestTwinRepository:
         assert got.golden_id == "c1"
         assert got.lifecycle_stage == "ramp"
         assert got.rollups == {"contract_of_company_count": 1}
-        assert got.edges == (TwinEdge("contract_of_company", "contract", "k1"),)
+        assert got.edges == (TwinEdge("contract_of_company", "contract", "k1", "franchisee-0001"),)
+        assert got.scope_unit_id == "franchisee-0001"
 
     @mock_aws
     def test_get_missing_raises(self):
@@ -80,7 +84,7 @@ class TestTwinRepository:
         repo.upsert_twin("demo", _twin("c2"))
         repo.upsert_twin(
             "demo",
-            Twin("person", "p1", {}, (), None, {}),
+            Twin("person", "p1", {}, (), None, {}, "franchisee-0001"),
         )
         companies = repo.list_twins("demo", "company")
         assert {t.golden_id for t in companies} == {"c1", "c2"}

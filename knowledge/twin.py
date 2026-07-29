@@ -17,6 +17,8 @@ class TwinEdge:
     relationship_type: str
     to_entity_type: str
     to_golden_id: str
+    # The *target's* owning unit: an edge discloses that the target exists (DL-SCOPE-13).
+    scope_unit_id: str | None
 
 
 @dataclass(frozen=True)
@@ -27,3 +29,5 @@ class Twin:
     edges: tuple[TwinEdge, ...]
     lifecycle_stage: str | None
     rollups: dict[str, int]
+    # Required, not defaulted: an absent scope unit is what made the API filter inoperative.
+    scope_unit_id: str | None

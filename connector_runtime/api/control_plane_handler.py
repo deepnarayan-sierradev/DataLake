@@ -653,7 +653,10 @@ def _scope_predicate_for(
         ) from exc
 
 
-def _twin_to_dict(twin: Any) -> dict[str, Any]:
+def _twin_to_dict(twin: Any, predicate: ScopePredicate) -> dict[str, Any]:
+    # DL-SCOPE-13: an edge names the target, so fan-out is filtered too — a node the caller may
+    # see can still point at another unit's entity, and listing that edge discloses it exists.
+    visible_edges = [edge for edge in twin.edges if predicate.matches(edge.scope_unit_id)]
     return {
         "entity_type": twin.entity_type,
         "golden_id": twin.golden_id,
@@ -665,8 +668,9 @@ def _twin_to_dict(twin: Any) -> dict[str, Any]:
                 "to_entity_type": edge.to_entity_type,
                 "to_golden_id": edge.to_golden_id,
             }
-            for edge in twin.edges
+            for edge in visible_edges
         ],
+        "edges_hidden_by_scope": len(twin.edges) - len(visible_edges),
     }
 
 
@@ -764,13 +768,15 @@ def _handle_get_twin(
     try:
         twin = _twin_repository().get_twin(tenant_code, entity_type, golden_id)
         predicate = _scope_predicate_for(event, tenant_code, ConsumptionSurface.TWIN_TRAVERSAL)
-        if not predicate.matches(getattr(twin, "scope_unit_id", None)):
+        # Direct attribute access, never getattr(..., None): a missing field must be a type
+        # error, not a silent None that the predicate reads as "unattributed".
+        if not predicate.matches(twin.scope_unit_id):
             # 404 rather than 403: confirming the twin exists in another unit is the disclosure
             # DL-SCOPE-13 forbids.
             raise NotFoundError(f"No twin for {entity_type}/{golden_id}.")
     except TwinNotFoundError as exc:
         raise NotFoundError(str(exc)) from exc
-    return _response(200, {"tenant_code": tenant_code, **_twin_to_dict(twin)})
+    return _response(200, {"tenant_code": tenant_code, **_twin_to_dict(twin, predicate)})
 
 
 def _handle_list_twins(
@@ -786,7 +792,7 @@ def _handle_list_twins(
     visible = [
         twin
         for twin in _twin_repository().list_twins(tenant_code, entity_type)
-        if predicate.matches(getattr(twin, "scope_unit_id", None))
+        if predicate.matches(twin.scope_unit_id)
     ]
     # A silent truncation is indistinguishable from a complete list, so a caller building a
     # dashboard on it under-reports without knowing (S12). The token says there is more.
@@ -802,7 +808,7 @@ def _handle_list_twins(
         {
             "tenant_code": tenant_code,
             "entity_type": entity_type,
-            "twins": [_twin_to_dict(twin) for twin in twins],
+            "twins": [_twin_to_dict(twin, predicate) for twin in twins],
             "count": len(twins),
             "total_visible": len(visible),
             "next_token": next_token,

@@ -1,5 +1,5 @@
 .PHONY: install lint format typecheck test banned-names security-scan audit \
-        reachability fail-open traceability wiring-gates \
+        reachability fail-open traceability security-columns wiring-gates \
         iac-validate iac-scan iac-fmt-check iac-fmt \
         lambda-package lambda-upload lambda-deploy \
         seed-entity-config seed-serving-store-config seed-schedules \
@@ -17,7 +17,8 @@ help:
 	@echo "  reachability        Fail if a production module has no production importer (G1)"
 	@echo "  fail-open           Fail if a security parameter defaults to None (G4)"
 	@echo "  traceability        Fail if a requirement is uncited or unreachable (G5)"
-	@echo "  wiring-gates        Run all three wiring gates together"
+	@echo "  security-columns    Fail if a filtered column has no writer or declaration (G7)"
+	@echo "  wiring-gates        Run all four wiring gates together"
 	@echo "  typecheck           Run mypy strict type checking"
 	@echo "  test                Run test suite with coverage (≥80% required)"
 	@echo "  security-scan       Run bandit SAST security scan"
@@ -71,10 +72,13 @@ banned-names:
 		echo "OK — no prohibited generic identifiers found."; \
 	fi
 
-# ─── Wiring gates (G1, G4, G5) ───────────────────────────────────────────────
+# ─── Wiring gates (G1, G4, G5, G7) ───────────────────────────────────────────
 # These exist because "module written + unit tests green" was the definition of done that let
 # eighteen unreachable modules ship on 2026-07-28. A unit test imports the module under test
 # directly, which is precisely the import a deployed handler was missing.
+#
+# G7 was added after the follow-up audit: the twin routes filtered on a column the model never
+# carried, so a reachable module with a green call-site gate still applied no filter at all.
 
 reachability:
 	@python scripts/check_module_reachability.py
@@ -85,7 +89,10 @@ fail-open:
 traceability:
 	@python scripts/check_requirement_traceability.py
 
-wiring-gates: reachability fail-open traceability
+security-columns:
+	@python scripts/check_security_column_writers.py
+
+wiring-gates: reachability fail-open traceability security-columns
 
 format:
 	ruff format .

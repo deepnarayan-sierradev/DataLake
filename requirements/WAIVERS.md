@@ -147,16 +147,24 @@ does not. Waived at id level because the module waiver alone cannot express "hal
 
 ### Genuinely outstanding
 
-Two requirements are now *partially* implemented and therefore no longer waived — the gate reports
-them as wired because their code is reachable. The residual gap is recorded in the requirement
+One requirement is now *partially* implemented and therefore no longer waived — the gate reports
+it as wired because its code is reachable. The residual gap is recorded in the requirement
 document itself rather than here, so a waiver cannot hide a half-done requirement:
 
-1. **DL-SCOPE-13** — the twin **API** filters by scope unit (I1f); **edge fan-out from a
-   tenant-scoped node is still unfiltered**. Recorded in
-   `requirements/DL-12-connections-and-scope-isolation.md`.
-2. **DL-CFG-06** — the TTL bound and `force_refresh()` exist; the observed propagation-lag metric
+1. **DL-CFG-06** — the TTL bound and `force_refresh()` exist; the observed propagation-lag metric
    is not yet emitted for the credential cache. Recorded in
    `requirements/DL-11-config-propagation-consistency.md`.
+
+**DL-SCOPE-13 is closed**, and how it was previously recorded here is worth keeping. This file
+used to say the twin *API* filtered and only edge fan-out was open. That was wrong in the safer-
+sounding direction: `Twin`, `TwinEdge` and the `EdlTwinIndex` item carried **no** `scope_unit_id`,
+so `getattr(twin, "scope_unit_id", None)` made the node filter read every twin as unattributed —
+match-all for a `single` tenant and deny-all for a partitioned one. Both halves are now real: the
+model carries the column, the writer persists it, the node filter uses direct attribute access so
+a missing field is a type error, and edges are filtered by the target's owning unit. Gate **G7**
+(`make security-columns`) exists so a filter on an unwritten column cannot recur, and
+`connector_runtime/tests/test_twin_scope_isolation.py` drives both routes with two sibling
+franchisees rather than the single-partition `demo` tenant that hid this.
 
 - `DL-SEM-07` — filters on saved queries: implemented in `semantic/query_compiler.py`
   (`SemanticFilter`, `RelativeDateRange`) but uncited; add the id rather than the code
