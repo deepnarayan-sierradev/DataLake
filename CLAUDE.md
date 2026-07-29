@@ -57,6 +57,10 @@ stays focused on repo-wide conventions.
 - `docs/WIRING_PASS_HANDOFF.md` — **session handoff** for the 2026-07-28 wiring pass: why the gates
   exist, what landed, the design notes not to re-derive, the ordering hazards, and the four items
   awaiting an approval before any `terraform apply`
+- `docs/REMEDIATION_PASS_HANDOFF.md` — **session handoff** for the 2026-07-29 remediation pass: what a
+  second assessment found in the wiring pass (ten of sixteen findings were defects in it), the
+  `.gitignore` rule that had excluded 14 source files and kept CI red for months, the two new gates,
+  and what is still open. Its sizing companion is `docs/SCALE_AND_DLQ_THRESHOLDS.md`.
 - `docs/PLATFORM_EVOLUTION_PROGRESS.md` — **session handoff** for the twin/semantic/agent/
   dashboards work. Its requirements + assessment companion is `docs/PLATFORM_EVOLUTION_SPEC.md`.
 - `requirements/` — the **SOW requirements programme** (DL-01…DL-12): one document per phase plus
@@ -128,6 +132,12 @@ Lambda, route, or script could reach them. Every existing gate stayed green, bec
 imports the module under test directly — which is precisely the import the handlers were missing.
 
 Six gates now make that class of defect detectable. Three run from the Makefile and CI:
+
+Two more were added on 2026-07-29 after a second assessment found controls that were present and
+inert: **G7** (`make security-columns`) fails when a scope filter reads a column no record declares
+and no writer sets — the twin routes filtered on a field the model never carried — and the naming
+gate was rewritten because its `grep` used BRE alternation under `grep -E` and therefore **could not
+fail**. Both have committed negative tests, including a positive control.
 
 ```bash
 make reachability   # G1: a production module with no production importer
