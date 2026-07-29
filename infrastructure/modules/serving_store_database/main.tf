@@ -136,8 +136,11 @@ resource "aws_db_instance" "serving_store" {
   monitoring_interval = 60
   monitoring_role_arn = aws_iam_role.enhanced_monitoring.arn
 
-  performance_insights_enabled    = true
-  performance_insights_kms_key_id = var.storage_kms_key_arn
+  # Behind a variable, not hardcoded: not every instance class supports Performance Insights, and
+  # if this apply is rejected the operator should be able to proceed by setting one variable rather
+  # than editing this module. Defaults to true so the control is on unless deliberately disabled.
+  performance_insights_enabled    = var.performance_insights_enabled
+  performance_insights_kms_key_id = var.performance_insights_enabled ? var.storage_kms_key_arn : null
 
   apply_immediately = var.environment != "prod"
 

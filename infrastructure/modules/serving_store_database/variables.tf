@@ -83,3 +83,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "performance_insights_enabled" {
+  description = "Performance Insights (CKV_AWS_353). Set false only if the instance class rejects it."
+  type        = bool
+  default     = true
+}
