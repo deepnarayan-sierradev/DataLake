@@ -43,9 +43,9 @@ from connector_runtime.adapters.rest_api.rest_source_spec import (
     TokenGrantKind,
 )
 from connector_runtime.rate_limiting import (
-    RateLimitPolicySpec,
-    RateLimitStrategy,
+    DocumentedRateLimit,
     rate_limit_policy_registry,
+    token_bucket_within,
 )
 from connector_runtime.source_capabilities import SourceCapability
 
@@ -58,19 +58,18 @@ SOURCE_ID: Final[str] = "servicebridge"
 # push the pair over.
 DOCUMENTED_REQUESTS_PER_SECOND: Final[int] = 50
 DOCUMENTED_REQUESTS_PER_HOUR: Final[int] = 60_000
-_SUSTAINED_PER_SECOND: Final[float] = DOCUMENTED_REQUESTS_PER_HOUR / 3600 * 0.8
-_BURST_CAPACITY: Final[int] = int(DOCUMENTED_REQUESTS_PER_SECOND * 0.8)
+DOCUMENTED_LIMITS: Final[tuple[DocumentedRateLimit, ...]] = (
+    DocumentedRateLimit(DOCUMENTED_REQUESTS_PER_SECOND, 1),
+    DocumentedRateLimit(DOCUMENTED_REQUESTS_PER_HOUR, 3_600),
+)
 
 RATE_LIMIT_POLICY_NAME: Final[str] = "servicebridge-shared-ip"
 rate_limit_policy_registry.register(
     RATE_LIMIT_POLICY_NAME,
-    RateLimitPolicySpec(
-        RateLimitStrategy.TOKEN_BUCKET,
-        capacity=_BURST_CAPACITY,
-        refill_per_second=_SUSTAINED_PER_SECOND,
-        # The quota is per IP and every Lambda shares one NAT address (see module docstring).
-        shared_across_connections=True,
-    ),
+    # Derived rather than hand-sized: a capacity chosen as a fraction of the per-second
+    # figure still breached it once the refill over that same second was counted.
+    # The quota is per IP and every Lambda shares one NAT address (see module docstring).
+    token_bucket_within(DOCUMENTED_LIMITS, shared_across_connections=True),
 )
 
 # ServiceBridge names resources in the plural and versions them in the path. v2 is the
@@ -135,6 +134,8 @@ SERVICEBRIDGE_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     # The session-login grant needs a user id and password; a connection using the OAuth
     # flow instead stores an access_token and overrides auth at the connection level.
     required_credential_keys=frozenset({"user_id", "password"}),
+    # 200-row pages from a field-service system carrying work-order history.
+    request_timeout_seconds=60.0,
     default_records_json_path=("Results",),
     default_page_size=200,
     watermark_lower_parameter="modifiedOnOrAfter",

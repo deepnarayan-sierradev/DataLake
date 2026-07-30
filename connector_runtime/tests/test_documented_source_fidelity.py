@@ -49,8 +49,10 @@ from connector_runtime.adapters.servicebridge.servicebridge_connector import (
 )
 from connector_runtime.adapters.wellsky.wellsky_connector import MAX_COUNT, WELLSKY_SPEC
 from connector_runtime.rate_limiting import (
+    DocumentedRateLimit,
     RateLimitStrategy,
     rate_limit_policy_registry,
+    token_bucket_within,
 )
 from connector_runtime.source_capabilities import SourceCapability
 
@@ -250,8 +252,54 @@ class TestWellSky:
         assert searchable
         assert all(e.read_method == "POST" for e in searchable)
 
-    def test_every_path_carries_the_mandatory_trailing_slash(self) -> None:
-        assert all(entity.path.endswith("/") for entity in WELLSKY_SPEC.entities)
+    def test_every_path_is_published_verbatim_including_its_slash(self) -> None:
+        # The vendor's implementation rules make the trailing slash load-bearing — and
+        # `/v1/locations/_search` is published without one, unlike every other `_search`.
+        # A blanket "everything ends in /" rule is what hid that.
+        published = {
+            "wellsky-patient": "/v1/patients/_search/",
+            "wellsky-practitioner": "/v1/practitioners/_search/",
+            "wellsky-related-person": "/v1/relatedperson/_search/",
+            "wellsky-encounter": "/v1/encounter/_search/",
+            "wellsky-appointment": "/v1/appointment/_search/",
+            "wellsky-charge-item": "/v1/chargeitem/_search/",
+            "wellsky-medication": "/v1/medication/_search/",
+            "wellsky-subscription": "/v1/subscriptions/_search/",
+            "wellsky-agency-admin": "/v1/admins/_search/",
+            "wellsky-location": "/v1/locations/_search",
+            "wellsky-organization": "/v1/organizations/",
+            "wellsky-allergy-intolerance": "/v1/allergyintolerance/all-allergy/",
+        }
+        assert {e.entity_id: e.path for e in WELLSKY_SPEC.entities} == published
+
+    def test_only_the_three_resources_that_document_it_claim_a_watermark(self) -> None:
+        # Only patients, practitioners and relatedperson document `created`/`updated` as
+        # searchable. Sending the filter elsewhere loads everything while still advancing
+        # the watermark — a completeness illusion, not an error.
+        watermarked = sorted(e.entity_id for e in WELLSKY_SPEC.entities if e.watermark_field)
+        assert watermarked == [
+            "wellsky-patient",
+            "wellsky-practitioner",
+            "wellsky-related-person",
+        ]
+
+    def test_an_endpoint_without_documented_paging_is_never_page_driven(self) -> None:
+        # organizations and all-allergy declare no `_page`/`_count`; page_number would
+        # re-request page 0 until the 10,000-page ceiling, duplicating every row.
+        for entity_id in ("wellsky-organization", "wellsky-allergy-intolerance"):
+            assert WELLSKY_SPEC.entity(entity_id).pagination_strategy == "single_request"
+
+    def test_no_entity_targets_a_create_only_or_absent_endpoint(self) -> None:
+        # adminTasks/activities/documentReferences publish no `_search`; referralsource and
+        # profileTags are POST-create only. All five were declared and are now gone.
+        absent = {
+            "wellsky-admin-task",
+            "wellsky-activity",
+            "wellsky-document-reference",
+            "wellsky-referral-source",
+            "wellsky-profile-tag",
+        }
+        assert not absent & set(WELLSKY_SPEC.entity_ids())
 
     def test_records_are_unwrapped_from_the_fhir_bundle(self) -> None:
         assert all(entity.records_json_path == ("entry",) for entity in WELLSKY_SPEC.entities)
@@ -309,10 +357,62 @@ class TestSeniorPlace:
 
 
 class TestDialpad:
-    def test_the_refill_matches_the_documented_per_company_limit(self) -> None:
+    def test_the_bucket_cannot_exceed_the_documented_per_company_limit(self) -> None:
+        # Was `capacity == 20` with a 16/s refill, which permits 36 in the documented
+        # 1-second window. Capacity is an instantaneous burst *on top of* the refill.
         spec = _policy_spec("dialpad-standard")
-        assert spec.capacity == 20
-        assert 10.0 < spec.refill_per_second <= 20.0
+        assert DocumentedRateLimit(20, 1).permits(spec.capacity, spec.refill_per_second)
+
+
+class TestNoBucketCanBreachItsDocumentedWindow:
+    """
+    The invariant every hand-sized bucket got wrong: a vendor caps
+    `capacity + refill x window`, not `capacity`.
+
+    On 2026-07-30 four registered policies were over — MaidCentral, ServiceBridge and
+    DialPad from this programme, and HubSpot's, which predates it. Each looked correct
+    because `capacity` had been set to the vendor's headline number.
+    """
+
+    # Each vendor's published limits, in the vendor's own units.
+    DOCUMENTED: Final[dict[str, tuple[DocumentedRateLimit, ...]]] = {
+        "maid-central-hourly": (DocumentedRateLimit(1_000, 3_600), DocumentedRateLimit(100, 60)),
+        "maid-central-standard": (
+            DocumentedRateLimit(1_000, 3_600),
+            DocumentedRateLimit(100, 60),
+        ),
+        "servicebridge-shared-ip": (
+            DocumentedRateLimit(50, 1),
+            DocumentedRateLimit(60_000, 3_600),
+        ),
+        "bepro-standard": (DocumentedRateLimit(100, 1), DocumentedRateLimit(1_000, 60)),
+        "dialpad-standard": (DocumentedRateLimit(20, 1),),
+        "hubspot-standard": (DocumentedRateLimit(110, 10),),
+        "wellsky-conservative": (DocumentedRateLimit(100, 1),),
+    }
+
+    @pytest.mark.parametrize("policy_name", sorted(DOCUMENTED))
+    def test_the_worst_case_burst_stays_inside_every_window(self, policy_name: str) -> None:
+        spec = _policy_spec(policy_name)
+        assert spec.strategy is RateLimitStrategy.TOKEN_BUCKET
+        for limit in self.DOCUMENTED[policy_name]:
+            issued = limit.worst_case_issued(spec.capacity, spec.refill_per_second)
+            assert issued <= limit.max_requests, (
+                f"{policy_name}: a full bucket issues {issued:.1f} requests in "
+                f"{limit.window_seconds:g}s, but the vendor documents "
+                f"{limit.max_requests}. capacity is an instantaneous burst that ADDS to "
+                "the refill over the window — derive it with token_bucket_within()."
+            )
+
+    def test_the_derivation_refuses_to_produce_a_breaching_bucket(self) -> None:
+        # Positive control on the helper itself.
+        derived = token_bucket_within([DocumentedRateLimit(20, 1)])
+        assert DocumentedRateLimit(20, 1).permits(derived.capacity, derived.refill_per_second)
+        assert not DocumentedRateLimit(20, 1).permits(20, 16.0)
+
+    def test_deriving_from_no_limit_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="at least one documented limit"):
+            token_bucket_within([])
 
 
 class TestEverySpecIsInternallyConsistent:

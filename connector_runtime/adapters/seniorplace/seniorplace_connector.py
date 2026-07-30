@@ -82,6 +82,10 @@ SENIORPLACE_SPEC: Final[RestSourceSpec] = RestSourceSpec(
         _entity("user", "/api/v1/users"),
         _entity("referral-contact", "/api/v1/referral-contacts"),
         _entity("referral-organization", "/api/v1/referral-organizations"),
+        # `GET /me` returns the caller and **the offices it can act on**. Extracted because
+        # it is the only published way to enumerate offices, which a multi-office tenant
+        # needs before it can read completely — see MULTI_OFFICE_SCOPE_REQUIRED.
+        _entity("office", "/api/v1/me"),
     ),
     capabilities=frozenset(
         {
@@ -110,6 +114,20 @@ SENIORPLACE_SPEC: Final[RestSourceSpec] = RestSourceSpec(
 register_rest_source(SENIORPLACE_SPEC)
 
 IS_PHI_BEARING: Final[bool] = True
+
+# The specification states: "If your organization has multiple offices, you must specify
+# which office to operate in using the `officeId` parameter on search and create endpoints."
+#
+# Nothing here supplies `officeId`, and the API does not say what it does without one. The
+# dangerous reading is that it silently scopes to a default office — which would extract a
+# subset while reporting success, the worst failure mode this platform has. It is recorded
+# here, and in docs/KNOWN_GAPS_AND_ROADMAP.md, rather than papered over: a single-office
+# agency is unaffected, and a multi-office one needs a per-office fan-out driven by the
+# `seniorplace-office` entity above before its extraction can be called complete.
+MULTI_OFFICE_SCOPE_REQUIRED: Final[bool] = True
+OFFICE_SCOPED_ENTITY_IDS: Final[frozenset[str]] = frozenset(
+    {f"{SOURCE_ID}-client", f"{SOURCE_ID}-referral-organization"}
+)
 
 
 def build_odata_incremental_filter(

@@ -17,7 +17,7 @@ import abc
 import random
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
@@ -347,6 +347,73 @@ class RateLimitPolicySpec:
     shared_across_connections: bool = False
 
 
+@dataclass(frozen=True)
+class DocumentedRateLimit:
+    """One limit a vendor publishes, in the vendor's own units."""
+
+    max_requests: int
+    window_seconds: float
+
+    def worst_case_issued(self, capacity: int, refill_per_second: float) -> float:
+        """Most requests a full bucket can issue inside this window."""
+        return capacity + refill_per_second * self.window_seconds
+
+    def permits(self, capacity: int, refill_per_second: float) -> bool:
+        return self.worst_case_issued(capacity, refill_per_second) <= self.max_requests
+
+
+# How much of the tightest documented rate is spent on sustained throughput; the remainder
+# is what leaves room for a burst without breaching the window.
+SUSTAINED_FRACTION: Final[float] = 0.7
+
+# Headroom kept under every documented window, so a co-tenant or a retry does not tip us over.
+BURST_SAFETY_FRACTION: Final[float] = 0.9
+
+
+def token_bucket_within(
+    limits: Sequence[DocumentedRateLimit],
+    *,
+    shared_across_connections: bool = False,
+) -> RateLimitPolicySpec:
+    """
+    Derive a token bucket that cannot breach any of the vendor's documented limits.
+
+    Sizing a bucket by hand gets this wrong in a way that looks right: `capacity` is an
+    *instantaneous* burst which **adds** to whatever the bucket refills during the window, so
+    the quantity a vendor caps is `capacity + refill x window`, not `capacity`. On 2026-07-30
+    four registered policies — three new, plus HubSpot's, which predates them — were over
+    their documented limit for exactly that reason. Deriving the numbers makes the invariant
+    hold by construction instead of by arithmetic nobody re-checks.
+
+    `refill` is the tightest documented rate scaled by `SUSTAINED_FRACTION`; `capacity` is
+    then the largest burst every window still permits at `BURST_SAFETY_FRACTION`.
+    """
+    if not limits:
+        raise ValueError("A token bucket must be derived from at least one documented limit.")
+    refill = min(limit.max_requests / limit.window_seconds for limit in limits)
+    refill *= SUSTAINED_FRACTION
+    headroom = min(
+        limit.max_requests * BURST_SAFETY_FRACTION - refill * limit.window_seconds
+        for limit in limits
+    )
+    capacity = max(1, int(headroom))
+    spec = RateLimitPolicySpec(
+        RateLimitStrategy.TOKEN_BUCKET,
+        capacity=capacity,
+        refill_per_second=refill,
+        shared_across_connections=shared_across_connections,
+    )
+    breached = [limit for limit in limits if not limit.permits(capacity, refill)]
+    if breached:
+        # Unreachable by construction; asserted because a silent breach is a vendor
+        # relationship problem, not a test failure someone can shrug off.
+        raise ValueError(
+            f"Derived bucket (capacity={capacity}, refill={refill:.3f}/s) still breaches "
+            f"{[(b.max_requests, b.window_seconds) for b in breached]}."
+        )
+    return spec
+
+
 class RateLimitPolicyRegistry:
     """
     Named policy specs plus one instance per (policy, connection).
@@ -415,8 +482,9 @@ def _register_platform_policies() -> None:
     """Provider-observed defaults; a connection may override via its config."""
     rate_limit_policy_registry.register(
         "hubspot-standard",
-        # HubSpot: 110 requests / 10 s per private app token.
-        RateLimitPolicySpec(RateLimitStrategy.TOKEN_BUCKET, capacity=100, refill_per_second=10.0),
+        # HubSpot: 110 requests / 10 s per private app token. Previously capacity=100 with
+        # a 10/s refill, which permits 200 in that same 10 s — 82% over. Derived now.
+        token_bucket_within([DocumentedRateLimit(110, 10)]),
     )
     rate_limit_policy_registry.register(
         "wellsky-conservative",
@@ -444,33 +512,27 @@ def _register_platform_policies() -> None:
     )
     rate_limit_policy_registry.register(
         "dialpad-standard",
-        # DialPad documents 20 requests/second per company. The previous 2.0/s refill was a
-        # tenth of that with no stated reason and made a full call-log sweep ten times
-        # longer than it needed to be; 16/s keeps 20% headroom for the endpoint-specific
-        # per-minute caps that sit under the global limit.
-        RateLimitPolicySpec(RateLimitStrategy.TOKEN_BUCKET, capacity=20, refill_per_second=16.0),
+        # DialPad documents 20 requests/second per company. Endpoint-specific per-minute
+        # caps sit under that global limit; the derived headroom covers the common ones.
+        token_bucket_within([DocumentedRateLimit(20, 1)]),
     )
     rate_limit_policy_registry.register(
         "housecall-pro-standard",
         RateLimitPolicySpec(RateLimitStrategy.FIXED_WINDOW, max_requests=5, window_seconds=1.0),
     )
-    rate_limit_policy_registry.register(
-        "maid-central-hourly",
-        # MaidCentral documents 1000 requests/hour with a 100/minute burst — 0.28 req/s
-        # sustained, the tightest budget on the platform. Capacity is the documented burst
-        # and refill is 80% of the hourly rate, so a burst drains and then settles to the
-        # sustained rate rather than spending the hour's budget in its first minute.
-        RateLimitPolicySpec(
-            RateLimitStrategy.TOKEN_BUCKET, capacity=100, refill_per_second=1000 / 3600 * 0.8
-        ),
+    # MaidCentral documents "1000 requests per hour per API key" and "burst limit: 100
+    # requests per MINUTE" — the tightest budget on the platform at 0.28 req/s sustained.
+    # A capacity of 100 was the error the derivation exists to prevent: it permits 100
+    # instantly, which is 100 inside one second, not one minute.
+    maid_central = token_bucket_within(
+        [DocumentedRateLimit(1_000, 3_600), DocumentedRateLimit(100, 60)]
     )
+    rate_limit_policy_registry.register("maid-central-hourly", maid_central)
     rate_limit_policy_registry.register(
+        # Retained so a connection still configured with the pre-rewrite policy name
+        # resolves rather than failing at build time.
         "maid-central-standard",
-        # Retained so a connection still configured with the old policy name resolves
-        # rather than failing at build time; it now points at the documented budget.
-        RateLimitPolicySpec(
-            RateLimitStrategy.TOKEN_BUCKET, capacity=100, refill_per_second=1000 / 3600 * 0.8
-        ),
+        maid_central,
     )
     rate_limit_policy_registry.register(
         "servman-pro-standard",

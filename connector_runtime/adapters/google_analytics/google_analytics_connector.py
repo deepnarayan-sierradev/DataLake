@@ -76,6 +76,8 @@ GOOGLE_ANALYTICS_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     default_rate_limit_policy="google-analytics-standard",
     # Inherited by a config-declared entity (DL-CONN-21); must match what this
     # source's own entities use, or a console-added entity silently reads zero rows.
+    # A 10,000-row GA4 report is computed server-side on request, not paged from storage.
+    request_timeout_seconds=180.0,
     default_records_json_path=("rows",),
     default_page_size=10_000,
     required_credential_keys=GOOGLE_REQUIRED_CREDENTIAL_KEYS | frozenset({"property_id"}),

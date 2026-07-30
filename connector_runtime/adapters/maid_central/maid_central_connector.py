@@ -73,6 +73,11 @@ def _entity(
         pagination_strategy="offset_limit",
         page_size=MAX_RESULT_COUNT,
         pagination_parameters=_PAGINATION,
+        # Offset paging over a table that is being written to skips and repeats rows
+        # unless the server orders deterministically. The guide documents `sorting`, so
+        # every page is ordered by the entity's own key — the one column guaranteed
+        # unique and stable for the life of the sweep.
+        static_query_parameters={"sorting": f"{natural_key} ASC"},
     )
 
 
@@ -111,6 +116,9 @@ MAID_CENTRAL_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     default_pagination_strategy="offset_limit",
     default_rate_limit_policy="maid-central-hourly",
     pagination_parameters=_PAGINATION,
+    # 1000-row reporting pages over payroll and job history; the guide advises processing
+    # large datasets in chunks, which implies these are not fast responses.
+    request_timeout_seconds=120.0,
     default_records_json_path=("Result", "Items"),
     default_page_size=MAX_RESULT_COUNT,
     # Password grant on first exchange; the response's refresh_token is written back into

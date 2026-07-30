@@ -36,6 +36,11 @@ from connector_runtime.source_capabilities import (
 # (OWASP A03, A10).
 _SAFE_PATH_PATTERN: Final[re.Pattern[str]] = re.compile(r"^/[A-Za-z0-9/_.\-{}]{0,255}$")
 
+# Ceiling on any single read. The extraction Lambda has 900s and reserves 120s to start,
+# so one request must never be able to consume enough of the remainder that the run cannot
+# checkpoint. 300s leaves room for at least two attempts plus the checkpoint write.
+MAX_REQUEST_TIMEOUT_SECONDS: Final[float] = 300.0
+
 
 def _reject_unsafe_path(owner: str, label: str, path: str) -> None:
     """
@@ -120,6 +125,16 @@ class RestEntitySpec:
     def __post_init__(self) -> None:
         owner = f"entity {self.entity_id!r}"
         _reject_unsafe_path(owner, "path", self.path)
+        if "{" in self.path or "}" in self.path:
+            # The substrate does no path templating: a `{patient_id}` would be requested
+            # literally and 404. Several WellSky and BePro endpoints are shaped this way,
+            # so the trap is live rather than theoretical — such an entity needs a
+            # parent-scoped fan-out, not a declaration.
+            raise ValueError(
+                f"{owner}: path {self.path!r} contains a path template. Nothing substitutes "
+                "it, so the request would be issued literally. Declare a parent-scoped "
+                "fan-out instead."
+            )
         if self.writeback_path:
             _reject_unsafe_path(owner, "writeback_path", self.writeback_path)
         if self.shape is EntityShape.REPORT and not self.report_metrics:
@@ -179,6 +194,12 @@ class RestSourceSpec:
     # like the only way to add one.
     default_records_json_path: tuple[str, ...] = ("results",)
     default_page_size: int = 100
+    # Per-source read timeout. A single platform-wide 30s was fine for a row collection and
+    # wrong for a report: an unpaginated per-frame or payroll read is slow by nature, and a
+    # timeout shorter than the response makes the entity permanently unextractable while
+    # looking like a transient network fault. Bounded below the Lambda budget so a slow
+    # source still checkpoints rather than being killed mid-write.
+    request_timeout_seconds: float = 30.0
     notes: str = ""
 
     def __post_init__(self) -> None:
@@ -200,6 +221,13 @@ class RestSourceSpec:
         if self.token_endpoint_path:
             _reject_unsafe_path(
                 f"source {self.source_id!r}", "token_endpoint_path", self.token_endpoint_path
+            )
+        if not 1.0 <= self.request_timeout_seconds <= MAX_REQUEST_TIMEOUT_SECONDS:
+            raise ValueError(
+                f"source {self.source_id!r}: request_timeout_seconds "
+                f"{self.request_timeout_seconds} must be between 1 and "
+                f"{MAX_REQUEST_TIMEOUT_SECONDS}. A single read may not consume so much of "
+                "the Lambda budget that the run cannot checkpoint and exit cleanly."
             )
         if bool(self.token_endpoint_path) != bool(self.token_grant_kind):
             raise ValueError(

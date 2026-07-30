@@ -36,6 +36,33 @@ plus "do not use this for batch" is a request for restraint, not a licence to sa
 
 **PHI-bearing.** Home care records are PHI, so this source stays gated by `DL-PORT-08` and
 must not be onboarded before a BAA is recorded.
+
+## Second pass, 2026-07-30 — seven of the first sixteen entities were wrong
+
+The first rewrite got the *shape* right and the *inventory* wrong: it assumed every resource
+in the "Supported APIs" table had a `_search` sibling. Checking each declared path against
+the operations the specification actually publishes found:
+
+- `adminTasks`, `activities`, `documentReferences` — **no `_search` path exists.** They
+  publish create plus fetch-by-id only. `documentReferences` has `_profile`, which requires
+  a `reference` in its body and so is profile-scoped, not a bulk list.
+- `referralsource`, `profileTags` — the collection endpoint is **POST (create) only**; there
+  is no GET list. Reading them would have been a 405, not a list.
+- `locations/_search` — published with **no trailing slash**, unlike every other `_search`.
+- `organizations` — its endpoints declare **no `_page` / `_count`**. Driving it with
+  `page_number` would re-request page 0 until the 10,000-page ceiling, duplicating rows.
+
+Watermarks were also over-claimed: only `patients`, `practitioners` and `relatedperson`
+document `created` / `updated` as searchable. The other eight were sending a filter their
+endpoint does not define — which loads everything while still advancing the watermark.
+
+`allergyintolerance/all-allergy` was missed entirely and is now included.
+
+Not extractable in bulk, and therefore deliberately absent: `condition`, `goal`,
+`medicationstatement`, `careplan`, `documentReferences`, `invoice`, `tasklog` — each is
+scoped to a patient, encounter or id the schedule cannot supply. Several also carry a path
+parameter, and the substrate does no path templating, so declaring them would issue a
+literal `{patient_id}`. They need a parent-scoped fan-out first.
 """
 
 from __future__ import annotations
@@ -66,13 +93,14 @@ _PAGINATION: Final[PaginationParameters] = PaginationParameters(
 _GE_PREFIX: Final[str] = "ge"
 
 
-def _searchable(suffix: str, resource: str, *, watermarked: bool = True) -> RestEntitySpec:
-    """A resource read through `POST /v1/{resource}/_search/`, returning a FHIR Bundle."""
+def _searchable(path: str, suffix: str, *, watermarked: bool = False) -> RestEntitySpec:
+    """A `POST .../_search/` read returning a paginated FHIR Bundle."""
     return RestEntitySpec(
         entity_id=f"{SOURCE_ID}-{suffix}",
-        # The trailing slash is mandatory: the vendor's implementation rules state that
-        # omitting it returns an error rather than the collection.
-        path=f"/v1/{resource}/_search/",
+        # The path is taken verbatim from the specification, trailing slash included or
+        # excluded exactly as published — `/v1/locations/_search` genuinely has none, and
+        # the vendor's own implementation rules make the slash load-bearing.
+        path=path,
         read_method="POST",
         records_json_path=("entry",),
         record_unwrap_field="resource",
@@ -86,16 +114,23 @@ def _searchable(suffix: str, resource: str, *, watermarked: bool = True) -> Rest
     )
 
 
-def _listable(suffix: str, resource: str) -> RestEntitySpec:
-    """A resource the API exposes only as a `GET` collection, with no search sibling."""
+def _unpaginated(path: str, suffix: str, *, read_method: str = "GET") -> RestEntitySpec:
+    """
+    A bulk read the specification declares without `_page` / `_count`.
+
+    Driving one of these with `page_number` is the trap this exists to avoid: the endpoint
+    ignores `_page`, so every request returns the same full first page, the strategy never
+    sees a short page, and the run duplicates that page up to the 10,000-page ceiling.
+    """
     return RestEntitySpec(
         entity_id=f"{SOURCE_ID}-{suffix}",
-        path=f"/v1/{resource}/",
+        path=path,
+        read_method=read_method,
         records_json_path=("entry",),
         record_unwrap_field="resource",
         watermark_field=None,
         natural_key_field="id",
-        pagination_strategy="page_number",
+        pagination_strategy="single_request",
         page_size=MAX_COUNT,
         pagination_parameters=_PAGINATION,
     )
@@ -109,25 +144,25 @@ WELLSKY_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     token_endpoint_path="/oauth/accesstoken",  # noqa: S106  # nosec B106 — a path, not a secret
     token_grant_kind=TokenGrantKind.CLIENT_CREDENTIALS,
     entities=(
-        # Clinical and demographic records — the PHI core of the source.
-        _searchable("patient", "patients"),
-        _searchable("practitioner", "practitioners"),
-        _searchable("related-person", "relatedperson"),
-        _searchable("encounter", "encounter"),
-        _searchable("appointment", "appointment"),
-        _searchable("admin-task", "adminTasks"),
-        _searchable("activity", "activities"),
-        _searchable("charge-item", "chargeitem"),
-        _searchable("document-reference", "documentReferences"),
-        _searchable("medication", "medication"),
-        _searchable("subscription", "subscriptions"),
-        # Reference and organisational data: searchable, but with no useful change stamp.
-        _searchable("organization", "organizations", watermarked=False),
-        _searchable("location", "locations", watermarked=False),
-        _searchable("agency-admin", "admins", watermarked=False),
-        # Collection-only resources — no `_search` sibling is published for these.
-        _listable("referral-source", "referralsource"),
-        _listable("profile-tag", "profileTags"),
+        # The only three resources whose `_search` documents `created` / `updated` as
+        # searchable date fields. Claiming a watermark anywhere else would send a filter
+        # the endpoint ignores, load everything, and still advance the watermark — a
+        # completeness illusion rather than an error.
+        _searchable("/v1/patients/_search/", "patient", watermarked=True),
+        _searchable("/v1/practitioners/_search/", "practitioner", watermarked=True),
+        _searchable("/v1/relatedperson/_search/", "related-person", watermarked=True),
+        # Paginated searches with no documented date filter — full load every run.
+        _searchable("/v1/encounter/_search/", "encounter"),
+        _searchable("/v1/appointment/_search/", "appointment"),
+        _searchable("/v1/chargeitem/_search/", "charge-item"),
+        _searchable("/v1/medication/_search/", "medication"),
+        _searchable("/v1/subscriptions/_search/", "subscription"),
+        _searchable("/v1/admins/_search/", "agency-admin"),
+        # Published without a trailing slash, unlike every other `_search`.
+        _searchable("/v1/locations/_search", "location"),
+        # Declared without `_page` / `_count`, so read in one request.
+        _unpaginated("/v1/organizations/", "organization"),
+        _unpaginated("/v1/allergyintolerance/all-allergy/", "allergy-intolerance"),
     ),
     capabilities=frozenset(
         {
@@ -139,6 +174,9 @@ WELLSKY_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     default_pagination_strategy="page_number",
     default_rate_limit_policy="wellsky-conservative",
     pagination_parameters=_PAGINATION,
+    # The vendor designed this for object-by-object CRUD and advises against batch use,
+    # so a 100-row search bundle is at the slow end of what it expects to serve.
+    request_timeout_seconds=90.0,
     default_records_json_path=("entry",),
     default_page_size=MAX_COUNT,
     required_credential_keys=frozenset({"client_id", "client_secret"}),

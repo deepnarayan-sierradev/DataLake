@@ -1,4 +1,100 @@
-# Source API Fidelity Audit — 2026-07-29
+# Source API Fidelity Audit — 2026-07-29, second pass 2026-07-30
+
+---
+
+## Second pass (2026-07-30) — what the first pass still got wrong
+
+The first pass was asked to be re-checked "so there is no room for issues, gaps, timeout,
+rate limit or any other threshold." Re-reading every artifact against the shipped code found
+five further classes of defect. Two of them would have caused **silent** wrong behaviour,
+which is the category that matters most.
+
+### 1. Every hand-sized token bucket could breach its documented limit
+
+`capacity` is an *instantaneous* burst that **adds** to whatever the bucket refills during a
+window. The quantity a vendor caps is `capacity + refill x window`. Four registered policies
+were over — three from this programme and HubSpot's, which predates it:
+
+| Policy | Documented | Worst case it permitted |
+|---|---|---|
+| `maid-central-hourly` | 100 / 60 s | **113** in 60 s |
+| `servicebridge-shared-ip` | 50 / 1 s | **53** in 1 s |
+| `dialpad-standard` | 20 / 1 s | **36** in 1 s |
+| `hubspot-standard` | 110 / 10 s | **200** in 10 s |
+
+MaidCentral is the clearest illustration: the vendor's burst limit is 100 per *minute*, and a
+capacity of 100 permits 100 in one *second*. Buckets are now derived by
+`rate_limiting.token_bucket_within()` from `DocumentedRateLimit` values, so the invariant
+holds by construction, and a parametrised test asserts it per policy per window.
+
+### 2. Seven of sixteen WellSky entities pointed at endpoints that do not exist
+
+Checking every declared path against the operations the Swagger actually publishes:
+
+| Entity | Declared | Reality |
+|---|---|---|
+| `admin-task` | `POST /v1/adminTasks/_search/` | no `_search` path exists |
+| `activity` | `POST /v1/activities/_search/` | no `_search` path exists |
+| `document-reference` | `POST /v1/documentReferences/_search/` | no `_search`; `_profile` needs a `reference` |
+| `referral-source` | `GET /v1/referralsource/` | **POST-create only** — a GET is 405 |
+| `profile-tag` | `GET /v1/profileTags/` | **POST-create only** |
+| `location` | `POST /v1/locations/_search/` | published **without** the trailing slash |
+| `organization` | `page_number` paging | declares no `_page`/`_count` |
+
+`organization` is the dangerous one: `page_number` stops only on a short page, so an endpoint
+that ignores `_page` returns the same full page forever — 10,000 duplicate requests to the
+`MAX_PAGES` ceiling. It now uses `single_request`, and `allergyintolerance/all-allergy`, a
+bulk endpoint missed entirely, is added.
+
+### 3. WellSky watermarks were claimed on eight entities that cannot filter
+
+Only `patients`, `practitioners` and `relatedperson` document `created`/`updated` as
+searchable. The other eight were sending `{"updated": "ge…"}` to a search that does not
+define it: the filter is ignored, everything loads, **and the watermark still advances**. A
+completeness illusion, not an error. A cross-source test now refuses a watermark on any
+source that does not declare the incremental capability.
+
+### 4. One timeout for every source
+
+A single platform-wide 30 s applied to BePro's unpaginated per-frame tracking read and to a
+10,000-row GA4 report alike. A timeout shorter than the response makes an entity permanently
+unextractable while looking like a transient network fault. `request_timeout_seconds` is now
+per source — BePro and GA4 180 s, MaidCentral 120 s, WellSky 90 s, ServiceBridge 60 s — and
+bounded at 300 s so one read can never consume enough of the Lambda budget to prevent a
+checkpoint.
+
+### 5. Offset paging with no deterministic order
+
+MaidCentral pages by `skipCount` and BePro defaults `sort_direction` to `desc`. Offset paging
+over data being written to skips and repeats rows unless the server orders stably. MaidCentral
+now sorts by each entity's own key ascending (the guide documents `sorting`); BePro pins
+`sort_direction=asc`.
+
+### Also closed
+
+- **Path templates.** Several WellSky and BePro endpoints are `/{patient_id}`-shaped. The
+  substrate does no substitution, so such a path would be requested literally. Now rejected at
+  spec construction, with a cross-source test.
+- **SeniorPlace multi-office.** The spec states `officeId` **must** be supplied "if your
+  organization has multiple offices". Nothing supplies it, and the likely behaviour is a
+  silent default-office scope — partial data reported as success. Recorded as
+  `MULTI_OFFICE_SCOPE_REQUIRED`, and `GET /me` is now extracted as `seniorplace-office`
+  because it is the only published way to enumerate offices.
+
+### Re-confirmed, unchanged
+
+- **ServMan Pro** publishes no API surface in 456 pages. Every "REST" hit is a *column
+  description* inside the database (a `CCRESTACTIVITY` log table, a REST-provider config
+  table). It is a database, as first reported.
+- **WellSky Insights** is a warehouse — it even carries a `datawarehouse_availability` status
+  table. No API, no rate limits. Separate from Home Connect, as first reported.
+- **BePro** rate limits, required parameters and envelope are exactly as first recorded.
+- **SeniorPlace** returns bare arrays, documents no paging and no rate limit — as first
+  recorded.
+
+---
+
+# First pass — 2026-07-29
 
 The customer supplied vendor API documentation for three sources (`API Docs/`) and doc URLs for six
 more. This is what reading all of them against the shipped connector specs found, what changed as a

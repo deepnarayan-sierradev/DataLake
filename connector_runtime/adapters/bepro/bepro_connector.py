@@ -20,13 +20,18 @@ A single fixed window cannot express that; a token bucket can, and does — capa
 burst, refill is the sustained rate. Both are set below the documented figures because the
 budget is per API token and a token is shared by whatever else the customer runs against it.
 
-**Two endpoints are match-scoped and cannot be scheduled standalone.** `data/tracking`
-returns per-frame positional data for one match and is not paginated at all; `video/timings`
-requires a `match_id`. Both are declared with `required_run_parameters` so calling them
-without a scope fails closed as a *configuration* error rather than reaching the provider
-and returning 422, which the retry policy would otherwise treat as worth retrying. They
-become schedulable when a match-scoped fan-out exists; the declaration is what makes that
-gap visible in the console instead of invisible.
+**Two endpoints are match-scoped and cannot be scheduled standalone**, for two different
+reasons worth keeping distinct. `video/timings` declares `match_id` **required** — the
+vendor's own constraint. `data/tracking` does not: `match_id` is optional there, but the
+endpoint is unpaginated and returns per-frame positional data, so an unscoped call asks for
+every frame of every match in one response. That second constraint is **ours**, chosen
+because the alternative is a request that cannot complete.
+
+Both are declared with `required_run_parameters`, so calling them without a scope fails
+closed as a *configuration* error rather than reaching the provider and returning 422, which
+the retry policy would otherwise treat as worth retrying. They become schedulable when a
+match-scoped fan-out exists; the declaration is what makes that gap visible in the console
+instead of invisible.
 """
 
 from __future__ import annotations
@@ -40,9 +45,9 @@ from connector_runtime.adapters.rest_api.rest_source_spec import (
     RestSourceSpec,
 )
 from connector_runtime.rate_limiting import (
-    RateLimitPolicySpec,
-    RateLimitStrategy,
+    DocumentedRateLimit,
     rate_limit_policy_registry,
+    token_bucket_within,
 )
 from connector_runtime.source_capabilities import SourceCapability
 
@@ -51,18 +56,13 @@ SOURCE_ID: Final[str] = "bepro"
 # Documented: 1000 requests/minute per API token, burst 100 requests/second.
 DOCUMENTED_REQUESTS_PER_MINUTE: Final[int] = 1_000
 DOCUMENTED_BURST_PER_SECOND: Final[int] = 100
-_SUSTAINED_PER_SECOND: Final[float] = DOCUMENTED_REQUESTS_PER_MINUTE / 60 * 0.8
-_BURST_CAPACITY: Final[int] = int(DOCUMENTED_BURST_PER_SECOND * 0.8)
+DOCUMENTED_LIMITS: Final[tuple[DocumentedRateLimit, ...]] = (
+    DocumentedRateLimit(DOCUMENTED_BURST_PER_SECOND, 1),
+    DocumentedRateLimit(DOCUMENTED_REQUESTS_PER_MINUTE, 60),
+)
 
 RATE_LIMIT_POLICY_NAME: Final[str] = "bepro-standard"
-rate_limit_policy_registry.register(
-    RATE_LIMIT_POLICY_NAME,
-    RateLimitPolicySpec(
-        RateLimitStrategy.TOKEN_BUCKET,
-        capacity=_BURST_CAPACITY,
-        refill_per_second=_SUSTAINED_PER_SECOND,
-    ),
-)
+rate_limit_policy_registry.register(RATE_LIMIT_POLICY_NAME, token_bucket_within(DOCUMENTED_LIMITS))
 
 # The API's own default page size is 50 and it publishes no maximum. 200 is four times the
 # default and still one request; going higher risks a provider-side cap the document does
@@ -85,6 +85,10 @@ def _collection(suffix: str, path: str, natural_key: str = "id") -> RestEntitySp
         natural_key_field=natural_key,
         pagination_strategy="offset_limit",
         page_size=_PAGE_SIZE,
+        # The API defaults `sort_direction` to `desc`. Under offset paging that is unsafe
+        # for anything append-heavy: a row inserted mid-sweep shifts every later page down
+        # by one and a record is skipped. Ascending order makes the offsets stable.
+        static_query_parameters={"sort_direction": "asc"},
     )
 
 
@@ -176,6 +180,9 @@ BEPRO_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     ),
     default_pagination_strategy="offset_limit",
     default_rate_limit_policy=RATE_LIMIT_POLICY_NAME,
+    # `data/tracking` returns per-frame positional data for a whole match in one
+    # unpaginated response — minutes of play at ~25 frames/second. 30s is not enough.
+    request_timeout_seconds=180.0,
     default_records_json_path=("data",),
     default_page_size=_PAGE_SIZE,
     # Left at watermark polling because that strategy already plans a FULL extraction when

@@ -112,13 +112,17 @@ class RestHttpSession:
         credentials: Mapping[str, str],
         rate_limit_policy: RateLimitPolicy,
         *,
-        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        timeout_seconds: float | None = None,
         session: Any | None = None,
     ) -> None:
         self._spec = spec
         self._credentials = dict(credentials)
         self._rate_limit = rate_limit_policy
-        self._timeout = timeout_seconds
+        # The source's declared timeout unless a caller overrides it; a slow report source
+        # and a fast row collection should not share one number.
+        self._timeout = (
+            timeout_seconds if timeout_seconds is not None else spec.request_timeout_seconds
+        )
         self._session = session or requests.Session()
         self._token_exchange = (
             RestTokenExchange(spec, credentials, session=self._session)

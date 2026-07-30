@@ -33,10 +33,12 @@ from connector_runtime.adapters.rest_api.rest_adapter_registration import (
     resolve_entity_spec,
 )
 from connector_runtime.adapters.rest_api.rest_source_spec import (
+    MAX_REQUEST_TIMEOUT_SECONDS,
     RestSourceSpec,
     rest_source_spec_registry,
 )
 from connector_runtime.pagination import pagination_strategy_registry
+from connector_runtime.source_capabilities import SourceCapability
 
 _SOURCE_IDS = sorted(rest_source_spec_registry.registered_source_ids())
 
@@ -93,6 +95,57 @@ class TestEveryRestSourceAcceptsAConfigDeclaredEntity:
             _spec(source_id), _params(source_id, entity_path="/v1/console-added")
         )
         assert resolved.supports_writeback is False
+
+
+class TestStructuralTrapsNoSourceMayFallInto:
+    """
+    Cross-source invariants for the two ways a spec can look right and read nothing.
+
+    Both were live on 2026-07-30: WellSky drove an unpaginated endpoint with `page_number`
+    (which re-requests page 0 to the 10,000-page ceiling), and several endpoints carry a
+    `{patient_id}` template the substrate never substitutes.
+    """
+
+    @pytest.mark.parametrize("source_id", _SOURCE_IDS)
+    def test_no_read_path_carries_an_unsubstituted_template(self, source_id: str) -> None:
+        offenders = [
+            e.entity_id for e in _spec(source_id).entities if "{" in e.path or "}" in e.path
+        ]
+        assert not offenders, (
+            f"{source_id}: {offenders} declare a path template. Nothing substitutes it, so "
+            "the request is issued literally and 404s. Use a parent-scoped fan-out."
+        )
+
+    @pytest.mark.parametrize("source_id", _SOURCE_IDS)
+    def test_keyset_paging_always_has_a_key_to_seek_on(self, source_id: str) -> None:
+        # KeysetPagination raises at run time without one; catching it here means the
+        # failure surfaces in CI rather than on the first scheduled extraction.
+        for entity in _spec(source_id).entities:
+            if entity.pagination_strategy == "keyset":
+                assert entity.keyset_field, (
+                    f"{source_id}/{entity.entity_id}: keyset paging with no keyset_field "
+                    "cannot seek and raises on the first page."
+                )
+
+    @pytest.mark.parametrize("source_id", _SOURCE_IDS)
+    def test_the_read_timeout_leaves_room_for_the_run_to_checkpoint(self, source_id: str) -> None:
+        spec = _spec(source_id)
+        assert 1.0 <= spec.request_timeout_seconds <= MAX_REQUEST_TIMEOUT_SECONDS
+
+    @pytest.mark.parametrize("source_id", _SOURCE_IDS)
+    def test_a_watermark_field_is_only_claimed_where_an_entity_can_filter(
+        self, source_id: str
+    ) -> None:
+        # A watermark on an entity whose source cannot filter incrementally advances state
+        # against an unfiltered read. Either the capability is declared, or no entity claims
+        # a watermark field.
+        spec = _spec(source_id)
+        claims = [e.entity_id for e in spec.entities if e.watermark_field]
+        if SourceCapability.INCREMENTAL not in spec.capabilities:
+            assert not claims, (
+                f"{source_id} does not declare the incremental capability, but {claims} "
+                "carry a watermark field. The watermark would advance against a full load."
+            )
 
 
 class TestInheritedDefaultsMatchWhatTheSourceActuallyUses:

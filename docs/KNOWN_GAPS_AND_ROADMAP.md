@@ -543,3 +543,39 @@ reaching the provider and being retried on a 422. They become schedulable when a
 Both vendors' documentation sites are login-gated. Their existing policies are internally consistent
 and conservative, so they were **left unchanged rather than edited on unverifiable information**.
 Re-verify when someone with an account can read the current published limits.
+
+### 30. SeniorPlace multi-office extraction is silently partial
+
+The SeniorPlace specification states: *"If your organization has multiple offices, you must
+specify which office to operate in using the `officeId` parameter on search and create
+endpoints."* Nothing supplies `officeId`, and the specification does not say what the API does
+without one. The dangerous reading — and the one to assume — is that it scopes to a default
+office, so a multi-office agency would extract a subset and the run would report success.
+
+A single-office agency is unaffected. `GET /me` is now extracted as `seniorplace-office`
+because it is the only published way to enumerate offices; `MULTI_OFFICE_SCOPE_REQUIRED` and
+`OFFICE_SCOPED_ENTITY_IDS` in the adapter name the two affected entities. Closing it needs a
+per-office fan-out, the same primitive `DL-CONN-19`'s match-scoped endpoints need.
+
+### 31. Match-scoped and patient-scoped endpoints need a parent-driven fan-out
+
+Three sources now declare endpoints that cannot be scheduled standalone because they require a
+scope the schedule cannot supply:
+
+- BePro `tracking` and `video-timings` — need a `match_id`.
+- WellSky `condition`, `goal`, `medicationstatement`, `careplan`, `documentReferences`,
+  `invoice`, `tasklog` — patient- or encounter-scoped, and most carry a path template the
+  substrate does not substitute. These are **absent from the spec** rather than declared,
+  because a declared `/v1/condition/{patient_id}` would be requested literally.
+- SeniorPlace's office scoping above.
+
+One primitive closes all three: a driver that iterates a parent entity's extracted rows and
+fans out a child extraction per row, with the parent key bound into `query_parameters` (and,
+for WellSky, into the path). Until it exists these remain declared-and-guarded or omitted.
+
+### 32. HubSpot and Sage Intacct rate limits are still unverified (carried forward)
+
+Unchanged from item 29. HubSpot's *bucket* was corrected on 2026-07-30 — it permitted 200
+requests in the documented 110-per-10-second window — but the documented number itself still
+comes from the pre-existing comment, not from a re-read, because the vendor's docs are
+login-gated.
