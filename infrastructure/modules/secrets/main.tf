@@ -16,109 +16,78 @@ locals {
   })
 }
 
-# ---------------------------------------------------------------------------
-# Source credentials secrets
-# Each source gets a dedicated secret. Runtime retrieves via GetSecretValue.
-# Secret values are NEVER set here — populated by the secrets onboarding runbook.
-# Rotation: configured at secret level; Lambda rotation function wired in Phase 10.
-# ---------------------------------------------------------------------------
 
 resource "aws_secretsmanager_secret" "salesforce_credentials" {
-  name        = "edl/sources/salesforce/credentials"
+  name        = "${var.name_prefix}/${var.environment}/sources/salesforce/credentials"
   description = "Salesforce OAuth 2.0 client credentials for the extraction runtime."
   kms_key_id  = var.secrets_kms_key_arn
 
-  # Rotation schedule: configure after onboarding the rotation Lambda
-  # rotation_lambda_arn = var.salesforce_rotation_lambda_arn
-  # rotation_rules { automatically_after_days = 90 }
 
   recovery_window_in_days = var.secret_recovery_window_days
 
   tags = merge(local.common_tags, {
-    Name   = "EdlSalesforceCredentials"
+    Name   = "${var.name_prefix}-salesforce-credentials-${var.environment}"
     Source = "salesforce"
   })
 }
 
 resource "aws_secretsmanager_secret" "netsuite_credentials" {
-  name        = "edl/sources/netsuite/credentials"
+  name        = "${var.name_prefix}/${var.environment}/sources/netsuite/credentials"
   description = "NetSuite OAuth 2.0 / TBA credentials for the extraction runtime."
   kms_key_id  = var.secrets_kms_key_arn
 
   recovery_window_in_days = var.secret_recovery_window_days
 
   tags = merge(local.common_tags, {
-    Name   = "EdlNetsuiteCredentials"
+    Name   = "${var.name_prefix}-netsuite-credentials-${var.environment}"
     Source = "netsuite"
   })
 }
 
 resource "aws_secretsmanager_secret" "mysql_rds_credentials" {
-  name        = "edl/sources/mysql-rds/credentials"
+  name        = "${var.name_prefix}/${var.environment}/sources/mysql-rds/credentials"
   description = "MySQL RDS read-only credentials for the extraction runtime."
   kms_key_id  = var.secrets_kms_key_arn
 
   recovery_window_in_days = var.secret_recovery_window_days
 
   tags = merge(local.common_tags, {
-    Name   = "EdlMysqlRdsCredentials"
+    Name   = "${var.name_prefix}-mysql-rds-credentials-${var.environment}"
     Source = "mysql-rds"
   })
 }
 
-# SEC-3: Sage credentials were previously created out-of-band (no Terraform
-# resource, no DenyAllOtherPrincipals policy) — sage_credential_manager.py
-# reads {environment}/sources/sage/{product}/credentials for both supported
-# products (see connector_runtime/adapters/sage/common/sage_product_registry.py
-# SUPPORTED_SAGE_PRODUCTS). Bringing these under Terraform closes that gap.
 
 resource "aws_secretsmanager_secret" "sage_intacct_credentials" {
-  # Automatic rotation is not implementable for this credential: it is issued by a third party
-  # (Sage), and rotating it means a human obtaining new credentials from that vendor — there is no
-  # API this system can call. Attaching a rotation schedule would produce a Lambda that fails on
-  # every run, which is worse than no rotation because it looks like a working control.
-  # The compensating control is real and deployed: `credential_expiry_notifier` (SEC-6) sweeps
-  # daily and alerts before expiry, so a stale credential surfaces before it breaks ingestion.
   #checkov:skip=CKV2_AWS_57:Vendor-issued credential; no programmatic rotation exists. See expiry notifier.
-  name        = "edl/sources/sage/intacct/credentials"
+  name        = "${var.name_prefix}/${var.environment}/sources/sage/intacct/credentials"
   description = "Sage Intacct web services credentials for the extraction runtime."
   kms_key_id  = var.secrets_kms_key_arn
 
   recovery_window_in_days = var.secret_recovery_window_days
 
   tags = merge(local.common_tags, {
-    Name    = "EdlSageIntacctCredentials"
+    Name    = "${var.name_prefix}-sage-intacct-credentials-${var.environment}"
     Source  = "sage"
     Product = "intacct"
   })
 }
 
 resource "aws_secretsmanager_secret" "sage_x3_credentials" {
-  # Automatic rotation is not implementable for this credential: it is issued by a third party
-  # (Sage), and rotating it means a human obtaining new credentials from that vendor — there is no
-  # API this system can call. Attaching a rotation schedule would produce a Lambda that fails on
-  # every run, which is worse than no rotation because it looks like a working control.
-  # The compensating control is real and deployed: `credential_expiry_notifier` (SEC-6) sweeps
-  # daily and alerts before expiry, so a stale credential surfaces before it breaks ingestion.
   #checkov:skip=CKV2_AWS_57:Vendor-issued credential; no programmatic rotation exists. See expiry notifier.
-  name        = "edl/sources/sage/x3/credentials"
+  name        = "${var.name_prefix}/${var.environment}/sources/sage/x3/credentials"
   description = "Sage X3 API credentials for the extraction runtime."
   kms_key_id  = var.secrets_kms_key_arn
 
   recovery_window_in_days = var.secret_recovery_window_days
 
   tags = merge(local.common_tags, {
-    Name    = "EdlSageX3Credentials"
+    Name    = "${var.name_prefix}-sage-x3-credentials-${var.environment}"
     Source  = "sage"
     Product = "x3"
   })
 }
 
-# ---------------------------------------------------------------------------
-# Resource-based policies on secrets
-# Only the extraction runtime role is permitted to read secret values.
-# The Secrets Manager console and root can manage; runtime cannot rotate.
-# ---------------------------------------------------------------------------
 
 data "aws_caller_identity" "current" {}
 
@@ -179,11 +148,6 @@ resource "aws_secretsmanager_secret_policy" "sage_x3" {
   policy     = data.aws_iam_policy_document.source_credential_secret_policy.json
 }
 
-# ---------------------------------------------------------------------------
-# Automatic secret rotation — activated when rotation Lambda ARNs are provided.
-# Rotation Lambdas are deployed via the Phase 10 runbook.  Until then, manual
-# rotation must be performed on a quarterly schedule per the operations runbook.
-# ---------------------------------------------------------------------------
 
 resource "aws_secretsmanager_secret_rotation" "salesforce" {
   count               = var.salesforce_rotation_lambda_arn != null ? 1 : 0
@@ -212,19 +176,9 @@ resource "aws_secretsmanager_secret_rotation" "mysql_rds" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Credential Expiry Notifier (SEC-6)
-#
-# None of the three rotation_lambda_arn variables above are set in any
-# environment today, so automatic rotation is inert everywhere. Until a
-# per-connector rotation Lambda is built (separate integration work per
-# source auth system), this Lambda closes the observability half of the gap:
-# a daily check of every source-credential secret's age, alerting via SNS
-# when a secret is approaching or past its rotation window.
-# ---------------------------------------------------------------------------
 
 resource "aws_lambda_function" "credential_expiry_notifier" {
-  function_name = "EdlCredentialExpiryNotifier"
+  function_name = "${var.name_prefix}-credential-expiry-notifier-${var.environment}"
   description   = "Daily check of source-credential secret age; publishes an SNS alert when rotation is overdue (SEC-6)."
 
   s3_bucket        = var.lambda_package_s3_bucket
@@ -256,18 +210,13 @@ resource "aws_lambda_function" "credential_expiry_notifier" {
   timeout     = 60
   memory_size = 256
 
-  # A daily expiry sweep needs almost no concurrency; a ceiling of 2 leaves headroom for a
-  # retry without letting a schedule storm consume the pool.
   reserved_concurrent_executions = var.reserved_concurrent_executions
 
   role = var.credential_expiry_notifier_role_arn
 
   environment {
     variables = {
-      PLATFORM_ENVIRONMENT = var.environment
-      # AWS_REGION is a reserved Lambda environment variable injected
-      # automatically by the runtime — setting it explicitly is rejected by
-      # CreateFunction with InvalidParameterValueException.
+      PLATFORM_ENVIRONMENT          = var.environment
       SOURCE_CREDENTIAL_SECRET_ARNS = join(",", local.all_source_credential_secret_arns)
       ALERT_SNS_TOPIC_ARN           = var.alert_topic_arn
       ROTATION_WARNING_DAYS         = tostring(var.rotation_warning_days)
@@ -275,9 +224,6 @@ resource "aws_lambda_function" "credential_expiry_notifier" {
     }
   }
 
-  # Uses the logs KMS key (allow_cloudwatch_logs enabled), not
-  # secrets_kms_key_arn — the secrets key's policy only covers the 5 source
-  # credential secrets themselves, not this Lambda's own env var encryption.
   kms_key_arn = var.logs_kms_key_arn
 
   tracing_config {
@@ -285,22 +231,22 @@ resource "aws_lambda_function" "credential_expiry_notifier" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "EdlCredentialExpiryNotifier"
+    Name = "${var.name_prefix}-credential-expiry-notifier-${var.environment}"
   })
 }
 
 resource "aws_cloudwatch_log_group" "credential_expiry_notifier" {
-  name              = "/aws/lambda/EdlCredentialExpiryNotifier"
+  name              = "/aws/lambda/${var.name_prefix}-credential-expiry-notifier-${var.environment}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.logs_kms_key_arn
 
   tags = merge(local.common_tags, {
-    Name = "/aws/lambda/EdlCredentialExpiryNotifier"
+    Name = "/aws/lambda/${var.name_prefix}-credential-expiry-notifier-${var.environment}"
   })
 }
 
 resource "aws_scheduler_schedule" "credential_expiry_notifier_daily" {
-  name       = "EdlCredentialExpiryCheck"
+  name       = "${var.name_prefix}-credential-expiry-check-${var.environment}"
   group_name = "default"
 
   flexible_time_window {
@@ -330,35 +276,21 @@ locals {
   ]
 }
 
-# ---------------------------------------------------------------------------
-# Async-invocation dead letter queue (CKV_AWS_116). An asynchronous Lambda failure with no
-# DLQ is discarded after the retries with nothing left to inspect. Named `EdlStageDlq-*` so
-# the existing `sqs:SendMessage` grant on that prefix covers it rather than adding a new one.
-# SSE-SQS rather than a CMK: no per-module KMS input exists, and the payload here is a failed
-# event envelope, not tenant data.
-# ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "async_dlq" {
-  name                      = "EdlStageDlq-CredentialExpiryAsync"
+  name                      = "${var.name_prefix}-credential-expiry-async-dlq-${var.environment}"
   message_retention_seconds = 1209600 # 14 days, the maximum — a DLQ that expires loses the evidence
   sqs_managed_sse_enabled   = true
 
-  tags = merge(local.common_tags, { Name = "EdlStageDlq-CredentialExpiryAsync" })
+  tags = merge(local.common_tags, { Name = "${var.name_prefix}-credential-expiry-async-dlq-${var.environment}" })
 }
 
-# ---------------------------------------------------------------------------
-# The function runs inside the VPC (CKV_AWS_117) so its egress is attributable and
-# controllable. HTTPS only: S3 and DynamoDB go via gateway endpoints, the rest via the
-# interface endpoints and NAT the networking module already provisions.
-# ---------------------------------------------------------------------------
 
 resource "aws_security_group" "secrets_lambda" {
-  # Attached to this module's function(s) through the `vpc_config` block below. Checkov's graph
-  # does not traverse a dynamic block, so it reads the group as orphaned.
   #checkov:skip=CKV2_AWS_5:Attached via dynamic vpc_config in this module.
   count = var.vpc_id == null ? 0 : 1
 
-  name        = "CredentialExpiryNotifierLambdaSg"
+  name        = "${var.name_prefix}-credential-expiry-notifier-${var.environment}-sg"
   description = "HTTPS egress only for the CredentialExpiryNotifier Lambda function(s)."
   vpc_id      = var.vpc_id
 
@@ -370,7 +302,7 @@ resource "aws_security_group" "secrets_lambda" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = merge(local.common_tags, { Name = "CredentialExpiryNotifierLambdaSg" })
+  tags = merge(local.common_tags, { Name = "${var.name_prefix}-credential-expiry-notifier-${var.environment}-sg" })
 
   lifecycle {
     create_before_destroy = true

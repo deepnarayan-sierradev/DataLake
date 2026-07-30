@@ -100,9 +100,9 @@ free — that is the design constraint that matters most here.
 | S3 `{tenant_code}/features/{feature_set}/{version}/as_of=…/` | offline feature store, Parquet |
 | S3 `{tenant_code}/ml/training-sets/{model}/{version}/` | immutable training snapshots |
 | S3 `{tenant_code}/ml/predictions/{model}/{version}/score_date=…/` | batch scores |
-| `EdlFeatureSet` (new) | PK `tenant_code`, SK `{feature_set}#{version}` — definitions, lineage |
-| `EdlModelRegistry` (new) | PK `tenant_code`, SK `{model_name}#{version}` — artefact, metrics, state |
-| `EdlModelMonitor` (new) | PK `tenant_code`, SK `{model_name}#{period}` — drift and accuracy |
+| `datalake-feature-sets-<env>` (new) | PK `tenant_code`, SK `{feature_set}#{version}` — definitions, lineage |
+| `datalake-model-registry-<env>` (new) | PK `tenant_code`, SK `{model_name}#{version}` — artefact, metrics, state |
+| `datalake-model-monitor-<env>` (new) | PK `tenant_code`, SK `{model_name}#{period}` — drift and accuracy |
 
 Predictions land in the analytics layer under the standard tenant-prefixed pattern and are
 registered in Glue, so they are queryable by Athena, the serving store, the semantic layer, and the

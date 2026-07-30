@@ -36,14 +36,12 @@ def _sql(engine: ServingEngine, **kwargs: object) -> str:
 class TestLoaderCanStillWrite:
     @pytest.mark.parametrize("engine", _POSTGRES_LIKE)
     def test_a_for_all_policy_is_emitted_for_the_loader_role(self, engine: ServingEngine) -> None:
-        # The assertion the previous implementation failed.
         sql = _sql(engine)
         assert "FOR ALL" in sql
         assert f"TO {DEFAULT_LOADER_ROLE}" in sql
 
     @pytest.mark.parametrize("engine", _POSTGRES_LIKE)
     def test_the_loader_policy_permits_both_read_and_write(self, engine: ServingEngine) -> None:
-        # USING governs rows read, WITH CHECK governs rows written. An upsert needs both.
         sql = _sql(engine)
         assert "USING (true) WITH CHECK (true)" in sql
 
@@ -64,13 +62,12 @@ class TestLoaderCanStillWrite:
         assert "ALTER POLICY" in sql
 
     def test_sqlserver_exempts_the_loader_inside_the_predicate(self) -> None:
-        # T-SQL has no per-command policy, and a filter predicate also constrains the read side of
-        # MERGE — which is exactly what the loader uses to decide what changed.
         sql = _sql(ServingEngine.SQLSERVER)
         assert f"IS_ROLEMEMBER('{DEFAULT_LOADER_ROLE}') = 1" in sql
 
     def test_the_loader_role_is_configurable(self) -> None:
-        assert "TO edl_bulk_writer" in _sql(ServingEngine.POSTGRESQL, loader_role="edl_bulk_writer")
+        sql = _sql(ServingEngine.POSTGRESQL, loader_role="custom_bulk_writer")
+        assert "TO custom_bulk_writer" in sql
 
 
 class TestReaderIsolationIsUnchanged:
@@ -80,21 +77,16 @@ class TestReaderIsolationIsUnchanged:
 
     @pytest.mark.parametrize("engine", _POSTGRES_LIKE)
     def test_force_is_retained(self, engine: ServingEngine) -> None:
-        # Without FORCE the table owner reads unfiltered, and the owner is reachable from any
-        # connection that authenticates as it.
         assert "FORCE ROW LEVEL SECURITY" in _sql(engine)
 
     @pytest.mark.parametrize("engine", _POSTGRES_LIKE)
     def test_the_predicate_reads_a_session_setting_not_a_client_value(
         self, engine: ServingEngine
     ) -> None:
-        # OWASP A03: the caller must not be able to choose which scope units it sees.
-        assert "current_setting('edl.scope_units', true)" in _sql(engine)
+        assert "current_setting('datalake.scope_units', true)" in _sql(engine)
 
     @pytest.mark.parametrize("engine", _POSTGRES_LIKE)
     def test_a_null_scope_unit_is_excluded(self, engine: ServingEngine) -> None:
-        # Writer contract, not a filter gap: attribution stamps `__tenant__` for a single-partition
-        # tenant, so a NULL reaching the serving store is a data defect.
         assert "scope_unit_id IS NULL" not in _sql(engine)
 
 
@@ -104,7 +96,6 @@ class TestGuardrails:
             generate_row_security_policy(table_name="dim_customer", engine=ServingEngine.MYSQL)
 
     def test_an_unsafe_loader_role_is_rejected(self) -> None:
-        # The role name is interpolated into DDL, so it must pass the allowlist (OWASP A03).
         with pytest.raises(ValueError, match="allowlisted identifier"):
             generate_row_security_policy(
                 table_name="dim_customer",

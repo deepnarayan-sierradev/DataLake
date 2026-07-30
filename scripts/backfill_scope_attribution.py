@@ -37,8 +37,6 @@ import pyarrow.parquet as pq
 from tenancy.scope_attribution import ScopeAttributor
 from tenancy.scope_predicate import SCOPE_UNIT_COLUMN
 
-# Partitions scanned per invocation before the script stops and reports. A backfill that walks a
-# whole bucket in one run cannot be reasoned about or resumed.
 DEFAULT_MAX_PARTITIONS: Final[int] = 500
 
 
@@ -146,9 +144,6 @@ def _stamp_partition(
             report.per_unit_rows[str(unit)] += 1
 
     if unattributable:
-        # Partially-attributable partitions are reported rather than half-written: a partition
-        # where some rows carry a unit and others do not is harder to reason about than one that
-        # carries none, because the NULL rows look deliberate.
         report.ambiguous_partitions.append(key)
         return
 

@@ -36,8 +36,6 @@ from typing import Final
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 
-# Parameter name -> why a None default is a security defect. Every entry is a real incident
-# class, not a hypothetical.
 GUARDED_PARAMETERS: Final[dict[str, str]] = {
     "scope_predicate": (
         "an omitted predicate returns tenant-wide rows across every scope unit (DL-SCOPE-14)"
@@ -47,8 +45,6 @@ GUARDED_PARAMETERS: Final[dict[str, str]] = {
     "granted_access_tags": "an omitted tag set would widen column access rather than narrow it",
 }
 
-# Only production code is checked. Tests legitimately construct partial objects, and a test that
-# passes no predicate is often the test asserting the refusal.
 EXCLUDED_PARTS: Final[frozenset[str]] = frozenset({"tests", "__pycache__", ".venv", "dist"})
 
 
@@ -88,7 +84,6 @@ def _is_optional_annotation(annotation: ast.expr | None) -> bool:
         base = annotation.value
         name = base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", "")
         return name == "Optional"
-    # A stringified annotation still spells the union out.
     if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
         text = annotation.value.replace(" ", "")
         return "|None" in text or "None|" in text or text.startswith("Optional[")
@@ -154,7 +149,6 @@ def _violations_in(path: Path) -> list[Violation]:
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
         args = node.args
-        # Positional parameters pair with defaults from the right; keyword-only pair directly.
         positional = args.posonlyargs + args.args
         paired: list[tuple[ast.arg, ast.expr | None]] = [
             (arg, default)

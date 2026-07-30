@@ -13,7 +13,6 @@ body never echoes the payload.
 from __future__ import annotations
 
 import json
-import os
 import time
 from typing import Any, Final
 
@@ -33,6 +32,7 @@ from contracts.identifier_policy import (
     validate_stable_id,
 )
 from contracts.platform_metrics import PlatformMetric
+from contracts.resource_naming import secret_path
 from observability.lambda_runtime import require_env
 from observability.metrics_emitter import CloudWatchMetricsEmitter
 from observability.stage_execution import StageIdentity, derive_correlation_id, stage_execution
@@ -41,10 +41,8 @@ from tenancy.connection_keys import resolve_connection_id
 
 _logger = get_platform_logger(__name__)
 
-_DEDUP_TABLE_NAME: Final[str] = "EdlWebhookEventDedup"
 _DEDUP_TTL_SECONDS: Final[int] = 48 * 3_600
 
-# Reject an oversized body before hashing it (OWASP A05 — resource exhaustion).
 _MAX_BODY_BYTES: Final[int] = 1_048_576
 
 
@@ -90,7 +88,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 source_id=request["source_id"],
                 error=str(exc),
             )
-            # A specific reason would help an attacker tune a forgery attempt.
             return _response(401, "signature verification failed")
 
         if _already_seen(request, region_name):
@@ -107,11 +104,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             entity_id=request["entity_id"],
         )
         return _response(202, "accepted")
-
-
-# ---------------------------------------------------------------------------
-# Private
-# ---------------------------------------------------------------------------
 
 
 def _parse_request(event: dict[str, Any]) -> dict[str, Any]:
@@ -197,9 +189,8 @@ def _verify_signature(request: dict[str, Any], region_name: str) -> None:
 
 def _webhook_secret(request: dict[str, Any], region_name: str) -> str:
     """Per-connection webhook secret; never logged, never returned."""
-    secret_id = (
-        f"edl/tenants/{request['tenant_code']}/connections/"
-        f"{request['connection_id']}/webhook-secret"
+    secret_id = secret_path(
+        "tenants", request["tenant_code"], "connections", request["connection_id"], "webhook-secret"
     )
     client = boto3.client("secretsmanager", region_name=region_name)
     try:
@@ -224,7 +215,7 @@ def _webhook_secret(request: dict[str, Any], region_name: str) -> str:
 
 def _already_seen(request: dict[str, Any], region_name: str) -> bool:
     """Conditional write on the dedup table; a lost race is treated as a duplicate."""
-    table_name = os.environ.get("WEBHOOK_DEDUP_TABLE") or _DEDUP_TABLE_NAME
+    table_name = require_env("WEBHOOK_DEDUP_TABLE")
     table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
     try:
         table.put_item(

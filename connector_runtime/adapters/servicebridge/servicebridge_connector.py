@@ -51,11 +51,6 @@ from connector_runtime.source_capabilities import SourceCapability
 
 SOURCE_ID: Final[str] = "servicebridge"
 
-# Documented: 50 requests/second and 60000 requests/hour, per IP address.
-# 60000/hour is 16.67/second sustained, so the hourly ceiling binds long before the
-# per-second one; the bucket is sized to the hourly rate with the per-second figure as
-# burst headroom. Deliberately below both so a co-tenant sharing the NAT address does not
-# push the pair over.
 DOCUMENTED_REQUESTS_PER_SECOND: Final[int] = 50
 DOCUMENTED_REQUESTS_PER_HOUR: Final[int] = 60_000
 DOCUMENTED_LIMITS: Final[tuple[DocumentedRateLimit, ...]] = (
@@ -66,15 +61,9 @@ DOCUMENTED_LIMITS: Final[tuple[DocumentedRateLimit, ...]] = (
 RATE_LIMIT_POLICY_NAME: Final[str] = "servicebridge-shared-ip"
 rate_limit_policy_registry.register(
     RATE_LIMIT_POLICY_NAME,
-    # Derived rather than hand-sized: a capacity chosen as a fraction of the per-second
-    # figure still breached it once the refill over that same second was counted.
-    # The quota is per IP and every Lambda shares one NAT address (see module docstring).
     token_bucket_within(DOCUMENTED_LIMITS, shared_across_connections=True),
 )
 
-# ServiceBridge names resources in the plural and versions them in the path. v2 is the
-# current shape for customers, locations and contacts — v1 kept only where the vendor has
-# not published a v2 equivalent, which is what the 2.0 upgrade note describes.
 _PAGINATION: Final[PaginationParameters] = PaginationParameters(
     page="page", limit="pageSize", first_page_index=1
 )
@@ -94,8 +83,6 @@ def _entity(
         watermark_field=watermark,
         natural_key_field=natural_key,
         pagination_strategy="page_number",
-        # Kept well under the documented per-second ceiling: a large page is one request,
-        # but a page this size is also what keeps a 60k/hour budget covering ~50 entities.
         page_size=200,
         pagination_parameters=_PAGINATION,
     )
@@ -131,10 +118,7 @@ SERVICEBRIDGE_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     default_pagination_strategy="page_number",
     default_rate_limit_policy=RATE_LIMIT_POLICY_NAME,
     pagination_parameters=_PAGINATION,
-    # The session-login grant needs a user id and password; a connection using the OAuth
-    # flow instead stores an access_token and overrides auth at the connection level.
     required_credential_keys=frozenset({"user_id", "password"}),
-    # 200-row pages from a field-service system carrying work-order history.
     request_timeout_seconds=60.0,
     default_records_json_path=("Results",),
     default_page_size=200,
@@ -150,7 +134,4 @@ SERVICEBRIDGE_SPEC: Final[RestSourceSpec] = RestSourceSpec(
 
 register_rest_source(SERVICEBRIDGE_SPEC)
 
-# Consumed by the migration runbook: this source is expected to go read-only and then dark
-# once Brothers Gutters completes the HubSpot cutover. Declared here so the fact lives with
-# the adapter rather than only in a document.
 IS_MIGRATION_SOURCE: Final[bool] = True

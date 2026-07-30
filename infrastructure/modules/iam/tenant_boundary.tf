@@ -1,19 +1,3 @@
-# ---------------------------------------------------------------------------
-# IAM-enforced tenant isolation (DL-SEC-01, DL-SEC-02, gap 1).
-#
-# The gap being closed: every existing policy scopes to a resource ARN with no `Condition`
-# tying a principal to its tenant. A path-construction bug or a compromised dependency can
-# therefore cross tenants even though application code says it cannot.
-#
-# Rolled out in two stages, deliberately:
-#   1. `audit` — the conditions are attached to a *separate, unattached* policy so CloudTrail
-#      can be queried for what would have been denied. Nothing changes behaviourally.
-#   2. `enforce` — the deny policy attaches to the runtime roles.
-#
-# Attaching conditions blind would break the default `demo` tenant the moment one path segment
-# does not match, and the failure mode is a silent AccessDenied mid-pipeline. The audit stage
-# is what makes that discoverable before it is live.
-# ---------------------------------------------------------------------------
 
 variable "tenant_boundary_mode" {
   description = <<-EOT
@@ -76,13 +60,8 @@ variable "cloudtrail_log_group_name" {
 }
 
 locals {
-  # The tenant prefix every data-plane object key starts with. Matches
-  # contracts/identifier_policy.py::tenant_scoped_key and the S3 layouts in every writer.
   tenant_prefix_pattern = "$${aws:PrincipalTag/tenant_code}/*"
 
-  # Roles that read or write tenant-scoped data. The control plane is deliberately absent: it
-  # serves every tenant and derives its scope from verified JWT claims per request, so a
-  # principal-tag condition would break it rather than protect anything.
   tenant_scoped_role_names = {
     extraction          = aws_iam_role.extraction_runtime.name
     transformation      = aws_iam_role.transformation_runtime.name
@@ -90,7 +69,6 @@ locals {
     analytics_publisher = aws_iam_role.analytics_publisher_runtime.name
   }
 
-  # The same four stages by ARN, for the data roles' trust policies.
   tenant_scoped_role_arns = {
     extraction          = aws_iam_role.extraction_runtime.arn
     transformation      = aws_iam_role.transformation_runtime.arn
@@ -98,19 +76,11 @@ locals {
     analytics_publisher = aws_iam_role.analytics_publisher_runtime.arn
   }
 
-  # Both conditions, deliberately. See `tenant_session_tagging_adopted` for why enforcing without
-  # the tagged-session path is worse than not enforcing at all.
   tenant_boundary_enforced = var.tenant_boundary_mode == "enforce" && var.tenant_session_tagging_adopted
 }
 
-# ---------------------------------------------------------------------------
-# The boundary policy. Written as explicit Denys rather than scoped Allows, because a Deny
-# cannot be widened by another attached policy — which is the property a boundary needs.
-# ---------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "tenant_boundary" {
-  # S3: deny any object operation whose key is outside the principal's tenant prefix
-  # (DL-SEC-02 — turning today's write-path convention into a boundary).
   statement {
     sid    = "DenyS3OutsideTenantPrefix"
     effect = "Deny"
@@ -130,9 +100,6 @@ data "aws_iam_policy_document" "tenant_boundary" {
       values   = [local.tenant_prefix_pattern]
     }
 
-    # A principal with no tenant_code tag is denied outright rather than unconstrained: an
-    # absent tag must not read as "every tenant" (the same empty-means-deny rule as
-    # DL-SCOPE-14).
     condition {
       test     = "Null"
       variable = "aws:PrincipalTag/tenant_code"
@@ -154,10 +121,6 @@ data "aws_iam_policy_document" "tenant_boundary" {
     }
   }
 
-  # DynamoDB: deny any item operation whose leading key does not begin with the principal's
-  # tenant prefix. `dynamodb:LeadingKeys` is evaluated against the partition key, which is
-  # exactly `tenant_scoped_key(tenant_code, ...)` on the config and watermark tables and
-  # `tenant_code` itself on the rest.
   statement {
     sid    = "DenyDynamoDbOutsideTenantLeadingKey"
     effect = "Deny"
@@ -184,10 +147,6 @@ data "aws_iam_policy_document" "tenant_boundary" {
     }
   }
 
-  # A full-table Scan cannot be constrained by LeadingKeys, so it is denied outright on
-  # tenant-scoped tables. `list_configs_for_tenant` uses a Scan today, which is why the
-  # control-plane role is excluded from this boundary — see the note on
-  # `tenant_scoped_role_names`.
   statement {
     sid    = "DenyDynamoDbScanOnTenantScopedTables"
     effect = "Deny"
@@ -196,9 +155,6 @@ data "aws_iam_policy_document" "tenant_boundary" {
     resources = var.tenant_scoped_table_arns
   }
 
-  # Secrets Manager: deny any secret outside the principal's tenant path. The path form comes
-  # from DL-SCOPE-06 (`edl/tenants/{tenant_code}/connections/{connection_id}/credentials`), so
-  # the condition and the code construct the same string.
   statement {
     sid    = "DenySecretsOutsideTenantPath"
     effect = "Deny"
@@ -209,7 +165,9 @@ data "aws_iam_policy_document" "tenant_boundary" {
       "secretsmanager:PutSecretValue",
     ]
 
-    resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:edl/*"]
+    resources = [
+      "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:${var.name_prefix}/${var.environment}/*",
+    ]
 
     condition {
       test     = "StringNotLike"
@@ -220,7 +178,7 @@ data "aws_iam_policy_document" "tenant_boundary" {
 }
 
 resource "aws_iam_policy" "tenant_boundary" {
-  name        = "${var.environment}-edl-tenant-boundary"
+  name        = "${var.name_prefix}-tenant-boundary-${var.environment}"
   description = <<-EOT
     Tenant isolation boundary (DL-SEC-01). Deny-based so it cannot be widened by another
     attached policy. Attached to the runtime roles only when tenant_boundary_mode is
@@ -229,17 +187,12 @@ resource "aws_iam_policy" "tenant_boundary" {
   policy      = data.aws_iam_policy_document.tenant_boundary.json
 
   tags = merge(var.tags, {
-    Name    = "${var.environment}-edl-tenant-boundary"
+    Name    = "${var.name_prefix}-tenant-boundary-${var.environment}"
     Purpose = "tenant-isolation-boundary"
     Mode    = var.tenant_boundary_mode
   })
 }
 
-# The boundary is only meaningful over real resources. Every environment left
-# `data_bucket_arns` and `tenant_scoped_table_arns` unset, so the S3 and DynamoDB statements had an
-# empty `resources` list — a statement with no Resource, which IAM rejects outright. The policy
-# therefore could not have been applied successfully in any environment, while `terraform validate`
-# stayed green because validate does not call IAM. This check makes that a plan-time failure.
 resource "terraform_data" "tenant_boundary_covers_resources" {
   lifecycle {
     precondition {
@@ -264,33 +217,20 @@ resource "aws_iam_role_policy_attachment" "tenant_boundary" {
   policy_arn = aws_iam_policy.tenant_boundary.arn
 }
 
-# ---------------------------------------------------------------------------
-# CloudTrail data-event selector for the audit stage. Without object-level events, CloudTrail
-# records the API call but not the key, so "would this have been denied" is unanswerable.
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_metric_filter" "cross_tenant_access_attempts" {
   count = var.cloudtrail_log_group_name == "" ? 0 : 1
 
-  name           = "${var.environment}-edl-cross-tenant-access-attempts"
+  name           = "${var.name_prefix}-cross-tenant-access-attempts-${var.environment}"
   log_group_name = var.cloudtrail_log_group_name
 
-  # An AccessDenied on an edl resource is either the boundary working or a legitimate access
-  # the boundary broke. Either way an operator must see it.
-  pattern = "{ ($.errorCode = \"AccessDenied\") && ($.requestParameters.bucketName = \"edl-*\" || $.requestParameters.tableName = \"Edl*\") }"
+  pattern = "{ ($.errorCode = \"AccessDenied\") && ($.requestParameters.bucketName = \"${var.name_prefix}-*\" || $.requestParameters.tableName = \"${var.name_prefix}-*\") }"
 
   metric_transformation {
-    # Deliberately NOT `CrossTenantAccessAttempts`. That name is already emitted by the control
-    # plane's own claim check, so one metric carried two unrelated events — and the go/no-go gate for
-    # `enforce` ("sustained zero") was therefore satisfiable by an API surface nobody was calling,
-    # while saying nothing about IAM. A separate name makes the observation window mean what the
-    # runbook claims it means.
-    name      = "IamBoundaryAccessDenied"
-    namespace = "EnterpriseDatalake"
-    value     = "1"
-    unit      = "Count"
-    # Zero default so the alarm distinguishes "no attempts" from "no data", which matters
-    # because this metric pages.
+    name          = "IamBoundaryAccessDenied"
+    namespace     = "EnterpriseDatalake"
+    value         = "1"
+    unit          = "Count"
     default_value = 0
   }
 }
@@ -310,17 +250,6 @@ output "tenant_boundary_attached_roles" {
   value       = local.tenant_boundary_enforced ? values(local.tenant_scoped_role_names) : []
 }
 
-# ---------------------------------------------------------------------------
-# Per-stage tenant data roles (DL-SEC-01).
-#
-# The boundary attaches here, not to the stage execution roles, because these are the only
-# principals that can carry `tenant_code`: a stage role assumes one of these per invocation with
-# `Tags=[{tenant_code}]` (see `tenancy/tenant_session.py`), and `sts:TagSession` in the trust policy
-# is what makes the tag authoritative — a caller cannot assert a tag the trust policy forbids.
-#
-# One data role per stage rather than one shared role, so each stays as narrow as the stage role it
-# serves. A single shared data role would widen every stage to the union of all of them.
-# ---------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "tenant_data_assume_role" {
   for_each = local.tenant_scoped_role_arns
@@ -335,16 +264,12 @@ data "aws_iam_policy_document" "tenant_data_assume_role" {
       identifiers = [each.value]
     }
 
-    # The tag must be present. Without this a caller could assume the role with no tag at all, which
-    # is the untagged state the boundary cannot constrain — the same "absent means everything"
-    # failure mode the scope predicate refuses.
     condition {
       test     = "StringLike"
       variable = "aws:RequestTag/tenant_code"
       values   = ["*"]
     }
 
-    # Only this tag may be set, and it is transitive so a further hop cannot drop it.
     condition {
       test     = "ForAllValues:StringEquals"
       variable = "sts:TransitiveTagKeys"
@@ -356,14 +281,12 @@ data "aws_iam_policy_document" "tenant_data_assume_role" {
 resource "aws_iam_role" "tenant_data" {
   for_each = local.tenant_scoped_role_arns
 
-  name               = "EdlTenantData${replace(title(replace(each.key, "_", " ")), " ", "")}Role"
+  name               = "${var.name_prefix}-tenant-data-${replace(each.key, "_", "-")}-${var.environment}-exec"
   assume_role_policy = data.aws_iam_policy_document.tenant_data_assume_role[each.key].json
   description        = "Tenant-tagged data role for the ${each.key} stage; the boundary attaches here."
   tags               = merge(var.tags, { Purpose = "tenant-tagged-data-access", Stage = each.key })
 }
 
-# Attached unconditionally: these roles exist *for* the boundary, so one without it would be a
-# strictly wider principal than the stage role that assumes it.
 resource "aws_iam_role_policy_attachment" "tenant_data_boundary" {
   for_each = aws_iam_role.tenant_data
 

@@ -90,12 +90,7 @@ class GoldenRecordPublisher:
         curated_s3_prefixes: tuple[str, ...] | None = None,
         resolution_scope: ResolutionScope | None = None,
     ) -> None:
-        # DL-SCOPE-08: a partitioned tenant resolves at scope-unit grain so two franchisees'
-        # identical customer never becomes one golden record. Defaults to tenant grain, which
-        # preserves pre-DL-12 behaviour for single-partition tenants.
         self._match_engine = MatchRuleEngine(rule_set, resolution_scope=resolution_scope)
-        # Set by from_registry() to the version the registry resolved; the rule set itself is the
-        # source of truth when constructed directly.
         self.match_rules_version: str = rule_set.rule_set_version
         self._survivorship = GoldenRecordSurvivorshipPolicy(survivorship_policy)
         self._analytics_s3_bucket = analytics_s3_bucket
@@ -132,13 +127,13 @@ class GoldenRecordPublisher:
         Example::
 
             registry = ResolutionConfigRegistry(
-                s3_bucket="edl-curated-087972550871", region_name="us-east-1"
+                s3_bucket="datalake-curated-<env>-<region>", region_name="us-east-1"
             )
             publisher = GoldenRecordPublisher.from_registry(
                 registry=registry,
                 entity_type="company",
                 tenant_code="demo",
-                analytics_s3_bucket="edl-analytics-087972550871",
+                analytics_s3_bucket="datalake-analytics-<env>-<region>",
                 region_name="us-east-1",
             )
         """
@@ -158,8 +153,6 @@ class GoldenRecordPublisher:
             curated_s3_prefixes=curated_s3_prefixes,
             resolution_scope=resolution_scope,
         )
-        # The *resolved* version, not the requested one: an effective-config record naming
-        # "latest" would tell the console nothing about what a run actually consumed (DL-CFG-08).
         publisher.match_rules_version = config.match_rule_set.rule_set_version
         return publisher
 
@@ -204,10 +197,8 @@ class GoldenRecordPublisher:
             input_record_count=len(curated_records),
         )
 
-        # Step 1: Cluster
         clusters, all_decisions = self._match_engine.cluster(curated_records, id_field)
 
-        # Step 2: Survivorship per cluster → golden records
         golden_records: list[dict[str, Any]] = []
         for cluster_ids in clusters:
             cluster_records = [
@@ -217,27 +208,20 @@ class GoldenRecordPublisher:
                 cluster_records, id_field, source_field
             )
             golden = dict(result.canonical_record)
-            # Build a stable cluster key from sorted contributing IDs
             cluster_key = "|".join(sorted(cluster_ids))
             golden["golden_id"] = stable_cluster_id(source_field, entity_type, cluster_key)
             golden["contributing_source_records"] = list(sorted(cluster_ids))
             golden["survivorship_version"] = self._survivorship._policy.policy_version
             golden["match_run_id"] = match_run_id
-            # Serialise field_provenance as JSON so it lands in Parquet and is
-            # directly queryable in Athena via json_extract_scalar(field_provenance, '$.full_name')
             golden["field_provenance"] = result.field_provenance
             golden_records.append(golden)
 
-        # Step 3: Write golden records to analytics layer
         prefix = (
             f"{tenant_code}/canonical/{entity_type}"
             f"/golden_date={partition_date.isoformat()}"
             f"/run_id={match_run_id}/"
         )
         analytics_key = f"{prefix}golden.parquet"
-        # Use the shared, multipart-capable S3ParquetWriter (PERF-4): streams
-        # batches instead of building full Parquet bytes in memory, and lifts
-        # the 5 GB single-PUT ceiling for large golden-record sets.
         self._parquet_writer.write(
             records_iter=flatten_list_fields(golden_records),
             bucket=self._analytics_s3_bucket,
@@ -245,7 +229,6 @@ class GoldenRecordPublisher:
             compression="snappy",
         )
 
-        # Step 4: Write match decision audit trail (no PII values)
         decisions_key = (
             f"{tenant_code}/canonical/{entity_type}/match-decisions/{match_run_id}/decisions.json"
         )
@@ -266,7 +249,6 @@ class GoldenRecordPublisher:
             cluster_count=len(clusters),
         )
 
-        # Emit lineage record (spec §9.1 — lineage at publication boundaries)
         if self._governance_s3_bucket and self._curated_s3_bucket:
             emit_golden_record_lineage(
                 s3_governance_bucket=self._governance_s3_bucket,

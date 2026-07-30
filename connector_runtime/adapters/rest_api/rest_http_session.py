@@ -88,18 +88,11 @@ class RestResponse:
         if isinstance(node, list):
             found = [item for item in node if isinstance(item, dict)]
         elif isinstance(node, dict):
-            # An empty object is no record. It reaches here only for a source whose records
-            # are the body itself (an empty `records_json_path`), where a blank response
-            # parses to `{}` — yielding it would write a field-less row to the raw layer and
-            # poison the schema fingerprint.
             found = [node] if node else []
         else:
             return []
         if unwrap_field is None:
             return found
-        # A FHIR search bundle nests each row one level down under `resource`; an entry that
-        # carries no wrapper is dropped rather than stored as an envelope masquerading as a
-        # record, which would poison the raw layer's schema fingerprint.
         return [item[unwrap_field] for item in found if isinstance(item.get(unwrap_field), dict)]
 
 
@@ -118,8 +111,6 @@ class RestHttpSession:
         self._spec = spec
         self._credentials = dict(credentials)
         self._rate_limit = rate_limit_policy
-        # The source's declared timeout unless a caller overrides it; a slow report source
-        # and a fast row collection should not share one number.
         self._timeout = (
             timeout_seconds if timeout_seconds is not None else spec.request_timeout_seconds
         )
@@ -130,8 +121,6 @@ class RestHttpSession:
             else None
         )
         self.requests_issued = 0
-
-    # ── Public API ────────────────────────────────────────────────────────────
 
     def get(self, path: str, parameters: Mapping[str, Any] | None = None) -> RestResponse:
         return self._request("GET", path, parameters=parameters)
@@ -147,8 +136,6 @@ class RestHttpSession:
     def patch(self, path: str, payload: Mapping[str, Any] | None = None) -> RestResponse:
         return self._request("PATCH", path, payload=payload)
 
-    # ── Private ───────────────────────────────────────────────────────────────
-
     def _request(
         self,
         method: str,
@@ -158,9 +145,6 @@ class RestHttpSession:
     ) -> RestResponse:
         response = self._issue(method, path, parameters, payload)
         if response.status_code == 401 and self._token_exchange is not None:
-            # A token that expired mid-entity is not a bad credential: re-exchange once and
-            # retry, so a long extraction is not failed by its own duration. Exactly one
-            # retry — a genuinely revoked credential must still surface as deterministic.
             self._token_exchange.invalidate()
             response = self._issue(method, path, parameters, payload)
         self._raise_for_status(response.status_code, method, path)
@@ -194,12 +178,8 @@ class RestHttpSession:
         self.requests_issued += 1
 
         headers = {str(k): str(v) for k, v in dict(raw.headers or {}).items()}
-        # The policy needs the status to recognise a throttle even when the provider
-        # sends no Retry-After header.
-        self._rate_limit.observe({**headers, "x-edl-response-status": str(raw.status_code)})
+        self._rate_limit.observe({**headers, "x-datalake-response-status": str(raw.status_code)})
 
-        # `path` is the spec-declared template only. The query string is deliberately never
-        # logged: a session-key source carries its credential there (OWASP A09).
         _logger.info(
             "rest_source_request_completed",
             source_id=self._spec.source_id,
@@ -214,14 +194,11 @@ class RestHttpSession:
                 SourceId=self._spec.source_id,
                 StatusClass=f"{raw.status_code // 100}xx",
             )
-        # An error body is never parsed: a 5xx HTML error page is a transient outage, and
-        # parsing it would misclassify the failure as a deterministic contract break.
         body = {} if raw.status_code >= 400 else _parse_body(raw)
         return RestResponse(status_code=raw.status_code, body=body, headers=headers)
 
     def _resolve_url(self, path: str) -> str:
         if path.startswith("https://"):
-            # Link-header pagination hands back an absolute URL; the allowlist still applies.
             return path
         base_url = self._spec.base_url
         base = base_url if base_url.endswith("/") else base_url + "/"
@@ -278,5 +255,4 @@ def _parse_body(raw: Any) -> Any:
     try:
         return json.loads(text)
     except (json.JSONDecodeError, ValueError):
-        # A non-JSON body is a provider contract break, not a credential problem.
         raise RestSourceRequestError("Source returned a non-JSON body.") from None

@@ -21,7 +21,6 @@ _ENV = "dev"
 @mock_aws
 class TestSourceOnboardingRegistry:
     def setup_method(self, method=None):
-        # Create the onboarding DynamoDB table
         boto3.client("dynamodb", region_name=_REGION).create_table(
             TableName=f"{_ENV}-source-onboarding-registry",
             KeySchema=[{"AttributeName": "source_id", "KeyType": "HASH"}],
@@ -67,7 +66,6 @@ class TestSourceOnboardingRegistry:
 
     def test_cannot_pass_gate_when_prior_gate_pending(self):
         self.registry.register_source("salesforce", "data-eng", "critical", "pii")
-        # Try to pass CREDENTIAL_REGISTRATION before SOURCE_REGISTRATION
         with pytest.raises(OnboardingValidationError, match="prior gate"):
             self.registry.advance_gate(
                 "salesforce",
@@ -123,7 +121,6 @@ class TestSourceOnboardingRegistry:
 
     def test_failed_gate_status_allowed_without_prior_gates(self):
         self.registry.register_source("salesforce", "data-eng", "critical", "pii")
-        # FAILED can be set at any time without prior gates
         self.registry.advance_gate(
             "salesforce",
             OnboardingGate.SECURITY_GOVERNANCE,

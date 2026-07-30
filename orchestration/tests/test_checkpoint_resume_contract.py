@@ -43,7 +43,7 @@ class TestPolicyHandsLongWaitsToTheStateMachine:
     def test_a_wait_above_the_threshold_raises_instead_of_sleeping(self) -> None:
         slept: list[float] = []
         policy = RetryAfterRateLimitPolicy(connection_id="hubspot", sleep=slept.append)
-        policy.observe({"Retry-After": "45", "x-edl-response-status": "429"})
+        policy.observe({"Retry-After": "45", "x-datalake-response-status": "429"})
         with pytest.raises(ResumeAfterBackoffRequired) as caught:
             policy.acquire()
         assert slept == []
@@ -51,7 +51,7 @@ class TestPolicyHandsLongWaitsToTheStateMachine:
 
     def test_the_signal_names_the_connection_so_one_source_does_not_stall_others(self) -> None:
         policy = RetryAfterRateLimitPolicy(connection_id="dialpad-west", sleep=lambda _: None)
-        policy.observe({"Retry-After": "600", "x-edl-response-status": "429"})
+        policy.observe({"Retry-After": "600", "x-datalake-response-status": "429"})
         with pytest.raises(ResumeAfterBackoffRequired) as caught:
             policy.acquire()
         assert caught.value.connection_id == "dialpad-west"
@@ -59,7 +59,7 @@ class TestPolicyHandsLongWaitsToTheStateMachine:
     def test_a_short_wait_is_absorbed_rather_than_costing_a_state_transition(self) -> None:
         slept: list[float] = []
         policy = RetryAfterRateLimitPolicy(connection_id="hubspot", sleep=slept.append)
-        policy.observe({"Retry-After": "1", "x-edl-response-status": "429"})
+        policy.observe({"Retry-After": "1", "x-datalake-response-status": "429"})
         policy.acquire()
         assert slept
 
@@ -79,8 +79,6 @@ class TestCheckpointCarriesWhatTheMachineNeeds:
         )
 
     def test_the_resume_payload_is_json_serialisable(self) -> None:
-        # It travels as the exception message and is parsed by States.StringToJson, so anything
-        # that fails to serialise breaks the loop at runtime rather than at deploy.
         payload = self._checkpoint(30.0).to_resume_payload()
         assert json.loads(json.dumps(payload)) == payload
 
@@ -88,12 +86,9 @@ class TestCheckpointCarriesWhatTheMachineNeeds:
         assert self._checkpoint(30.0).to_resume_payload()["retry_after_seconds"] == 30.0
 
     def test_a_record_count_checkpoint_carries_no_wait(self) -> None:
-        # Resume immediately: there is no provider asking us to slow down.
         assert self._checkpoint(0.0).to_resume_payload()["retry_after_seconds"] == 0.0
 
     def test_the_payload_names_the_resume_watermark_for_the_operator(self) -> None:
-        # Not used to resume — the committed watermark does that — but an operator reading the
-        # execution history needs to see where it got to.
         payload = self._checkpoint(0.0).to_resume_payload()
         assert payload["resume_watermark"] == "2026-07-28T00:00:00+00:00"
         assert payload["records_written"] == 1_000
@@ -124,7 +119,6 @@ class TestStateMachineHalfOfTheContract:
         assert 'SecondsPath = "$.resume.retry_after_seconds"' in definition
 
     def test_the_wait_reads_the_same_field_the_payload_writes(self, definition: str) -> None:
-        # The one agreement that cannot be checked by any type system.
         payload_field = "retry_after_seconds"
         assert (
             payload_field
@@ -142,8 +136,6 @@ class TestStateMachineHalfOfTheContract:
         assert f"$.resume.{payload_field}" in definition
 
     def test_the_loop_is_bounded(self, definition: str) -> None:
-        # An unbounded resume loop against a permanently-throttling provider would spin forever
-        # and bury the problem in execution history.
         assert "ExtractionResumeExhausted" in definition
         assert "max_extraction_resume_attempts" in definition
 
@@ -160,8 +152,6 @@ class TestStateMachineHalfOfTheContract:
         )
 
     def test_the_resumed_task_receives_the_pinned_config(self, definition: str) -> None:
-        # A resumed invocation must run under the same configuration version as the first, or the
-        # two halves of one logical run disagree about a definition (DL-CFG-01).
         parse_block = re.search(r"ParseCheckpoint = \{.*?\n      \}", definition, re.DOTALL)
         assert parse_block is not None
         assert "pinned_config_versions" in parse_block.group(0)

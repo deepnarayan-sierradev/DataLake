@@ -75,20 +75,20 @@ The DataLake has a documented history of tenant-collision bugs from exactly this
 
 ## 2. DynamoDB tables the enterprise-platform touches
 
-All `Edl`-prefixed PascalCase, no environment prefix — each environment is a separate AWS account.
+All `datalake`-prefixed PascalCase, no environment prefix — each environment is a separate AWS account.
 Five carry `lifecycle { prevent_destroy = true }`; never create any by hand.
 
 | Table | PK | SK | Notes |
 |---|---|---|---|
-| `EdlEntityExtractionConfig` | `source_id` = `tenant_scoped_key(tenant, source_id)` | `entity_id` | Plain `source_id` restored on read. **Changing under DL-12 — see §7** |
-| `EdlWatermarkRepository` | `source_id` = tenant-scoped composite | `entity_id` | **Changing under DL-12** |
-| `EdlRunAuditLog` | `run_id` | `stage` | GSI `source-entity-time-index` hash = `{tenant}#{source_id}#{entity_id}` |
-| `EdlEntityTypeRegistry` | `tenant_code` | `sk` | `entity_type#{type}` items carry `pk_field`, `contributing_sources` |
-| `EdlServingStoreConfig` | `tenant_code` | `entity_type` | Keyed by analytics entity_type, **not** source-level entity_id |
-| `EdlSemanticModel` | `tenant_code` | `model_version` | `$latest` pointer item names the active version |
-| `EdlSavedQuery` | `tenant_code` | `query_id` | |
-| `EdlTwinIndex` | `tenant_code` | `sk` | Read-only from EP |
-| `EdlSourceOnboardingRegistry` | `source_id` | — | Per-source, **not** per-tenant. No `prevent_destroy` |
+| `datalake-entity-extraction-config-dev` | `source_id` = `tenant_scoped_key(tenant, source_id)` | `entity_id` | Plain `source_id` restored on read. **Changing under DL-12 — see §7** |
+| `datalake-watermark-dev` | `source_id` = tenant-scoped composite | `entity_id` | **Changing under DL-12** |
+| `datalake-run-audit-log-dev` | `run_id` | `stage` | GSI `source-entity-time-index` hash = `{tenant}#{source_id}#{entity_id}` |
+| `datalake-entity-type-registry-dev` | `tenant_code` | `sk` | `entity_type#{type}` items carry `pk_field`, `contributing_sources` |
+| `datalake-serving-store-config-dev` | `tenant_code` | `entity_type` | Keyed by analytics entity_type, **not** source-level entity_id |
+| `datalake-semantic-model-dev` | `tenant_code` | `model_version` | `$latest` pointer item names the active version |
+| `datalake-saved-query-dev` | `tenant_code` | `query_id` | |
+| `datalake-twin-index-dev` | `tenant_code` | `sk` | Read-only from EP |
+| `datalake-source-onboarding-registry-dev` | `source_id` | — | Per-source, **not** per-tenant. No `prevent_destroy` |
 
 ### 2a. Declaring a REST entity the DataLake has never heard of (DL-CONN-21)
 
@@ -98,7 +98,7 @@ Salesforce, MySQL and NetSuite have always taken their entity from configuration
 (`connector_params.object_name` / `table_name` / `record_type`). The spec-driven REST family did
 not, so onboarding a REST entity meant a code change in DataLake. It no longer does.
 
-For a REST source, write these into `EdlEntityExtractionConfig.connector_params`:
+For a REST source, write these into `datalake-entity-extraction-config-dev.connector_params`:
 
 | Key | Required | Meaning |
 |---|---|---|
@@ -151,8 +151,8 @@ containers indefinitely. `DL-CFG-05` makes this a contract test on the DataLake 
 ## 4. Secrets Manager
 
 ```
-Current    edl/sources/{source_id}/credentials
-Under DL-12  edl/tenants/{tenant_code}/connections/{connection_id}/credentials
+Current    datalake/<env>/sources/{source_id}/credentials
+Under DL-12  datalake/<env>/tenants/{tenant_code}/connections/{connection_id}/credentials
 ```
 
 Read and write-back credentials are **separate secrets**. Values are **write-only** from the
@@ -248,8 +248,8 @@ of the same connector type (10–12 franchisee CRMs under one portco).
 | Watermark PK | `tenant#source_id` | `tenant#connection_id` |
 | Raw S3 | `{tenant}/{source}/{entity}` | `{tenant}/{source_id}/{connection_id}/{entity}` |
 | Schedule name | `{tenant}--{source}--{entity}` | `{tenant}--{connection_id}--{entity}` |
-| Secrets | `edl/sources/{source_id}/…` | `edl/tenants/{tenant}/connections/{connection_id}/…` |
-| New tables | — | `EdlSourceConnection`, `EdlScopeUnit` |
+| Secrets | `datalake/<env>/sources/{source_id}/…` | `datalake/<env>/tenants/{tenant}/connections/{connection_id}/…` |
+| New tables | — | `datalake-source-connections-dev`, `datalake-scope-units-dev` |
 | New column | — | `scope_unit_id` on every data layer |
 
 **This breaks `entity_extraction_repository.py` and `schedule_repository.py` in the

@@ -56,8 +56,8 @@ reachable, CI breaks until the waiver is removed.
 ### New Lambda functions declared in Terraform (not applied)
 
 `infrastructure/modules/platform_lambdas/` declares four functions whose handlers previously had no
-deployment at all: `EdlWebhookReceiver`, `EdlConnectorWriteback`, `EdlWorkflowRunner`,
-`EdlPortability`. Each has its **own** execution role
+deployment at all: `datalake-webhook-receiver-dev`, `datalake-connector-writeback-dev`, `datalake-workflow-runner-dev`,
+`datalake-portability-dev`. Each has its **own** execution role
 (`infrastructure/modules/iam/platform_lambda_roles.tf`) — the write-back role reads only the
 `-writeback` secret suffix, and the portability role holds the only bulk `s3:DeleteObject` in the
 platform. The webhook API route and the workflow schedules are opt-in per environment and default
@@ -67,7 +67,7 @@ to off.
 |---|---|---|
 | Programme tables | 21 new DynamoDB tables (source connections, scope units, effective config, restatements, config governance, quality exceptions/policies, brands, data dictionary, semantic model versions, saved queries, workflow definitions/executions/idempotency/destinations, approval tasks, export requests, deletion requests, webhook dedup, PHI classifications) | `infrastructure/modules/metadata_persistence/programme_tables.tf` |
 | Per-metric alarms | One alarm per catalogued `PlatformMetric`, reconciled bidirectionally against the emitters by `observability/tests/test_alarm_emitter_reconciliation.py`; 5 metrics route to a paging SNS topic; Lambda Insights memory alarms | `infrastructure/modules/observability/platform_metric_alarms.tf` |
-| Per-stage DLQs | 9 per-stage dead-letter queues, a terminal `EdlStageReplayExhausted`, `EdlWebhookIngest.fifo`, `EdlReportDistribution`, plus depth alarms | `infrastructure/modules/orchestration/per_stage_dlq.tf` |
+| Per-stage DLQs | 9 per-stage dead-letter queues, a terminal `datalake-replay-exhausted-dev`, `datalake-webhook-ingest-dev.fifo`, `datalake-report-distribution-dev`, plus depth alarms | `infrastructure/modules/orchestration/per_stage_dlq.tf` |
 | WAF | Managed rule sets + rate limiting in front of the control plane, **audit (count) mode** | `infrastructure/modules/waf/` |
 | IAM tenant boundary | Deny-based boundary across S3/DynamoDB/Secrets Manager, `tenant_boundary_mode = audit`, CloudTrail metric filter emitting `CrossTenantAccessAttempts` | `infrastructure/modules/iam/tenant_boundary.tf` |
 | Lake Formation | Per-tenant and per-department LF-Tags replacing the wildcard grant. **Applying this revokes a grant three real dev principals currently depend on** — confirm the principals with the account owner first | `infrastructure/modules/lake_formation/` |
@@ -115,13 +115,13 @@ remaining and accurate statement. WellSky and SeniorPlace are marked PHI-bearing
 
 Verified as of 2026-07-09, for the two connected sources: **34 Salesforce accounts** and
 **36,023 MySQL RDS contract rows** extracted, transformed, resolved, and published — Athena
-returns real query results against `edl_analytics` for these entities. Per-entity counts for
+returns real query results against `datalake_analytics_dev` for these entities. Per-entity counts for
 `salesforce-contact` were not re-confirmed with an exact number in this pass; treat the two
 figures above as the solid data point and re-check row counts directly
 (`aws s3 ls` / Athena `SELECT COUNT(*)`) before quoting others.
 
-`edl_curated` (the Glue database, not the S3 layer) stays empty regardless — see the Glue
-Catalog section below for why; only `edl_analytics` tables get registered at pipeline runtime,
+`datalake_curated_dev` (the Glue database, not the S3 layer) stays empty regardless — see the Glue
+Catalog section below for why; only `datalake_analytics_dev` tables get registered at pipeline runtime,
 by `analytics_publisher/analytics_publisher_handler.py`, not by Terraform.
 
 The three newer entities (`salesforce-opportunity`, `salesforce-contract`,
@@ -171,21 +171,21 @@ Sage X3, and NetSuite are still empty shells — not reachable until real creden
 
 | Bucket | Pipeline stage | Written by | Read by | Purpose |
 |---|---|---|---|---|
-| `edl-raw-087972550871` | Stage A — Extraction | Extraction Lambda | Transformation Lambda | Immutable raw Parquet files written once per extraction run. One Hive-partitioned prefix per entity per date. Never overwritten; watermark prevents re-extraction of unchanged data. |
-| `edl-curated-087972550871` | Stage B — Transformation | Transformation Lambda | Entity Resolution Lambda, Athena (Athena access not wired in dev today — see Glue Catalog section) | Field-mapped, quality-checked Parquet (canonical column names). Also stores field-mapping JSON config files under `field-mappings/{source_id}/{entity_id}/`. |
-| `edl-analytics-087972550871` | Stages C & D — Entity Resolution + Analytics | Entity Resolution Lambda, Analytics Publisher Lambda | Athena, downstream BI tools | Golden (de-duplicated) records from entity resolution and consumption-optimised Parquet for analytics. Registered in Glue Catalog for Athena queries. |
-| `edl-schema-snapshots-087972550871` | Stage A — Extraction (post-extract) | Extraction Lambda | Drift Evaluation (same Lambda) | JSON schema fingerprints captured after every extraction. The drift evaluator compares the new snapshot against `latest.json` to detect breaking changes (added/removed/type-changed columns). Path: `{tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json` + `drift-report-{extraction_date}.json`; latest-pointer at `{tenant_code}/{source_id}/{entity_id}/latest.json`. |
-| `edl-access-logs-087972550871` | All stages (passive) | AWS S3 service (automatic) | Security & compliance audits | Receives S3 server access logs from every other data lake bucket. Never written to directly by pipeline code. Used for access auditing, cost attribution, and compliance. Retention: 30 days (dev). |
-| `edl-terraform-state-087972550871` | Infrastructure (deploy time only) | Terraform CLI, `make lambda-upload` | Terraform CLI, Lambda service at deploy | Dual-purpose: (1) Terraform remote state file (`environments/dev/terraform.tfstate`) with DynamoDB lock for single-writer safety. (2) Lambda artifact store — `lambda/extraction-pipeline.zip` uploaded here by `make lambda-upload` and pulled by Lambda on every `terraform apply`. Not accessed at pipeline runtime. |
+| `datalake-raw-dev-use1` | Stage A — Extraction | Extraction Lambda | Transformation Lambda | Immutable raw Parquet files written once per extraction run. One Hive-partitioned prefix per entity per date. Never overwritten; watermark prevents re-extraction of unchanged data. |
+| `datalake-curated-dev-use1` | Stage B — Transformation | Transformation Lambda | Entity Resolution Lambda, Athena (Athena access not wired in dev today — see Glue Catalog section) | Field-mapped, quality-checked Parquet (canonical column names). Also stores field-mapping JSON config files under `field-mappings/{source_id}/{entity_id}/`. |
+| `datalake-analytics-dev-use1` | Stages C & D — Entity Resolution + Analytics | Entity Resolution Lambda, Analytics Publisher Lambda | Athena, downstream BI tools | Golden (de-duplicated) records from entity resolution and consumption-optimised Parquet for analytics. Registered in Glue Catalog for Athena queries. |
+| `datalake-schema-snapshots-dev-use1` | Stage A — Extraction (post-extract) | Extraction Lambda | Drift Evaluation (same Lambda) | JSON schema fingerprints captured after every extraction. The drift evaluator compares the new snapshot against `latest.json` to detect breaking changes (added/removed/type-changed columns). Path: `{tenant_code}/{source_id}/{entity_id}/{schema_version}/{extraction_date}.json` + `drift-report-{extraction_date}.json`; latest-pointer at `{tenant_code}/{source_id}/{entity_id}/latest.json`. |
+| `datalake-access-logs-dev-use1` | All stages (passive) | AWS S3 service (automatic) | Security & compliance audits | Receives S3 server access logs from every other data lake bucket. Never written to directly by pipeline code. Used for access auditing, cost attribution, and compliance. Retention: 30 days (dev). |
+| `datalake-terraform-state-dev-use1` | Infrastructure (deploy time only) | Terraform CLI, `make lambda-upload` | Terraform CLI, Lambda service at deploy | Dual-purpose: (1) Terraform remote state file (`environments/dev/terraform.tfstate`) with DynamoDB lock for single-writer safety. (2) Lambda artifact store — `lambda/extraction-pipeline.zip` uploaded here by `make lambda-upload` and pulled by Lambda on every `terraform apply`. Not accessed at pipeline runtime. |
 
 ### S3 Key Patterns
 
 | Layer | Pattern |
 |---|---|
-| Raw | `s3://edl-raw-087972550871/{tenant_code}/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/data.parquet` — tenant-prefixed root segment (ARCH-1), then one hyphenated source segment (`salesforce`, `netsuite`, `mysql-rds`, `sage-intacct`, `sage-x3`); no `raw/` root segment (`connector_runtime/raw_layer_writer.py::RawLayerWriter._partition_path`). App-level convention, not yet IAM/bucket-policy-enforced |
-| Curated | `s3://edl-curated-087972550871/{tenant_code}/curated/{domain}/{entity_id}/curated_date=YYYY-MM-DD/run_id={run_id}/data.parquet` |
-| Golden records | `s3://edl-analytics-087972550871/{tenant_code}/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet` |
-| Analytics | `s3://edl-analytics-087972550871/{tenant_code}/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet` |
+| Raw | `s3://datalake-raw-dev-use1/{tenant_code}/{source}/{entity_id}/extraction_date=YYYY-MM-DD/run_id={run_id}/data.parquet` — tenant-prefixed root segment (ARCH-1), then one hyphenated source segment (`salesforce`, `netsuite`, `mysql-rds`, `sage-intacct`, `sage-x3`); no `raw/` root segment (`connector_runtime/raw_layer_writer.py::RawLayerWriter._partition_path`). App-level convention, not yet IAM/bucket-policy-enforced |
+| Curated | `s3://datalake-curated-dev-use1/{tenant_code}/curated/{domain}/{entity_id}/curated_date=YYYY-MM-DD/run_id={run_id}/data.parquet` |
+| Golden records | `s3://datalake-analytics-dev-use1/{tenant_code}/canonical/{entity_type}/golden_date={date}/run_id={run_id}/golden.parquet` |
+| Analytics | `s3://datalake-analytics-dev-use1/{tenant_code}/analytics/{entity_type}/analytics_date=YYYY-MM-DD/data.parquet` |
 | Entity config (S3 backend, alternate to DynamoDB) | `s3://<config-bucket>/{tenant_code}/{source_id}/{entity_id}/config.json` |
 
 > `{tenant_code}` defaults to `demo` (`contracts/identifier_policy.DEFAULT_TENANT_CODE`) and is
@@ -217,20 +217,20 @@ Sage X3, and NetSuite are still empty shells — not reachable until real creden
 
 Five of the six tables below are Terraform-managed with `lifecycle { prevent_destroy = true }`
 (`infrastructure/modules/metadata_persistence/main.tf`) — never create any of them by hand.
-`EdlSourceOnboardingRegistry` is Terraform-managed too but does **not** have `prevent_destroy` set
+`datalake-source-onboarding-registry-dev` is Terraform-managed too but does **not** have `prevent_destroy` set
 (confirmed by reading the resource block directly) — a `terraform destroy`/replace on that table
 is not blocked the way it is for the other five.
 
 | Table | Purpose | Hash key | Terraform resource |
 |---|---|---|---|
-| `EdlEntityExtractionConfig` | Entity extraction configuration (source, watermark field, load type, tenant_code, etc.). The `source_id` attribute holds `tenant_scoped_key(tenant_code, connection_id)` — e.g. `"demo#salesforce"` — since the tenant-key migration was applied to dev on 2026-07-24; for a single-connection source `connection_id == source_id`, which is what kept every existing key byte-identical | `source_id` (tenant+connection-scoped composite) + `entity_id` (range) | `aws_dynamodb_table.entity_extraction_config` |
-| `EdlWatermarkRepository` | Per-entity watermark timestamps for incremental loads. The DynamoDB **key itself is tenant-scoped** — `WatermarkRepository` stores `tenant_scoped_key(tenant_code, source_id)` (e.g. `"demo#salesforce"`) as the `source_id` attribute, not just an application-level guard checked on read | `source_id` (tenant-scoped composite) + `entity_id` (range) | `aws_dynamodb_table.watermark_repository` |
-| `EdlRunAuditLog` | Immutable audit record of every pipeline run (including partial/checkpointed runs). `source-entity-time-index` GSI hash key (`source_entity_key`) is tenant-scoped as `{tenant_code}#{source_id}#{entity_id}`, populated for every run, not just DLQ-routed failures | `run_id` + `stage` (range) | `aws_dynamodb_table.run_audit_log` |
-| `EdlEntityTypeRegistry` | Tenant-scoped entity-type/entity-id registry (`entity_resolution/entity_type_registry.py::EntityTypeRegistryClient`) — supersedes the old hardcoded dicts, which remain as fallback seed data | `tenant_code` + `sk` (range) | `aws_dynamodb_table.entity_type_registry` |
-| `EdlSourceOnboardingRegistry` | Tracks onboarding-gate state (registration → gate transitions → activation) **per `source_id`, not per tenant** (`governance/source_onboarding_registry.py::SourceOnboardingRegistryClient`) — a source-level certification workflow (see `connector_runtime/certification/connector_certification_checklist.py`), distinct from the control-plane API's tenant/entity registration flow. Not currently called from `connector_runtime/api/` — no route in the Control Plane API section below reads or writes this table today. | `source_id` (no range key) | `aws_dynamodb_table.source_onboarding_registry` |
-| `EdlServingStoreConfig` | Which tenant/entity_type pairs load into a serving store, and into which engine (`serving_store/serving_store_config_repository.py::ServingStoreConfigRepositoryClient`) — tenant-partitioned from creation, no `tenant_scoped_key()` composite-key needed. Keyed by `entity_type` (the analytics-layer entity, e.g. `company`), not a source-level `entity_id` — one entity_type's analytics dataset can be fed by several contributing sources. **Created and deployed in dev** (2026-07-24) but **empty** — no tenant/entity onboarded yet, so the loader skips every run (see Stage 16 in `docs/PIPELINE_FLOW.md`; onboard via `scripts/seed_serving_store_config.py`) | `tenant_code` + `entity_type` (range) | `aws_dynamodb_table.serving_store_config` |
+| `datalake-entity-extraction-config-dev` | Entity extraction configuration (source, watermark field, load type, tenant_code, etc.). The `source_id` attribute holds `tenant_scoped_key(tenant_code, connection_id)` — e.g. `"demo#salesforce"` — since the tenant-key migration was applied to dev on 2026-07-24; for a single-connection source `connection_id == source_id`, which is what kept every existing key byte-identical | `source_id` (tenant+connection-scoped composite) + `entity_id` (range) | `aws_dynamodb_table.entity_extraction_config` |
+| `datalake-watermark-dev` | Per-entity watermark timestamps for incremental loads. The DynamoDB **key itself is tenant-scoped** — `WatermarkRepository` stores `tenant_scoped_key(tenant_code, source_id)` (e.g. `"demo#salesforce"`) as the `source_id` attribute, not just an application-level guard checked on read | `source_id` (tenant-scoped composite) + `entity_id` (range) | `aws_dynamodb_table.watermark_repository` |
+| `datalake-run-audit-log-dev` | Immutable audit record of every pipeline run (including partial/checkpointed runs). `source-entity-time-index` GSI hash key (`source_entity_key`) is tenant-scoped as `{tenant_code}#{source_id}#{entity_id}`, populated for every run, not just DLQ-routed failures | `run_id` + `stage` (range) | `aws_dynamodb_table.run_audit_log` |
+| `datalake-entity-type-registry-dev` | Tenant-scoped entity-type/entity-id registry (`entity_resolution/entity_type_registry.py::EntityTypeRegistryClient`) — supersedes the old hardcoded dicts, which remain as fallback seed data | `tenant_code` + `sk` (range) | `aws_dynamodb_table.entity_type_registry` |
+| `datalake-source-onboarding-registry-dev` | Tracks onboarding-gate state (registration → gate transitions → activation) **per `source_id`, not per tenant** (`governance/source_onboarding_registry.py::SourceOnboardingRegistryClient`) — a source-level certification workflow (see `connector_runtime/certification/connector_certification_checklist.py`), distinct from the control-plane API's tenant/entity registration flow. Not currently called from `connector_runtime/api/` — no route in the Control Plane API section below reads or writes this table today. | `source_id` (no range key) | `aws_dynamodb_table.source_onboarding_registry` |
+| `datalake-serving-store-config-dev` | Which tenant/entity_type pairs load into a serving store, and into which engine (`serving_store/serving_store_config_repository.py::ServingStoreConfigRepositoryClient`) — tenant-partitioned from creation, no `tenant_scoped_key()` composite-key needed. Keyed by `entity_type` (the analytics-layer entity, e.g. `company`), not a source-level `entity_id` — one entity_type's analytics dataset can be fed by several contributing sources. **Created and deployed in dev** (2026-07-24) but **empty** — no tenant/entity onboarded yet, so the loader skips every run (see Stage 16 in `docs/PIPELINE_FLOW.md`; onboard via `scripts/seed_serving_store_config.py`) | `tenant_code` + `entity_type` (range) | `aws_dynamodb_table.serving_store_config` |
 
-> Table names above follow the `Edl<Table>` PascalCase convention, with no environment prefix —
+> Table names above follow the `datalake<Table>` PascalCase convention, with no environment prefix —
 > each environment (dev/staging/prod) lives in its own separate AWS account, so the account
 > boundary provides isolation instead of a name prefix.
 
@@ -238,17 +238,17 @@ is not blocked the way it is for the other five.
 
 | Function | Handler | Purpose |
 |---|---|---|
-| `EdlExtractionPipeline` | `connector_runtime.extraction_pipeline_handler.lambda_handler` | Extract from source → raw layer. Now supports mid-run checkpointing on approaching Lambda timeout (`LambdaTimeoutWarning`, partial watermark commit) — see Known Gotchas in `docs/DEVELOPER_GUIDE.md`. |
-| `EdlTransformationPipeline` | `transformation.transformation_pipeline_handler.lambda_handler` | Raw → curated layer (tenant-prefixed S3 keys) |
-| `EdlEntityResolutionPipeline` | `entity_resolution.entity_resolution_pipeline_handler.lambda_handler` | Curated → golden records; now streams curated records via DuckDB rather than fully materializing them, and resolves entity types via `EntityTypeRegistryClient` (DynamoDB) with fallback to hardcoded seed dicts |
-| `EdlAnalyticsLayerPublisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` | Golden records → analytics layer; emits an end-to-end pipeline SLA metric. |
-| `EdlControlPlane` | `connector_runtime.api.control_plane_handler.lambda_handler` | SaaS control-plane REST API behind a Cognito/JWT authorizer — entity registration/listing, pipeline trigger, run status, plus the config/semantic-governance routes in `api/config_governance_routes.py`. **No tenant/user/role provisioning route** — identity is owned by the Identity API (see the root `CLAUDE.md` system boundary); the deployed function still carries the older code until redeployed. Deployed; end-to-end request flow against the live API Gateway + Cognito authorizer has not yet been exercised. |
-| `EdlCredentialExpiryNotifier` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` | Daily check of all 5 source-credential secrets' age; publishes an SNS alert if rotation is overdue. |
-| `EdlPipelineTrigger` | `orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler` | Rate-limited SQS FIFO consumer that starts Step Functions executions — the single path both `scripts/trigger_extraction.py` and the control-plane API's pipeline-trigger route funnel through. |
-| `EdlDlqProcessor` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` | Processes the extraction-failure DLQ: writes an audit record, sends an SNS alert, and optionally auto-replays (`AUTO_REPLAY=false` by default). |
+| `datalake-extraction-dev` | `connector_runtime.extraction_pipeline_handler.lambda_handler` | Extract from source → raw layer. Now supports mid-run checkpointing on approaching Lambda timeout (`LambdaTimeoutWarning`, partial watermark commit) — see Known Gotchas in `docs/DEVELOPER_GUIDE.md`. |
+| `datalake-transformation-dev` | `transformation.transformation_pipeline_handler.lambda_handler` | Raw → curated layer (tenant-prefixed S3 keys) |
+| `datalake-entity-resolution-dev` | `entity_resolution.entity_resolution_pipeline_handler.lambda_handler` | Curated → golden records; now streams curated records via DuckDB rather than fully materializing them, and resolves entity types via `EntityTypeRegistryClient` (DynamoDB) with fallback to hardcoded seed dicts |
+| `datalake-analytics-devLayerPublisher` | `analytics_publisher.analytics_publisher_handler.lambda_handler` | Golden records → analytics layer; emits an end-to-end pipeline SLA metric. |
+| `datalake-control-plane-dev` | `connector_runtime.api.control_plane_handler.lambda_handler` | SaaS control-plane REST API behind a Cognito/JWT authorizer — entity registration/listing, pipeline trigger, run status, plus the config/semantic-governance routes in `api/config_governance_routes.py`. **No tenant/user/role provisioning route** — identity is owned by the Identity API (see the root `CLAUDE.md` system boundary); the deployed function still carries the older code until redeployed. Deployed; end-to-end request flow against the live API Gateway + Cognito authorizer has not yet been exercised. |
+| `datalake-credential-expiry-notifier-dev` | `connector_runtime.credential_rotation.credential_expiry_notifier_handler.lambda_handler` | Daily check of all 5 source-credential secrets' age; publishes an SNS alert if rotation is overdue. |
+| `datalake-pipeline-trigger-dev` | `orchestration.pipeline_trigger.pipeline_trigger_handler.lambda_handler` | Rate-limited SQS FIFO consumer that starts Step Functions executions — the single path both `scripts/trigger_extraction.py` and the control-plane API's pipeline-trigger route funnel through. |
+| `datalake-dlq-processor-dev` | `orchestration.dlq_processor.dlq_processor_handler.lambda_handler` | Processes the extraction-failure DLQ: writes an audit record, sends an SNS alert, and optionally auto-replays (`AUTO_REPLAY=false` by default). |
 
 All eight Lambdas are deployed from the **same zip** (via `var.lambda_package_s3_bucket` /
-`lambda_package_s3_key`, shared across every module): `s3://edl-terraform-state-087972550871/lambda/extraction-pipeline.zip`
+`lambda_package_s3_key`, shared across every module): `s3://datalake-terraform-state-dev-use1/lambda/extraction-pipeline.zip`
 
 ### Control Plane API
 
@@ -270,13 +270,13 @@ All eight Lambdas are deployed from the **same zip** (via `var.lambda_package_s3
 
 | State Machine | Purpose |
 |---|---|
-| `EdlExtractionPipeline` | Full end-to-end pipeline: extraction → transformation → entity resolution → analytics → serving store (optional). Single state machine for all four stages. Now includes an `ExtractionCheckpointed` terminal `Succeed` state, reached via a `Catch` on `LambdaTimeoutWarning` — the extraction stage commits a partial watermark and exits cleanly rather than failing when it detects it's about to hit the Lambda timeout. **Automatic re-invocation from the checkpoint is not yet implemented** — a checkpointed run currently needs a manual re-trigger (see `docs/KNOWN_GAPS_AND_ROADMAP.md`). The `LoadServingStore` state (`infrastructure/modules/orchestration/main.tf`) is a conditional `Task`/`Pass` — a `Pass` (no-op) unless `serving_store_loader_lambda_arn` is set. The `serving_store/` module (adapter+registry pattern, five engine loaders — MySQL RDS, PostgreSQL, SQL Server, Azure SQL, Redshift — behind `ServingStoreLoaderRegistry`) and its Terraform (`infrastructure/modules/serving_store_database`, `infrastructure/modules/serving_store_lambda`, and `infrastructure/modules/serving_store_redshift`) are code-complete and wire that ARN automatically in all three environments' `main.tf`. **In dev this has been `terraform apply`'d (2026-07-24)**: `serving_store_loader_lambda_arn` resolves to the live `EdlServingStoreLoader` Lambda, so the state takes the `Task` branch there (staging/prod remain un-applied → `Pass`). The `Task` branch threads `"tenant_code.$" = "$.tenant_code"` and `"entity_type.$" = "$.analytics.entity_type"` through (the analytics-layer entity type produced by the prior stage, not the source-level `entity_id` that triggered the run — kept alongside it for tracing only), and the loader's tenant isolation is real — database-per-tenant (MySQL) or schema-per-tenant (PostgreSQL/SQL Server/Azure SQL/Redshift), enforced at the database engine's own GRANT model. **The dev serving store is deployed but unpopulated: `EdlServingStoreConfig` has no rows, so the loader skips every run and the `edl-serving-store-mysql-dev` RDS instance holds no databases or tables. Onboard a tenant/entity with `scripts/seed_serving_store_config.py`.** Redshift is the exception to the row-upsert path: it is a columnar MPP warehouse (Serverless), so its adapter loads set-based via `COPY` from the analytics Parquet in S3 (`supports_s3_bulk_load`) with an IAM-auth writer — no writer password — rather than driver row upserts. |
+| `datalake-extraction-dev` | Full end-to-end pipeline: extraction → transformation → entity resolution → analytics → serving store (optional). Single state machine for all four stages. Now includes an `ExtractionCheckpointed` terminal `Succeed` state, reached via a `Catch` on `LambdaTimeoutWarning` — the extraction stage commits a partial watermark and exits cleanly rather than failing when it detects it's about to hit the Lambda timeout. **Automatic re-invocation from the checkpoint is not yet implemented** — a checkpointed run currently needs a manual re-trigger (see `docs/KNOWN_GAPS_AND_ROADMAP.md`). The `LoadServingStore` state (`infrastructure/modules/orchestration/main.tf`) is a conditional `Task`/`Pass` — a `Pass` (no-op) unless `serving_store_loader_lambda_arn` is set. The `serving_store/` module (adapter+registry pattern, five engine loaders — MySQL RDS, PostgreSQL, SQL Server, Azure SQL, Redshift — behind `ServingStoreLoaderRegistry`) and its Terraform (`infrastructure/modules/serving_store_database`, `infrastructure/modules/serving_store_lambda`, and `infrastructure/modules/serving_store_redshift`) are code-complete and wire that ARN automatically in all three environments' `main.tf`. **In dev this has been `terraform apply`'d (2026-07-24)**: `serving_store_loader_lambda_arn` resolves to the live `datalake-serving-store-loader-dev` Lambda, so the state takes the `Task` branch there (staging/prod remain un-applied → `Pass`). The `Task` branch threads `"tenant_code.$" = "$.tenant_code"` and `"entity_type.$" = "$.analytics.entity_type"` through (the analytics-layer entity type produced by the prior stage, not the source-level `entity_id` that triggered the run — kept alongside it for tracing only), and the loader's tenant isolation is real — database-per-tenant (MySQL) or schema-per-tenant (PostgreSQL/SQL Server/Azure SQL/Redshift), enforced at the database engine's own GRANT model. **The dev serving store is deployed but unpopulated: `datalake-serving-store-config-dev` has no rows, so the loader skips every run and the `datalake-serving-store-mysql-dev` RDS instance holds no databases or tables. Onboard a tenant/entity with `scripts/seed_serving_store_config.py`.** Redshift is the exception to the row-upsert path: it is a columnar MPP warehouse (Serverless), so its adapter loads set-based via `COPY` from the analytics Parquet in S3 (`supports_s3_bulk_load`) with an IAM-auth writer — no writer password — rather than driver row upserts. |
 
 ### EventBridge Scheduler
 
 | Schedule | Target | Purpose |
 |---|---|---|
-| `EdlCredentialExpiryCheck` | `EdlCredentialExpiryNotifier` | **New.** Daily (`rate(1 day)`) check of source-credential secret age across all 5 sources. |
+| `datalake-credential-expiry-check-dev` | `datalake-credential-expiry-notifier-dev` | **New.** Daily (`rate(1 day)`) check of source-credential secret age across all 5 sources. |
 
 Per-entity extraction schedules (one per tenant/source/entity, created via
 `orchestration/event_bridge/extraction_schedule_client.py`) are named
@@ -293,17 +293,17 @@ suffix, never a naive slice (`_build_schedule_name()`).
 
 | Resource | Purpose |
 |---|---|
-| `EdlExtractionFailureDlq` (SQS, `aws_sqs_queue.extraction_failure_dlq` in `infrastructure/modules/metadata_persistence/main.tf`) | Failed extraction runs land here; `EdlDlqProcessor` drains it into an audit record + SNS alert, with optional auto-replay. |
+| `datalake-extraction-failure-dlq-dev` (SQS, `aws_sqs_queue.extraction_failure_dlq` in `infrastructure/modules/metadata_persistence/main.tf`) | Failed extraction runs land here; `datalake-dlq-processor-dev` drains it into an audit record + SNS alert, with optional auto-replay. |
 
 ### Glue Catalog
 
 | Database | Wired to | Tables |
 |---|---|---|
-| `edl_curated` | **Nothing, in dev today.** `infrastructure/modules/transformation_lambda/main.tf`'s `glue_catalog_database` variable defaults to `""` (registration disabled) and `infrastructure/environments/dev/main.tf`'s `module.transformation_lambda` block never sets it. | Created by Terraform; permanently empty in dev until someone wires this variable. The curated-registration code path (`transformation/transformation_pipeline.py::_register_curated_catalog`, one table per `{tenant_code}_{entity_id}_{domain}_curated`) exists and is exercised by tests, but is currently dead code in the deployed dev Lambda. |
-| `edl_analytics` | `module.analytics_publisher_lambda` (`glue_catalog_database = module.glue.analytics_database_name` in `infrastructure/environments/dev/main.tf`) | Created by Terraform; empty until a pipeline run completes. Tables are registered by `analytics_publisher/analytics_publisher_handler.py` (not `_register_curated_catalog`) after a full run reaches the analytics-publish stage. |
+| `datalake_curated_dev` | **Nothing, in dev today.** `infrastructure/modules/transformation_lambda/main.tf`'s `glue_catalog_database` variable defaults to `""` (registration disabled) and `infrastructure/environments/dev/main.tf`'s `module.transformation_lambda` block never sets it. | Created by Terraform; permanently empty in dev until someone wires this variable. The curated-registration code path (`transformation/transformation_pipeline.py::_register_curated_catalog`, one table per `{tenant_code}_{entity_id}_{domain}_curated`) exists and is exercised by tests, but is currently dead code in the deployed dev Lambda. |
+| `datalake_analytics_dev` | `module.analytics_publisher_lambda` (`glue_catalog_database = module.glue.analytics_database_name` in `infrastructure/environments/dev/main.tf`) | Created by Terraform; empty until a pipeline run completes. Tables are registered by `analytics_publisher/analytics_publisher_handler.py` (not `_register_curated_catalog`) after a full run reaches the analytics-publish stage. |
 
 > Both Glue databases are provisioned in every environment (`infrastructure/modules/glue/main.tf`),
-> but only `edl_analytics` is actually reachable by a running Lambda in dev right now — don't assume
+> but only `datalake_analytics_dev` is actually reachable by a running Lambda in dev right now — don't assume
 > curated-layer tables will appear in Athena without first wiring `glue_catalog_database` on the
 > transformation Lambda module block.
 
@@ -311,11 +311,11 @@ suffix, never a naive slice (`_build_schedule_name()`).
 
 | Secret | Contents |
 |---|---|
-| `edl/sources/salesforce/credentials` | `instance_url`, `client_id`, `client_secret` |
-| `edl/sources/netsuite/credentials` | NetSuite OAuth/TBA credentials — connector is code-complete (`connector_runtime/adapters/netsuite/`); confirm this secret is actually populated before assuming live extraction |
-| `edl/sources/mysql-rds/credentials` | `host`, `port`, `username`, `password`, `database` |
-| `edl/sources/sage/intacct/credentials` | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
-| `edl/sources/sage/x3/credentials` | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
+| `datalake/<env>/sources/salesforce/credentials` | `instance_url`, `client_id`, `client_secret` |
+| `datalake/<env>/sources/netsuite/credentials` | NetSuite OAuth/TBA credentials — connector is code-complete (`connector_runtime/adapters/netsuite/`); confirm this secret is actually populated before assuming live extraction |
+| `datalake/<env>/sources/mysql-rds/credentials` | `host`, `port`, `username`, `password`, `database` |
+| `datalake/<env>/sources/sage/intacct/credentials` | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
+| `datalake/<env>/sources/sage/x3/credentials` | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
 
 > All five secrets above are now Terraform-managed (`infrastructure/modules/secrets/main.tf`),
 > including Sage's — each has a resource policy (`DenyAllOtherPrincipals`) restricting
@@ -323,7 +323,7 @@ suffix, never a naive slice (`_build_schedule_name()`).
 > empty secret **shells**; the actual credential values still need to be populated by hand via
 > `aws secretsmanager put-secret-value` — don't assume `terraform apply` alone makes a source live.
 >
-> **Credential rotation monitoring**: `EdlCredentialExpiryNotifier` (daily) checks the age
+> **Credential rotation monitoring**: `datalake-credential-expiry-notifier-dev` (daily) checks the age
 > of all five secrets above and alerts via SNS if rotation is overdue.
 
 ---
@@ -333,9 +333,9 @@ suffix, never a naive slice (`_build_schedule_name()`).
 | Item | Value |
 |---|---|
 | Backend | S3 remote state |
-| State bucket | `edl-terraform-state-087972550871` |
+| State bucket | `datalake-terraform-state-dev-use1` |
 | State key | `environments/dev/terraform.tfstate` |
-| Lock table | `EdlTerraformStateLock` |
+| Lock table | `datalake-terraform-state-lock-dev` |
 
 ---
 
@@ -358,7 +358,7 @@ Intacct, Sage X3, or NetSuite):
 - Staging AWS account and credentials
 - Terraform state bootstrap (state bucket, lock table, KMS key — `docs/DEPLOYMENT_GUIDE.md` Phase 1,
   including the orphaned-resource check in Step 1.6)
-- `ARTIFACTS_BUCKET=edl-terraform-state-{staging_account_id} make lambda-deploy` once the staging
+- `ARTIFACTS_BUCKET=datalake-terraform-state-{staging_account_id} make lambda-deploy` once the staging
   account ID is known (always as a single command — see `infrastructure/CLAUDE.md`)
 
 Apply order (see `infrastructure/CLAUDE.md` for the full module list and dependency mechanics):
@@ -375,7 +375,7 @@ terraform apply -target=module.control_plane
 
 ### Deploy Production Environment
 
-Same pattern as staging — use `edl-terraform-state-{prod_account_id}` as `ARTIFACTS_BUCKET`. Lambda
+Same pattern as staging — use `datalake-terraform-state-{prod_account_id}` as `ARTIFACTS_BUCKET`. Lambda
 log retention is already configured at 365 days in HCL. `terraform apply`/`destroy` against
 `infrastructure/environments/prod` requires explicit operator sign-off outside of automated tooling.
 
@@ -384,6 +384,6 @@ log retention is already configured at 365 days in HCL. `terraform apply`/`destr
 `connector_runtime/adapters/netsuite/` has a full implementation (connector, OAuth/TBA auth
 client, SuiteQL query planner, raw layer writer). Remaining steps are configuration-only:
 
-- Populate `edl/sources/netsuite/credentials` with real OAuth/TBA credentials
+- Populate `datalake/<env>/sources/netsuite/credentials` with real OAuth/TBA credentials
 - Seed entity config for NetSuite entities via `seed_entity_config.py`
 - Set `schedule_enabled=True` once ready for live scheduled extraction

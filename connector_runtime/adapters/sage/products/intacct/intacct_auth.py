@@ -6,7 +6,7 @@ client_credentials grant.  Credentials are loaded exclusively from AWS
 Secrets Manager via SageCredentialProvider — never from constructor arguments,
 environment variables, or config files.
 
-Required secret keys (stored at edl/sources/sage/intacct/credentials):
+Required secret keys (stored at datalake/<env>/sources/sage/intacct/credentials):
     base_url       — Intacct REST API base URL
                      (e.g. "https://api.intacct.com/ia/api/v1")
     token_url      — OAuth 2.0 token endpoint
@@ -52,13 +52,10 @@ _logger = get_platform_logger(__name__)
 
 _PRODUCT_NAME: Final[str] = "intacct"
 
-# Refresh the token this many seconds before expiry to avoid mid-extraction expiry.
 _PROACTIVE_REFRESH_SECONDS: Final[int] = 300
 
-# Fallback TTL when the token endpoint does not return expires_in.
 _DEFAULT_TOKEN_TTL_SECONDS: Final[int] = 3_600
 
-# Required keys that must be present in the Intacct credentials secret.
 _REQUIRED_CREDENTIAL_KEYS: Final[frozenset[str]] = frozenset(
     {"base_url", "token_url", "client_id", "client_secret", "company_id"}
 )
@@ -99,7 +96,6 @@ class IntacctAuthClient:
         self._credentials = credential_manager
         self._http = http_client
 
-        # Token state — populated lazily on first get_access_token() call.
         self._access_token: str | None = None
         self._token_expires_at: float = 0.0  # UNIX epoch seconds
         self._base_url: str | None = None
@@ -146,8 +142,6 @@ class IntacctAuthClient:
         self._token_expires_at = 0.0
         _logger.info("sage_intacct_token_invalidated")
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _is_token_valid(self) -> bool:
         """True when the cached token has more than the proactive refresh window remaining."""
         return (self._token_expires_at - time.time()) > _PROACTIVE_REFRESH_SECONDS
@@ -171,8 +165,6 @@ class IntacctAuthClient:
         company_id: str = creds["company_id"]
         base_url: str = creds["base_url"]
 
-        # Post the client_credentials grant.  client_secret is form data —
-        # never a query parameter (OWASP A07).
         try:
             response_body = self._http.post_form(
                 url=token_url,
@@ -205,7 +197,6 @@ class IntacctAuthClient:
         _logger.info(
             "sage_intacct_token_acquired",
             expires_in_seconds=expires_in,
-            # Token value intentionally NOT logged (OWASP A09).
         )
 
     def build_auth_headers(self) -> dict[str, str]:

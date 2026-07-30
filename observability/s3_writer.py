@@ -36,17 +36,10 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Threshold above which multipart upload is used instead of single PUT.
-# Files below this size (e.g. small incremental deltas) avoid the multipart
-# overhead (API calls for CreateMultipartUpload + CompleteMultipartUpload).
 _MULTIPART_THRESHOLD_BYTES: Final[int] = 8 * 1024 * 1024  # 8 MB
 
-# Each S3 part is 64 MB. AWS minimum part size is 5 MB; 64 MB is a good
-# balance between API call count and per-part upload latency.
 _PART_SIZE_BYTES: Final[int] = 64 * 1024 * 1024  # 64 MB
 
-# Records are batched into Arrow RecordBatches of this size before writing.
-# Peak RAM per batch: 50_000 rows x ~400 bytes = ~20 MB.
 _WRITE_BATCH_SIZE: Final[int] = 50_000
 
 
@@ -62,14 +55,6 @@ class S3ParquetWriter:
 
     def __init__(self, s3_client: Any) -> None:
         self._s3 = s3_client
-        # PERF-3: the schema used for the most recent write() call — either
-        # the caller-supplied `schema` argument, or the schema inferred from
-        # the first batch of records. Callers that need a PyArrow schema for
-        # a downstream purpose (e.g. Glue Data Catalog column registration)
-        # can read this instead of re-materialising the full record set into
-        # a second pa.Table just to recompute a schema write() already
-        # derived. None until the first write() call, and reset to None when
-        # a write() call receives zero records (nothing was written).
         self.last_written_schema: pa.Schema | None = None
 
     def write(
@@ -97,7 +82,6 @@ class S3ParquetWriter:
             Sets self.last_written_schema to the schema used for this write
             (caller-supplied or inferred), or None if zero records were written.
         """
-        # Buffer the first batch to infer schema if not provided.
         first_batch: list[dict[str, Any]] = []
         remaining_iter = records_iter
 
@@ -115,7 +99,6 @@ class S3ParquetWriter:
 
         self.last_written_schema = inferred_schema
 
-        # Reconstruct a single iterator: first_batch + rest of original iter.
         def _combined() -> Iterator[dict[str, Any]]:
             yield from first_batch
             yield from remaining_iter
@@ -137,7 +120,6 @@ class S3ParquetWriter:
         writer = pq.ParquetWriter(buf, schema, compression=compression)
         total_records = 0
 
-        # Accumulate current batch
         batch_records: list[dict[str, Any]] = []
 
         def _flush_batch() -> None:
@@ -164,7 +146,6 @@ class S3ParquetWriter:
             return 0
 
         if len(parquet_bytes) < _MULTIPART_THRESHOLD_BYTES:
-            # Small file — single PUT
             self._s3.put_object(
                 Bucket=bucket,
                 Key=key,
@@ -179,7 +160,6 @@ class S3ParquetWriter:
                 record_count=total_records,
             )
         else:
-            # Large file — multipart upload
             self._multipart_upload(bucket, key, parquet_bytes)
             _logger.info(
                 "s3_parquet_writer_multipart_upload",
@@ -222,8 +202,6 @@ class S3ParquetWriter:
                 MultipartUpload={"Parts": parts},
             )
         except Exception:
-            # Abort multipart upload on any failure to avoid orphaned parts
-            # (S3 charges for incomplete multipart uploads).
             self._s3.abort_multipart_upload(
                 Bucket=bucket,
                 Key=key,

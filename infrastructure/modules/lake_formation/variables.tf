@@ -1,10 +1,10 @@
 variable "environment" {
-  description = "Deployment environment (dev, staging, prod)."
+  description = "Deployment environment (dev, uat, prod)."
   type        = string
 
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment must be one of dev, staging, prod."
+    condition     = contains(["dev", "uat", "prod"], var.environment)
+    error_message = "environment must be one of dev, uat, prod."
   }
 }
 
@@ -65,7 +65,7 @@ variable "scope_unit_ids" {
   description = <<-EOT
     Registered scope unit ids (franchisee/brand/location) that may appear as `scope_unit` LF-Tag
     values. Empty means no partitioned tenant exists yet, in which case the tag carries only the
-    implicit single-tenant sentinel. Keep in step with the `EdlScopeUnit` table — a scope unit
+    implicit single-tenant sentinel. Keep in step with the `datalake-scope-units-<env>` table — a scope unit
     with no tag value cannot be granted, and Athena would return its rows to anyone holding the
     tenant tag (DL-SCOPE-14).
   EOT
@@ -127,4 +127,9 @@ variable "scope_unit_grants" {
     ])
     error_message = "Each principal_arn must be an IAM ARN — a Lake Formation grant to a non-IAM principal fails at apply, not at plan."
   }
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
 }

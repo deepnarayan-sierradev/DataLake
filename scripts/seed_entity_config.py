@@ -5,7 +5,7 @@ Seed entity extraction configuration records into DynamoDB for local dev testing
 Usage:
     python scripts/seed_entity_config.py --environment dev --region us-east-1
 
-This writes one record per source entity into the EdlEntityExtractionConfig
+This writes one record per source entity into the entity-extraction-config
 DynamoDB table.  All records are safe to re-run — they use put_item which is idempotent.
 
 Prerequisite:
@@ -37,13 +37,8 @@ import sys
 import boto3
 
 from contracts.identifier_policy import tenant_scoped_key
+from observability.lambda_runtime import require_env
 
-# extraction_window_days is capped at 365 (contracts/entity_configuration_contract.py)
-# and only ever applies to FULL loads and to an entity's steady-state incremental
-# runs where a watermark already exists. An entity's first-ever incremental run
-# (no watermark yet) always backfills from epoch regardless of this value —
-# see WatermarkRepository.compute_extraction_window(). Keep this small; it is
-# not a backfill-window knob.
 _INCREMENTAL_EXTRACTION_WINDOW_DAYS = 1
 
 
@@ -91,7 +86,7 @@ def _validate_connector_params(records: list[dict[str, object]]) -> None:
 
 
 def _table_name() -> str:
-    return "EdlEntityExtractionConfig"
+    return require_env("ENTITY_CONFIG_TABLE")
 
 
 def _account_id(region: str) -> str:
@@ -100,7 +95,7 @@ def _account_id(region: str) -> str:
     Bucket names are suffixed with the account ID rather than the
     environment name — S3 bucket names are unique across all of AWS, and
     each environment is already a separate AWS account, so the account ID
-    is what actually guarantees no collision with dev/staging/prod.
+    is what actually guarantees no collision with dev/uat/prod.
     """
     return boto3.client("sts", region_name=region).get_caller_identity()["Account"]
 
@@ -110,21 +105,21 @@ def _raw_prefix(account_id: str, source_id: str, entity_id: str, tenant_code: st
 
     With multi-tenancy: {tenant_code}/{source_id}/{entity_id}/
     """
-    return f"s3://edl-raw-{account_id}/{tenant_code}/{source_id}/{entity_id}/"
+    return f"s3://{require_env('RAW_S3_BUCKET')}/{tenant_code}/{source_id}/{entity_id}/"
 
 
 def _sage_raw_prefix(
     account_id: str, product_name: str, entity_id: str, tenant_code: str = "demo"
 ) -> str:
     """Full s3:// URI for Sage raw layer partition root."""
-    return f"s3://edl-raw-{account_id}/{tenant_code}/sage-{product_name}/{entity_id}/"
+    return f"s3://{require_env('RAW_S3_BUCKET')}/{tenant_code}/sage-{product_name}/{entity_id}/"
 
 
 def _snapshot_prefix(
     account_id: str, source_id: str, entity_id: str, tenant_code: str = "demo"
 ) -> str:
     """Full s3:// URI for schema snapshot storage."""
-    return f"s3://edl-schema-snapshots-{account_id}/{tenant_code}/{source_id}/{entity_id}/"
+    return f"s3://{require_env('SCHEMA_SNAPSHOT_S3_BUCKET')}/{tenant_code}/{source_id}/{entity_id}/"
 
 
 def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str, object]]:
@@ -153,13 +148,6 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "schedule_cron": "cron(0 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
-            # SCD Type 1 merge with tombstone soft-delete.
-            # Salesforce hard-deletes: deleted accounts disappear from the API
-            # and are not captured in the incremental delta.  They persist in
-            # the curated layer as tombstones (last-known state, is_active=False
-            # if deactivated before deletion).  soft_delete_field is None because
-            # there is no deletion flag in the extracted data — a future enhancement
-            # will add IsDeleted=true ALL ROWS SOQL support to track hard-deletes.
             "primary_key_field": "account_id",
             "soft_delete_field": None,
             "active": True,
@@ -186,10 +174,6 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "schedule_cron": "cron(15 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
-            # SCD Type 1 merge: curated layer always holds full current state.
-            # Salesforce Contact uses hard-delete (records disappear from API),
-            # so soft_delete_field is None — deletions tracked via full-load
-            # when the entity is eventually switched to full load for that need.
             "primary_key_field": "contact_id",
             "soft_delete_field": None,
             "active": True,
@@ -218,9 +202,6 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "schedule_cron": "cron(20 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
-            # SCD Type 1 merge: curated layer always holds full current state.
-            # Salesforce Opportunity uses hard-delete (records disappear from
-            # the API), so soft_delete_field is None — same rationale as Contact.
             "primary_key_field": "opportunity_id",
             "soft_delete_field": None,
             "active": True,
@@ -248,9 +229,6 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "schedule_cron": "cron(25 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
-            # SCD Type 1 merge: curated layer always holds full current state.
-            # Salesforce Contract uses hard-delete (records disappear from
-            # the API), so soft_delete_field is None — same rationale as Contact.
             "primary_key_field": "sales_contract_id",
             "soft_delete_field": None,
             "active": True,
@@ -273,10 +251,6 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
                 account_id, "netsuite", "netsuite-customer", tenant_code
             ),
             "output_format": "parquet",
-            # `record_type` is required by NetSuiteConnectorParams (extra="forbid"), so the
-            # previous `{}` made this entity raise ValidationError the moment extraction ran.
-            # Recorded as KNOWN_GAPS item 9; `_validate_connector_params` below now makes a
-            # config that cannot construct its params model a seed-time failure.
             "connector_params": {"record_type": "customer"},
             "schedule_cron": None,
             "schedule_enabled": False,
@@ -284,9 +258,6 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "active": False,
             "tenant_code": tenant_code,
         },
-        # ── Add new MySQL tables here — copy this block and adjust entity_id,
-        # ── connector_params["table_name"], schedule_cron, and load_type.
-        # ── After adding: make seed-entity-config && make seed-schedules
         {
             "source_id": "mysql-rds",
             "entity_id": "mysql-rds-contracts",
@@ -309,12 +280,6 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "schedule_cron": "cron(30 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
-            # SCD Type 1 merge with tombstone soft-delete.
-            # MySQL Contracts uses a soft-delete flag (IsDelete → canonical is_deleted).
-            # soft_delete_field is intentionally None: deleted contracts are KEPT in
-            # the curated layer and analytics with is_deleted=True as a tombstone,
-            # never physically removed.  BI queries filter WHERE is_deleted = false
-            # to see only active contracts.  This preserves the full audit trail.
             "primary_key_field": "contract_id",
             "soft_delete_field": None,
             "active": True,
@@ -342,15 +307,11 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "schedule_cron": "cron(35 2 * * ? *)",
             "schedule_enabled": True,
             "schedule_timezone": "UTC",
-            # Same SCD Type 1 / tombstone convention as mysql-rds-contracts —
-            # assumed ModifiedOn/Id column names; adjust if ContractTerms uses
-            # different watermark/primary-key columns than Contracts.
             "primary_key_field": "contract_term_id",
             "soft_delete_field": None,
             "active": True,
             "tenant_code": tenant_code,
         },
-        # ── Sage Intacct ─────────────────────────────────────────────────────
         {
             "source_id": "sage",
             "entity_id": "sage-intacct-customer",
@@ -460,7 +421,6 @@ def _build_records(account_id: str, tenant_code: str = "demo") -> list[dict[str,
             "active": True,
             "tenant_code": tenant_code,
         },
-        # ── Sage X3 ────────────────────────────────────────────────────────────
         {
             "source_id": "sage",
             "entity_id": "sage-x3-customer",
@@ -518,7 +478,6 @@ def seed(environment: str, region: str, dry_run: bool = False, tenant_code: str 
     table_name = _table_name()
     account_id = _account_id(region)
     records = _build_records(account_id, tenant_code=tenant_code)
-    # Before the dry-run branch on purpose: a dry run should surface an unusable config too.
     _validate_connector_params(records)
     print(
         f"Target table: {table_name}  "
@@ -537,10 +496,7 @@ def seed(environment: str, region: str, dry_run: bool = False, tenant_code: str 
     table = dynamodb.Table(table_name)
 
     for rec in records:
-        # DynamoDB does not have a native None type; omit None fields.
         item: dict[str, object] = {k: v for k, v in rec.items() if v is not None}
-        # PK is the tenant-scoped composite (ARCH-1/ARCH-03), matching
-        # ConfigurationRepositoryClient so the extraction pipeline reads it back.
         item["source_id"] = tenant_scoped_key(str(rec["tenant_code"]), str(rec["source_id"]))
         table.put_item(Item=item)  # type: ignore[arg-type]
         print(f"  Written: {rec['source_id']} / {rec['entity_id']}")
@@ -556,7 +512,7 @@ def seed(environment: str, region: str, dry_run: bool = False, tenant_code: str 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed entity extraction config records.")
-    parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"])
+    parser.add_argument("--environment", required=True, choices=["dev", "uat", "prod"])
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument("--tenant-code", default="demo", help="Tenant code slug (default: demo).")
     parser.add_argument(

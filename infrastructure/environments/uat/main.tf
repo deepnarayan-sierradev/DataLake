@@ -1,10 +1,35 @@
 locals {
-  environment  = "staging"
-  project_name = "edl"
-  aws_region   = var.aws_region
+  environment = "uat"
+  name_prefix = "datalake"
+  aws_region  = var.aws_region
+
+  region_short_by_region = {
+    "us-east-1"      = "use1"
+    "us-east-2"      = "use2"
+    "us-west-1"      = "usw1"
+    "us-west-2"      = "usw2"
+    "eu-west-1"      = "euw1"
+    "eu-west-2"      = "euw2"
+    "eu-central-1"   = "euc1"
+    "ap-south-1"     = "aps1"
+    "ap-southeast-1" = "apse1"
+    "ap-southeast-2" = "apse2"
+    "ca-central-1"   = "cac1"
+  }
+  region_short = lookup(
+    local.region_short_by_region,
+    data.aws_region.current.name,
+    replace(data.aws_region.current.name, "-", ""),
+  )
+  replica_region_short = lookup(
+    local.region_short_by_region,
+    var.replica_region,
+    replace(var.replica_region, "-", ""),
+  )
 
   common_tags = {
-    Project     = "enterprise-data-lake"
+    Application = "datalake"
+    Project     = "datalake"
     Environment = local.environment
     ManagedBy   = "terraform"
     CostCenter  = var.cost_center
@@ -12,24 +37,23 @@ locals {
 }
 
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
-# ---------------------------------------------------------------------------
-# Lambda code signing (CKV_AWS_272). Warn, not Enforce: `make lambda-deploy` uploads an
-# unsigned locally-built zip, so Enforce would reject every deployment this repo can perform.
-# ---------------------------------------------------------------------------
 
 module "code_signing" {
   source      = "../../modules/code_signing"
   environment = local.environment
+  name_prefix = local.name_prefix
   tags        = local.common_tags
 }
 
 module "kms_storage" {
   source                  = "../../modules/kms"
   environment             = local.environment
+  name_prefix             = local.name_prefix
   aws_region              = local.aws_region
   capability              = "storage"
-  description             = "KMS key for S3 data lake bucket encryption (staging)"
+  description             = "KMS key for S3 data lake bucket encryption (uat)"
   deletion_window_in_days = 14
   tags                    = local.common_tags
 }
@@ -37,9 +61,10 @@ module "kms_storage" {
 module "kms_database" {
   source                  = "../../modules/kms"
   environment             = local.environment
+  name_prefix             = local.name_prefix
   aws_region              = local.aws_region
   capability              = "database"
-  description             = "KMS key for DynamoDB and SQS encryption (staging)"
+  description             = "KMS key for DynamoDB and SQS encryption (uat)"
   deletion_window_in_days = 14
   tags                    = local.common_tags
 }
@@ -47,9 +72,10 @@ module "kms_database" {
 module "kms_secrets" {
   source                  = "../../modules/kms"
   environment             = local.environment
+  name_prefix             = local.name_prefix
   aws_region              = local.aws_region
   capability              = "secrets"
-  description             = "KMS key for Secrets Manager encryption (staging)"
+  description             = "KMS key for Secrets Manager encryption (uat)"
   deletion_window_in_days = 14
   tags                    = local.common_tags
 }
@@ -57,9 +83,10 @@ module "kms_secrets" {
 module "kms_logs" {
   source                  = "../../modules/kms"
   environment             = local.environment
+  name_prefix             = local.name_prefix
   aws_region              = local.aws_region
   capability              = "logs"
-  description             = "KMS key for CloudWatch Logs and SNS encryption (staging)"
+  description             = "KMS key for CloudWatch Logs and SNS encryption (uat)"
   allow_cloudwatch_logs   = true
   allow_sns               = true
   deletion_window_in_days = 14
@@ -69,6 +96,7 @@ module "kms_logs" {
 module "networking" {
   source      = "../../modules/networking"
   environment = local.environment
+  name_prefix = local.name_prefix
 
   vpc_cidr             = "10.1.0.0/16"
   availability_zones   = ["${local.aws_region}a", "${local.aws_region}b", "${local.aws_region}c"]
@@ -97,9 +125,11 @@ module "storage" {
 
   replica_region                        = var.replica_region
   environment                           = local.environment
-  project_name                          = local.project_name
+  name_prefix                           = local.name_prefix
+  region_short                          = local.region_short
+  replica_region_short                  = local.replica_region_short
   storage_kms_key_arn                   = module.kms_storage.key_arn
-  extraction_runtime_role_arns          = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/EdlExtractionRuntimeRole"]
+  extraction_runtime_role_arns          = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-extraction-${local.environment}-exec"]
   raw_object_lock_retention_days        = 180
   raw_noncurrent_version_retention_days = 14
   access_logs_retention_days            = 90
@@ -109,15 +139,95 @@ module "storage" {
 module "metadata_persistence" {
   source                    = "../../modules/metadata_persistence"
   environment               = local.environment
+  name_prefix               = local.name_prefix
   database_kms_key_arn      = module.kms_database.key_arn
   orchestration_role_arns   = [module.iam.orchestration_step_functions_role_arn]
   replay_operator_role_arns = var.replay_operator_role_arns
   tags                      = local.common_tags
 }
 
+locals {
+  programme_tables = module.metadata_persistence.programme_table_names
+
+  prevent_destroy_tables = [
+    module.metadata_persistence.watermark_repository_table_name,
+    module.metadata_persistence.run_audit_log_table_name,
+    module.metadata_persistence.entity_extraction_config_table_name,
+    module.metadata_persistence.entity_type_registry_table_name,
+    module.metadata_persistence.serving_store_config_table_name,
+    module.metadata_persistence.twin_index_table_name,
+    module.metadata_persistence.semantic_model_table_name,
+    module.metadata_persistence.saved_query_table_name,
+  ]
+
+  tenant_keyed_tables = concat(
+    [
+      module.metadata_persistence.serving_store_config_table_name,
+      module.metadata_persistence.source_onboarding_registry_table_name,
+      module.metadata_persistence.twin_index_table_name,
+      module.metadata_persistence.semantic_model_table_name,
+      module.metadata_persistence.saved_query_table_name,
+    ],
+    [for purpose, name in local.programme_tables : name if purpose != "deletion-certificates"],
+  )
+
+  resource_names = merge(
+    {
+      RESOURCE_NAME_PREFIX = local.name_prefix
+      SECRET_PATH_PREFIX   = "${local.name_prefix}/${local.environment}"
+
+      AUDIT_LOG_TABLE            = module.metadata_persistence.run_audit_log_table_name
+      RUN_AUDIT_LOG_TABLE        = module.metadata_persistence.run_audit_log_table_name
+      ENTITY_CONFIG_TABLE        = module.metadata_persistence.entity_extraction_config_table_name
+      ENTITY_TYPE_REGISTRY_TABLE = module.metadata_persistence.entity_type_registry_table_name
+      WATERMARK_TABLE            = module.metadata_persistence.watermark_repository_table_name
+      SERVING_STORE_CONFIG_TABLE = module.metadata_persistence.serving_store_config_table_name
+      SOURCE_ONBOARDING_TABLE    = module.metadata_persistence.source_onboarding_registry_table_name
+      TWIN_INDEX_TABLE           = module.metadata_persistence.twin_index_table_name
+      SEMANTIC_MODEL_TABLE       = module.metadata_persistence.semantic_model_table_name
+      SAVED_QUERY_TABLE          = module.metadata_persistence.saved_query_table_name
+
+      TENANT_KEYED_TABLES = join(",", local.tenant_keyed_tables)
+      TENANT_SCOPED_KEY_TABLES = join(",", [
+        module.metadata_persistence.entity_extraction_config_table_name,
+        module.metadata_persistence.watermark_repository_table_name,
+      ])
+      TENANT_ATTRIBUTED_TABLES = module.metadata_persistence.run_audit_log_table_name
+      DELETION_EVIDENCE_TABLES = local.programme_tables["deletion-certificates"]
+      PREVENT_DESTROY_TABLES   = join(",", local.prevent_destroy_tables)
+    },
+    {
+      BACKFILL_JOB_TABLE           = local.programme_tables["backfill-jobs"]
+      BRAND_REGISTRY_TABLE         = local.programme_tables["brand-registry"]
+      CONFIG_GOVERNANCE_TABLE      = local.programme_tables["config-governance"]
+      CONFIG_RESTATEMENT_TABLE     = local.programme_tables["config-restatements"]
+      DATA_QUALITY_EXCEPTION_TABLE = local.programme_tables["data-quality-exceptions"]
+      DELETION_CERTIFICATE_TABLE   = local.programme_tables["deletion-certificates"]
+      EFFECTIVE_CONFIG_TABLE       = local.programme_tables["effective-config"]
+      EXPORT_JOB_TABLE             = local.programme_tables["export-jobs"]
+      QUALITY_POLICY_TABLE         = local.programme_tables["quality-policy-attachments"]
+      RECONCILIATION_REPORT_TABLE  = local.programme_tables["reconciliation-reports"]
+      SCOPE_UNIT_TABLE             = local.programme_tables["scope-units"]
+      SEMANTIC_APPROVAL_TABLE      = local.programme_tables["semantic-approvals"]
+      SERVING_CLAIM_TABLE          = local.programme_tables["serving-credential-claims"]
+      SOURCE_CONNECTION_TABLE      = local.programme_tables["source-connections"]
+      SUBPROCESSOR_TABLE           = local.programme_tables["subprocessor-register"]
+      TENANT_USAGE_TABLE           = local.programme_tables["tenant-usage-metering"]
+      WEBHOOK_DEDUP_TABLE          = local.programme_tables["webhook-event-dedup"]
+      WORKFLOW_BREAKER_TABLE       = local.programme_tables["workflow-circuit-breaker"]
+      WORKFLOW_DEFINITION_TABLE    = local.programme_tables["workflow-definitions"]
+      WORKFLOW_DESTINATION_TABLE   = local.programme_tables["workflow-destinations"]
+      WORKFLOW_EXECUTION_TABLE     = local.programme_tables["workflow-executions"]
+      WORKFLOW_IDEMPOTENCY_TABLE   = local.programme_tables["workflow-idempotency"]
+      WORKFLOW_TASK_TABLE          = local.programme_tables["workflow-tasks"]
+    },
+  )
+}
+
 module "serving_store_database" {
   source      = "../../modules/serving_store_database"
   environment = local.environment
+  name_prefix = local.name_prefix
   engine      = "mysql"
 
   vpc_id     = module.networking.vpc_id
@@ -140,12 +250,12 @@ module "secrets" {
   vpc_id                       = module.networking.vpc_id
   subnet_ids                   = module.networking.private_subnet_ids
   environment                  = local.environment
+  name_prefix                  = local.name_prefix
   secrets_kms_key_arn          = module.kms_secrets.key_arn
   logs_kms_key_arn             = module.kms_logs.key_arn
   extraction_runtime_role_arns = [module.iam.extraction_runtime_role_arn]
   secret_recovery_window_days  = 14
 
-  # SEC-6: credential expiry notifier Lambda + daily EventBridge schedule.
   credential_expiry_notifier_role_arn  = module.iam.credential_expiry_notifier_role_arn
   credential_expiry_scheduler_role_arn = module.iam.credential_expiry_scheduler_role_arn
   alert_topic_arn                      = module.observability.platform_alerts_topic_arn
@@ -154,11 +264,14 @@ module "secrets" {
   lambda_package_source_hash           = var.lambda_package_source_hash
 
   tags = local.common_tags
+
+  resource_names = local.resource_names
 }
 
 module "iam" {
   source                         = "../../modules/iam"
   environment                    = local.environment
+  name_prefix                    = local.name_prefix
   raw_layer_bucket_arn           = module.storage.raw_layer_bucket_arn
   curated_layer_bucket_arn       = module.storage.curated_layer_bucket_arn
   analytics_layer_bucket_arn     = module.storage.analytics_layer_bucket_arn
@@ -174,7 +287,7 @@ module "iam" {
   saved_query_table_arn          = module.metadata_persistence.saved_query_table_arn
   serving_store_secret_arns = [
     module.serving_store_database.master_user_secret_arn,
-    "arn:aws:secretsmanager:${local.aws_region}:${data.aws_caller_identity.current.account_id}:secret:edl/serving-store/*",
+    "arn:aws:secretsmanager:${local.aws_region}:${data.aws_caller_identity.current.account_id}:secret:datalake/<env>/serving-store/*",
   ]
   kms_key_arns_for_extraction                 = [module.kms_storage.key_arn, module.kms_secrets.key_arn, module.kms_database.key_arn]
   kms_key_arns_for_transformation             = [module.kms_storage.key_arn, module.kms_database.key_arn]
@@ -184,9 +297,6 @@ module "iam" {
   github_repo                                 = var.github_repo
   cicd_deployment_policy_arns                 = var.cicd_deployment_policy_arns
 
-  # The tenant boundary's own inputs. All three were unset in every environment, so the S3 and
-  # DynamoDB Deny statements carried no Resource — a policy IAM rejects outright, which is why this
-  # had never applied anywhere while `terraform validate` stayed green.
   data_bucket_arns = [
     module.storage.raw_layer_bucket_arn,
     module.storage.curated_layer_bucket_arn,
@@ -202,18 +312,11 @@ module "iam" {
   ]
   cloudtrail_log_group_name = module.audit_trail.log_group_name
 
-  # Stays false until every call site touching tenant data builds its client from a tenant-tagged
-  # session (tenancy/tenant_session.py). The module refuses `enforce` while it is false, because
-  # enforcing over untagged principals leaves S3 open and denies DynamoDB outright.
   tenant_session_tagging_adopted = false
 
   tags = local.common_tags
 }
 
-# ---------------------------------------------------------------------------
-# Audit trail (SOW §23.4). Also the producer of IamBoundaryAccessDenied, which is what makes the
-# tenant boundary's audit stage measurable — see modules/audit_trail/main.tf.
-# ---------------------------------------------------------------------------
 
 module "audit_trail" {
   source = "../../modules/audit_trail"
@@ -222,9 +325,11 @@ module "audit_trail" {
     aws         = aws
     aws.replica = aws.replica
   }
-  environment = local.environment
-  account_id  = data.aws_caller_identity.current.account_id
-  region      = local.aws_region
+  environment  = local.environment
+  name_prefix  = local.name_prefix
+  region_short = local.region_short
+  account_id   = data.aws_caller_identity.current.account_id
+  region       = local.aws_region
 
   access_log_bucket_id = module.storage.access_logs_bucket_id
 
@@ -241,29 +346,22 @@ module "audit_trail" {
 }
 
 module "observability" {
-  # G6: alarm when a security or consistency control publishes nothing at all.
-  #
-  # Deliberately false until the programme Terraform is applied *and* one full pipeline run
-  # has completed in this environment. Several alarmed metrics have producers that read
-  # tables which do not exist yet — `EffectiveVersionTransitions` needs `EdlEffectiveConfig`,
-  # one of the 21 unapplied programme tables — and these alarms use
-  # `treat_missing_data = "breaching"`. Enabling them first puts them in permanent ALARM,
-  # which this module's own comment identifies as no more useful than an alarm that never
-  # fires. Flip it as the last step of the environment's first successful run.
   enable_absence_alarms = false
 
   source                    = "../../modules/observability"
   environment               = local.environment
+  name_prefix               = local.name_prefix
   logs_kms_key_arn          = module.kms_logs.key_arn
   log_retention_days        = 365
   alert_email               = var.alert_email
-  watermark_lag_slo_seconds = 86400 # 24h SLO for staging
+  watermark_lag_slo_seconds = 86400 # 24h SLO for uat
   tags                      = local.common_tags
 }
 
 module "glue" {
   source      = "../../modules/glue"
   environment = local.environment
+  name_prefix = local.name_prefix
 
   curated_layer_bucket_id   = module.storage.curated_layer_bucket_id
   analytics_layer_bucket_id = module.storage.analytics_layer_bucket_id
@@ -277,14 +375,12 @@ module "glue" {
   depends_on = [module.storage]
 }
 
-# ---------------------------------------------------------------------------
-# Lambda — Extraction Pipeline
-# ---------------------------------------------------------------------------
 
 module "lambda_pipeline" {
   source                  = "../../modules/lambda_pipeline"
   code_signing_config_arn = module.code_signing.code_signing_config_arn
   environment             = local.environment
+  name_prefix             = local.name_prefix
 
   kms_key_arn        = module.kms_logs.key_arn
   execution_role_arn = module.iam.extraction_runtime_role_arn
@@ -311,15 +407,15 @@ module "lambda_pipeline" {
   tags = local.common_tags
 
   depends_on = [module.iam, module.storage, module.networking]
+
+  resource_names = local.resource_names
 }
 
-# ---------------------------------------------------------------------------
-# Lambda — Transformation Pipeline
-# ---------------------------------------------------------------------------
 
 module "transformation_lambda" {
   source      = "../../modules/transformation_lambda"
   environment = local.environment
+  name_prefix = local.name_prefix
 
   kms_key_arn        = module.kms_logs.key_arn
   execution_role_arn = module.iam.transformation_runtime_role_arn
@@ -343,15 +439,15 @@ module "transformation_lambda" {
   tags = local.common_tags
 
   depends_on = [module.iam, module.storage, module.networking]
+
+  resource_names = local.resource_names
 }
 
-# ---------------------------------------------------------------------------
-# Lambda — Entity Resolution Pipeline
-# ---------------------------------------------------------------------------
 
 module "entity_resolution_lambda" {
   source      = "../../modules/entity_resolution_lambda"
   environment = local.environment
+  name_prefix = local.name_prefix
 
   kms_key_arn        = module.kms_logs.key_arn
   execution_role_arn = module.iam.entity_resolution_runtime_role_arn
@@ -374,16 +470,16 @@ module "entity_resolution_lambda" {
   tags = local.common_tags
 
   depends_on = [module.iam, module.storage, module.networking]
+
+  resource_names = local.resource_names
 }
 
-# ---------------------------------------------------------------------------
-# Lambda — Analytics Publisher
-# ---------------------------------------------------------------------------
 
 module "analytics_publisher_lambda" {
   source                  = "../../modules/analytics_publisher_lambda"
   code_signing_config_arn = module.code_signing.code_signing_config_arn
   environment             = local.environment
+  name_prefix             = local.name_prefix
 
   kms_key_arn        = module.kms_logs.key_arn
   execution_role_arn = module.iam.analytics_publisher_runtime_role_arn
@@ -406,16 +502,16 @@ module "analytics_publisher_lambda" {
   tags = local.common_tags
 
   depends_on = [module.iam, module.storage, module.networking, module.glue]
+
+  resource_names = local.resource_names
 }
 
-# ---------------------------------------------------------------------------
-# Lambda — Serving Store Loader
-# ---------------------------------------------------------------------------
 
 module "serving_store_lambda" {
   source                  = "../../modules/serving_store_lambda"
   code_signing_config_arn = module.code_signing.code_signing_config_arn
   environment             = local.environment
+  name_prefix             = local.name_prefix
 
   kms_key_arn        = module.kms_logs.key_arn
   execution_role_arn = module.iam.serving_store_loader_runtime_role_arn
@@ -438,10 +534,10 @@ module "serving_store_lambda" {
   tags = local.common_tags
 
   depends_on = [module.iam, module.storage, module.networking]
+
+  resource_names = local.resource_names
 }
 
-# Cross-module SG wiring for the serving store — kept out of both modules to
-# avoid a circular module dependency (each needs the other's SG id).
 resource "aws_security_group_rule" "serving_store_lambda_to_database" {
   type                     = "egress"
   from_port                = 3306
@@ -462,19 +558,10 @@ resource "aws_security_group_rule" "serving_store_database_from_lambda" {
   description              = "MySQL ingress to the serving store RDS instance from the loader Lambda only."
 }
 
-# ---------------------------------------------------------------------------
-# Orchestration module — full chained pipeline state machine
-#
-# State machine type: STANDARD for staging (execution history preserved for
-# 90 days, supports executions > 5 minutes, exactly-once semantics).
-#
-# Five Lambda stages chained in sequence with explicit branching on
-# transformation_blocked and is_publication_blocked:
-#   extraction → transformation → entity_resolution → analytics → serving_store
-# ---------------------------------------------------------------------------
 module "twin_build_lambda" {
   source      = "../../modules/twin_build_lambda"
   environment = local.environment
+  name_prefix = local.name_prefix
 
   code_signing_config_arn = module.code_signing.code_signing_config_arn
   vpc_id                  = module.networking.vpc_id
@@ -495,6 +582,8 @@ module "twin_build_lambda" {
   tags = local.common_tags
 
   depends_on = [module.iam, module.storage]
+
+  resource_names = local.resource_names
 }
 
 module "orchestration" {
@@ -503,7 +592,9 @@ module "orchestration" {
   vpc_id                  = module.networking.vpc_id
   subnet_ids              = module.networking.private_subnet_ids
 
-  environment             = local.environment
+  environment = local.environment
+
+  name_prefix             = local.name_prefix
   kms_key_arn             = module.kms_logs.key_arn
   step_functions_role_arn = module.iam.orchestration_step_functions_role_arn
   state_machine_type      = "STANDARD"
@@ -518,20 +609,15 @@ module "orchestration" {
   serving_store_loader_lambda_arn    = module.serving_store_lambda.lambda_function_arn
   twin_build_lambda_arn              = module.twin_build_lambda.lambda_function_arn
 
-  # SQS burst buffer — pipeline trigger Lambda package (same zip as extraction pipeline)
   lambda_package_s3_bucket   = var.lambda_package_s3_bucket
   lambda_package_s3_key      = var.lambda_package_s3_key
   lambda_package_source_hash = var.lambda_package_source_hash
 
   pipeline_trigger_role_arn = module.iam.pipeline_trigger_role_arn
 
-  # ── DLQ alarms and processor sizing ──────────────────────────────────────
-  # Staging mirrors prod's shape at lower volume so a threshold change can be rehearsed here
-  # before prod. See docs/SCALE_AND_DLQ_THRESHOLDS.md.
   dlq_processor_batch_size           = 10
   dlq_processor_reserved_concurrency = 10
 
-  # DLQ processor Lambda
   dlq_processor_role_arn     = module.iam.dlq_processor_role_arn
   extraction_failure_dlq_arn = module.metadata_persistence.extraction_failure_dlq_arn
   run_audit_log_table_name   = module.metadata_persistence.run_audit_log_table_name
@@ -539,14 +625,10 @@ module "orchestration" {
   tags = local.common_tags
 
   depends_on = [module.iam, module.observability]
+
+  resource_names = local.resource_names
 }
 
-# ---------------------------------------------------------------------------
-# Control Plane — multi-tenant SaaS API (tenant provisioning, entity
-# registration, pipeline triggering, run status). Reuses the same pipeline
-# trigger SQS FIFO queue as orchestration's pipeline_trigger Lambda, and the
-# same Lambda deployment package as the rest of connector_runtime.
-# ---------------------------------------------------------------------------
 
 module "control_plane" {
   source                  = "../../modules/control_plane"
@@ -554,6 +636,7 @@ module "control_plane" {
   vpc_id                  = module.networking.vpc_id
   subnet_ids              = module.networking.private_subnet_ids
   environment             = local.environment
+  name_prefix             = local.name_prefix
 
   kms_key_arn         = module.kms_logs.key_arn
   log_retention_days  = 365
@@ -577,21 +660,15 @@ module "control_plane" {
   tags = local.common_tags
 
   depends_on = [module.iam, module.orchestration, module.metadata_persistence]
+
+  resource_names = local.resource_names
 }
 
-# ---------------------------------------------------------------------------
-# SOW requirements programme additions (requirements/DL-01…DL-12)
-#
-# Wired identically into dev/staging/prod per infrastructure/CLAUDE.md. Each block names the
-# requirement it satisfies so a `terraform plan` reviewer can trace a resource to its clause.
-# ---------------------------------------------------------------------------
 
-# DL-SEC-13 (gap 7): WAF on the control plane. Starts in audit mode — DL-SEC-13 requires
-# alarming before blocking, and a managed rule set enforced blind will reject a legitimate
-# request shape sooner or later.
 module "waf" {
   source      = "../../modules/waf"
   environment = local.environment
+  name_prefix = local.name_prefix
   region      = local.aws_region
 
   api_gateway_stage_arn = module.control_plane.api_stage_arn
@@ -602,12 +679,10 @@ module "waf" {
   tags = local.common_tags
 }
 
-# DL-SERV-01: the BI network path. Disabled until the customer decides on VPN topology —
-# an idle Client VPN endpoint bills hourly for something nobody connects to. Gap register
-# item 4 stays open while `enabled = false`, which the module's own output reports.
 module "client_vpn" {
   source      = "../../modules/client_vpn"
   environment = local.environment
+  name_prefix = local.name_prefix
 
   enabled              = var.client_vpn_enabled
   vpc_id               = module.networking.vpc_id
@@ -625,11 +700,10 @@ module "client_vpn" {
   tags = local.common_tags
 }
 
-# DL-SERV-07 (gap 5): LF-Tags replacing the Athena/Glue wildcard grant. Required before a
-# second tenant's data lands in a shared environment.
 module "lake_formation" {
   source      = "../../modules/lake_formation"
   environment = local.environment
+  name_prefix = local.name_prefix
 
   glue_database_name       = module.glue.analytics_database_name
   tenant_codes             = var.lake_formation_tenant_codes
@@ -641,17 +715,6 @@ module "lake_formation" {
   depends_on = [module.glue]
 }
 
-# ---------------------------------------------------------------------------
-# Platform Lambdas (S8/S9): webhook receiver, write-back, workflow runner, portability.
-#
-# Their handlers existed in code with no deployed function, so DL-CONN-14, DL-CONN-02, DL-06 and
-# DL-10 could not execute at all. Each gets its own execution role — see
-# `modules/iam/platform_lambda_roles.tf` for why sharing one would be a security regression.
-#
-# The webhook route and the workflow schedules are opt-in per environment: an unauthenticated
-# route that nothing uses is still attack surface, and a schedule firing against an empty
-# definition table only costs invocations.
-# ---------------------------------------------------------------------------
 
 module "platform_lambdas" {
   source                  = "../../modules/platform_lambdas"
@@ -659,6 +722,7 @@ module "platform_lambdas" {
   vpc_id                  = module.networking.vpc_id
   subnet_ids              = module.networking.private_subnet_ids
   environment             = local.environment
+  name_prefix             = local.name_prefix
 
   lambda_package_s3_bucket   = var.lambda_package_s3_bucket
   lambda_package_s3_key      = var.lambda_package_s3_key
@@ -676,11 +740,24 @@ module "platform_lambdas" {
   curated_s3_bucket_name   = module.storage.curated_layer_bucket_id
   analytics_s3_bucket_name = module.storage.analytics_layer_bucket_id
 
-  # Opt-in surfaces: left off until a provider webhook and a published workflow exist.
+  entity_config_table_name = module.metadata_persistence.entity_extraction_config_table_name
+  run_audit_log_table_name = module.metadata_persistence.run_audit_log_table_name
+
+  webhook_dedup_table_name        = module.metadata_persistence.programme_table_names["webhook-event-dedup"]
+  workflow_definition_table_name  = module.metadata_persistence.programme_table_names["workflow-definitions"]
+  workflow_execution_table_name   = module.metadata_persistence.programme_table_names["workflow-executions"]
+  workflow_idempotency_table_name = module.metadata_persistence.programme_table_names["workflow-idempotency"]
+  workflow_destination_table_name = module.metadata_persistence.programme_table_names["workflow-destinations"]
+  workflow_task_table_name        = module.metadata_persistence.programme_table_names["workflow-tasks"]
+  export_job_table_name           = module.metadata_persistence.programme_table_names["export-jobs"]
+  deletion_certificate_table_name = module.metadata_persistence.programme_table_names["deletion-certificates"]
+
   control_plane_api_id            = ""
   control_plane_api_execution_arn = ""
   workflow_schedule_enabled       = false
   tenant_codes                    = []
 
   tags = local.common_tags
+
+  resource_names = local.resource_names
 }

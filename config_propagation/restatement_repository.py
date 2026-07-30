@@ -1,5 +1,5 @@
 """
-`EdlConfigRestatement` — restatement events for definition changes (DL-CFG-13).
+`datalake-config-restatements-dev` — restatement events for definition changes (DL-CFG-13).
 
 A semantic-model change is apply-forward but read-time, so it silently restates every
 historical figure unless announced. This record is the source of the explanation board
@@ -11,24 +11,22 @@ figure, so it is append-only and names the actor.
 
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any
 
 import boto3
 
 from config_propagation.capability import ConfigCapability
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from persistence.dynamodb_paging import iter_items
 
 _logger = get_platform_logger(__name__)
-
-_TABLE_NAME: Final[str] = "EdlConfigRestatement"
 
 
 @dataclass(frozen=True)
@@ -69,7 +67,7 @@ class RestatementRepository:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("CONFIG_RESTATEMENT_TABLE") or _TABLE_NAME
+        table_name = require_env("CONFIG_RESTATEMENT_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def emit(self, event: RestatementEvent) -> str:

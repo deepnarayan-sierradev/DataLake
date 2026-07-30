@@ -50,36 +50,24 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 _API_VERSION: Final[str] = "v59.0"
 _BULK_BASE_PATH: Final[str] = f"/services/data/{_API_VERSION}/jobs/query"
 _LIMITS_PATH: Final[str] = f"/services/data/{_API_VERSION}/limits"
 
-# ISO-8601 datetime pattern: values bound into SOQL must match this exactly.
-# Any non-datetime value would indicate a programming error or injection attempt.
 _ISO8601_DATETIME_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$"
 )
 
-# Polling configuration
 _POLL_INITIAL_DELAY_S: Final[float] = 5.0
 _POLL_MAX_DELAY_S: Final[float] = 60.0
 _POLL_BACKOFF_FACTOR: Final[float] = 2.0
 _POLL_JITTER_MAX_S: Final[float] = 3.0
 
-# Result page size (max allowed by Salesforce Bulk API 2.0)
 _RESULT_PAGE_SIZE: Final[int] = 50_000
 
-# Minimum remaining API bulk query limit before aborting job submission.
-# Salesforce allocates DailyBulkV2QueryFileStorageMB and DailyBulkApiBatches.
 _MIN_BULK_QUERY_JOBS_REMAINING: Final[int] = 5
 
-# Fallback timeout (seconds) for _request_with_401_retry() when a caller does
-# not supply one explicitly (OWASP A05: never make an unbounded HTTP request).
-# Every current call site passes its own timeout; this is defense-in-depth.
 _DEFAULT_REQUEST_TIMEOUT_S: Final[float] = 30.0
 
 
@@ -198,8 +186,6 @@ class SalesforceBulkQueryJobController:
         finally:
             self._current_job_id = None
 
-    # ── 401-aware request helper ───────────────────────────────────────────────
-
     def _request_with_401_retry(
         self,
         method: str,
@@ -216,8 +202,6 @@ class SalesforceBulkQueryJobController:
         token = self._auth.get_access_token()
         headers: dict[str, str] = dict(kwargs.pop("headers", {}))
         headers["Authorization"] = f"Bearer {token}"
-        # timeout is always enforced via kwargs.setdefault() above the call, but
-        # ruff/bandit cannot statically see through **kwargs to confirm it.
         kwargs.setdefault("timeout", _DEFAULT_REQUEST_TIMEOUT_S)
 
         response = requests.request(method, url, headers=headers, **kwargs)  # noqa: S113
@@ -232,8 +216,6 @@ class SalesforceBulkQueryJobController:
             headers["Authorization"] = f"Bearer {token}"
             response = requests.request(method, url, headers=headers, **kwargs)  # noqa: S113
         return response
-
-    # ── API limit pre-flight ───────────────────────────────────────────────────
 
     def _check_api_limits(self, auth: SalesforceAuthProtocol) -> None:
         """
@@ -267,8 +249,6 @@ class SalesforceBulkQueryJobController:
             bulk_api_batches_remaining=remaining,
         )
 
-    # ── Job creation ───────────────────────────────────────────────────────────
-
     def _create_job(self, auth: SalesforceAuthProtocol, soql: str) -> str:
         """
         Create a Bulk API 2.0 query job.
@@ -294,8 +274,6 @@ class SalesforceBulkQueryJobController:
             job_id=job_id,
         )
         return job_id
-
-    # ── Polling ────────────────────────────────────────────────────────────────
 
     def _poll_until_complete(self, auth: SalesforceAuthProtocol, job_id: str) -> int:
         """
@@ -345,12 +323,9 @@ class SalesforceBulkQueryJobController:
             if status in (BulkJobState.FAILED, BulkJobState.ABORTED):
                 raise BulkJobFailedError(f"Bulk job {job_id!r} terminated with state={status!r}.")
 
-            # Exponential backoff with full jitter — non-cryptographic use only.
             jitter = random.uniform(0, _POLL_JITTER_MAX_S)  # nosec B311 — poll jitter only  # noqa: S311
             time.sleep(min(delay + jitter, _POLL_MAX_DELAY_S))
             delay = min(delay * _POLL_BACKOFF_FACTOR, _POLL_MAX_DELAY_S)
-
-    # ── Result retrieval ───────────────────────────────────────────────────────
 
     def _fetch_results(
         self, auth: SalesforceAuthProtocol, job_id: str
@@ -400,8 +375,6 @@ class SalesforceBulkQueryJobController:
                 break
             locator = next_locator
 
-    # ── Record count validation ───────────────────────────────────────────────────
-
     @staticmethod
     def _validate_record_count(job_id: str, declared: int, actual: int) -> None:
         """
@@ -419,8 +392,6 @@ class SalesforceBulkQueryJobController:
                 actual_count=actual,
                 delta=actual - declared,
             )
-
-    # ── Job close / abort ─────────────────────────────────────────────────────
 
     def _close_job(self, auth: SalesforceAuthProtocol, job_id: str) -> None:
         """Mark the job as closed after successful result retrieval."""
@@ -449,8 +420,6 @@ class SalesforceBulkQueryJobController:
             )
         except Exception:
             _logger.warning("salesforce_bulk_job_abort_failed", job_id=job_id)
-
-    # ── Parameter binding ─────────────────────────────────────────────────────
 
     @staticmethod
     def _bind_parameters(soql: str, parameters: dict[str, str]) -> str:

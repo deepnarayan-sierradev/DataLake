@@ -117,7 +117,6 @@ class TestValidateRunId:
             validate_run_id("0")
 
     def test_alphanumeric_run_id_accepted(self) -> None:
-        # A run_id that contains digits but also letters is fine
         assert validate_run_id("run-001-abc") == "run-001-abc"
 
 
@@ -217,7 +216,6 @@ class TestSafeS3PrefixPattern:
         assert SAFE_S3_PREFIX_PATTERN.match("acme-corp/curated/crm/entity/run_id=run-1")
 
     def test_traversal_and_leading_slash_rejected(self) -> None:
-        # OWASP A03: no '.' means '..' can never match.
         assert not SAFE_S3_PREFIX_PATTERN.match("../etc/passwd")
         assert not SAFE_S3_PREFIX_PATTERN.match("/etc/passwd")
         assert not SAFE_S3_PREFIX_PATTERN.match("a/../b")

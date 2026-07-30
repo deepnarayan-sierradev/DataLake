@@ -32,7 +32,6 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Validate database/schema/table/column identifiers before any DDL/DML (OWASP A03, A05).
 SAFE_CONTAINER_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 SAFE_COLUMN_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
 RESERVED_COLUMNS: Final[frozenset[str]] = frozenset({"_row_hash", "_synced_at"})
@@ -93,17 +92,10 @@ class ServingStoreLoaderInterface(abc.ABC):
     resolve the tenant-scoped container (database or schema) per call.
     """
 
-    #: Max identifier (username) length this engine's server allows.
     max_identifier_length: int = 63
-    #: Default port when a writer credential omits one.
     default_port: int = 5432
-    #: Default connection database for platform-provisioned Postgres/SQL Server instances
-    #: (irrelevant for MySQL, where tenant_code is itself the connection database).
-    default_connection_database: str = "edl_serving"
-    #: Whether this engine loads directly from S3 (COPY) instead of Python row batches.
+    default_connection_database: str = "datalake_serving"
     supports_s3_bulk_load: bool = False
-    #: The registry engine_id this loader was resolved as; set by the registry so an
-    #: adapter shared across engines (SQL Server / Azure SQL) can tell them apart.
     engine_id: str = ""
 
     def __init__(
@@ -124,8 +116,6 @@ class ServingStoreLoaderInterface(abc.ABC):
         self._db_host = db_host
         self._db_port = db_port
         self._sm: Any = boto3.client("secretsmanager", region_name=region_name)
-
-    # ── Public API (shared across every engine) ──────────────────────────────
 
     def load(
         self,
@@ -376,8 +366,6 @@ class ServingStoreLoaderInterface(abc.ABC):
         engine = serving_engine_from_config(self.engine_id)
         _container, statement = drop_tenant_container_statements(tenant_code, engine)
         credentials = self._retrieve_credentials()
-        # Deliberately not `_select_container`: a session cannot drop the container it is in, so
-        # this connects to the fixed top-level database every loader already bootstraps into.
         connection = self._connect(credentials, self.default_connection_database)
         try:
             cursor = connection.cursor()
@@ -470,8 +458,6 @@ class ServingStoreLoaderInterface(abc.ABC):
         )
         return loaded, len(batch) - loaded
 
-    # ── Credentials (shared — Secrets Manager access is identical per engine) ─
-
     def _retrieve_credentials(self) -> dict[str, str]:
         """Fetch writer DB credentials from Secrets Manager, then inject the endpoint.
 
@@ -522,11 +508,9 @@ class ServingStoreLoaderInterface(abc.ABC):
 
         No-op by default: MySQL connects with no default database and creates the tenant
         database itself; Redshift Serverless always has a default database. Postgres/SQL
-        Server override this — a freshly provisioned RDS instance has no `edl_serving`
+        Server override this — a freshly provisioned RDS instance has no `datalake_serving`
         database, so `CREATE SCHEMA` on connect would otherwise fail (OWASP A05).
         """
-
-    # ── Abstract: genuine per-engine SQL-dialect differences only ────────────
 
     @abc.abstractmethod
     def _connect(self, credentials: dict[str, str], connection_database: str) -> Any:

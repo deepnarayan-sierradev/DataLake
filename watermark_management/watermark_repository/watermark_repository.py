@@ -10,7 +10,7 @@ conditional expressions on the version attribute).  The watermark is advanced
 ONLY after a fully successful extraction run — partial or failed runs leave
 the watermark unchanged.
 
-DynamoDB table: EdlWatermarkRepository
+DynamoDB table: datalake-watermark-dev
   PK: source_id (string) — stores tenant_scoped_key(tenant_code, source_id) (ARCH-1),
       e.g. "demo#salesforce", so two tenants extracting the same source_id/entity_id
       never share an item
@@ -29,7 +29,6 @@ Security:
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
@@ -43,26 +42,14 @@ from contracts.identifier_policy import (
     tenant_scoped_key,
     validate_tenant_code,
 )
+from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
 from tenancy.connection_keys import resolve_connection_id
 
 _logger = get_platform_logger(__name__)
 
-_WATERMARK_TABLE_NAME: Final[str] = "EdlWatermarkRepository"
 
-# Lower-bound sentinel for an entity's first-ever run: initialise_watermark()
-# already seeds last_successful_watermark to this value, and
-# compute_extraction_window() now uses it directly for the "no watermark yet"
-# case too, so the actual extraction query and the watermark bookkeeping agree
-# on what "first run" means. Deliberately epoch, not extraction_window_days —
-# that field is capped at 365 days (contracts/entity_configuration_contract.py)
-# as a steady-state guardrail, never meant to bound a first-time backfill.
 _EPOCH: Final[datetime] = datetime(1970, 1, 1, tzinfo=UTC)
-
-
-# ---------------------------------------------------------------------------
-# Value objects
-# ---------------------------------------------------------------------------
 
 
 class WatermarkRecord(BaseModel):
@@ -101,22 +88,12 @@ class WatermarkRecord(BaseModel):
         raise ValueError(f"Expected a datetime or ISO-8601 string, got {type(value).__name__!r}.")
 
 
-# ---------------------------------------------------------------------------
-# Exceptions
-# ---------------------------------------------------------------------------
-
-
 class WatermarkConcurrencyError(Exception):
     """
     Raised when an optimistic concurrency check fails during watermark update.
 
     The caller should reload the watermark record and retry if appropriate.
     """
-
-
-# ---------------------------------------------------------------------------
-# Repository
-# ---------------------------------------------------------------------------
 
 
 class WatermarkRepository:
@@ -131,11 +108,9 @@ class WatermarkRepository:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        self._table_name = os.environ.get("WATERMARK_TABLE") or _WATERMARK_TABLE_NAME
+        self._table_name = require_env("WATERMARK_TABLE")
         dynamodb = boto3.resource("dynamodb", region_name=region_name)
         self._table = dynamodb.Table(self._table_name)
-
-    # ── Read ───────────────────────────────────────────────────────────────────
 
     def get_watermark(
         self,
@@ -155,8 +130,6 @@ class WatermarkRepository:
         Uses a strongly-consistent read to prevent stale-read races.
         """
         tenant_code = validate_tenant_code(tenant_code)
-        # DL-SCOPE-04: the key's identity component is the connection; for a
-        # single-connection source that is the source_id, so the key is unchanged.
         scoped_source_id = tenant_scoped_key(
             tenant_code, resolve_connection_id(source_id, connection_id)
         )
@@ -177,13 +150,8 @@ class WatermarkRepository:
         item = response.get("Item")
         if not item:
             return None
-        # The stored item's "source_id" attribute is the tenant-scoped composite
-        # key value — restore the plain source_id before constructing the model
-        # so callers always see the unscoped identifier they passed in.
         record_item = {**item, "source_id": source_id, "connection_id": connection_id}
         return WatermarkRecord(**record_item)  # type: ignore[arg-type]
-
-    # ── Write ──────────────────────────────────────────────────────────────────
 
     def initialise_watermark(
         self,
@@ -222,7 +190,6 @@ class WatermarkRepository:
             )
         except ClientError as exc:
             if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
-                # A concurrent initialisation succeeded first — return that record.
                 existing = self.get_watermark(
                     source_id, entity_id, tenant_code=tenant_code, connection_id=connection_id
                 )
@@ -286,8 +253,6 @@ class WatermarkRepository:
             raise
         return updated
 
-    # ── Window computation ─────────────────────────────────────────────────────
-
     @staticmethod
     def compute_extraction_window(
         watermark: WatermarkRecord | None,
@@ -314,13 +279,6 @@ class WatermarkRepository:
         if config.load_type == LoadType.FULL:
             lower = reference_time - timedelta(days=config.extraction_window_days)
         elif watermark is None:
-            # First-ever incremental run for this entity (per tenant) — pull
-            # full history from epoch. extraction_window_days does not apply
-            # here: it's capped at 365 days as a steady-state guardrail, which
-            # would silently truncate a first-time backfill of older data.
-            # Large/slow first runs rely on the existing checkpoint mechanism
-            # (max_records_per_lambda_run / LambdaTimeoutWarning) rather than
-            # a bounded window, same as any other incremental run would.
             lower = _EPOCH
         else:
             overlap = timedelta(hours=config.watermark_overlap_hours)
@@ -344,11 +302,6 @@ class WatermarkRepository:
                 f"before window_end ({window_end.isoformat()})."
             )
         return window_start, window_end
-
-
-# ---------------------------------------------------------------------------
-# Serialisation helpers (module-level; not methods — simplifies testing)
-# ---------------------------------------------------------------------------
 
 
 def _serialise_watermark(record: WatermarkRecord) -> dict[str, Any]:

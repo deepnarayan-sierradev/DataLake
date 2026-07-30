@@ -40,25 +40,15 @@ class SemanticQueryService:
         engine: SetBasedQueryEngine,
         entity_uri_resolver: Callable[[str], str],
         granted_access_tags: frozenset[str],
-        # Required and non-nullable: see QueryCompiler.compile. The service holds it so no
-        # per-call site can omit it, and construction cannot supply nothing.
         scope_predicate: ScopePredicate,
         result_cache: SemanticResultCache | None = None,
     ) -> None:
         self._compiler = QueryCompiler(model)
-        # Held for the cache key: two model versions must never share an entry, because a
-        # definition change is exactly when a cached number becomes wrong.
         self._model = model
         self._engine = engine
         self._resolve_uri = entity_uri_resolver
         self._granted = granted_access_tags
-        # Held on the service rather than passed per call so no caller can omit it
-        # (DL-SCOPE-17: a surface that bypasses the predicate builder is a defect).
         self._scope_predicate = scope_predicate
-        # L17: identical dashboard queries recompute today. The cache key includes the scope
-        # signature and the access-tag signature, so two callers with different grants can never
-        # share an entry — a cache that ignored either would be an authorization bypass with a
-        # performance justification.
         self._cache = result_cache
 
     def run(
@@ -107,13 +97,8 @@ class SemanticQueryService:
             for row in batch
         ]
         if self._cache is not None and cache_key is not None:
-            # `partition_marker` is the analytics partition URI: when a new partition lands the
-            # marker changes and the entry is naturally stale, which is the declared invalidation
-            # basis rather than a guessed TTL (DL-CFG-05).
             self._cache.put(cache_key, rows, partition_marker=entity_uri)
         if minimum_cohort_size is not None:
-            # Small-cohort suppression (DL-SCOPE-16): a benchmark over two franchisees
-            # re-identifies both, so under-threshold counts are blanked rather than returned.
             rows = _suppress_small_cohorts(rows, minimum_cohort_size)
         record_platform_metric(
             PlatformMetric.SEMANTIC_QUERY_LATENCY_MS,

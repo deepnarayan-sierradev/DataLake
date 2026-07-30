@@ -32,7 +32,6 @@ class AggregateFunction(StrEnum):
     PERCENTILE = "percentile"
 
 
-# Combinations that let a viewer recover a single unit's value from a cohort result.
 _BACK_COMPUTABLE_PAIRS: Final[frozenset[frozenset[AggregateFunction]]] = frozenset(
     {
         frozenset({AggregateFunction.RANK, AggregateFunction.AVERAGE}),
@@ -122,7 +121,6 @@ def enforce_benchmark(
     record_platform_metric(PlatformMetric.AGGREGATE_SUPPRESSIONS)
     if _is_back_computable(request.functions):
         raise BackComputableAggregateError(verdict.reason)
-    # Existence disclosure: the message names no unit and no count of the viewer's peers.
     raise AggregateSuppressedError(
         "This comparison cannot be shown because the peer group is too small."
     )

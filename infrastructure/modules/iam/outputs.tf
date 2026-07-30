@@ -78,7 +78,6 @@ output "control_plane_role_arn" {
   value       = aws_iam_role.control_plane.arn
 }
 
-# ─── S8/S9 platform Lambda roles ─────────────────────────────────────────────
 
 output "webhook_receiver_role_arn" {
   description = "Webhook receiver execution role; enqueue + signing secret only."

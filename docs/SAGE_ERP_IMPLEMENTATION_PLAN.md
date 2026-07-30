@@ -131,7 +131,7 @@ These are the Sage-specific gaps still open, roughly ordered by severity. Platfo
 #    resources as empty shells (infrastructure/modules/secrets/main.tf) —
 #    populating the actual credential values is a manual step for each product.
 AWS_PROFILE=dev aws secretsmanager put-secret-value \
-  --secret-id edl/sources/sage/intacct/credentials \
+  --secret-id datalake/<env>/sources/sage/intacct/credentials \
   --secret-string '{
     "base_url":      "https://api.intacct.com/ia/api/v1",
     "token_url":     "https://api.intacct.com/ia/api/v1/auth/token",
@@ -142,7 +142,7 @@ AWS_PROFILE=dev aws secretsmanager put-secret-value \
   --region us-east-1
 
 AWS_PROFILE=dev aws secretsmanager put-secret-value \
-  --secret-id edl/sources/sage/x3/credentials \
+  --secret-id datalake/<env>/sources/sage/x3/credentials \
   --secret-string '{
     "base_url":      "https://x3.yourcompany.com",
     "token_url":     "https://x3.yourcompany.com/auth/token",
@@ -180,7 +180,7 @@ AWS_PROFILE=dev python scripts/run_sage_connector_local.py \
 AWS_PROFILE=dev python scripts/trigger_extraction.py \
   --source-id sage --entity-id sage-intacct-customer \
   --environment dev --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:datalake-extraction-dev \
   --param sage_product=intacct \
   --param object_path=accounts-receivable/customer
 
@@ -188,7 +188,7 @@ AWS_PROFILE=dev python scripts/trigger_extraction.py \
 AWS_PROFILE=dev python scripts/trigger_extraction.py \
   --source-id sage --entity-id sage-intacct-vendor \
   --environment dev --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:datalake-extraction-dev \
   --param sage_product=intacct \
   --param object_path=accounts-payable/vendor
 
@@ -196,7 +196,7 @@ AWS_PROFILE=dev python scripts/trigger_extraction.py \
 AWS_PROFILE=dev python scripts/trigger_extraction.py \
   --source-id sage --entity-id sage-intacct-arinvoice \
   --environment dev --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:datalake-extraction-dev \
   --param sage_product=intacct \
   --param object_path=accounts-receivable/invoice
 
@@ -204,7 +204,7 @@ AWS_PROFILE=dev python scripts/trigger_extraction.py \
 AWS_PROFILE=dev python scripts/trigger_extraction.py \
   --source-id sage --entity-id sage-intacct-apbill \
   --environment dev --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:datalake-extraction-dev \
   --param sage_product=intacct \
   --param object_path=accounts-payable/bill
 
@@ -212,7 +212,7 @@ AWS_PROFILE=dev python scripts/trigger_extraction.py \
 AWS_PROFILE=dev python scripts/trigger_extraction.py \
   --source-id sage --entity-id sage-x3-customer \
   --environment dev --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:datalake-extraction-dev \
   --param sage_product=x3 \
   --param object_path=BPCUSTOMER
 
@@ -220,7 +220,7 @@ AWS_PROFILE=dev python scripts/trigger_extraction.py \
 AWS_PROFILE=dev python scripts/trigger_extraction.py \
   --source-id sage --entity-id sage-x3-supplier \
   --environment dev --region us-east-1 \
-  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline \
+  --state-machine-arn arn:aws:states:us-east-1:087972550871:stateMachine:datalake-extraction-dev \
   --param sage_product=x3 \
   --param object_path=BPSUPPLIER
 ```
@@ -286,6 +286,6 @@ handler — confirmed in practice by the X3 addition, which touched none of thes
 **Consequence:** The S3 raw path includes `{sage_product}` folded into a single hyphenated
 segment (`sage-{sage_product}`) to prevent cross-product collisions:
 ```
-s3://edl-raw-087972550871/{tenant_code}/sage-intacct/sage-intacct-customer/extraction_date=.../
-s3://edl-raw-087972550871/{tenant_code}/sage-x3/sage-x3-customer/extraction_date=.../
+s3://datalake-raw-dev-use1/{tenant_code}/sage-intacct/sage-intacct-customer/extraction_date=.../
+s3://datalake-raw-dev-use1/{tenant_code}/sage-x3/sage-x3-customer/extraction_date=.../
 ```

@@ -46,15 +46,7 @@ _TRANSIENT_CLASSIFICATIONS: Final[frozenset[ExtractionErrorClassification]] = fr
     }
 )
 
-# Sentinel run_id for circuit breaker items stored in the run-audit-log table.
-# Uses double-underscores so it can never collide with real run_ids, which must
-# start with a letter and match STABLE_ID_PATTERN.
 _CB_SENTINEL: Final[str] = "__circuit_breaker__"
-
-
-# ---------------------------------------------------------------------------
-# Exceptions
-# ---------------------------------------------------------------------------
 
 
 class CircuitOpenError(Exception):
@@ -65,11 +57,6 @@ class CircuitOpenError(Exception):
     The circuit must be reset (manually or after a cool-down period) before
     extraction resumes for that source.
     """
-
-
-# ---------------------------------------------------------------------------
-# Policy
-# ---------------------------------------------------------------------------
 
 
 class ExtractionRetryPolicy:
@@ -89,7 +76,7 @@ class ExtractionRetryPolicy:
     Distributed circuit breaker:
     When PLATFORM_ENVIRONMENT and AWS_REGION environment variables are present
     (i.e. running inside Lambda), the circuit breaker state is persisted to the
-    existing EdlRunAuditLog DynamoDB table using a sentinel run_id
+    existing datalake-run-audit-log-dev DynamoDB table using a sentinel run_id
     ("__circuit_breaker__").  This ensures that all Lambda containers see the
     same failure count — a container that opens the circuit will block other
     containers from starting new extractions for the same source.
@@ -128,16 +115,10 @@ class ExtractionRetryPolicy:
         self._backoff_multiplier = backoff_multiplier
         self._circuit_open_threshold = circuit_open_threshold
         self._jitter_fraction = jitter_fraction
-        # Mutable circuit-breaker state: circuit_key → consecutive failure count
-        # Protected by _lock for thread safety.
         self._consecutive_failures: dict[str, int] = {}
         self._lock = threading.Lock()
-        # DynamoDB-backed distributed state — lazy-initialized on first use.
-        # None until _get_ddb_table() is called; stays None in non-Lambda envs.
         self._ddb_table: Any = None
         self._ddb_init_done: bool = False
-
-    # ── Retry eligibility ───────────────────────────────────────────────────
 
     def is_retryable(self, classification: ExtractionErrorClassification) -> bool:
         """Return True when the classification permits a retry attempt."""
@@ -166,8 +147,6 @@ class ExtractionRetryPolicy:
             return False
         return attempt < self._max_transient_attempts
 
-    # ── Delay computation ───────────────────────────────────────────────────
-
     def compute_delay_seconds(self, attempt: int) -> float:
         """
         Compute the back-off delay for the next attempt.
@@ -185,12 +164,9 @@ class ExtractionRetryPolicy:
             self._base_delay * (self._backoff_multiplier ** (attempt - 1)),
             self._max_delay,
         )
-        # Retry-delay jitter is scheduling, never a security decision.
         signed_jitter = random.uniform(-1.0, 1.0)  # noqa: S311  # nosec B311
         jitter = raw_delay * self._jitter_fraction * signed_jitter
         return max(0.0, raw_delay + jitter)
-
-    # ── Circuit breaker ─────────────────────────────────────────────────────
 
     @staticmethod
     def _circuit_key(source_id: str, entity_id: str = "", tenant_code: str = "demo") -> str:
@@ -210,12 +186,10 @@ class ExtractionRetryPolicy:
         key = self._circuit_key(source_id, entity_id, tenant_code)
         count = self._ddb_increment(key)
         if count is None:
-            # DynamoDB unavailable — fall back to in-process atomic increment.
             with self._lock:
                 self._consecutive_failures[key] = self._consecutive_failures.get(key, 0) + 1
                 count = self._consecutive_failures[key]
         else:
-            # Sync local cache with DynamoDB count.
             with self._lock:
                 self._consecutive_failures[key] = count
         _logger.info(
@@ -246,7 +220,6 @@ class ExtractionRetryPolicy:
             with self._lock:
                 self._consecutive_failures[key] = count  # sync local cache
             return count >= self._circuit_open_threshold
-        # DynamoDB unavailable — fall back to in-process state.
         with self._lock:
             return self._consecutive_failures.get(key, 0) >= self._circuit_open_threshold
 
@@ -279,11 +252,9 @@ class ExtractionRetryPolicy:
         """Consecutive failure count at which the circuit opens."""
         return self._circuit_open_threshold
 
-    # ── DynamoDB helpers ────────────────────────────────────────────────────
-
     def _get_ddb_table(self) -> Any:
         """
-        Lazily connect to the edl-run-audit-log DynamoDB table.
+        Lazily connect to the datalake-run-audit-log-dev DynamoDB table.
 
         Returns None when PLATFORM_ENVIRONMENT or AWS_REGION are absent (local /
         test environments) or when initialization fails.  Never raises.
@@ -296,7 +267,7 @@ class ExtractionRetryPolicy:
             env = os.environ.get("PLATFORM_ENVIRONMENT", "")
             if not region or not env:
                 return None  # local/test environment — in-process only
-            table_name = os.environ.get("AUDIT_LOG_TABLE") or "EdlRunAuditLog"
+            table_name = os.environ.get("AUDIT_LOG_TABLE", "")
             self._ddb_table = boto3.resource("dynamodb", region_name=region).Table(table_name)
             _logger.info(
                 "circuit_breaker_ddb_backend_enabled",

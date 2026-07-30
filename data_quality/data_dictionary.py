@@ -176,11 +176,6 @@ def publish_data_dictionary(s3_client: Any, bucket: str, dictionary: DataDiction
     return key
 
 
-# ---------------------------------------------------------------------------
-# Survivorship explainability (DL-DQ-07) and golden-id history (DL-DQ-08)
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class FieldProvenanceEntry:
     """Which source won a golden field, and under which rule."""

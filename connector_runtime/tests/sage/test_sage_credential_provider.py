@@ -23,6 +23,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime.adapters.sage.substrate.sage_credential_provider import (
     _CREDENTIAL_CACHE_TTL_SECONDS,
     SageCredentialError,
@@ -32,7 +33,9 @@ from connector_runtime.adapters.sage.substrate.sage_credential_provider import (
 _ENV = "dev"
 _REGION = "us-east-1"
 _PRODUCT = "intacct"
-_SECRET_PATH = f"edl/sources/sage/{_PRODUCT}/credentials"
+_SECRET_PATH = (
+    f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/sources/sage/{_PRODUCT}/credentials"
+)
 _REQUIRED_KEYS: frozenset[str] = frozenset({"base_url", "client_id", "client_secret", "company_id"})
 
 _VALID_SECRET: dict[str, str] = {
@@ -57,11 +60,6 @@ def _create_secret(payload: dict[str, str] | str) -> None:
     client = boto3.client("secretsmanager", region_name=_REGION)
     body = payload if isinstance(payload, str) else json.dumps(payload)
     client.create_secret(Name=_SECRET_PATH, SecretString=body)
-
-
-# ---------------------------------------------------------------------------
-# Constructor validation
-# ---------------------------------------------------------------------------
 
 
 class TestConstructorValidation:
@@ -93,11 +91,6 @@ class TestConstructorValidation:
             )
 
 
-# ---------------------------------------------------------------------------
-# Happy-path credential loading
-# ---------------------------------------------------------------------------
-
-
 class TestCredentialLoading:
     @mock_aws
     def test_returns_all_secret_keys(self) -> None:
@@ -113,7 +106,6 @@ class TestCredentialLoading:
         _create_secret(_VALID_SECRET)
         manager = _make_manager()
         creds1 = manager.get_credentials()
-        # Overwrite the secret — cache should serve the old value.
         boto3.client("secretsmanager", region_name=_REGION).update_secret(
             SecretId=_SECRET_PATH,
             SecretString=json.dumps({**_VALID_SECRET, "client_id": "updated-id"}),
@@ -127,13 +119,11 @@ class TestCredentialLoading:
         _create_secret(_VALID_SECRET)
         manager = _make_manager()
         manager.get_credentials()
-        # Simulate expired TTL by back-dating the loaded_at timestamp.
         monkeypatch.setattr(
             manager,
             "_loaded_at",
             time.monotonic() - _CREDENTIAL_CACHE_TTL_SECONDS - 1,
         )
-        # Update secret to confirm a fresh fetch happens.
         boto3.client("secretsmanager", region_name=_REGION).update_secret(
             SecretId=_SECRET_PATH,
             SecretString=json.dumps({**_VALID_SECRET, "client_id": "rotated-id"}),
@@ -162,15 +152,9 @@ class TestCredentialLoading:
         assert isinstance(creds, dict)
 
 
-# ---------------------------------------------------------------------------
-# Error cases
-# ---------------------------------------------------------------------------
-
-
 class TestErrorCases:
     @mock_aws
     def test_secret_not_found_raises_credential_error(self) -> None:
-        # No secret created — should raise SageCredentialError.
         manager = _make_manager()
         with pytest.raises(SageCredentialError, match="Secrets Manager"):
             manager.get_credentials()
@@ -184,7 +168,6 @@ class TestErrorCases:
 
     @mock_aws
     def test_missing_required_keys_raises_credential_error(self) -> None:
-        # Secret exists but is missing several required keys.
         _create_secret({"base_url": "https://api.intacct.com"})
         manager = _make_manager()
         with pytest.raises(SageCredentialError, match="missing required keys"):
@@ -192,13 +175,11 @@ class TestErrorCases:
 
     @mock_aws
     def test_error_message_does_not_contain_secret_values(self) -> None:
-        # Partial secret missing keys — verify secret values never leak.
         _create_secret({"base_url": "https://api.intacct.com"})
         manager = _make_manager()
         try:
             manager.get_credentials()
         except SageCredentialError as exc:
-            # Product name is fine to include; actual credential values must not appear.
             assert "super-secret-value" not in str(exc)
             assert "test-client-id" not in str(exc)
 
@@ -206,7 +187,6 @@ class TestErrorCases:
     def test_subset_required_keys_passes_validation(self) -> None:
         """A manager that only requires a subset of keys should accept extra keys."""
         _create_secret(_VALID_SECRET)
-        # Require only base_url — extra keys in the secret are acceptable.
         manager = SageCredentialProvider(
             environment=_ENV,
             region_name=_REGION,

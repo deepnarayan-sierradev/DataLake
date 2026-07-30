@@ -28,15 +28,10 @@ REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 REQUIREMENTS_DIR: Final[Path] = REPO_ROOT / "requirements"
 WAIVER_FILE: Final[Path] = REQUIREMENTS_DIR / "WAIVERS.md"
 
-# Phases deferred to a separate team by agreement (see requirements/README.md). Their IDs are
-# not expected to be implemented and are reported separately rather than as failures.
 DEFERRED_DOCUMENTS: Final[frozenset[str]] = frozenset(
     {"DL-04-ai-agent-runtime.md", "DL-05-machine-learning-platform.md"}
 )
 
-# Infrastructure requirements backed by an executable assertion (a Terraform plan check or a
-# post-apply probe), not merely by the id appearing in a `.tf` file. Empty today, deliberately:
-# nothing in this repo yet asserts that a Terraform resource enforces what its requirement claims.
 ASSERTED_INFRASTRUCTURE: Final[frozenset[str]] = frozenset()
 
 _ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bDL-[A-Z]+-\d+\b")
@@ -128,9 +123,6 @@ def main() -> int:
     waived = _waivers()
     reachability = analyse_reachability()
     reachable = reachability.reachable
-    # A requirement whose every citing module carries a recorded G1 waiver is waived *by module*.
-    # Requiring the id to be waived again here would duplicate the same decision in two files and
-    # invite them to disagree — the module waiver already names the plan item that wires it.
     waived_modules = set(reachability.waived_and_unreachable)
     citations = _citations(set(declared))
 

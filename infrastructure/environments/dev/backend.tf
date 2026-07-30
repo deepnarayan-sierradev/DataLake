@@ -8,21 +8,14 @@ terraform {
   }
 }
 
-# Remote state — S3 bucket and DynamoDB lock table must be bootstrapped manually once
-# before the first terraform init.
-#
-# Bucket name embeds the dev account ID (087972550871) rather than the literal
-# word "dev": S3 bucket names are unique across all of AWS, not just this
-# account, so environment-as-account-ID is what actually guarantees no
-# collision with staging/prod — the word "dev" would not.
 terraform {
   backend "s3" {
-    bucket         = "edl-terraform-state-087972550871"
+    bucket         = "datalake-terraform-state-dev-use1"
     key            = "environments/dev/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    kms_key_id     = "alias/EdlTerraformState" # Created during bootstrap
-    dynamodb_table = "EdlTerraformStateLock"
+    kms_key_id     = "alias/datalake-terraform-state-dev" # Created during bootstrap
+    dynamodb_table = "datalake-terraform-state-lock-dev"
   }
 }
 
@@ -31,7 +24,8 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project     = "enterprise-data-lake"
+      Application = "datalake"
+      Project     = "datalake"
       Environment = "dev"
       ManagedBy   = "terraform"
       CostCenter  = var.cost_center
@@ -39,15 +33,14 @@ provider "aws" {
   }
 }
 
-# Cross-region S3 replica provider (CKV_AWS_144). The replicas and their CMK are created here;
-# every other resource stays in `var.aws_region`.
 provider "aws" {
   alias  = "replica"
   region = var.replica_region
 
   default_tags {
     tags = {
-      Project     = "enterprise-data-lake"
+      Application = "datalake"
+      Project     = "datalake"
       Environment = "dev"
       ManagedBy   = "terraform"
       CostCenter  = var.cost_center

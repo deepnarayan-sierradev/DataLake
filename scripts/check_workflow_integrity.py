@@ -36,7 +36,6 @@ from typing import Final
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 WORKFLOW_DIR: Final[Path] = REPO_ROOT / ".github" / "workflows"
 
-# Paths a workflow may name that are legitimately absent from git.
 GENERATED_PATHS: Final[frozenset[str]] = frozenset(
     {"coverage.xml", "bandit-report.json", "checkov-report.sarif", "dist", "htmlcov"}
 )

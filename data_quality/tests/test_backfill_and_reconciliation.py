@@ -10,6 +10,7 @@ import pytest
 from moto import mock_aws
 
 from config_propagation.capability import ConfigCapability
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from data_quality.backfill_orchestrator import (
     BackfillJobNotFoundError,
     BackfillOrchestrator,
@@ -122,7 +123,7 @@ class TestChunkPlanning:
 @mock_aws
 class TestBackfillOrchestrator:
     def _orchestrator(self) -> BackfillOrchestrator:
-        _table("EdlBackfillJob", "tenant_code", "job_key")
+        _table(RESOURCE_NAME_ENVIRONMENT["BACKFILL_JOB_TABLE"], "tenant_code", "job_key")
         return BackfillOrchestrator(environment="dev", region_name=_REGION)
 
     def _job(self, orchestrator: BackfillOrchestrator, **overrides):
@@ -181,7 +182,7 @@ class TestBackfillOrchestrator:
         s3 = boto3.client("s3", region_name=_REGION)
         s3.create_bucket(Bucket="raw-bucket")
         s3.put_object(Bucket="raw-bucket", Key="evive/hubspot/x/data.parquet", Body=b"x")
-        _table("EdlBackfillJob", "tenant_code", "job_key")
+        _table(RESOURCE_NAME_ENVIRONMENT["BACKFILL_JOB_TABLE"], "tenant_code", "job_key")
         orchestrator = BackfillOrchestrator(
             environment="dev", region_name=_REGION, s3_client=s3, raw_s3_bucket="raw-bucket"
         )
@@ -278,7 +279,6 @@ class TestReconciliationComparators:
         assert "difference=0.01" in result.detail
 
     def test_monetary_sum_uses_decimal_arithmetic(self):
-        # 0.1 + 0.2 in float is 0.30000000000000004; Decimal keeps it exact.
         result = MonetarySumComparator().compare(*self._pair("0.30", "0.30"), "revenue")
         assert result.verdict is ReconciliationVerdict.MATCHED
 
@@ -377,7 +377,9 @@ class TestReconciliationReport:
         assert self._report().signature() != self._report(observed="1100").signature()
 
     def test_report_persists_with_its_signature(self):
-        _table("EdlReconciliationReport", "tenant_code", "report_key")
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["RECONCILIATION_REPORT_TABLE"], "tenant_code", "report_key"
+        )
         repository = ReconciliationReportRepository(environment="dev", region_name=_REGION)
         report = self._report()
         signature = repository.save(report)
@@ -390,7 +392,11 @@ class TestReconciliationReport:
 @mock_aws
 class TestExceptionRepository:
     def _repository(self) -> DataQualityExceptionRepository:
-        _table("EdlDataQualityException", "tenant_code", "exception_key")
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["DATA_QUALITY_EXCEPTION_TABLE"],
+            "tenant_code",
+            "exception_key",
+        )
         return DataQualityExceptionRepository(environment="dev", region_name=_REGION)
 
     def _exception(self, **overrides) -> QualityException:
@@ -428,10 +434,6 @@ class TestExceptionRepository:
         assert len(keys) == 2
 
     def test_list_for_run_drains_every_page(self):
-        # `list_for_run` issued a single `query`, so it stopped at DynamoDB's 1 MB page and a
-        # partial list was indistinguishable from a clean run. moto will not produce a >1 MB
-        # page here, so the paging contract is asserted directly: a response carrying
-        # LastEvaluatedKey must be followed.
         repository = self._repository()
         pages = [
             {"Items": [{"exception_key": "a"}], "LastEvaluatedKey": {"k": 1}},
@@ -453,10 +455,6 @@ class TestExceptionRepository:
         assert seen[2]["ExclusiveStartKey"] == {"k": 2}
 
     def test_severity_is_recorded_so_a_consumer_can_filter_on_it(self):
-        # Replaces test_blocking_exceptions_filter_by_severity. That method had no production
-        # caller and this test was its only reference, which made dead code read as wired.
-        # Severity itself is still load-bearing — the triage route and the in-run gate use it —
-        # so what is worth asserting is that it round-trips, not that a deleted helper filtered.
         repository = self._repository()
         repository.record_many(
             [self._exception(), self._exception(severity=ExceptionSeverity.WARN)]
@@ -487,7 +485,7 @@ class TestExceptionRepository:
 @mock_aws
 class TestQualityPolicyGate:
     def _repository(self) -> QualityPolicyRepository:
-        _table("EdlQualityPolicyAttachment", "tenant_code", "entity_id")
+        _table(RESOURCE_NAME_ENVIRONMENT["QUALITY_POLICY_TABLE"], "tenant_code", "entity_id")
         return QualityPolicyRepository(environment="dev", region_name=_REGION)
 
     def _attachment(self, **overrides) -> QualityPolicyAttachment:
@@ -550,7 +548,7 @@ class TestQualityPolicyGate:
 @mock_aws
 class TestBrandRegistry:
     def _registry(self) -> BrandRegistry:
-        _table("EdlBrandRegistry", "tenant_code", "brand_code")
+        _table(RESOURCE_NAME_ENVIRONMENT["BRAND_REGISTRY_TABLE"], "tenant_code", "brand_code")
         return BrandRegistry(environment="dev", region_name=_REGION)
 
     def test_customer_brands_register(self):

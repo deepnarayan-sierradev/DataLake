@@ -6,7 +6,7 @@ access (Power BI, Tableau).
 
 Security (OWASP A01):
   - One PostgreSQL *schema* per tenant, inside a fixed connection database
-    (`edl_serving` by default, or a tenant-supplied database for BYO-DB) —
+    (`datalake_serving` by default, or a tenant-supplied database for BYO-DB) —
     the isolation boundary a tenant's BI tool credential is scoped to, since
     BI tools connect directly and bypass any application-level tenant filter.
   - A read-only PostgreSQL role, GRANTed SELECT on only that tenant's schema
@@ -23,6 +23,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Final
 
+from contracts.resource_naming import secret_path
 from serving_store.interfaces.loader_interface import (
     RESERVED_COLUMNS,
     SAFE_COLUMN_PATTERN,
@@ -51,7 +52,7 @@ class PostgreSqlLoader(ServingStoreLoaderInterface):
 
     max_identifier_length = 63  # Postgres identifier length limit
     default_port = 5432
-    default_connection_database = "edl_serving"
+    default_connection_database = "datalake_serving"
 
     def _ensure_connection_database(
         self, credentials: dict[str, str], connection_database: str
@@ -109,23 +110,18 @@ class PostgreSqlLoader(ServingStoreLoaderInterface):
         self, connection: Any, tenant_code: str, container_name: str, writer_creds: dict[str, str]
     ) -> None:
         """Create/refresh a per-tenant read-only role, scoped to container_name only."""
-        secret_name = f"edl/serving-store/{tenant_code}/postgresql/reader-credentials"
+        secret_name = secret_path("serving-store", tenant_code, "postgresql", "reader-credentials")
         username = reader_username(tenant_code, self.max_identifier_length)
         connection_database = connection.info.dbname
         password = self._get_or_create_reader_password(
             secret_name, username, container_name, writer_creds, connection_database
         )
         with connection.cursor() as cur:
-            # Postgres has no CREATE ROLE IF NOT EXISTS — check first (a parameter
-            # placeholder can't be substituted inside a dollar-quoted DO block body,
-            # so that's not a viable shortcut here).
             cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (username,))
             if cur.fetchone() is None:
                 cur.execute(f'CREATE ROLE "{username}" LOGIN PASSWORD %s', (password,))
             cur.execute(f'GRANT USAGE ON SCHEMA "{container_name}" TO "{username}"')
             cur.execute(f'GRANT SELECT ON ALL TABLES IN SCHEMA "{container_name}" TO "{username}"')
-            # Without this, a table created by a *future* load (a new entity type for
-            # this tenant) stays invisible to the reader until someone re-runs the GRANT.
             cur.execute(
                 f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{container_name}" '
                 f'GRANT SELECT ON TABLES TO "{username}"'
@@ -171,9 +167,6 @@ class PostgreSqlLoader(ServingStoreLoaderInterface):
         pk_cols = ", ".join(f'"{k}"' for k in primary_keys)
         row_placeholder = "(" + ", ".join(["%s"] * len(primary_keys)) + ")"
         placeholders = ", ".join([row_placeholder] * len(pk_tuples))
-        # Identifiers validated by load_batches()/_ensure_table() above; values bound as
-        # params. Postgres supports row-value IN natively — unlike SQL Server (see
-        # sqlserver_loader.py's VALUES-join workaround for the non-portable case).
         sql = (
             f'SELECT {pk_cols}, "_row_hash" FROM "{table_name}" '  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
             f"WHERE ({pk_cols}) IN ({placeholders})"
@@ -200,7 +193,6 @@ class PostgreSqlLoader(ServingStoreLoaderInterface):
         placeholders = ", ".join(["%s"] * len(all_columns))
         update_clause = ", ".join(f'"{c}" = EXCLUDED."{c}"' for c in all_columns)
         pk_cols = ", ".join(f'"{k}"' for k in primary_keys)
-        # Identifiers validated by load_batches()/_ensure_table() above; values bound as params.
         sql = (
             f'INSERT INTO "{table_name}" ({col_list}) VALUES ({placeholders}) '  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
             f"ON CONFLICT ({pk_cols}) DO UPDATE SET {update_clause}"

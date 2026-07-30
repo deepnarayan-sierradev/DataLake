@@ -155,7 +155,6 @@ class TestGoldenRecordPublisher:
         assert isinstance(decisions, list)
         assert len(decisions) > 0
         assert "rule_id" in decisions[0]
-        # Verify PII values (actual email addresses) not in audit trail
         for d in decisions:
             assert "alice@example.com" not in json.dumps(d)
             assert "alice_at_example" not in json.dumps(d)
@@ -178,7 +177,6 @@ class TestGoldenRecordPublisher:
             source_field="source_id",
             tenant_code="demo",
         )
-        # golden_ids should be the same across runs (deterministic from cluster members)
         s3 = boto3.client("s3", region_name=_REGION)
         t1 = pq.read_table(
             io.BytesIO(
@@ -252,18 +250,11 @@ class TestTenantIsolation:
         assert result_a.decisions_s3_key.startswith("acme-corp/")
         assert result_b.decisions_s3_key.startswith("globex-eu/")
 
-        # Both golden-record objects genuinely exist independently — neither
-        # publish overwrote the other.
         s3 = boto3.client("s3", region_name=_REGION)
         key_a = result_a.analytics_s3_prefix + "golden.parquet"
         key_b = result_b.analytics_s3_prefix + "golden.parquet"
         assert s3.get_object(Bucket=_ANALYTICS_BUCKET, Key=key_a)["Body"].read()
         assert s3.get_object(Bucket=_ANALYTICS_BUCKET, Key=key_b)["Body"].read()
-
-
-# ---------------------------------------------------------------------------
-# Uncovered branches — targeted gap-fill tests
-# ---------------------------------------------------------------------------
 
 
 @mock_aws
@@ -299,7 +290,6 @@ class TestPublisherWithLineageEmission:
         )
         assert result.golden_record_count == 1
 
-        # Verify lineage object written to governance bucket
         s3 = boto3.client("s3", region_name=_REGION)
         response = s3.list_objects_v2(Bucket="test-governance-bucket", Prefix="demo/lineage/")
         assert response.get("KeyCount", 0) >= 1
@@ -318,7 +308,6 @@ class TestPublisherWithLineageEmission:
         records = [
             {"record_id": "sf-001", "source_id": "salesforce", "email": "b@x.com", "name": "Bob"},
         ]
-        # Should complete successfully despite lineage failure
         result = publisher.publish(
             curated_records=records,
             entity_type="customer",

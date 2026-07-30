@@ -35,9 +35,6 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-# Import canonical enums from contracts — never redefine them in adapter code.
-# A single definition prevents enum values diverging between contract validation
-# and runtime connector behaviour.
 from contracts.entity_configuration_contract import FieldMode, LoadType
 
 
@@ -52,24 +49,16 @@ class ExtractionErrorClassification(StrEnum):
     relies on this taxonomy to decide retry vs fail-fast behaviour.
     """
 
-    # Retry-eligible — transient infrastructure issues
     TRANSIENT_TIMEOUT = "transient_timeout"
     TRANSIENT_THROTTLE = "transient_throttle"
     TRANSIENT_NETWORK = "transient_network"
 
-    # Fail-fast — configuration or credential problems that retrying cannot fix
     DETERMINISTIC_INVALID_CREDENTIALS = "deterministic_invalid_credentials"
     DETERMINISTIC_INVALID_OBJECT = "deterministic_invalid_object"
     DETERMINISTIC_INVALID_CONFIGURATION = "deterministic_invalid_configuration"
     DETERMINISTIC_SCHEMA_VIOLATION = "deterministic_schema_violation"
 
-    # Used when the error cannot be reliably classified — routes to DLQ with manual review
     UNKNOWN = "unknown"
-
-
-# ---------------------------------------------------------------------------
-# Value objects
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -155,9 +144,6 @@ class QueryContract:
     watermark_upper: str | None  # ISO8601 UTC
     watermark_field: str | None = None  # Source field name used for watermark filtering
     estimated_record_count: int | None = None
-    # Bound body for a source whose read is a POST search rather than a GET — WellSky
-    # Personal Care Connect filters on `POST /_search/` with a JSON body. Values are bound
-    # here for the same reason they are bound in query_parameters, never interpolated.
     request_body: dict[str, Any] | None = None
 
 
@@ -196,11 +182,6 @@ class ConnectorCapabilities:
     bulk_threshold_records: int = 2_000
     max_concurrent_jobs: int = 1
     supported_field_modes: tuple[FieldMode, ...] = field(default_factory=lambda: (FieldMode.ALL,))
-
-
-# ---------------------------------------------------------------------------
-# Abstract connector interface
-# ---------------------------------------------------------------------------
 
 
 class ConnectorInterface(abc.ABC):
@@ -340,32 +321,6 @@ class ConnectorInterface(abc.ABC):
             return True
         except Exception:
             return False
-
-
-# ---------------------------------------------------------------------------
-# Shared error taxonomy (DP-3)
-# ---------------------------------------------------------------------------
-#
-# Salesforce, NetSuite, and MySQL RDS each independently hand-rolled isinstance
-# dispatch chains in classify_extraction_error() because their exception types
-# carried no marker of whether they were transient or deterministic. Sage's
-# adapter already solved this (see sage_errors.SageMetadataError and its
-# Deterministic/Transient subclasses); these two marker bases generalize that
-# pattern so every adapter can opt in.
-#
-# Usage: a connector-specific exception that is UNAMBIGUOUSLY transient or
-# deterministic should subclass the matching marker and set `classification`
-# to the precise ExtractionErrorClassification value. classify_extraction_error()
-# implementations can then collapse what used to be several isinstance branches
-# into a single `isinstance(exc, (TransientConnectorError, DeterministicConnectorError))`
-# check followed by `exc.classification`.
-#
-# Exceptions whose cause is genuinely ambiguous from the type alone (e.g. a
-# generic query-execution failure that could be a deadlock — transient — or a
-# schema mismatch — deterministic) should NOT be forced under either marker.
-# Forcing an ambiguous exception into one bucket trades a correct UNKNOWN/DLQ
-# routing decision for an incorrect retry-or-fail-fast decision, which is
-# exactly the accuracy loss classify_extraction_error() must avoid.
 
 
 class TransientConnectorError(Exception):

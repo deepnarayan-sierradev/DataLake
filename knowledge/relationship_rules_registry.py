@@ -78,8 +78,6 @@ class RelationshipRulesRegistry:
 
     @staticmethod
     def _rules_key(tenant_code: str, entity_type: str, version: str) -> str:
-        # {version}.json (not rules_{version}.json) — matches the config-service writer's
-        # single-part S3VersionedConfigRepository layout so the two stay contract-aligned.
         return f"{tenant_code}/relationship-rules/{entity_type}/{version}.json"
 
     @staticmethod

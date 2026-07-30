@@ -18,7 +18,6 @@ from typing import Final
 
 from contracts.platform_metrics import PlatformMetric
 
-# Bounded so a runaway loop cannot exhaust memory through the recorder.
 MAX_BUFFERED_POINTS: Final[int] = 5_000
 
 

@@ -27,8 +27,6 @@ from typing import Any, Final
 
 from botocore.exceptions import ClientError
 
-# DynamoDB will not return more than 1 MB per page regardless of Limit, so a caller asking for
-# more than this in one page is expressing a hope, not a bound.
 MAX_PAGE_SIZE: Final[int] = 1000
 DEFAULT_PAGE_SIZE: Final[int] = 100
 

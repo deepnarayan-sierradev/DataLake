@@ -27,8 +27,6 @@ _logger = get_platform_logger(__name__)
 
 DEFAULT_MAX_ENTRIES: Final[int] = 512
 
-# A backstop only — invalidation is explicit; this bounds unbounded staleness if a publish
-# signal is ever missed.
 DEFAULT_MAX_AGE_SECONDS: Final[float] = 900.0
 
 

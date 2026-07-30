@@ -152,7 +152,7 @@ store). Open gaps in that model are tracked in `docs/KNOWN_GAPS_AND_ROADMAP.md`.
 ---
 
 ### Control Plane
-A Cognito-authenticated REST API (Lambda `EdlControlPlane`,
+A Cognito-authenticated REST API (Lambda `datalake-control-plane-dev`,
 `connector_runtime/api/control_plane_handler.py`) that lets a tenant self-service provision itself
 — register a new tenant, onboard a source — instead of a platform engineer manually editing
 DynamoDB records or running Terraform by hand. Built on Amazon Cognito (user pool + JWT
@@ -506,7 +506,7 @@ Quick-reference definitions for every tool and service used in the platform.
 | **DynamoDB** | Amazon DynamoDB | NoSQL database for config, watermark state, audit log, entity-type registry, onboarding records (5 tables) |
 | **Secrets Manager** | AWS Secrets Manager | Secure credential store; daily expiry-check alerting via a dedicated Lambda (auto-rotation planned, not yet implemented); never in code or logs |
 | **Cognito** | Amazon Cognito | User pool + JWT authorizer securing the self-service tenant control-plane API (code-complete, not yet verified live) |
-| **Glue Catalog** | AWS Glue Data Catalog | Metadata registry for the analytics layer (live); a second `edl_curated` database and curated-layer registration code path also exist but aren't wired on in dev yet |
+| **Glue Catalog** | AWS Glue Data Catalog | Metadata registry for the analytics layer (live); a second `datalake_curated_dev` database and curated-layer registration code path also exist but aren't wired on in dev yet |
 | **DuckDB** | DuckDB | In-process SQL engine used for curated-layer merges inside the transformation Lambda |
 | **Athena** | Amazon Athena | Serverless SQL query engine over S3 Parquet files |
 | **RDS** | Amazon Relational Database Service (MySQL, PostgreSQL, SQL Server) | Serving store for operational apps and low-latency reads; Azure SQL is tenant-supplied BYO-DB |

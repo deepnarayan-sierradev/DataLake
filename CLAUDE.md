@@ -206,6 +206,41 @@ what produced the eighteen.
 
 ## House rules (non-obvious, actually enforced)
 
+- **No standalone comments above declarations. This one is absolute.** Do not put a comment on its
+  own line above a `def`, `class`, attribute, assignment, or Terraform/YAML block. Not rationale,
+  not history, not a warning, not a `# ─── Section ───` banner, not a one-liner. On 2026-07-30 the
+  repo owner had 6,264 such lines deleted from 384 files, having raised it in prior sessions; treat
+  it as a standing constraint, not a style preference.
+
+  Specifically **do not** write the shape this codebase had accumulated — a retrospective
+  explaining what once broke:
+
+  ```python
+  # Must track the secret path prefix. A Deny whose resource pattern matches nothing denies
+  # nothing — this read `secret:edl/*` after the rename, leaving cross-tenant secret access
+  # ungoverned while the policy still looked present (OWASP A01).
+  resources = [...]
+  ```
+
+  If the reasoning is genuinely load-bearing, it belongs in one of the places that survives:
+  the module or function **docstring**, a Pydantic `Field(description=...)`, a Terraform
+  `description`, a **test name** that asserts the behaviour, or `docs/`. An incident belongs in
+  `docs/KNOWN_GAPS_AND_ROADMAP.md`, not above the line it happened on. Prefer naming things so the
+  comment is unnecessary. **Never re-add deleted narrative** when editing nearby code.
+
+  Only four kinds of own-line comment are legitimate, because deleting them breaks a gate — the
+  50 that remain repo-wide are all of these:
+  `#checkov:skip=CKV_...`, `# nosec BXXX — <justification>`, `#!/usr/bin/env ...`, and the
+  requirement-ID citations below. Trailing comments on the same line as code are also acceptable
+  in moderation (`message_retention_seconds = 1209600 # 14 days, the maximum`).
+- **Requirement-ID citations (`DL-XXX-NN`) are load-bearing — never delete one.** G5
+  (`make traceability`, `scripts/check_requirement_traceability.py`) greps raw file text for
+  `\bDL-[A-Z]+-\d+\b` and **fails** when an active requirement has no citation. Cite the id in a
+  docstring, a `Field(description=...)`, or a test name — not in a narrative comment. Two
+  Terraform sites (`DL-SERV-08` in `modules/transformation_lambda/main.tf`, `DL-WF-08` in
+  `modules/metadata_persistence/programme_tables.tf`) carry a deliberate one-line comment because
+  HCL offers nowhere else to put the string; leave them alone. Run `make traceability` after any
+  bulk edit that touches comments or docstrings.
 - **Banned identifiers**: `helper`, `util`, `common`, `manager` (and `Helper`/`Util`/`Common`/
   `Manager` classes) are rejected by `make banned-names` — name things by domain concept instead
   (see `PROHIBITED_IDENTIFIERS` in `contracts/identifier_policy.py`). This is now also enforced in
@@ -230,8 +265,11 @@ what produced the eighteen.
 - **`extra="forbid"`** is used specifically on config/params/API-boundary Pydantic models
   (`EntityExtractionConfig`, the `*_params.py` connector models, `connector_runtime/api/models.py`)
   — not universal; don't assume every model has it.
-- **Cite the OWASP category** (`OWASP A03`, `A09`, etc.) in security-relevant code comments —
-  this is a real, consistently-applied convention (150+ occurrences repo-wide), not aspirational.
+- **Cite the OWASP category** (`OWASP A03`, `A09`, etc.) on security-relevant code — a real,
+  consistently-applied convention (209 occurrences repo-wide as of 2026-07-30), not aspirational.
+  Put it **in the docstring**, never in a comment above the declaration: after the 2026-07-30
+  comment sweep all 209 live in docstrings and `Field(description=...)` strings, and zero live in
+  comments. Adding one as a comment would both violate the rule above and make this count wrong.
 - **Lambda handler pattern** (canonical example: `analytics_publisher/analytics_publisher_handler.py`):
   thin `lambda_handler` → `_validate_event` → `check_lambda_timeout(...)` / `configure_xray(...)`
   → `structlog.contextvars.bind_contextvars(run_id=..., tenant_code=..., ...)` → delegate to a

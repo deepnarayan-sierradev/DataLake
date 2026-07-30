@@ -29,7 +29,6 @@ from typing import Final
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 
-# Singular and plural, because `utils` is the form that actually appears in filenames.
 PROHIBITED_WORDS: Final[frozenset[str]] = frozenset(
     {
         "helper",
@@ -55,17 +54,10 @@ EXCLUDED_DIRECTORIES: Final[frozenset[str]] = frozenset(
         ".terraform",
         "node_modules",
         ".ruff_cache",
-        # Test code is out of scope, as it was under the original rule: a fixture called
-        # `_patch_common` names a test concern, not a domain concept. Production code and
-        # operator scripts are both in scope — `scripts/` was wrongly excluded before.
         "tests",
     }
 )
 
-# Proper nouns whose spelling is not ours to choose. Narrow by construction: the word is excused
-# only inside this exact compound, so `SecretsManagerCredentialClient` passes while a bare
-# `CredentialManager` still fails. This is not a general escape hatch, and there is no
-# file-based allowlist on purpose — a waiver list is how a naming rule dies quietly.
 PROPER_NOUN_COMPOUNDS: Final[dict[str, str]] = {"secretsmanager": "manager"}
 
 _CAMEL_BOUNDARY: Final[re.Pattern[str]] = re.compile(r"(?<!^)(?=[A-Z])")

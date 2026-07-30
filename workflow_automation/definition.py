@@ -24,7 +24,6 @@ from contracts.identifier_policy import validate_tenant_code
 WORKFLOW_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}$")
 ACTION_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-_]{1,63}$")
 
-# A workflow with more actions than this is a program, not a rule.
 MAX_ACTIONS_PER_WORKFLOW: Final[int] = 20
 MAX_CONDITIONS_PER_WORKFLOW: Final[int] = 10
 
@@ -75,7 +74,6 @@ class ActionKind(StrEnum):
     RUN_SAVED_QUERY = "run_saved_query"
 
 
-# Actions with an external effect require maker-checker publish (DL-WF-01, OWASP A08).
 EXTERNAL_EFFECT_ACTIONS: Final[frozenset[ActionKind]] = frozenset(
     {
         ActionKind.SEND_NOTIFICATION,
@@ -152,8 +150,6 @@ class WorkflowCondition(BaseModel):
         if self.operator is ComparisonOperator.NOT_EQUALS:
             return observed != self.threshold
         if previous is None or previous == 0:
-            # No prior figure means no change to measure; a workflow must not fire on
-            # "unknown" as though it were "changed".
             return False
         change_pct = abs(observed - previous) / abs(previous) * 100
         return change_pct > self.threshold

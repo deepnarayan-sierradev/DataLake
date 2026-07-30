@@ -28,36 +28,28 @@ def md_to_html(md: str) -> str:
     title = md.split("\n")[0].lstrip("# ").strip()
     body = md
 
-    # Protect fenced code blocks first
     code_blocks: list[str] = []
     def save_block(m: re.Match) -> str:
         code_blocks.append(m.group(1))
         return f"\x00CODEBLOCK{len(code_blocks) - 1}\x00"
     body = re.sub(r"```[^\n]*\n(.*?)```", save_block, body, flags=re.DOTALL)
 
-    # Headers
     body = re.sub(r"^#### (.+)$", r"<h4>\1</h4>", body, flags=re.MULTILINE)
     body = re.sub(r"^### (.+)$",  r"<h3>\1</h3>",  body, flags=re.MULTILINE)
     body = re.sub(r"^## (.+)$",   r"<h2>\1</h2>",   body, flags=re.MULTILINE)
     body = re.sub(r"^# (.+)$",    r"<h1>\1</h1>",    body, flags=re.MULTILINE)
 
-    # Inline code
     body = re.sub(r"`([^`]+)`", r"<code>\1</code>", body)
 
-    # Bold / italic
     body = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", body)
     body = re.sub(r"\*([^*]+)\*",   r"<em>\1</em>",         body)
 
-    # Links
     body = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', body)
 
-    # Blockquotes
     body = re.sub(r"^> (.+)$", r"<blockquote>\1</blockquote>", body, flags=re.MULTILINE)
 
-    # Horizontal rules
     body = re.sub(r"^---$", "<hr/>", body, flags=re.MULTILINE)
 
-    # Tables
     lines = body.split("\n")
     out: list[str] = []
     in_table = False
@@ -79,14 +71,12 @@ def md_to_html(md: str) -> str:
         out.append("</table>")
     body = "\n".join(out)
 
-    # Restore code blocks
     for i, code in enumerate(code_blocks):
         escaped = (code.replace("&", "&amp;").replace("<", "&lt;")
                        .replace(">", "&gt;"))
         body = body.replace(f"\x00CODEBLOCK{i}\x00",
                             f"<pre><code>{escaped}</code></pre>")
 
-    # Unordered lists
     body = re.sub(r"(?m)^- (.+)$", r"<li>\1</li>", body)
     body = re.sub(r"(<li>.*?</li>(\n<li>.*?</li>)*)", r"<ul>\1</ul>",
                   body, flags=re.DOTALL)

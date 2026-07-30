@@ -9,7 +9,6 @@ validated registry rather than a free-text column.
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from typing import Any, Final
@@ -17,16 +16,14 @@ from typing import Any, Final
 import boto3
 
 from contracts.identifier_policy import validate_tenant_code
+from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-_TABLE_NAME: Final[str] = "EdlBrandRegistry"
 
-# Brand codes become partition values and Glue column values, so the charset is narrow.
 BRAND_CODE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,47}$")
 
-# Physical column carried on curated and analytics layers.
 BRAND_COLUMN: Final[str] = "brand_code"
 
 
@@ -62,8 +59,6 @@ class Brand:
             raise ValueError(f"brand {self.brand_code!r}: display_name must not be empty.")
 
 
-# The customer's seven brands, from the source-system list. Seeded rather than hardcoded into
-# a handler so onboarding an eighth brand is a data change.
 EVIVE_BRANDS: Final[tuple[tuple[str, str], ...]] = (
     ("maid-brigade", "Maid Brigade"),
     ("pacific-lawn", "Pacific Lawn & Sprinklers"),
@@ -82,7 +77,7 @@ class BrandRegistry:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("BRAND_REGISTRY_TABLE") or _TABLE_NAME
+        table_name = require_env("BRAND_REGISTRY_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
         self._cache: dict[str, frozenset[str]] = {}
 

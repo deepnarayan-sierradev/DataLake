@@ -96,11 +96,6 @@ _LOWER = "2026-01-01T00:00:00Z"
 _UPPER = "2026-07-01T00:00:00Z"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _make_connector() -> SageConnector:
     """
     Build a SageConnector with fully mocked internals — no AWS or HTTP calls.
@@ -176,14 +171,8 @@ def _page_response(
     }
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
 class TestRegistration:
     def test_sage_registered_in_connector_registry(self) -> None:
-        # Import ensures the module is loaded and registration happened.
         import connector_runtime.adapters.sage.sage_connector  # noqa: F401
 
         assert "sage" in connector_registry.registered_source_ids
@@ -193,11 +182,6 @@ class TestRegistration:
 
     def test_registered_class_is_sage_connector(self) -> None:
         assert connector_registry._registry["sage"] is SageConnector
-
-
-# ---------------------------------------------------------------------------
-# Constructor validation
-# ---------------------------------------------------------------------------
 
 
 class TestConstructorValidation:
@@ -234,11 +218,6 @@ class TestConstructorValidation:
         assert connector._sage_product == "intacct"  # type: ignore[attr-defined]
 
 
-# ---------------------------------------------------------------------------
-# Capabilities
-# ---------------------------------------------------------------------------
-
-
 class TestCapabilityDeclaration:
     def test_source_id_is_sage(self) -> None:
         connector = _make_connector()
@@ -258,7 +237,6 @@ class TestCapabilityDeclaration:
 
     def test_supports_metadata_discovery(self) -> None:
         connector = _make_connector()
-        # The protocol declares it read-only; the concrete client exposes a plain attribute.
         connector._metadata_client.supports_live_discovery = True  # type: ignore[misc]
         caps = connector.get_capability_declaration()
         assert caps.supports_metadata_discovery is True
@@ -274,11 +252,6 @@ class TestCapabilityDeclaration:
     def test_max_concurrent_jobs_is_one(self) -> None:
         connector = _make_connector()
         assert connector.get_capability_declaration().max_concurrent_jobs == 1
-
-
-# ---------------------------------------------------------------------------
-# discover_queryable_fields
-# ---------------------------------------------------------------------------
 
 
 class TestDiscoverQueryableFields:
@@ -305,11 +278,6 @@ class TestDiscoverQueryableFields:
         )
 
 
-# ---------------------------------------------------------------------------
-# build_extraction_query
-# ---------------------------------------------------------------------------
-
-
 class TestBuildExtractionQuery:
     def test_delegates_to_query_engine(self) -> None:
         connector = _make_connector()
@@ -327,11 +295,6 @@ class TestBuildExtractionQuery:
         )
         assert result is expected_qc
         connector._query_engine.build.assert_called_once()  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
-# execute_extraction
-# ---------------------------------------------------------------------------
 
 
 class TestExecuteExtraction:
@@ -401,7 +364,6 @@ class TestExecuteExtraction:
         """HTTP 401 mid-run: invalidate token, refresh, retry once — succeeds."""
         connector = _make_connector()
         rows = [{"key": "1"}]
-        # First call → SageAuthenticationError (401); second call → success.
         connector._http_client.post.side_effect = [  # type: ignore[attr-defined]
             SageAuthenticationError("401"),
             _page_response(rows, next_start=None),
@@ -410,7 +372,6 @@ class TestExecuteExtraction:
         qc = _make_query_contract()
         records = list(connector.execute_extraction(qc, run_id=_RUN_ID))
         assert len(records) == 1
-        # Auth token should have been invalidated once.
         connector._auth.invalidate_token.assert_called_once()  # type: ignore[attr-defined]
 
     def test_401_on_retry_propagates_exception(self) -> None:
@@ -456,18 +417,11 @@ class TestExecuteExtraction:
 
         assert len(captured_calls) == 1
         sent = captured_calls[0]
-        # Placeholders should have been substituted.
         assert sent["filters"][0]["$gte"]["auditInfo.modifiedAt"] == _LOWER
         assert sent["filters"][1]["$lt"]["auditInfo.modifiedAt"] == _UPPER
 
 
-# ---------------------------------------------------------------------------
-# classify_extraction_error
-# ---------------------------------------------------------------------------
-
-
 class TestClassifyExtractionError:
-    # Transient errors — retry eligible
     def test_rate_limit_is_transient_throttle(self) -> None:
         c = _make_connector()
         assert (
@@ -496,7 +450,6 @@ class TestClassifyExtractionError:
             == ExtractionErrorClassification.TRANSIENT_NETWORK
         )
 
-    # Deterministic errors — fail-fast
     def test_auth_error_is_deterministic_invalid_credentials(self) -> None:
         c = _make_connector()
         assert (
@@ -559,11 +512,6 @@ class TestClassifyExtractionError:
             c.classify_extraction_error(ValueError("bad input"))
             == ExtractionErrorClassification.UNKNOWN
         )
-
-
-# ---------------------------------------------------------------------------
-# _build_sage factory function
-# ---------------------------------------------------------------------------
 
 
 class TestBuildSageFactory:
@@ -636,10 +584,6 @@ class TestBuildSageFactory:
         assert writer._sage_product == "intacct"  # type: ignore[attr-defined]
 
 
-# ---------------------------------------------------------------------------
-# X3 helpers
-# ---------------------------------------------------------------------------
-
 _X3_ENDPOINT = "BPCUSTOMER"
 _X3_BASE_URL = "https://x3.company.com/api/SEED"
 _X3_ENTITY_ID = "sage-x3-customer"
@@ -700,11 +644,6 @@ def _x3_page(records: list[dict], next_link: str | None = None) -> dict:
     return resp
 
 
-# ---------------------------------------------------------------------------
-# X3 execution path tests
-# ---------------------------------------------------------------------------
-
-
 class TestX3ExecuteExtraction:
     """Tests for the Sage X3 OData GET execution path."""
 
@@ -752,7 +691,6 @@ class TestX3ExecuteExtraction:
         records = list(connector.execute_extraction(qc, run_id=_RUN_ID))
         assert len(records) == X3_PAGE_SIZE + 3
 
-        # Second call must include $skip=1000
         second_call_params = connector._http_client.get.call_args_list[1][1]["params"]
         assert second_call_params.get("$skip") == str(X3_PAGE_SIZE)
 
@@ -772,7 +710,6 @@ class TestX3ExecuteExtraction:
         records = list(connector.execute_extraction(qc, run_id=_RUN_ID))
         assert len(records) == X3_PAGE_SIZE + 1
 
-        # Second call must use the nextLink URL directly.
         second_url = connector._http_client.get.call_args_list[1][1]["url"]
         assert second_url == next_link
 
@@ -784,7 +721,6 @@ class TestX3ExecuteExtraction:
         """
         connector = _make_x3_connector()
         next_link = f"{_X3_BASE_URL}/BPCUSTOMER?$skiptoken=partial"
-        # First page: partial (only 500 records) but server still has more.
         page1 = [{"BPCNUM_0": f"C{i:04d}"} for i in range(500)]
         page2 = [{"BPCNUM_0": f"C{i + 500:04d}"} for i in range(200)]
 
@@ -795,7 +731,6 @@ class TestX3ExecuteExtraction:
 
         qc = _make_x3_query_contract()
         records = list(connector.execute_extraction(qc, run_id=_RUN_ID))
-        # Must yield ALL records from both pages, not just the first 500.
         assert len(records) == 700
 
     def test_x3_source_timestamp_set_from_watermark(self) -> None:
@@ -819,11 +754,6 @@ class TestX3ExecuteExtraction:
         records = list(connector.execute_extraction(qc, run_id=_RUN_ID))
         assert len(records) == 1
         connector._auth.invalidate_token.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# X3 error classification
-# ---------------------------------------------------------------------------
 
 
 class TestX3ClassifyExtractionError:

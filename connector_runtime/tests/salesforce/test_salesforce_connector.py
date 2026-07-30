@@ -48,24 +48,13 @@ def _make_connector(object_name: str = "Account") -> SalesforceConnector:
         )
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
 class TestConnectorRegistration:
     def test_salesforce_registered_in_connector_registry(self) -> None:
         """Acceptance: connector registered via decorator at import time."""
-        # Import triggers registration
         import connector_runtime.adapters.salesforce.salesforce_connector  # noqa: F401
         from connector_runtime.registry import connector_registry
 
         assert "salesforce" in connector_registry.registered_source_ids
-
-
-# ---------------------------------------------------------------------------
-# Capability declaration
-# ---------------------------------------------------------------------------
 
 
 class TestCapabilityDeclaration:
@@ -92,11 +81,6 @@ class TestCapabilityDeclaration:
         assert FieldMode.INCLUDE_ONLY in caps.supported_field_modes
 
 
-# ---------------------------------------------------------------------------
-# Configuration-only new entity onboarding
-# ---------------------------------------------------------------------------
-
-
 class TestConfigurationOnlyOnboarding:
     def test_different_object_names_use_same_class(self) -> None:
         """
@@ -107,15 +91,9 @@ class TestConfigurationOnlyOnboarding:
         contact_connector = _make_connector("Contact")
         opportunity_connector = _make_connector("Opportunity")
 
-        # All use the same class — zero code change for new objects
         assert type(account_connector) is SalesforceConnector
         assert type(contact_connector) is SalesforceConnector
         assert type(opportunity_connector) is SalesforceConnector
-
-
-# ---------------------------------------------------------------------------
-# Error classification
-# ---------------------------------------------------------------------------
 
 
 class TestErrorClassification:
@@ -169,11 +147,6 @@ class TestErrorClassification:
         ]:
             result = connector.classify_extraction_error(exc)
             assert isinstance(result, ExtractionErrorClassification)
-
-
-# ---------------------------------------------------------------------------
-# execute_extraction — mocked bulk controller
-# ---------------------------------------------------------------------------
 
 
 class TestExecuteExtraction:

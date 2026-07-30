@@ -29,9 +29,6 @@ from orchestration.event_bridge.extraction_schedule_client import (
     ScheduleNotFoundError,
 )
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 _GROUP = "dev-extraction-schedules"
 _TARGET_ARN = "arn:aws:states:us-east-1:123456789012:stateMachine:extraction-pipeline"
 _ROLE_ARN = "arn:aws:iam::123456789012:role/dev-eventbridge-scheduler-role"
@@ -69,15 +66,9 @@ def _make_client() -> tuple[ExtractionScheduleClient, MagicMock]:
     return client, mock_scheduler
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-
 class TestCreateOrUpdateSchedule:
     def test_creates_new_schedule_when_not_found(self) -> None:
         client, mock_scheduler = _make_client()
-        # update raises ResourceNotFoundException (schedule doesn't exist yet)
         mock_scheduler.update_schedule.side_effect = _resource_not_found_error()
         mock_scheduler.create_schedule.return_value = {"ScheduleArn": _SCHEDULE_ARN}
 
@@ -253,7 +244,6 @@ class TestScheduleNameConstruction:
         name = ExtractionScheduleClient.build_schedule_name(
             "mysql-rds", "mysql-rds-orders", tenant_code="demo"
         )
-        # tenant / source (mysql-rds) / entity (mysql-rds-orders) must all be separable.
         parts = name.split("--")
         assert parts == ["demo", "mysql-rds", "mysql-rds-orders"]
 
@@ -301,7 +291,6 @@ class TestScheduleNameConstruction:
         )
         assert len(name) <= 64
 
-        # Deterministic: same inputs always produce the same clamped name.
         name_again = ExtractionScheduleClient.build_schedule_name(
             long_source, long_entity, tenant_code=long_tenant
         )

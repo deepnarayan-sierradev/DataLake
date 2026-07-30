@@ -57,49 +57,27 @@ from tenancy.connection_keys import resolve_connection_id
 
 _logger = get_platform_logger(__name__)
 
-# Stable identifier format — same constraint used platform-wide.
 _STABLE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}$")
 
-# Schedule name: {tenant_code}--{source_id}--{entity_id}
 _SCHEDULE_NAME_SEP: Final[str] = "--"
 
-# EventBridge Scheduler hard limit on schedule name length (AWS API constraint).
 _MAX_SCHEDULE_NAME_LEN: Final[int] = 64
 
-# Length of the deterministic content-hash suffix appended when a schedule
-# name would otherwise exceed _MAX_SCHEDULE_NAME_LEN. 10 hex chars (40 bits)
-# of the full untruncated name's SHA-256 digest is enough to make two
-# different max-length tenant/source/entity combinations that happen to share
-# a truncated prefix resolve to different final names deterministically
-# (OWASP A03 — the fallback must not be attacker-controllable or guessable
-# to a colliding value; a content hash of validated stable identifiers is not).
 _SCHEDULE_NAME_HASH_LEN: Final[int] = 10
 
-# EventBridge Scheduler flexible time window. Jitter is deliberately ON (DL-OPS-11,
-# gap 15): twelve connections per tenant means twelve times the schedules, and an exact
-# schedule time makes a thundering herd inevitable as connection count grows.
 DEFAULT_FLEXIBLE_WINDOW_MINUTES: Final[int] = 5
 _FLEXIBLE_WINDOW_OFF: Final[dict[str, str]] = {"Mode": "OFF"}
 
 
 def _flexible_window(minutes: int) -> dict[str, Any]:
+    """Jitter window for schedule fan-out (DL-OPS-11); 0 minutes disables it."""
     if minutes <= 0:
         return dict(_FLEXIBLE_WINDOW_OFF)
     return {"Mode": "FLEXIBLE", "MaximumWindowInMinutes": minutes}
 
 
-# ---------------------------------------------------------------------------
-# Exceptions
-# ---------------------------------------------------------------------------
-
-
 class ScheduleNotFoundError(Exception):
     """Raised when get_schedule() is called for a non-existent schedule."""
-
-
-# ---------------------------------------------------------------------------
-# Client
-# ---------------------------------------------------------------------------
 
 
 class ExtractionScheduleClient:
@@ -114,7 +92,7 @@ class ExtractionScheduleClient:
       target_arn           Step Functions state machine ARN to invoke.
       execution_role_arn   IAM role ARN that EventBridge assumes to start SFN
                            executions.  Must have sfn:StartExecution permission.
-      environment          Deployment environment (dev / staging / prod).  Passed
+      environment          Deployment environment (dev / uat / prod).  Passed
                            as the 'environment' field in the Step Functions input
                            payload — required by the extraction Lambda handler.
       region_name          AWS region.
@@ -143,8 +121,6 @@ class ExtractionScheduleClient:
         self._environment = environment
         self._flexible_window_minutes = flexible_window_minutes
         self._scheduler = boto3.client("scheduler", region_name=region_name)
-
-    # ── Public API ──────────────────────────────────────────────────────────
 
     def create_or_update_schedule(
         self,
@@ -203,7 +179,6 @@ class ExtractionScheduleClient:
                 "connector_params": connector_params,
                 "is_replay": False,
                 "tenant_code": tenant_code,
-                # schedule_tick_iso is populated at message-send time by the trigger Lambda
             },
             separators=(",", ":"),
         )
@@ -222,7 +197,6 @@ class ExtractionScheduleClient:
             "State": "ENABLED",
         }
 
-        # Try to update existing schedule first; if not found, create it.
         try:
             response = self._scheduler.update_schedule(**kwargs)
             schedule_arn: str = response["ScheduleArn"]
@@ -237,7 +211,6 @@ class ExtractionScheduleClient:
         except ClientError as exc:
             if exc.response["Error"]["Code"] != "ResourceNotFoundException":
                 raise
-            # Schedule does not exist — create it.
 
         response = self._scheduler.create_schedule(**kwargs)
         schedule_arn = response["ScheduleArn"]
@@ -354,11 +327,6 @@ class ExtractionScheduleClient:
         )
 
 
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
-
-
 def _validate_stable_id(field_name: str, value: str) -> None:
     """Raise ValueError when value is not a valid stable identifier."""
     if not _STABLE_ID_PATTERN.match(value):
@@ -390,8 +358,6 @@ def _build_schedule_name(
     which could make two distinct long-id tuples collide on the same
     truncated name.
     """
-    # DL-SCOPE-04: the middle component is the connection, which for a single-connection
-    # source is the source_id — so existing schedule names are unchanged.
     key_id = resolve_connection_id(source_id, connection_id)
     name = f"{tenant_code}{_SCHEDULE_NAME_SEP}{key_id}{_SCHEDULE_NAME_SEP}{entity_id}"
     if len(name) <= _MAX_SCHEDULE_NAME_LEN:

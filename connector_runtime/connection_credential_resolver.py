@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from contracts.platform_metrics import PlatformMetric
+from contracts.resource_naming import secret_path
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from tenancy.source_connection import (
@@ -28,7 +29,7 @@ _logger = get_platform_logger(__name__)
 
 def legacy_source_credential_path(source_id: str) -> str:
     """The pre-DL-SEC-05 shared path, retained only as a migration fallback."""
-    return f"edl/sources/{source_id}/credentials"
+    return secret_path("sources", source_id, "credentials")
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,6 @@ class ConnectionCredentialPathResolver:
         if self._secret_exists(preferred):
             return ResolvedCredentialPath(secret_id=preferred, is_legacy_shared=False)
         if write_back or not self._allow_legacy_fallback:
-            # A write-back secret is never shared across tenants — fail closed instead.
             return ResolvedCredentialPath(secret_id=preferred, is_legacy_shared=False)
         record_platform_metric(
             PlatformMetric.CONNECTION_CREDENTIAL_FAILURES, 1.0, ConnectionId=connection_id

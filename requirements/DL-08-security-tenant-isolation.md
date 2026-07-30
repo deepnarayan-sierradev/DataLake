@@ -24,7 +24,7 @@ Open gaps, all verified against source:
 | # | Gap | Evidence |
 |---|---|---|
 | 1 | **No IAM-enforced tenant boundary anywhere.** S3/DynamoDB/Secrets policies scope to resource ARN only; no `Condition` block ties a principal to its tenant | `infrastructure/modules/iam/main.tf` |
-| 2 | Secrets Manager holds one shared credential per connector type, not per tenant | `edl/sources/{source_id}/credentials` |
+| 2 | Secrets Manager holds one shared credential per connector type, not per tenant | `datalake/<env>/sources/{source_id}/credentials` |
 | 5 | Glue/Athena wildcard grant across all tenants for 3 principals | `infrastructure/modules/glue/main.tf`, dev `terraform.tfvars` |
 | 6 | ~~`POST /tenants` accepts any authenticated caller — no admin authorization~~ **Closed by deletion 2026-07-28**: the route does not belong in this system (see DL-SEC-12) | `control_plane_handler.py` |
 | 7 | No WAF anywhere in the repo; no rate limiting on the control plane | no `aws_wafv2` resource exists |
@@ -49,7 +49,7 @@ access administration, SOC 2, formal incident response, BCDR.
   a credible multi-tenant claim.
 - **DL-SEC-02** **S3 bucket-policy conditions** binding each principal to its `{tenant_code}/`
   prefix, turning today's write-path convention into a boundary.
-- **DL-SEC-03** **Tenant-scoped keys everywhere.** The `EdlEntityExtractionConfig` migration to
+- **DL-SEC-03** **Tenant-scoped keys everywhere.** The `datalake-entity-extraction-config-dev` migration to
   `tenant_scoped_key()` is written but **`scripts/migrate_entity_config_to_tenant_scoped_key.py`
   must be run with `--apply` against each environment before the new code deploys**, or existing
   configs go dark. Treat this as a release-blocking migration step, not a background task.
@@ -59,7 +59,7 @@ access administration, SOC 2, formal incident response, BCDR.
 
 ### Credentials
 
-- **DL-SEC-05** **Per-tenant credential paths**: `edl/tenants/{tenant_code}/sources/{source_id}/credentials`,
+- **DL-SEC-05** **Per-tenant credential paths**: `datalake/<env>/tenants/{tenant_code}/sources/{source_id}/credentials`,
   with a migration for the existing shared entries and removal of the skipped placeholder test in
   `tests/test_tenant_isolation.py` once real coverage exists.
 - **DL-SEC-06** **Activate credential rotation** (gap 19) — implement the per-connector rotation

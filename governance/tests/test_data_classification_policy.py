@@ -49,8 +49,6 @@ class TestAutoClassifyField:
         assert auto_classify_field("credit_card_number") == DataClassificationLevel.SENSITIVE_PII
 
     def test_sensitive_pii_auto_masks_full_mask_not_hash(self):
-        # SEC-03 (OWASP A02): SENSITIVE_PII must default to irreversible FULL_MASK,
-        # never the dictionary-reversible unsalted HASH.
         policy = build_auto_classification_policy("salesforce", "sf-account", ["ssn", "email"])
         assert policy is not None
         by_field = {fc.field_name: fc for fc in policy.field_classifications}

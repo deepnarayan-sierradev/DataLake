@@ -30,8 +30,6 @@ _PLATFORM_LAMBDAS = {
 
 class TestEntryPointsComeFromTerraform:
     def test_the_hardcoded_constant_stays_empty(self) -> None:
-        # Re-adding an entry here re-creates the blind spot: the gate would stop depending on
-        # Terraform for that handler and could no longer notice its removal.
         assert EXTRA_ENTRY_POINTS == ()
 
     def test_terraform_declares_the_platform_lambdas(self) -> None:
@@ -45,6 +43,4 @@ class TestEntryPointsComeFromTerraform:
         )
 
     def test_the_parse_is_not_silently_empty(self) -> None:
-        # A regex that stops matching would make every module unreachable *and* make the gate
-        # report success for an empty graph, depending on how the sweep is seeded.
         assert len(_terraform_handlers()) >= 8

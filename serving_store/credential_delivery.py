@@ -12,7 +12,6 @@ this module handles a claim token, not a password.
 from __future__ import annotations
 
 import hashlib
-import os
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -24,17 +23,16 @@ from botocore.exceptions import ClientError
 
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from contracts.resource_naming import secret_path
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-_TABLE_NAME: Final[str] = "EdlServingCredentialClaim"
 
-# A claim link that lives longer than this is a credential sitting in someone's inbox.
 CLAIM_TTL_SECONDS: Final[int] = 900
 
-# Rotation cadence the console surfaces; also the `CredentialRotationAge` alarm threshold.
 ROTATION_INTERVAL_DAYS: Final[int] = 90
 
 
@@ -85,10 +83,8 @@ class ServingCredentialDelivery:
             raise ValueError("environment must not be empty.")
         self._environment = environment
         self._secrets = secrets_client or boto3.client("secretsmanager", region_name=region_name)
-        resolved = table_name or os.environ.get("SERVING_CLAIM_TABLE") or _TABLE_NAME
+        resolved = table_name or require_env("SERVING_CLAIM_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(resolved)
-
-    # ── Issue ─────────────────────────────────────────────────────────────────
 
     def issue_claim(self, tenant_code: str, *, issued_by: str) -> IssuedClaim:
         """Issue a one-time, time-limited claim for the tenant's reader credential."""
@@ -123,8 +119,6 @@ class ServingCredentialDelivery:
             claim_token=token,
             expires_at=expires.isoformat(),
         )
-
-    # ── Claim ─────────────────────────────────────────────────────────────────
 
     def claim(self, tenant_code: str, claim_token: str) -> dict[str, str]:
         """
@@ -179,8 +173,6 @@ class ServingCredentialDelivery:
                 revoked += 1
         return revoked
 
-    # ── Rotate ────────────────────────────────────────────────────────────────
-
     def rotate(self, tenant_code: str, *, rotated_by: str) -> str:
         """
         Rotate the reader credential and revoke outstanding claims.
@@ -208,7 +200,6 @@ class ServingCredentialDelivery:
         _logger.warning(
             "serving_credential_rotated", tenant_code=tenant_code, rotated_by=rotated_by
         )
-        # The caller receives the claim path, never the password.
         return self.issue_claim(tenant_code, issued_by=rotated_by).claim_url_path
 
     def rotation_age_days(self, tenant_code: str) -> float | None:
@@ -230,8 +221,6 @@ class ServingCredentialDelivery:
     def is_rotation_due(self, tenant_code: str) -> bool:
         age = self.rotation_age_days(tenant_code)
         return age is None or age >= ROTATION_INTERVAL_DAYS
-
-    # ── Private ───────────────────────────────────────────────────────────────
 
     def _read_secret(self, tenant_code: str) -> dict[str, str]:
         import json
@@ -280,4 +269,4 @@ class ServingCredentialDelivery:
 def serving_credential_secret_id(tenant_code: str) -> str:
     """Per-tenant reader credential path."""
     validate_tenant_code(tenant_code)
-    return f"edl/tenants/{tenant_code}/serving-store/reader-credentials"
+    return secret_path("tenants", tenant_code, "serving-store", "reader-credentials")

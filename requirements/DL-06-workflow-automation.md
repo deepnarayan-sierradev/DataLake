@@ -73,10 +73,10 @@ Everything in §6.3 beyond raw alerting is unbuilt.
 
 | Store | Purpose |
 |---|---|
-| `EdlWorkflowDefinition` (new) | PK `tenant_code`, SK `{workflow_id}#{version}` — definition, status, owner |
-| `EdlWorkflowExecution` (new) | PK `tenant_code`, SK `{workflow_id}#{execution_id}` — context, results; GSI on status+started_at |
-| `EdlWorkflowTask` (new) | PK `tenant_code`, SK `task_id`; GSI on assignee+status — approval and triage tasks |
-| `EdlWorkflowIdempotency` (new) | PK `tenant_code`, SK `idempotency_key`, TTL — exactly-once guard |
+| `datalake-workflow-definitions-dev` (new) | PK `tenant_code`, SK `{workflow_id}#{version}` — definition, status, owner |
+| `datalake-workflow-executions-dev` (new) | PK `tenant_code`, SK `{workflow_id}#{execution_id}` — context, results; GSI on status+started_at |
+| `datalake-workflow-tasks-dev` (new) | PK `tenant_code`, SK `task_id`; GSI on assignee+status — approval and triage tasks |
+| `datalake-workflow-idempotency-dev` (new) | PK `tenant_code`, SK `idempotency_key`, TTL — exactly-once guard |
 
 Definitions above a size threshold hold their body in S3 under
 `{tenant_code}/workflows/{workflow_id}/{version}.json` with a hash pointer in DynamoDB, matching the

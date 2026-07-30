@@ -1,5 +1,5 @@
 """
-`EdlSourceConnection` repository — PK `tenant_code`, SK `connection_id` (DL-SCOPE-03).
+`datalake-source-connections-dev` repository — PK `tenant_code`, SK `connection_id` (DL-SCOPE-03).
 
 Security (OWASP A01): every read and write is tenant-partitioned at the key level, and a
 retired connection is never returned as extractable.
@@ -7,9 +7,8 @@ retired connection is never returned as extractable.
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -17,6 +16,7 @@ from pydantic import ValidationError
 
 from contracts.identifier_policy import validate_stable_id, validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from persistence.dynamodb_paging import iter_items
@@ -28,8 +28,6 @@ from tenancy.source_connection import (
 )
 
 _logger = get_platform_logger(__name__)
-
-_TABLE_NAME: Final[str] = "EdlSourceConnection"
 
 
 class ConnectionNotFoundError(Exception):
@@ -47,10 +45,8 @@ class SourceConnectionRepository:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("SOURCE_CONNECTION_TABLE") or _TABLE_NAME
+        table_name = require_env("SOURCE_CONNECTION_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
-
-    # ── Reads ─────────────────────────────────────────────────────────────────
 
     def get_connection(self, tenant_code: str, connection_id: str) -> SourceConnection:
         tenant_code = validate_tenant_code(tenant_code)
@@ -138,8 +134,6 @@ class SourceConnectionRepository:
             c for c in self.list_connections(tenant_code, source_id=source_id) if c.is_extractable
         ]
 
-    # ── Writes ────────────────────────────────────────────────────────────────
-
     def register_connection(self, connection: SourceConnection) -> None:
         item = self._serialise(connection)
         try:
@@ -191,8 +185,6 @@ class SourceConnectionRepository:
             UpdateExpression="SET credential_verified_at = :ts",
             ExpressionAttributeValues={":ts": datetime.now(UTC).isoformat()},
         )
-
-    # ── Serialisation ─────────────────────────────────────────────────────────
 
     @staticmethod
     def _serialise(connection: SourceConnection) -> dict[str, Any]:

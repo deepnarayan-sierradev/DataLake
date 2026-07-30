@@ -14,7 +14,7 @@ a thin subclass that only adds the Sage-specific secret path convention
 (product_name) — its public API and observable behaviour are unchanged.
 
 Secret path convention (enforced here, not in auth clients):
-    edl/sources/sage/{product_name}/credentials
+    datalake/<env>/sources/sage/{product_name}/credentials
 
 Security (OWASP A07, A09):
   - Credentials are NEVER logged or included in exception messages.
@@ -37,11 +37,8 @@ from connector_runtime.interfaces.connector_interface import (
     DeterministicConnectorError,
     ExtractionErrorClassification,
 )
+from contracts.resource_naming import secret_path
 
-# Secret path template — product_name is validated before interpolation.
-_SECRET_PATH_TEMPLATE: Final[str] = "edl/sources/sage/{product_name}/credentials"  # noqa: S105
-
-# Re-fetch credentials this often to pick up Secrets Manager rotation (OWASP A07).
 _CREDENTIAL_CACHE_TTL_SECONDS: Final[int] = 3_600
 
 
@@ -88,7 +85,7 @@ class SageCredentialProvider(SecretsManagerCredentialClient):
         self._product_name = product_name
 
         super().__init__(
-            secret_id=_SECRET_PATH_TEMPLATE.format(product_name=product_name),
+            secret_id=secret_path("sources", "sage", product_name, "credentials"),
             region_name=region_name,
             required_keys=required_keys,
             source_label=f"Sage/{product_name}",

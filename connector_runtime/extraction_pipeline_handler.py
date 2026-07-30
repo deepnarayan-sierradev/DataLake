@@ -5,11 +5,14 @@ This is the entry point that Step Functions invokes for each extraction run.
 It receives the execution input, wires all platform dependencies, and delegates
 to ExtractionWorkflow for the full 10-stage pipeline.
 
+The connection is the identity dimension for a run (DL-SCOPE-05): a single-connection
+source resolves to its default connection rather than requiring one in the event.
+
 Step Functions execution input schema:
   {
     "source_id":        str   — stable source identifier
     "entity_id":        str   — stable entity identifier
-    "environment":      str   — "dev" | "staging" | "prod"
+    "environment":      str   — "dev" | "uat" | "prod"
     "connector_params": dict  — source-specific non-secret parameters
     "tenant_code":      str   — tenant identity for this run (ARCH-4: required, fails closed)
     "is_replay":        bool  — true when re-running a DLQ entry
@@ -18,7 +21,7 @@ Step Functions execution input schema:
 
 Required Lambda environment variables:
   AWS_REGION               — injected automatically by Lambda runtime
-  PLATFORM_ENVIRONMENT     — deployment environment (dev/staging/prod)
+  PLATFORM_ENVIRONMENT     — deployment environment (dev/uat/prod)
   RAW_S3_BUCKET            — name of the raw layer S3 bucket
   SCHEMA_SNAPSHOT_S3_BUCKET — name of the schema snapshot S3 bucket
 
@@ -34,8 +37,6 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Final
 
-# Import adapter modules so their @connector_registry.register() decorators
-# and register_builder() calls execute at Lambda cold-start time.
 import connector_runtime.adapters.bepro.bepro_connector
 import connector_runtime.adapters.dialpad.dialpad_connector
 import connector_runtime.adapters.google_ads.google_ads_connector
@@ -81,16 +82,8 @@ _logger = get_platform_logger(__name__)
 _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
     {"source_id", "entity_id", "environment", "connector_params", "tenant_code"}
 )
-_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
+_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "uat", "prod"})
 
-# ---------------------------------------------------------------------------
-# Lambda-instance retry policy
-# Lambda instances are reused across invocations, so a single ExtractionRetryPolicy
-# instance accumulates circuit-breaker state across runs for the same source.
-# This is intentional: consecutive failures within a Lambda instance's lifetime
-# will open the circuit for that instance, preventing further extraction attempts
-# until the instance recycles or the circuit is manually reset.
-# ---------------------------------------------------------------------------
 _retry_policy: ExtractionRetryPolicy = ExtractionRetryPolicy()
 
 
@@ -116,9 +109,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     _validate_event(event)
 
-    # Abort early if insufficient Lambda time remains to run the full pipeline.
-    # Lambda timeout is 900 s; 120 s margin prevents starting a run that cannot
-    # complete, which would be killed without a DLQ entry or audit record.
     check_lambda_timeout(context, min_remaining_ms=120_000)
 
     source_id: str = event["source_id"]
@@ -127,15 +117,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     connector_params: dict[str, str] = event["connector_params"]
     is_replay: bool = bool(event.get("is_replay", False))
     replay_of_run_id: str | None = event.get("replay_of_run_id")
-    # Tenant code for data-plane isolation (§1.1 / ARCH-4). Required — a
-    # missing or malformed tenant_code must fail closed rather than silently
-    # run as another tenant (OWASP A03); validated in _validate_event.
     tenant_code: str = str(event["tenant_code"])
-    # DL-SCOPE-05: the connection is the identity dimension; for a single-connection source it
-    # equals source_id, which keeps pre-migration payloads working unchanged.
     connection_id: str = resolve_connection_id(source_id, event.get("connection_id"))
 
-    # ── Validate connector_params with per-connector Pydantic model (§2.2) ───
     _validate_connector_params(source_id, connector_params)
 
     region_name = require_env("AWS_REGION")
@@ -152,8 +136,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         replay_of_run_id=replay_of_run_id,
         region_name=region_name,
     )
-
-    # ── Wire dependencies ────────────────────────────────────────────────────
 
     coordinator = RunCoordinator(
         environment=environment,
@@ -180,7 +162,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     drift_evaluator = SchemaDriftEvaluator()
 
-    # Resolve connector + raw-layer writer from the registry builder.
     builder = connector_registry.resolve_builder(source_id)
     connector, raw_writer = builder(
         environment, region_name, connector_params, raw_s3_bucket, tenant_code
@@ -195,17 +176,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         connector=connector,
         raw_layer_writer=raw_writer,
         retry_policy=_retry_policy,
-        # PERF-5: threaded through so the checkpoint path (opt-in via
-        # EntityExtractionConfig.max_records_per_lambda_run) can check
-        # remaining Lambda execution time via context.get_remaining_time_in_millis().
         lambda_context=context,
     )
 
-    # ── Execute pipeline ─────────────────────────────────────────────────────
-    # DL-OPS-05/07: this handler previously bound no contextvars at all and had no failure record
-    # on a hard Lambda kill — the stage that most often hits the timeout was the least
-    # instrumented. The run id comes from the coordinator, which owns it, so no workflow contract
-    # changes.
     identity = StageIdentity(
         tenant_code=tenant_code,
         source_id=source_id,
@@ -234,7 +207,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         transformation_blocked=result.transformation_blocked,
     )
 
-    # ── Emit CloudWatch metrics for extraction stage ──────────────────────────
     try:
         _metrics = CloudWatchMetricsEmitter(region_name=region_name)
         _metrics.set_tenant_context(tenant_code)
@@ -255,15 +227,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             )
         _metrics.flush()
     except Exception as _exc:
-        # Metric emission must never fail an extraction run.
         _logger.warning("extraction_metrics_emission_failed", error=str(_exc))
 
     return dataclasses.asdict(result)
-
-
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
 
 
 def _validate_event(event: dict[str, Any]) -> None:
@@ -299,9 +265,6 @@ def _validate_event(event: dict[str, Any]) -> None:
     if not isinstance(event.get("connector_params", {}), dict):
         raise ValueError("connector_params must be a JSON object (dict).")
 
-    # tenant_code is required (ARCH-4) and must always be well-formed
-    # (OWASP A03 / SEC-5) — a missing or malformed tenant_code must fail
-    # closed rather than silently default to another tenant's identity.
     tenant_code = str(event["tenant_code"])
     if not TENANT_CODE_PATTERN.match(tenant_code):
         raise ValueError(f"tenant_code={tenant_code!r} does not conform to the tenant code format.")
@@ -322,7 +285,6 @@ def _validate_connector_params(source_id: str, connector_params: dict[str, str])
 
     params_model_cls = connector_registry.get_params_model(source_id)
     if params_model_cls is None:
-        # No model registered — passthrough (OWASP: fail-open not fail-closed here is intentional).
         return
     try:
         params_model_cls.model_validate(connector_params)

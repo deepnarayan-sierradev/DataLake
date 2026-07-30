@@ -70,14 +70,12 @@ def _make_mock_connection(rows: list[dict] | None = None) -> MagicMock:
     effective_rows = rows if rows is not None else _MOCK_ROWS
     conn = MagicMock()
     cursor = MagicMock()
-    # cursor.description returns list of (column_name, ...) tuples
     col_names = list(effective_rows[0].keys()) if effective_rows else []
     cursor.description = [(col,) for col in col_names]
     cursor.fetchall.return_value = [
         tuple(row[col] for col in col_names)  # type: ignore[index]
         for row in effective_rows
     ]
-    # Support context manager protocol (with conn.cursor() as cursor)
     conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
     conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
     return conn
@@ -110,7 +108,6 @@ class TestFieldDiscovery:
             exclude_fields=[],
         )
         field_names = {f.name for f in contract.fields}
-        # 'notes' is json type — non-queryable, excluded
         assert "notes" not in field_names
         assert "id" in field_names
         assert "customer_id" in field_names
@@ -163,7 +160,6 @@ class TestFieldDiscovery:
 
     def test_empty_result_raises_error(self) -> None:
         conn = _make_mock_connection(rows=[])
-        # Override to avoid empty dict key error on column_name
         cursor = MagicMock()
         cursor.description = []
         cursor.fetchall.return_value = []
@@ -219,10 +215,8 @@ class TestFieldDiscovery:
 class TestSecurityRequirements:
     def test_query_uses_parameterized_placeholders(self) -> None:
         """OWASP A03: database and table_name must not be in the literal query string."""
-        # The introspect query uses %(database)s and %(table_name)s placeholders.
         assert "%(database)s" in _INTROSPECT_QUERY
         assert "%(table_name)s" in _INTROSPECT_QUERY
-        # Raw values must not be embedded.
         assert "production" not in _INTROSPECT_QUERY
         assert "orders" not in _INTROSPECT_QUERY
 

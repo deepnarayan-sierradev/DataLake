@@ -4,9 +4,9 @@
 **Purpose:** Quick response guide for common incidents  
 **Last updated:** 2026-07-14
 
-> **Lambda functions:** `EdlExtractionPipeline` · `EdlTransformationPipeline` · `EdlEntityResolutionPipeline` · `EdlAnalyticsLayerPublisher`  
-> **Key buckets (prod):** `edl-raw-<PROD_ACCOUNT_ID>` · `edl-curated-<PROD_ACCOUNT_ID>` · `edl-analytics-<PROD_ACCOUNT_ID>` · `edl-schema-snapshots-<PROD_ACCOUNT_ID>`  
-> Resource names no longer carry an environment prefix — dev/staging/prod each live in their own AWS account, so the same PascalCase name (e.g. `EdlExtractionPipeline`) resolves in every account; only S3 bucket names differ per environment, ending in that account's ID instead of an env prefix. See [PLATFORM_STATUS.md](PLATFORM_STATUS.md) for all resource names.
+> **Lambda functions:** `datalake-extraction-dev` · `datalake-transformation-dev` · `datalake-entity-resolution-dev` · `datalake-analytics-devLayerPublisher`  
+> **Key buckets (prod):** `datalake-raw-<PROD_ACCOUNT_ID>` · `datalake-curated-<PROD_ACCOUNT_ID>` · `datalake-analytics-<PROD_ACCOUNT_ID>` · `datalake-schema-snapshots-<PROD_ACCOUNT_ID>`  
+> Resource names no longer carry an environment prefix — dev/staging/prod each live in their own AWS account, so the same PascalCase name (e.g. `datalake-extraction-dev`) resolves in every account; only S3 bucket names differ per environment, ending in that account's ID instead of an env prefix. See [PLATFORM_STATUS.md](PLATFORM_STATUS.md) for all resource names.
 
 > ### Current environment reality — read before paging anyone
 >
@@ -63,7 +63,7 @@ aws stepfunctions describe-execution \
 
 # Examine DynamoDB config to understand what entity failed
 aws dynamodb get-item \
-  --table-name EdlEntityExtractionConfig \
+  --table-name datalake-entity-extraction-config-dev \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 ```
 
@@ -73,7 +73,7 @@ aws dynamodb get-item \
 ```bash
 # Verify Lambda can reach Secrets Manager
 aws secretsmanager get-secret-value \
-  --secret-id edl/sources/salesforce/credentials \
+  --secret-id datalake/<env>/sources/salesforce/credentials \
   --query 'SecretString' | grep instance_url
 
 # Verify Lambda can reach source API
@@ -84,12 +84,12 @@ curl -I https://YOUR_SALESFORCE_INSTANCE.salesforce.com/services/oauth2/token
 ```bash
 # Salesforce OAuth token expiry
 aws secretsmanager get-secret-value \
-  --secret-id edl/sources/salesforce/credentials \
+  --secret-id datalake/<env>/sources/salesforce/credentials \
   --query 'SecretString' | jq .client_id
 
 # Has credential been rotated recently?
 aws secretsmanager describe-secret \
-  --secret-id edl/sources/salesforce/credentials \
+  --secret-id datalake/<env>/sources/salesforce/credentials \
   --query 'RotationRules'
 ```
 
@@ -114,13 +114,13 @@ aws stepfunctions start-execution \
 ```bash
 # Immediately rotate the credential
 aws secretsmanager rotate-secret \
-  --secret-id edl/sources/salesforce/credentials \
+  --secret-id datalake/<env>/sources/salesforce/credentials \
   --rotation-lambda-arn <ROTATION_LAMBDA_ARN> \
   --rotation-rules AutomaticallyAfterDays=90
 
 # Manually update new OAuth token
 aws secretsmanager put-secret-value \
-  --secret-id edl/sources/salesforce/credentials \
+  --secret-id datalake/<env>/sources/salesforce/credentials \
   --secret-string '{"instance_url":"...","client_id":"NEW_ID","client_secret":"NEW_SECRET"}'
 
 # Trigger re-run
@@ -156,7 +156,7 @@ If missing: Add rule via Terraform or AWS console
 
 ```bash
 # Get the quality report from S3
-aws s3 cp s3://edl-analytics-<PROD_ACCOUNT_ID>/quality_reports/salesforce-account/2026-06-17.json - | jq '.blocking_violations'
+aws s3 cp s3://datalake-analytics-<PROD_ACCOUNT_ID>/quality_reports/salesforce-account/2026-06-17.json - | jq '.blocking_violations'
 
 # Count failed records
 jq '.summary.total_records_failed' < 2026-06-17.json
@@ -175,7 +175,7 @@ SELECT
   COUNT(*) as violation_count,
   account_name,
   NULL as account_name_is_null
-FROM `edl-raw-087972550871`.`salesforce_account`
+FROM `datalake-raw-dev-use1`.`salesforce_account`
 WHERE account_name IS NULL
   AND partition_date = '2026-06-17'
 GROUP BY account_name
@@ -185,7 +185,7 @@ LIMIT 10;
 SELECT 
   email,
   COUNT(*) as count
-FROM `edl-raw-087972550871`.`salesforce_contact`
+FROM `datalake-raw-dev-use1`.`salesforce_contact`
 WHERE email NOT LIKE '%@%.%'
   AND partition_date = '2026-06-17'
 GROUP BY email
@@ -222,7 +222,7 @@ Timeline: Update policy, re-run transformation
 
 ```bash
 # Download current policy
-aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/quality_policies/salesforce-account.json ./
+aws s3 cp s3://datalake-schema-snapshots-<PROD_ACCOUNT_ID>/quality_policies/salesforce-account.json ./
 
 # Edit policy file: change blocking violation to WARNING or update regex pattern
 # Example: change email pattern from strict to permissive
@@ -232,7 +232,7 @@ aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/quality_policies/salesforc
 python -m json.tool salesforce-account.json
 
 # Upload updated policy
-aws s3 cp salesforce-account.json s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/quality_policies/
+aws s3 cp salesforce-account.json s3://datalake-schema-snapshots-<PROD_ACCOUNT_ID>/quality_policies/
 
 # Trigger transformation re-run with new policy
 aws lambda invoke \
@@ -260,7 +260,7 @@ aws lambda invoke \
 
 ```bash
 # Get the drift report from S3
-aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/drift_reports/salesforce-account/2026-06-17.json - | jq '.'
+aws s3 cp s3://datalake-schema-snapshots-<PROD_ACCOUNT_ID>/drift_reports/salesforce-account/2026-06-17.json - | jq '.'
 
 # Example output:
 # {
@@ -288,7 +288,7 @@ aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/drift_reports/salesforce-a
 # Example for MySQL:
 aws rds-data execute-statement \
   --resource-arn "arn:aws:rds:us-east-1:ACCOUNT_ID:db:prod-rds-instance" \
-  --secret-arn "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:edl/sources/mysql-rds/credentials" \
+  --secret-arn "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:datalake/<env>/sources/mysql-rds/credentials" \
   --sql "DESCRIBE prod_schema.orders"
 ```
 
@@ -310,18 +310,18 @@ aws rds-data execute-statement \
 
 ```bash
 # Update schema snapshot to reflect new schema
-aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/schemas/salesforce-account/latest.json ./schema-latest.json
+aws s3 cp s3://datalake-schema-snapshots-<PROD_ACCOUNT_ID>/schemas/salesforce-account/latest.json ./schema-latest.json
 
 # Update field mapping to exclude removed field
-aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/field_mappings/salesforce-account/v1.json ./mapping-v1.json
+aws s3 cp s3://datalake-schema-snapshots-<PROD_ACCOUNT_ID>/field_mappings/salesforce-account/v1.json ./mapping-v1.json
 # Edit: remove any reference to LegacyAccountId__c
 # Save as v2.json
 
-aws s3 cp ./mapping-v2.json s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/field_mappings/salesforce-account/v2.json
+aws s3 cp ./mapping-v2.json s3://datalake-schema-snapshots-<PROD_ACCOUNT_ID>/field_mappings/salesforce-account/v2.json
 
 # Update entity config to reference new mapping version
 aws dynamodb update-item \
-  --table-name EdlEntityExtractionConfig \
+  --table-name datalake-entity-extraction-config-dev \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}' \
   --attribute-updates '{"field_mapping_version":{"Value":{"S":"v2"},"Action":"PUT"}}'
 
@@ -350,7 +350,7 @@ aws lambda invoke \
 
 ```bash
 # Get latest extraction run for the entity.
-# NOTE: EdlWatermarkRepository's "source_id" key attribute stores
+# NOTE: datalake-watermark-dev's "source_id" key attribute stores
 # tenant_scoped_key(tenant_code, source_id), i.e. "{tenant_code}#{source_id}"
 # (contracts/identifier_policy.py) — NOT the bare source_id. This is
 # genuinely key-level tenant isolation (see docs/PIPELINE_FLOW.md's canonical
@@ -359,7 +359,7 @@ aws lambda invoke \
 # looks identical to "no watermark yet" — confirm the tenant_code from the
 # alert/run_id before assuming this is a fresh entity.
 aws dynamodb query \
-  --table-name EdlWatermarkRepository \
+  --table-name datalake-watermark-dev \
   --key-condition-expression "source_id = :source AND entity_id = :entity" \
   --expression-attribute-values '{":source":{"S":"demo#salesforce"},":entity":{"S":"salesforce-account"}}'
 
@@ -405,7 +405,7 @@ aws logs tail /aws/lambda/extraction --since 30m --follow
 ```bash
 # Check raw data write throughput
 aws s3api list-objects-v2 \
-  --bucket edl-raw-<PROD_ACCOUNT_ID> \
+  --bucket datalake-raw-<PROD_ACCOUNT_ID> \
   --prefix salesforce/salesforce-account/extraction_date=2026-06-17 \
   --query 'Contents | length'
 
@@ -501,7 +501,7 @@ aws logs tail /aws/lambda/extraction --since 1m --follow --filter-pattern "run-2
 ```bash
 # Check if replay completed successfully
 aws dynamodb query \
-  --table-name EdlRunAuditLog \
+  --table-name datalake-run-audit-log-dev \
   --key-condition-expression "run_id = :run_id" \
   --expression-attribute-values '{":run_id":{"S":"run-20260617-020045678-xyz"}}' \
   | jq '.Items[] | {stage: .stage, status: .status}'
@@ -667,8 +667,8 @@ Two of those gaps come up often enough in practice to flag explicitly:
 
 - **Glue/Athena is a wildcard grant, not per-tenant isolation.** Three IAM principals configured
   in dev's `terraform.tfvars` (`analytics_reader_principals`) hold a Lake Formation
-  `SELECT`+`DESCRIBE` grant with `wildcard = true` across the whole shared `edl_curated`/
-  `edl_analytics` database — meaning each of those principals can already query every tenant's
+  `SELECT`+`DESCRIBE` grant with `wildcard = true` across the whole shared `datalake_curated_dev`/
+  `datalake_analytics_dev` database — meaning each of those principals can already query every tenant's
   tables, not just one. A "cross-tenant Athena query" report may not be a regression at all — check
   whether it's this grant working exactly as configured before assuming a code bug.
 - **The serving store's isolation is solid but currently unreachable from outside the VPC** (no
@@ -698,13 +698,13 @@ novel.
 ```bash
 # Find every run for a suspect tenant in the audit log (Scan — no tenant-code GSI yet)
 aws dynamodb scan \
-  --table-name EdlRunAuditLog \
+  --table-name datalake-run-audit-log-dev \
   --filter-expression "tenant_code = :tc" \
   --expression-attribute-values '{":tc":{"S":"<SUSPECT_TENANT_CODE>"}}'
 
 # Find every S3 object under a tenant's prefix (any bucket)
-aws s3 ls s3://edl-curated-<PROD_ACCOUNT_ID>/<SUSPECT_TENANT_CODE>/ --recursive
-aws s3 ls s3://edl-raw-<PROD_ACCOUNT_ID>/<SUSPECT_TENANT_CODE>/ --recursive
+aws s3 ls s3://datalake-curated-<PROD_ACCOUNT_ID>/<SUSPECT_TENANT_CODE>/ --recursive
+aws s3 ls s3://datalake-raw-<PROD_ACCOUNT_ID>/<SUSPECT_TENANT_CODE>/ --recursive
 ```
 
 ### Step 2: Contain (10 min)
@@ -857,16 +857,16 @@ Quick reference for tools and AWS services used during incident investigation an
 
 | Service | Console path | Key view for incidents |
 |---|---|---|
-| **Step Functions** | Console → Step Functions → State Machines → `EdlExtractionPipeline` | Execution history; failed executions; input/output per stage |
-| **Lambda** | Console → Lambda → Functions → `EdlExtraction*` | Invocation errors; CloudWatch log link; concurrency |
-| **CloudWatch Logs** | Console → CloudWatch → Log Groups → `/edl/*` | Structured JSON log events; filter by `run_id` |
+| **Step Functions** | Console → Step Functions → State Machines → `datalake-extraction-dev` | Execution history; failed executions; input/output per stage |
+| **Lambda** | Console → Lambda → Functions → `datalake-extraction*` | Invocation errors; CloudWatch log link; concurrency |
+| **CloudWatch Logs** | Console → CloudWatch → Log Groups → `/datalake/*` | Structured JSON log events; filter by `run_id` |
 | **CloudWatch Alarms** | Console → CloudWatch → Alarms | Active alarms; threshold; recent datapoints |
 | **X-Ray** | Console → X-Ray → Traces | Service map; latency; fault trace for specific `run_id` |
-| **DynamoDB** | Console → DynamoDB → Tables → `EdlWatermarkRepository` | Current watermark; version; last run ID |
-| **DynamoDB** | Console → DynamoDB → Tables → `EdlRunAuditLog` | Stage-by-stage audit record per run |
-| **SQS (DLQ)** | Console → SQS → `EdlExtractionFailureDlq` | Message count; message body (contains `run_id`, `source_id`, `entity_id`, `failed_stage`) |
-| **S3** | Console → S3 → `edl-schema-snapshots-<PROD_ACCOUNT_ID>` | Latest schema snapshot; drift report |
-| **Secrets Manager** | Console → Secrets Manager → `edl/sources/{source}/credentials` | Last rotation date; version status |
+| **DynamoDB** | Console → DynamoDB → Tables → `datalake-watermark-dev` | Current watermark; version; last run ID |
+| **DynamoDB** | Console → DynamoDB → Tables → `datalake-run-audit-log-dev` | Stage-by-stage audit record per run |
+| **SQS (DLQ)** | Console → SQS → `datalake-extraction-failure-dlq-dev` | Message count; message body (contains `run_id`, `source_id`, `entity_id`, `failed_stage`) |
+| **S3** | Console → S3 → `datalake-schema-snapshots-<PROD_ACCOUNT_ID>` | Latest schema snapshot; drift report |
+| **Secrets Manager** | Console → Secrets Manager → `datalake/<env>/sources/{source}/credentials` | Last rotation date; version status |
 
 ### CLI Quick Commands for Incident Investigation
 
@@ -877,29 +877,29 @@ Quick reference for tools and AWS services used during incident investigation an
 # See the note in Scenario 4 above and docs/PIPELINE_FLOW.md's canonical
 # isolation table.
 aws dynamodb get-item \
-  --table-name EdlWatermarkRepository \
+  --table-name datalake-watermark-dev \
   --key '{"source_id":{"S":"demo#salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
 # Read DLQ messages (peek without deleting) — this is an SQS queue, not SNS.
 aws sqs receive-message \
-  --queue-url https://sqs.us-east-1.amazonaws.com/ACCOUNT/EdlExtractionFailureDlq \
+  --queue-url https://sqs.us-east-1.amazonaws.com/ACCOUNT/datalake-extraction-failure-dlq-dev \
   --max-number-of-messages 10 \
   --visibility-timeout 0
 
 # Get most recent Step Functions execution status
 aws stepfunctions list-executions \
-  --state-machine-arn arn:aws:states:us-east-1:ACCOUNT:stateMachine:EdlExtractionPipeline \
+  --state-machine-arn arn:aws:states:us-east-1:ACCOUNT:stateMachine:datalake-extraction-dev \
   --status-filter FAILED \
   --max-results 5
 
 # Check latest schema snapshot
-aws s3 cp s3://edl-schema-snapshots-<PROD_ACCOUNT_ID>/salesforce/salesforce-account/latest.json -
+aws s3 cp s3://datalake-schema-snapshots-<PROD_ACCOUNT_ID>/salesforce/salesforce-account/latest.json -
 
 # Check CloudWatch alarm state (real alarm_name values from
 # infrastructure/modules/observability/main.tf — there are 17 alarms total
 # across observability + orchestration modules, not just these three)
 aws cloudwatch describe-alarms \
-  --alarm-names EdlExtractionFailures EdlSchemaDriftBreakingDetected EdlWatermarkLagSloBreach
+  --alarm-names datalake-extraction-failures-<env> datalake-schema-drift-breaking-<env> datalake-watermark-lag-slo-breach-<env>
 
 # Trigger manual replay
 python scripts/trigger_extraction.py \
@@ -925,9 +925,9 @@ python scripts/trigger_extraction.py \
 
 | Layer | Tool | Location |
 |---|---|---|
-| Structured logs | structlog → CloudWatch Logs | Log group: `/edl/{service}` |
+| Structured logs | structlog → CloudWatch Logs | Log group: `/datalake/{service}-<env>` |
 | Custom metrics | CloudWatch (namespace: `EnterpriseDatalake`) | 6 canonical metrics per run |
 | Alarms | CloudWatch Alarms → SNS (`platform_alerts`) → Email/PagerDuty | 17 alarms (`infrastructure/modules/observability/main.tf` + 3 more in `orchestration/main.tf`) — not the "4" figure some older docs still cite |
 | Distributed traces | AWS X-Ray | Service map; trace by `run_id` annotation |
-| DLQ | SQS `EdlExtractionFailureDlq` | KMS-encrypted; 14-day message retention |
+| DLQ | SQS `datalake-extraction-failure-dlq-dev` | KMS-encrypted; 14-day message retention |
 

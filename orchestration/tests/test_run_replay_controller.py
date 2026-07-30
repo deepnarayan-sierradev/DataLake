@@ -34,9 +34,6 @@ from orchestration.step_functions.run_replay_controller import (
     RunReplayController,
 )
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 _STATE_MACHINE_ARN = "arn:aws:states:us-east-1:123456789012:stateMachine:extraction-pipeline"
 _REGION = "us-east-1"
 _SOURCE = "netsuite"
@@ -74,11 +71,6 @@ def _make_controller() -> tuple[RunReplayController, MagicMock]:
             region_name=_REGION,
         )
     return controller, mock_sfn
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 class TestParseDlqEntry:
@@ -218,7 +210,6 @@ class TestStartReplayExecution:
 
     def test_execution_name_max_80_chars(self) -> None:
         controller, mock_sfn = _make_controller()
-        # Use an entry with a long run_id to test truncation
         long_run_id = "run-20260612-143022123456-" + ("a" * 60)
         raw = json.loads(_VALID_ENTRY_BODY)
         raw["run_id"] = long_run_id
@@ -258,7 +249,6 @@ class TestStartReplayExecution:
 
         arn = controller.start_replay_execution(entry, _CONNECTOR_PARAMS)
 
-        # Should return a deterministic ARN derived from the state machine ARN
         assert "execution" in arn
         assert "replay" in arn
         assert entry.run_id in arn

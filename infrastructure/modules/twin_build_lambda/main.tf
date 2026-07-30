@@ -17,7 +17,7 @@ locals {
     ManagedBy   = "terraform"
     Module      = "twin_build_lambda"
   })
-  function_name = "EdlTwinBuilder"
+  function_name = "${var.name_prefix}-twin-builder-${var.environment}"
 }
 
 resource "aws_cloudwatch_log_group" "lambda_execution" {
@@ -31,20 +31,18 @@ resource "aws_cloudwatch_log_group" "lambda_execution" {
   })
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Function — Twin Builder (BuildTwin Step Functions stage)
-#
-# Reads analytics-layer golden records and relationship-rules config from S3,
-# resolves edges set-based, and upserts the twin index in DynamoDB. Runs
-# outside the VPC: it needs only S3 (HTTPS) and DynamoDB, not the serving-store
-# RDS, so no security group / subnet wiring is required.
-#
-# Environment variables:
-#   PLATFORM_ENVIRONMENT          — "dev" | "staging" | "prod"
-#   ANALYTICS_S3_BUCKET           — analytics layer bucket (read golden, write edges)
-#   RELATIONSHIP_RULES_S3_BUCKET  — bucket holding relationship-rules config JSON
-#   AWS_REGION                    — injected automatically by the Lambda runtime
-# ---------------------------------------------------------------------------
+
+locals {
+  required_resource_names = [
+    "ENTITY_TYPE_REGISTRY_TABLE",
+    "RESOURCE_NAME_PREFIX",
+    "SECRET_PATH_PREFIX",
+    "TWIN_INDEX_TABLE",
+  ]
+  resource_name_variables = {
+    for key in local.required_resource_names : key => var.resource_names[key]
+  }
+}
 
 resource "aws_lambda_function" "twin_builder" {
   function_name = local.function_name
@@ -89,11 +87,11 @@ resource "aws_lambda_function" "twin_builder" {
   kms_key_arn = var.kms_key_arn
 
   environment {
-    variables = {
+    variables = merge({
       PLATFORM_ENVIRONMENT         = var.environment
       ANALYTICS_S3_BUCKET          = var.analytics_s3_bucket_name
       RELATIONSHIP_RULES_S3_BUCKET = var.relationship_rules_s3_bucket_name
-    }
+    }, local.resource_name_variables)
   }
 
   tracing_config {
@@ -112,28 +110,23 @@ resource "aws_lambda_permission" "allow_step_functions" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.twin_builder.function_name
   principal     = "states.amazonaws.com"
-  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:EdlExtractionPipeline"
+  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.name_prefix}-extraction-workflow-${var.environment}"
 }
 
-# ---------------------------------------------------------------------------
-# Async DLQ, and VPC egress, for the twin builder — missed in the first pass over the
-# Lambda modules because it is wired from the environment rather than the pipeline module.
-# ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "async_dlq" {
-  name                      = "EdlStageDlq-TwinBuildAsync"
+  name                      = "${var.name_prefix}-twin-build-async-dlq-${var.environment}"
   message_retention_seconds = 1209600
   sqs_managed_sse_enabled   = true
 
-  tags = merge(local.common_tags, { Name = "EdlStageDlq-TwinBuildAsync" })
+  tags = merge(local.common_tags, { Name = "${var.name_prefix}-twin-build-async-dlq-${var.environment}" })
 }
 
 resource "aws_security_group" "twin_build_lambda" {
   count = var.vpc_id == null ? 0 : 1
 
-  # Attached via the dynamic vpc_config block; checkov's graph does not traverse one.
   #checkov:skip=CKV2_AWS_5:Attached via dynamic vpc_config in this module.
-  name        = "TwinBuildLambdaSg"
+  name        = "${local.function_name}-sg"
   description = "HTTPS egress only for the twin build Lambda."
   vpc_id      = var.vpc_id
 
@@ -145,7 +138,7 @@ resource "aws_security_group" "twin_build_lambda" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = merge(local.common_tags, { Name = "TwinBuildLambdaSg" })
+  tags = merge(local.common_tags, { Name = "${local.function_name}-sg" })
 
   lifecycle {
     create_before_destroy = true

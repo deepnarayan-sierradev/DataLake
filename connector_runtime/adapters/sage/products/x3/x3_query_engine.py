@@ -59,34 +59,20 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Maximum records per X3 OData query page.
-# Sage X3 REST API allows up to 1000 records per page; use 1000 as the safe default.
 X3_PAGE_SIZE: Final[int] = 1_000
 
-# Discriminant key stored in query_text to identify X3 OData queries.
-# SageConnector checks this to select the correct execution path.
-# Public (no leading underscore) — imported by sage_connector for dispatch.
 X3_ODATA_DISCRIMINANT: Final[str] = "_x3_odata"
 
-# Validates Sage X3 endpoint names: uppercase letters and digits only.
-# e.g. "BPCUSTOMER", "BPSUPPLIER", "SORDER", "SINVOICE", "PITM"
 _SAFE_X3_ENDPOINT_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9]{1,63}$")
 
-# Validates X3 field names (short names).
-# X3 fields: uppercase, digits, underscores — e.g. BPCNUM_0, MODDAT_0, CRY_0
-# Dot-notation sub-resource fields: XBPADR.BPADES_0, XBPCRIT.CRDLMT_0
 _SAFE_X3_FIELD_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^[A-Z][A-Z0-9_]{0,63}(\.[A-Z][A-Z0-9_]{0,63})?$"
 )
 
-# ISO-8601 UTC pattern used to validate watermark parameter values before
-# substituting them into the filter string (injection prevention, OWASP A03).
 _ISO8601_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$"
 )
 
-# Placeholder markers embedded in the filter string for watermark values.
-# Double-underscore delimiters ensure they cannot match any real X3 field value.
 _LOWER_BOUND_PLACEHOLDER: Final[str] = "__X3_LOWER_BOUND__"
 _UPPER_BOUND_PLACEHOLDER: Final[str] = "__X3_UPPER_BOUND__"
 
@@ -127,7 +113,6 @@ class X3QueryEngine:
     """
 
     def __init__(self, object_path: str) -> None:
-        # For X3, object_path is the OData endpoint name (e.g. "BPCUSTOMER").
         if not _SAFE_X3_ENDPOINT_PATTERN.match(object_path):
             raise X3QueryBuildError(
                 f"object_path {object_path!r} does not match the required X3 endpoint pattern. "
@@ -169,7 +154,6 @@ class X3QueryEngine:
         if load_type == LoadType.INCREMENTAL and not watermark_field:
             raise X3QueryBuildError("watermark_field is required for INCREMENTAL load type.")
 
-        # Validate and collect field names from the FieldContract.
         field_names: list[str] = []
         for descriptor in field_contract.fields:
             if not _SAFE_X3_FIELD_PATTERN.match(descriptor.name):
@@ -184,7 +168,6 @@ class X3QueryEngine:
                 "FieldContract contains no queryable fields — cannot build query."
             )
 
-        # Build OData $select — comma-separated field list.
         select_str = ",".join(field_names)
 
         query_parameters: dict[str, Any] = {}
@@ -197,8 +180,6 @@ class X3QueryEngine:
                     f"watermark_field {watermark_field!r} does not match the "
                     "required X3 field name pattern."
                 )
-            # Embed placeholder markers in the filter string — NOT actual values.
-            # Values are in query_parameters and substituted at execution time.
             filter_str = (
                 f"{watermark_field} ge {_LOWER_BOUND_PLACEHOLDER} "
                 f"and {watermark_field} lt {_UPPER_BOUND_PLACEHOLDER}"
@@ -207,7 +188,6 @@ class X3QueryEngine:
             query_parameters["upper_bound"] = watermark_upper
             effective_watermark_field = watermark_field
 
-        # $orderby on the watermark field if incremental, else first field for stability.
         orderby_field = watermark_field if watermark_field else field_names[0]
         orderby_str = f"{orderby_field} asc"
 

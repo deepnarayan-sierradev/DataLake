@@ -31,7 +31,6 @@ class MergeStrategyError(Exception):
     """Raised when a merge cannot be expressed for the given table and keys."""
 
 
-# Rows above which a bulk staging load is preferred over row-wise upserts.
 BULK_LOAD_ROW_THRESHOLD: Final[int] = 5_000
 
 
@@ -106,8 +105,6 @@ def build_merge_plan(
     if soft_delete_column:
         statements = (
             *statements,
-            # Applied after the merge so a row that was both updated and deleted in one batch
-            # ends up deleted, matching the curated layer's SCD-1 semantics.
             f"DELETE FROM {target_table} WHERE {soft_delete_column} IN (1, TRUE);",  # nosec B608 — identifiers pass _validate_identifiers
         )
 
@@ -192,11 +189,6 @@ def _mysql_merge(
     )
 
 
-# ---------------------------------------------------------------------------
-# Performance sizing (DL-SERV-05)
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class IndexRecommendation:
     """One index the serving layer needs for interactive concurrency."""
@@ -209,7 +201,6 @@ class IndexRecommendation:
         name = f"ix_{self.table_name}_{'_'.join(self.columns)}"[:63]
         column_list = ", ".join(self.columns)
         if engine is ServingEngine.REDSHIFT:
-            # Redshift has no secondary indexes; sort and dist keys do the same job.
             return f"ALTER TABLE {self.table_name} ALTER SORTKEY ({column_list});"
         return f"CREATE INDEX IF NOT EXISTS {name} ON {self.table_name} ({column_list});"
 

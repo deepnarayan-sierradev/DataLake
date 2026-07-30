@@ -126,12 +126,9 @@ def _shift_years(moment: date, years: int) -> date:
     try:
         return moment.replace(year=moment.year + years)
     except ValueError:
-        # 29 February shifted into a non-leap year — 28 February is the finance convention.
         return moment.replace(year=moment.year + years, day=28)
 
 
-# SQL truncation expressions per grain, per dialect. The compiler emits these rather than
-# any caller-supplied fragment (OWASP A03).
 _TRUNC_EXPRESSIONS: Final[dict[str, dict[TimeGrain, str]]] = {
     "athena": {
         TimeGrain.DAY: "date_trunc('day', {column})",

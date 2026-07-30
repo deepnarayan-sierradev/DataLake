@@ -16,6 +16,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime.configuration_repository.configuration_repository import (
     ConfigurationBackend,
     ConfigurationNotFoundError,
@@ -26,8 +27,8 @@ from contracts.entity_configuration_contract import EntityExtractionConfig, Load
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_TABLE = "EdlEntityExtractionConfig"
-_BUCKET = "edl-entity-extraction-config-s3"
+_TABLE = RESOURCE_NAME_ENVIRONMENT["ENTITY_CONFIG_TABLE"]
+_BUCKET = "datalake-entity-extraction-config-dev-s3"
 
 _VALID_RECORD: dict[str, Any] = {
     "source_id": "salesforce",
@@ -38,11 +39,6 @@ _VALID_RECORD: dict[str, Any] = {
     "target_raw_s3_prefix": "s3://raw/salesforce/account/",
     "schema_snapshot_s3_prefix": "s3://schema-snapshots/salesforce/account/",
 }
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _create_dynamodb_table(dynamodb: Any) -> Any:
@@ -58,11 +54,6 @@ def _create_dynamodb_table(dynamodb: Any) -> Any:
         ],
         BillingMode="PAY_PER_REQUEST",
     )
-
-
-# ---------------------------------------------------------------------------
-# DynamoDB backend tests
-# ---------------------------------------------------------------------------
 
 
 class TestConfigurationRepositoryDynamoDB:
@@ -97,7 +88,6 @@ class TestConfigurationRepositoryDynamoDB:
     def test_load_config_invalid_record_raises_validation_error(self) -> None:
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         table = _create_dynamodb_table(dynamodb)
-        # INCREMENTAL without watermark_field — fails EntityExtractionConfig validation
         invalid = {
             "source_id": "salesforce",
             "entity_id": "salesforce-account",
@@ -119,7 +109,6 @@ class TestConfigurationRepositoryDynamoDB:
         """A record with the default tenant_code is visible under the default tenant."""
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         table = _create_dynamodb_table(dynamodb)
-        # tenant_code defaults to "demo"; PK is the scoped composite.
         table.put_item(Item={**_VALID_RECORD, "source_id": "demo#salesforce"})
 
         client = ConfigurationRepositoryClient(
@@ -179,18 +168,11 @@ class TestConfigurationRepositoryDynamoDB:
             client.load_config("salesforce", "salesforce-account", tenant_code="BAD_CODE")
 
 
-# ---------------------------------------------------------------------------
-# S3 backend tests
-# ---------------------------------------------------------------------------
-
-
 class TestConfigurationRepositoryS3:
     @mock_aws
     def test_load_config_success(self) -> None:
         s3 = boto3.client("s3", region_name=_REGION)
         s3.create_bucket(Bucket=_BUCKET)
-        # §1.1: S3 backend path is tenant-prefixed, "demo" included like any
-        # other tenant (matches curated_layer_writer.py's convention).
         s3.put_object(
             Bucket=_BUCKET,
             Key="demo/salesforce/salesforce-account/config.json",
@@ -250,8 +232,6 @@ class TestConfigurationRepositoryS3:
             backend=ConfigurationBackend.S3,
             s3_bucket=_BUCKET,
         )
-        # Requesting under a different tenant_code must not find acme-corp's
-        # record (it looks under a different S3 prefix entirely).
         with pytest.raises(ConfigurationNotFoundError):
             client.load_config("salesforce", "salesforce-account", tenant_code="globex-eu")
 
@@ -273,7 +253,6 @@ class TestConfigurationRepositoryS3:
     def test_load_config_invalid_json_record_raises(self) -> None:
         s3 = boto3.client("s3", region_name=_REGION)
         s3.create_bucket(Bucket=_BUCKET)
-        # Missing required fields
         s3.put_object(
             Bucket=_BUCKET,
             Key="demo/salesforce/salesforce-account/config.json",
@@ -297,11 +276,6 @@ class TestConfigurationRepositoryS3:
                 region_name=_REGION,
                 backend=ConfigurationBackend.S3,
             )
-
-
-# ---------------------------------------------------------------------------
-# Regression tests for fixed bugs
-# ---------------------------------------------------------------------------
 
 
 class TestInputValidation:

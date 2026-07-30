@@ -17,8 +17,8 @@ The run_id satisfies all platform invariants:
   - Matches the stable identifier format regex used by StructuredLogEvent
 
 AWS resources used:
-  - DynamoDB table: EdlRunAuditLog  (PK: run_id, SK: stage)
-  - SQS queue:      EdlExtractionFailureDlq
+  - DynamoDB table: <prefix>-run-audit-log-<env>  (PK: run_id, SK: stage)
+  - SQS queue:      datalake-extraction-failure-dlq-dev
 
 Security:
   - Sensitive content is auto-scrubbed by PipelineStageContract validators.
@@ -31,36 +31,27 @@ Security:
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
 
 from contracts.dlq_routing import (
-    LEGACY_EXTRACTION_DLQ,
     DlqStage,
     dlq_queue_name,
     dlq_stage_for,
+    legacy_extraction_dlq_name,
 )
 from contracts.observability_contract import PipelineStage, RunStatus, scrub_sensitive_values
 from contracts.pipeline_stage_contract import DriftClassification, PipelineStageContract
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
-
-_AUDIT_TABLE_NAME: Final[str] = "EdlRunAuditLog"
-# The legacy single queue now lives in contracts/dlq_routing.py alongside the per-stage names,
-# so the routing and the names cannot drift apart.
-
-
-# ---------------------------------------------------------------------------
-# run_id generator
-# ---------------------------------------------------------------------------
 
 
 def generate_run_id() -> str:
@@ -103,11 +94,6 @@ def make_partial_run_id(run_id: str, part_number: int) -> str:
     if part_number < 1:
         raise ValueError(f"part_number must be >= 1, got {part_number}.")
     return f"{run_id}-part{part_number}"
-
-
-# ---------------------------------------------------------------------------
-# Coordinator
-# ---------------------------------------------------------------------------
 
 
 class RunCoordinator:
@@ -161,13 +147,9 @@ class RunCoordinator:
         self._started_at: datetime = datetime.now(tz=UTC)
 
         dynamodb = boto3.resource("dynamodb", region_name=region_name)
-        _audit_table_name = os.environ.get("AUDIT_LOG_TABLE") or _AUDIT_TABLE_NAME
-        self._audit_table = dynamodb.Table(_audit_table_name)
+        self._audit_table = dynamodb.Table(require_env("AUDIT_LOG_TABLE"))
         self._sqs = boto3.client("sqs", region_name=region_name)
         self._region = region_name
-        # DLQ URL cached after first successful resolution to avoid redundant API calls.
-        # Keyed by queue name: one coordinator routes to a stage queue and, for extraction, the
-        # legacy queue as well during the migration window.
         self._dlq_urls: dict[str, str] = {}
 
     @property
@@ -194,8 +176,6 @@ class RunCoordinator:
     def tenant_code(self) -> str:
         """The tenant identifier slug for this run (§1.1)."""
         return self._tenant_code
-
-    # ── Stage emission ─────────────────────────────────────────────────────────
 
     def emit_stage(
         self,
@@ -247,8 +227,6 @@ class RunCoordinator:
                 PlatformMetric.STAGE_RETRIES, 1.0, Stage=str(stage), EntityId=self._entity_id
             )
         if stage is PipelineStage.RUN_COMPLETION and status is RunStatus.SUCCESS:
-            # Freshness is the metric customers actually perceive: how old the newest
-            # successfully-published data is for this entity.
             record_platform_metric(
                 PlatformMetric.PIPELINE_FRESHNESS_SECONDS,
                 max(0.0, (datetime.now(tz=UTC) - self._started_at).total_seconds()),
@@ -256,8 +234,6 @@ class RunCoordinator:
             )
         self._persist_audit_record(contract)
         return contract
-
-    # ── Checkpoint / partial-run audit (PERF-5) ─────────────────────────────────
 
     def emit_checkpoint_stage(
         self,
@@ -300,8 +276,6 @@ class RunCoordinator:
         self._persist_audit_record(contract)
         return contract
 
-    # ── DLQ routing ────────────────────────────────────────────────────────────
-
     def enqueue_dlq_entry(
         self,
         error_message: str,
@@ -312,7 +286,8 @@ class RunCoordinator:
         Route a terminal failure to the failed stage's own DLQ.
 
         `failed_stage` was accepted and then ignored: the queue name was hardcoded to
-        `EdlExtractionFailureDlq`, so the five non-extraction stages had nowhere to enqueue and the
+        `datalake-extraction-failure-dlq-dev`, so the five non-extraction stages had nowhere to
+        enqueue and the
         nine per-stage queues had no producer. The argument already carried the routing; only the
         lookup was missing (see `contracts/dlq_routing.py`).
 
@@ -325,8 +300,6 @@ class RunCoordinator:
         """
         dlq_stage = dlq_stage_for(failed_stage)
         if dlq_stage is DlqStage.NOT_REPLAYABLE:
-            # An affirmative decision, not a missing route: replaying a run-completion or a
-            # DLQ-enqueue failure is meaningless, and the audit record already holds the evidence.
             _logger.info(
                 "dlq_enqueue_skipped_not_replayable",
                 run_id=self._run_id,
@@ -343,18 +316,13 @@ class RunCoordinator:
             "failed_stage": str(failed_stage),
             "dlq_stage": dlq_stage.value,
             "error_code": error_code,
-            # Scrub before enqueue — the payload bypasses PipelineStageContract
-            # validators, so sensitive patterns must be removed here explicitly.
             "error_message": scrub_sensitive_values(error_message),
             "enqueued_at": datetime.now(tz=UTC).isoformat(),
         }
 
-        # Extraction writes to both its per-stage queue and the legacy queue until the processor's
-        # per-stage event-source mappings are applied and observed. Switching a live failure path in
-        # one step would leave no way to compare the two.
-        queue_names = [dlq_queue_name(dlq_stage)]
+        queue_names = [dlq_queue_name(dlq_stage, self._environment)]
         if dlq_stage is DlqStage.EXTRACTION:
-            queue_names.append(LEGACY_EXTRACTION_DLQ)
+            queue_names.append(legacy_extraction_dlq_name(self._environment))
 
         delivered = 0
         for queue_name in queue_names:
@@ -387,8 +355,6 @@ class RunCoordinator:
             PlatformMetric.DLQ_MESSAGES_ENQUEUED, float(delivered), Stage=dlq_stage.value
         )
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _persist_audit_record(self, contract: PipelineStageContract) -> None:
         """Write the stage contract to DynamoDB (best-effort — never propagates)."""
         try:
@@ -415,11 +381,6 @@ class RunCoordinator:
             return None
         self._dlq_urls[queue_name] = url
         return url
-
-
-# ---------------------------------------------------------------------------
-# Serialisation helper
-# ---------------------------------------------------------------------------
 
 
 def _serialise_contract(contract: PipelineStageContract, started_at: datetime) -> dict[str, Any]:
@@ -449,11 +410,6 @@ def _serialise_contract(contract: PipelineStageContract, started_at: datetime) -
         "status": str(contract.status),
         "environment": contract.environment,
         "tenant_code": contract.tenant_code,
-        # Tenant-scoped GSI hash key — must match dlq_processor_handler's
-        # "{tenant_code}#{source_id}#{entity_id}" format exactly so both
-        # write paths land in the same source-entity-time-index partition
-        # per tenant/source/entity (OWASP A01 — an un-scoped shared key would
-        # let one tenant's audit query surface another tenant's run history).
         "source_entity_key": f"{contract.tenant_code}#{contract.source_id}#{contract.entity_id}",
         "started_at": started_at.isoformat(),  # GSI range key
         "completed_at": _dt(contract.completed_at),

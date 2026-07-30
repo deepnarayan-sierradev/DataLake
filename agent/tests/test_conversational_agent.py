@@ -44,8 +44,6 @@ _TAGGED = SemanticQueryRequest(
 )
 
 
-# The `demo` single-tenant predicate: applied, and matching everything because a single
-# tenant owns every row it can read. Never `None`, which meant "apply nothing".
 _SINGLE_TENANT_PREDICATE = scope_predicate(
     build_scope_claims("demo", TenantPartitionProfile(tenant_code="demo"))
 )
@@ -56,7 +54,7 @@ def _agent(proposer, engine, granted=frozenset(), max_attempts=3):
         proposer=proposer,
         model=_model(),
         engine=engine,
-        entity_uri_resolver=lambda name: f"s3://edl-analytics-1/demo/analytics/{name}",
+        entity_uri_resolver=lambda name: f"s3://datalake-analytics-1/demo/analytics/{name}",
         scope_predicate=_SINGLE_TENANT_PREDICATE,
         granted_access_tags=granted,
         max_attempts=max_attempts,
@@ -81,7 +79,6 @@ class TestAgent:
         result = _agent(proposer, engine).ask("revenue?")
         assert result.answered is True
         assert result.attempts == 2
-        # second proposal received the schema error for self-correction
         assert proposer.prior_errors[0] is None
         assert proposer.prior_errors[1] is not None
 

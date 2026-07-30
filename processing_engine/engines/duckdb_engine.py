@@ -37,12 +37,8 @@ class DuckDbSetBasedEngine(SetBasedQueryEngine):
         except ImportError as exc:
             raise SetBasedQueryError("duckdb is not available in this runtime.") from exc
         con = duckdb.connect(":memory:")
-        # Lambda's HOME is read-only; point DuckDB's home/extension dir at writable /tmp
-        # so httpfs/aws INSTALL+LOAD succeed on a cold container.
         con.execute("SET home_directory='/tmp';")
         con.execute("INSTALL httpfs; LOAD httpfs;")
-        # OWASP A07: resolve S3 credentials from the execution role's default chain via
-        # the aws extension — never static keys. Without this, httpfs S3 reads fail auth.
         con.execute("INSTALL aws; LOAD aws;")
         con.execute("CALL load_aws_credentials();")
         con.execute(f"SET s3_region='{self._region_name}';")
@@ -51,7 +47,6 @@ class DuckDbSetBasedEngine(SetBasedQueryEngine):
     def _register_views(self, con: Any, inputs: Mapping[str, str]) -> None:
         for view_name, uri in inputs.items():
             glob = f"{uri.rstrip('/')}/*.parquet"
-            # Relation API avoids SQL-string interpolation; view_name allowlisted, glob validated.
             con.read_parquet(glob).create_view(view_name, replace=True)
 
     def stream(

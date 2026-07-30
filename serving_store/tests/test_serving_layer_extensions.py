@@ -6,6 +6,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from semantic.enterprise_model import TAG_FINANCE, build_enterprise_model
 from semantic.semantic_model import Dimension, SemanticEntity
 from serving_store.credential_delivery import (
@@ -96,7 +97,6 @@ class TestViewGeneration:
             granted_access_tags=frozenset({"dept_operations"}),
         )
         assert "recognised_amount" not in view.exposed_columns
-        # The security column is still present so RLS has something to filter on.
         assert "scope_unit_id" in view.exposed_columns
 
     def test_derived_metrics_are_not_materialised_in_a_view(self):
@@ -123,7 +123,6 @@ class TestViewGeneration:
             assert opener in view.create_sql
 
     def test_a_view_with_no_visible_columns_is_refused(self):
-        # Every column tagged and no tag granted: the view would expose nothing.
         entity = SemanticEntity(
             name="secret-entity",
             entity_type="secret_entity",
@@ -168,7 +167,7 @@ class TestRowSecurityPolicies:
         combined = " ".join(policy.sql_statements)
         assert "ENABLE ROW LEVEL SECURITY" in combined
         assert "FORCE ROW LEVEL SECURITY" in combined
-        assert "current_setting('edl.scope_units'" in combined
+        assert "current_setting('datalake.scope_units'" in combined
         assert "brand_code" in combined
 
     def test_brand_filtering_can_be_omitted(self):
@@ -284,7 +283,7 @@ class TestSizingProfile:
 class TestCredentialDelivery:
     def _delivery(self) -> ServingCredentialDelivery:
         boto3.client("dynamodb", region_name=_REGION).create_table(
-            TableName="EdlServingCredentialClaim",
+            TableName=RESOURCE_NAME_ENVIRONMENT["SERVING_CLAIM_TABLE"],
             KeySchema=[
                 {"AttributeName": "tenant_code", "KeyType": "HASH"},
                 {"AttributeName": "claim_id", "KeyType": "RANGE"},
@@ -365,7 +364,7 @@ class TestCredentialDelivery:
 
     def test_missing_secret_is_a_claim_error_not_a_crash(self):
         boto3.client("dynamodb", region_name=_REGION).create_table(
-            TableName="EdlServingCredentialClaim",
+            TableName=RESOURCE_NAME_ENVIRONMENT["SERVING_CLAIM_TABLE"],
             KeySchema=[
                 {"AttributeName": "tenant_code", "KeyType": "HASH"},
                 {"AttributeName": "claim_id", "KeyType": "RANGE"},
@@ -386,7 +385,7 @@ class TestCredentialDelivery:
 
     def test_secret_path_is_per_tenant(self):
         assert serving_credential_secret_id("evive") == (
-            "edl/tenants/evive/serving-store/reader-credentials"
+            f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/tenants/evive/serving-store/reader-credentials"
         )
         assert serving_credential_secret_id("acme-corp") != serving_credential_secret_id("evive")
 

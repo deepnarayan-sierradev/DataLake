@@ -19,9 +19,9 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime.adapters.salesforce.salesforce_auth_client import (
     _PROACTIVE_REFRESH_SECONDS,
-    _SECRET_PATH,
     SalesforceAuthClient,
     SalesforceAuthError,
     SalesforceCredentialError,
@@ -29,7 +29,7 @@ from connector_runtime.adapters.salesforce.salesforce_auth_client import (
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_SECRET_ID = _SECRET_PATH
+_SECRET_ID = f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/sources/salesforce/credentials"
 _INSTANCE_URL = "https://myorg.my.salesforce.com"
 _CLIENT_ID = "test-client-id"
 _CLIENT_SECRET = "test-client-secret"
@@ -51,16 +51,10 @@ def _valid_credentials() -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Credential loading
-# ---------------------------------------------------------------------------
-
-
 class TestSalesforceAuthClientCredentials:
     @mock_aws
     def test_missing_secret_raises_credential_error(self) -> None:
         client = SalesforceAuthClient(environment=_ENV, region_name=_REGION)
-        # Secret not created — should raise SalesforceCredentialError
         with pytest.raises(SalesforceCredentialError, match="Failed to retrieve"):
             client._load_credentials()  # type: ignore[attr-defined]
 
@@ -94,11 +88,6 @@ class TestSalesforceAuthClientCredentials:
         assert creds["client_secret"] == _CLIENT_SECRET
 
 
-# ---------------------------------------------------------------------------
-# Token validity logic
-# ---------------------------------------------------------------------------
-
-
 class TestTokenValidity:
     def test_new_client_token_is_invalid(self) -> None:
         client = SalesforceAuthClient(environment=_ENV, region_name=_REGION)
@@ -113,7 +102,6 @@ class TestTokenValidity:
     def test_token_invalid_within_proactive_refresh_window(self) -> None:
         client = SalesforceAuthClient(environment=_ENV, region_name=_REGION)
         client._access_token = _ACCESS_TOKEN  # type: ignore[attr-defined]
-        # Set expiry to just inside the proactive refresh window
         client._token_expires_at = time.time() + _PROACTIVE_REFRESH_SECONDS - 1  # type: ignore[attr-defined]
         assert not client._is_token_valid()  # type: ignore[attr-defined]
 
@@ -124,11 +112,6 @@ class TestTokenValidity:
         client.invalidate_token()
         assert client._access_token is None  # type: ignore[attr-defined]
         assert client._token_expires_at == 0.0  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
-# OAuth endpoint interaction — uses responses library to mock HTTP
-# ---------------------------------------------------------------------------
 
 
 class TestTokenRefresh:
@@ -166,7 +149,6 @@ class TestTokenRefresh:
         t1 = client.get_access_token()
         t2 = client.get_access_token()
         assert t1 == t2
-        # Token endpoint called exactly once
         assert requests_mock.call_count == 1
 
     @mock_aws

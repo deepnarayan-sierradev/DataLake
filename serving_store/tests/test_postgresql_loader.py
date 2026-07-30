@@ -39,7 +39,7 @@ def _make_records():
 
 def _make_connection(fetchall_return: list | None = None, role_exists: bool = False):
     mock_conn = MagicMock()
-    mock_conn.info.dbname = "edl_serving"
+    mock_conn.info.dbname = "datalake_serving"
     mock_cursor = MagicMock()
     mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
     mock_cursor.__exit__ = MagicMock(return_value=False)
@@ -124,14 +124,14 @@ class TestPostgreSqlLoader:
         assert "CREATE ROLE" not in executed_sql
 
     def test_connection_database_bootstrapped_when_absent(self):
-        mock_conn, mock_cursor = _make_connection()  # fetchone None → edl_serving absent
+        mock_conn, mock_cursor = _make_connection()  # fetchone None → datalake_serving absent
         loader = PostgreSqlLoader(_SECRET_ARN, _REGION)
 
         with patch("psycopg.connect", return_value=mock_conn):
             loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         executed_sql = " ".join(str(c.args[0]) for c in mock_cursor.execute.call_args_list)
-        assert 'CREATE DATABASE "edl_serving"' in executed_sql
+        assert 'CREATE DATABASE "datalake_serving"' in executed_sql
 
     def test_connection_database_not_recreated_when_present(self):
         mock_conn, mock_cursor = _make_connection(role_exists=True)  # fetchone truthy → present

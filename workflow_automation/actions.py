@@ -11,13 +11,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any
 from urllib.parse import urlparse
 
 import boto3
 
+from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
 from workflow_automation.action_registry import (
     ActionContext,
@@ -27,8 +27,6 @@ from workflow_automation.action_registry import (
 from workflow_automation.definition import ActionKind
 
 _logger = get_platform_logger(__name__)
-
-_DESTINATION_TABLE_NAME: Final[str] = "EdlWorkflowDestination"
 
 
 class DestinationNotAllowedError(Exception):
@@ -57,9 +55,7 @@ class DestinationAllowlist:
     """Per-tenant registry of permitted outbound destinations."""
 
     def __init__(self, region_name: str, table_name: str | None = None) -> None:
-        resolved = (
-            table_name or os.environ.get("WORKFLOW_DESTINATION_TABLE") or _DESTINATION_TABLE_NAME
-        )
+        resolved = table_name or require_env("WORKFLOW_DESTINATION_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(resolved)
 
     def register(self, tenant_code: str, destination: OutboundDestination) -> None:
@@ -220,7 +216,6 @@ class InvokePipelineRunAction(WorkflowActionHandler):
         }
         response = self._sfn.start_execution(
             stateMachineArn=self._arn,
-            # The execution name is the idempotency key, so a retry cannot start two runs.
             name=f"wf-{context.execution_id[:60]}",
             input=json.dumps(payload, separators=(",", ":")),
         )
@@ -287,7 +282,7 @@ class CallOutboundWebhookAction(WorkflowActionHandler):
             data=body,
             headers={
                 "Content-Type": "application/json",
-                "X-Edl-Signature": sign_outbound_payload(secret, body),
+                "X-datalake-Signature": sign_outbound_payload(secret, body),
             },
             timeout=15,
         )

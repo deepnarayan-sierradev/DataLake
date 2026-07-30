@@ -61,9 +61,9 @@ class TestEnvironmentValidator:
         contract = _make_contract(environment="dev")
         assert contract.environment == "dev"
 
-    def test_staging_accepted(self) -> None:
-        contract = _make_contract(environment="staging")
-        assert contract.environment == "staging"
+    def test_uat_accepted(self) -> None:
+        contract = _make_contract(environment="uat")
+        assert contract.environment == "uat"
 
     def test_prod_accepted(self) -> None:
         contract = _make_contract(environment="prod")

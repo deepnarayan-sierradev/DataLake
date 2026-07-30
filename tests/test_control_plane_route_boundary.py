@@ -25,7 +25,6 @@ CONTROL_PLANE_TF: Final[Path] = (
     / "main.tf"
 )
 
-# Collections this system may not create or administer, as they appear in a route path.
 IDENTITY_COLLECTIONS: Final[frozenset[str]] = frozenset(
     {"tenants", "users", "roles", "permissions", "groups"}
 )
@@ -41,8 +40,6 @@ def declared_routes() -> dict[str, tuple[str, str]]:
     """Every `key = "METHOD /path"` entry in the control-plane route map."""
     lines = CONTROL_PLANE_TF.read_text(encoding="utf-8").splitlines()
     start = next(i for i, line in enumerate(lines) if line.strip().startswith("routes = {"))
-    # Scan to the line that closes the block. Searching for the next `}` character instead would
-    # stop inside `{tenant_code}` and silently parse nothing.
     block: list[str] = []
     for line in lines[start + 1 :]:
         if line.strip() == "}":
@@ -70,8 +67,6 @@ def test_no_route_creates_or_administers_an_identity_resource() -> None:
         segments = [segment for segment in path.split("/") if segment]
         if not segments:
             continue
-        # `POST /tenants` administers tenants. `POST /tenants/{tenant_code}/entities` is scoped
-        # *by* a tenant and administers entities, which this system does own.
         collection_is_the_resource = len(segments) == 1 and segments[0] in IDENTITY_COLLECTIONS
         if method in MUTATING_METHODS and collection_is_the_resource:
             offenders.append(f"{key} = {method} {path}")

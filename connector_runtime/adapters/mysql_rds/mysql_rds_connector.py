@@ -73,14 +73,6 @@ _logger = get_platform_logger(__name__)
 
 _SOURCE_ID: Final[str] = "mysql-rds"
 
-# ---------------------------------------------------------------------------
-# Connection pooling (PERF-2)
-# ---------------------------------------------------------------------------
-# Module-level cache, scoped to the lifetime of the Lambda execution
-# environment (a "warm container"). Keyed by connection identity — NOT by
-# table_name, since multiple entities on the same MySQL database legitimately
-# share one connection. Every entry is a live pymysql Connection using
-# SSDictCursor (PERF-1).
 _ConnectionCacheKey = tuple[str, int, str, str]
 _connection_cache: dict[_ConnectionCacheKey, Any] = {}
 
@@ -115,10 +107,6 @@ class MySqlRdsConnector(ConnectorInterface):
             environment=environment,
             region_name=region_name,
         )
-        # Connection opened by discover_queryable_fields and reused by
-        # execute_extraction within the same extraction run, eliminating the
-        # second TCP handshake and TLS negotiation to the RDS instance.
-        # Set to None on extraction completion or on any discovery failure.
         self._reusable_conn: Any = None
 
     def get_capability_declaration(self) -> ConnectorCapabilities:
@@ -165,15 +153,9 @@ class MySqlRdsConnector(ConnectorInterface):
                 include_fields=include_fields,
                 exclude_fields=exclude_fields,
             )
-            # Transfer ownership: keep connection alive for execute_extraction.
-            # Left open (and pooled) on success; execute_extraction decides
-            # whether to keep it pooled or evict it once extraction finishes.
             self._reusable_conn = conn
             return result
         except Exception:
-            # Discovery failed on this connection — it may be in an unknown
-            # state (e.g. mid-transaction). Evict it from the pool rather than
-            # risk handing a poisoned connection to the next invocation.
             self._evict_connection(conn)
             raise
 
@@ -228,9 +210,6 @@ class MySqlRdsConnector(ConnectorInterface):
             table_name=self._table_name,
         )
 
-        # Reuse the connection opened by discover_queryable_fields if available;
-        # open a fresh (or pooled) connection only when called without prior
-        # discovery (e.g. direct invocation in tests or replay scenarios).
         conn = getattr(self, "_reusable_conn", None)
         self._reusable_conn = None  # consume — do not reuse again
         if conn is None:
@@ -246,9 +225,6 @@ class MySqlRdsConnector(ConnectorInterface):
             fully_consumed = True
         finally:
             if fully_consumed:
-                # Healthy connection — leave it open and pooled (PERF-2)
-                # instead of closing and reopening a fresh connection on the
-                # next extraction run.
                 pass
             else:
                 self._evict_connection(conn)
@@ -268,24 +244,16 @@ class MySqlRdsConnector(ConnectorInterface):
         if isinstance(exc, MySqlRdsCredentialError):
             return ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS
         if isinstance(exc, MySqlIncrementalExtractorError):
-            # Covers invalid table/column names and query execution failures.
-            # Query execution failures may be transient (deadlock, lock timeout)
-            # or deterministic (invalid schema). Default to UNKNOWN for DLQ routing.
             return ExtractionErrorClassification.UNKNOWN
         if isinstance(exc, MySqlSchemaIntrospectionClientError):
-            # Missing table is deterministic; schema query failure may be transient.
             return ExtractionErrorClassification.UNKNOWN
         if isinstance(exc, pymysql.err.OperationalError):
-            # Covers connection failures (host unreachable, authentication failure).
             return ExtractionErrorClassification.TRANSIENT_NETWORK
         if isinstance(exc, pymysql.err.ProgrammingError):
-            # Covers syntax errors, missing tables — deterministic.
             return ExtractionErrorClassification.DETERMINISTIC_INVALID_OBJECT
         if isinstance(exc, OSError):
             return ExtractionErrorClassification.TRANSIENT_NETWORK
         return ExtractionErrorClassification.UNKNOWN
-
-    # ── Private ────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _open_connection(params: Any) -> Any:
@@ -312,9 +280,6 @@ class MySqlRdsConnector(ConnectorInterface):
         cached = _connection_cache.get(key)
         if cached is not None:
             try:
-                # pymysql's ping(reconnect=True) health-checks the socket and
-                # transparently re-establishes it on a stale/dropped
-                # connection, reusing the same Connection object.
                 cached.ping(reconnect=True)
             except Exception:
                 _logger.warning(
@@ -377,11 +342,6 @@ class MySqlRdsConnector(ConnectorInterface):
                 "mysql_rds_evicted_connection_close_failed",
                 error=str(close_exc),
             )
-
-
-# ---------------------------------------------------------------------------
-# Connector builder
-# ---------------------------------------------------------------------------
 
 
 def _build_mysql_rds(

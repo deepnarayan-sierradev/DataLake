@@ -30,11 +30,6 @@ from contracts.identifier_policy import (
 )
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
 
-# Field name pattern: letters, digits, underscore only — no dots.
-# pk_field and soft_delete_field must be flat canonical field names because
-# record.get(field) performs top-level dict lookup only.  Dotted paths like
-# 'auditInfo.id' would silently return None and break merge logic.
-# Sourced from server-side entity config only — never from event input (OWASP A03).
 _FIELD_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,127}$")
 
 
@@ -74,7 +69,6 @@ class EntityExtractionConfig(BaseModel):
 
     model_config = {"frozen": True, "extra": "forbid"}
 
-    # ── Identity ──────────────────────────────────────────────────────────────
     source_id: str = Field(
         ...,
         description="Stable source system identifier (e.g. 'salesforce', 'netsuite').",
@@ -88,7 +82,6 @@ class EntityExtractionConfig(BaseModel):
         description="Semantic version of this configuration record (e.g. '1.0.0').",
     )
 
-    # ── Connection identity (DL-SCOPE-04) ─────────────────────────────────────
     connection_id: str | None = Field(
         default=None,
         description=(
@@ -98,14 +91,12 @@ class EntityExtractionConfig(BaseModel):
         ),
     )
 
-    # ── Configuration schema compatibility (DL-CFG-14) ────────────────────────
     config_schema_version: int = Field(
         default=1,
         ge=1,
         description="Schema generation of this config artefact; runtime declares its range.",
     )
 
-    # ── Multi-tenancy (§1.1) ──────────────────────────────────────────────────
     tenant_code: str = Field(
         default="demo",
         description=(
@@ -116,7 +107,6 @@ class EntityExtractionConfig(BaseModel):
         ),
     )
 
-    # ── Extraction behaviour ──────────────────────────────────────────────────
     load_type: LoadType = Field(
         default=LoadType.INCREMENTAL,
         description="Full or incremental extraction strategy.",
@@ -141,7 +131,6 @@ class EntityExtractionConfig(BaseModel):
         ),
     )
 
-    # ── Field selection ───────────────────────────────────────────────────────
     field_mode: FieldMode = Field(
         default=FieldMode.ALL,
         description="Controls which fields are included in the extraction query.",
@@ -155,7 +144,6 @@ class EntityExtractionConfig(BaseModel):
         description="Fields to exclude from extraction regardless of field_mode.",
     )
 
-    # ── Storage ───────────────────────────────────────────────────────────────
     target_raw_s3_prefix: str = Field(
         ...,
         description=(
@@ -172,7 +160,6 @@ class EntityExtractionConfig(BaseModel):
         description="Output file format for raw layer writes.",
     )
 
-    # ── Connector ─────────────────────────────────────────────────────────────
     connector_params: dict[str, str] = Field(
         default_factory=dict,
         description=(
@@ -182,7 +169,6 @@ class EntityExtractionConfig(BaseModel):
         ),
     )
 
-    # ── Schedule ──────────────────────────────────────────────────────────────
     schedule_cron: str | None = Field(
         default=None,
         description=(
@@ -204,13 +190,11 @@ class EntityExtractionConfig(BaseModel):
         ),
     )
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
     active: bool = Field(
         default=True,
         description="Whether this entity is active for scheduled extraction.",
     )
 
-    # ── Incremental merge ─────────────────────────────────────────────────────
     primary_key_field: str | None = Field(
         default=None,
         description=(
@@ -232,7 +216,6 @@ class EntityExtractionConfig(BaseModel):
         ),
     )
 
-    # ── Lambda execution tuning (§3.5, §3.7) ─────────────────────────────────
     max_records_per_lambda_run: int | None = Field(
         default=None,
         ge=1,
@@ -258,7 +241,6 @@ class EntityExtractionConfig(BaseModel):
         ),
     )
 
-    # ── Sync, pagination and rate limiting (DL-CONN-11, 13, 15) ───────────────
     sync_strategy: str = Field(
         default="watermark_polling",
         description=(
@@ -281,7 +263,6 @@ class EntityExtractionConfig(BaseModel):
         ),
     )
 
-    # ── Quality, brand and retention (DL-DQ-05, DL-DQ-09, DL-PORT-03) ─────────
     quality_policy_id: str | None = Field(
         default=None,
         description="Attached quality policy; required before production promotion (DL-DQ-05).",
@@ -298,15 +279,13 @@ class EntityExtractionConfig(BaseModel):
     retention_days: int | None = Field(
         default=None,
         ge=1,
-        description="Raw-layer retention for this entity; validated against reprocessing windows.",
+        description="Raw-layer retention for this entity (DL-PORT-03).",
     )
     minimum_reprocessing_window_days: int | None = Field(
         default=None,
         ge=1,
         description="Declared reprocess-eligible window; retention must be at least this long.",
     )
-
-    # ── Validators ────────────────────────────────────────────────────────────
 
     @field_validator("connection_id", mode="before")
     @classmethod
@@ -388,8 +367,6 @@ class EntityExtractionConfig(BaseModel):
                 "to be set. A primary key is needed to identify and remove deleted records "
                 "from the merged curated state."
             )
-        # DL-CFG-12: a retention policy shorter than a declared reprocessing window is a
-        # configuration error caught at publish, not discovered when the data is gone.
         if (
             self.retention_days is not None
             and self.minimum_reprocessing_window_days is not None

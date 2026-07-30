@@ -1,9 +1,9 @@
 variable "environment" {
-  description = "Deployment environment: dev, staging, or prod."
+  description = "Deployment environment: dev, uat, or prod."
   type        = string
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment must be one of: dev, staging, prod."
+    condition     = contains(["dev", "uat", "prod"], var.environment)
+    error_message = "environment must be one of: dev, uat, prod."
   }
 }
 
@@ -128,4 +128,14 @@ variable "security_group_ids" {
   description = "Additional security groups, alongside the one this module creates."
   type        = list(string)
   default     = []
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
+}
+
+variable "resource_names" {
+  type        = map(string)
+  description = "Every physical resource name this Lambda reads from its environment, built once in the environment root from the resources Terraform actually created."
 }

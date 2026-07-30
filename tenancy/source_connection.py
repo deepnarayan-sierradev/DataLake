@@ -15,6 +15,7 @@ from typing import Final
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from contracts.identifier_policy import validate_stable_id, validate_tenant_code
+from contracts.resource_naming import secret_path
 from tenancy.scope_contract import (
     AttributionMode,
     validate_scope_unit_id,
@@ -38,7 +39,6 @@ class ConnectionState(StrEnum):
     RETIRED = "retired"
 
 
-# States from which a connection may still be extracted.
 EXTRACTABLE_STATES: Final[frozenset[ConnectionState]] = frozenset(
     {ConnectionState.ACTIVE, ConnectionState.FAILING}
 )
@@ -74,7 +74,7 @@ def connection_credential_path(tenant_code: str, connection_id: str) -> str:
     """Per-connection read credential path (DL-SCOPE-06 supersedes the per-source path)."""
     validate_tenant_code(tenant_code)
     validate_stable_id(connection_id, "connection_id")
-    return f"edl/tenants/{tenant_code}/connections/{connection_id}/credentials"
+    return secret_path("tenants", tenant_code, "connections", connection_id, "credentials")
 
 
 def connection_writeback_credential_path(tenant_code: str, connection_id: str) -> str:

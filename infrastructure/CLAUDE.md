@@ -10,8 +10,8 @@ two unless there's a documented reason not to.
 `iam`, `kms`, `lambda_pipeline`, `metadata_persistence`, `networking`, `observability`,
 `orchestration`, `secrets`, `serving_store_database`, `serving_store_lambda`, `storage`,
 `transformation_lambda`. The `serving_store_*` modules are wired into all three environments'
-`main.tf` and have been `terraform apply`'d **in dev** (2026-07-24: `edl-serving-store-mysql-dev`
-RDS + `EdlServingStoreLoader` Lambda + `EdlServingStoreConfig` table); staging/prod remain
+`main.tf` and have been `terraform apply`'d **in dev** (2026-07-24: `datalake-serving-store-mysql-dev`
+RDS + `datalake-serving-store-loader-dev` Lambda + `datalake-serving-store-config-dev` table); staging/prod remain
 un-applied. The dev instance is empty until a tenant/entity is onboarded via
 `scripts/seed_serving_store_config.py` — see `docs/PLATFORM_STATUS.md`.
 

@@ -1,5 +1,5 @@
 """
-`EdlScopeUnit` repository and tenant partition profile store (DL-SCOPE-01, DL-SCOPE-02).
+`datalake-scope-units-dev` repository and tenant partition profile store (DL-SCOPE-01, DL-SCOPE-02).
 
 The profile lives in the same table under a reserved sort key so a tenant's partition
 model and its unit set are read in one place and can never disagree about which units
@@ -16,7 +16,6 @@ closed.
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
 from typing import Any, Final
 
@@ -26,6 +25,7 @@ from pydantic import ValidationError
 
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from persistence.dynamodb_paging import iter_items
@@ -39,7 +39,6 @@ from tenancy.scope_contract import (
 
 _logger = get_platform_logger(__name__)
 
-_TABLE_NAME: Final[str] = "EdlScopeUnit"
 _PROFILE_SORT_KEY: Final[str] = "__profile__"
 
 
@@ -67,18 +66,14 @@ class ScopeUnitRepository:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("SCOPE_UNIT_TABLE") or _TABLE_NAME
+        table_name = require_env("SCOPE_UNIT_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
-
-    # ── Partition profile ─────────────────────────────────────────────────────
 
     def get_partition_profile(self, tenant_code: str) -> TenantPartitionProfile:
         tenant_code = validate_tenant_code(tenant_code)
         item = self._get_item(tenant_code, _PROFILE_SORT_KEY)
         if item is None:
             return TenantPartitionProfile(tenant_code=tenant_code)
-        # Persistence-only attributes (the sort-key sentinel, audit stamps) are not part
-        # of the contract model, which forbids extras at the API boundary.
         persistence_only = {
             "scope_unit_id",
             "updated_at",
@@ -131,8 +126,6 @@ class ScopeUnitRepository:
                 approved_by=widening_approved_by,
             )
         self._table.put_item(Item=item)
-
-    # ── Scope units ───────────────────────────────────────────────────────────
 
     def get_scope_unit(self, tenant_code: str, scope_unit_id: str) -> ScopeUnit:
         tenant_code = validate_tenant_code(tenant_code)
@@ -190,8 +183,6 @@ class ScopeUnitRepository:
         if profile.partition_model is PartitionModel.SINGLE:
             return frozenset({IMPLICIT_SCOPE_UNIT_ID})
         return frozenset(u.scope_unit_id for u in self.list_scope_units(tenant_code))
-
-    # ── Private ───────────────────────────────────────────────────────────────
 
     def _get_item(self, tenant_code: str, scope_unit_id: str) -> dict[str, Any] | None:
         """`None` means the record is absent; a failed read raises rather than imitating absence."""

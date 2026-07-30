@@ -37,16 +37,12 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Renew this far before the stated expiry so a token cannot lapse mid-page.
 TOKEN_RENEWAL_MARGIN_SECONDS: Final[float] = 120.0
 
-# Assumed lifetime when a provider returns no `expires_in`. ServiceBridge documents a
-# 30-minute sliding session; the shortest documented lifetime is the safe assumption.
 DEFAULT_TOKEN_LIFETIME_SECONDS: Final[float] = 1_800.0
 
 TOKEN_REQUEST_TIMEOUT_SECONDS: Final[float] = 15.0
 
-# Field names providers use for the token itself, in preference order.
 _TOKEN_FIELDS: Final[tuple[str, ...]] = (
     "access_token",
     "accessToken",
@@ -122,8 +118,6 @@ class RestTokenExchange:
             ) from None
 
         status = int(getattr(response, "status_code", 0))
-        # The body is never logged and never included in an exception message: a token
-        # endpoint echoes the submitted credential in some providers' error payloads.
         if status in (400, 401, 403):
             raise TokenExchangeFailedError(
                 f"{self._spec.source_id}: the stored credential was rejected by the token "
@@ -159,7 +153,6 @@ class RestTokenExchange:
         return urljoin(base, str(self._spec.token_endpoint_path).lstrip("/"))
 
     def _is_form_encoded(self) -> bool:
-        # OAuth 2.0 §4.3 mandates form encoding; a bespoke session login posts JSON.
         return self._spec.token_grant_kind is not TokenGrantKind.SESSION_LOGIN
 
     def _request_headers(self) -> dict[str, str]:
@@ -184,9 +177,6 @@ class RestTokenExchange:
                 "password": self._require("password"),
             }
         if kind is TokenGrantKind.REFRESH_TOKEN or self._credentials.get("refresh_token"):
-            # A refresh token is preferred wherever one exists: it avoids replaying the
-            # password on every cold start, and a rotated password then breaks one run
-            # rather than every run.
             return {
                 "grant_type": "refresh_token",
                 "username": self._credentials.get("username", ""),

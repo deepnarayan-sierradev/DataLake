@@ -17,16 +17,9 @@ locals {
     ManagedBy   = "terraform"
     Module      = "transformation_lambda"
   })
-  function_name = "EdlTransformationPipeline"
+  function_name = "${var.name_prefix}-transformation-${var.environment}"
 }
 
-# ---------------------------------------------------------------------------
-# CloudWatch Log Group for Lambda execution logs
-#
-# Created before the Lambda so Terraform manages retention and encryption.
-# If Lambda creates the log group automatically it inherits no retention
-# and no KMS encryption.
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "lambda_execution" {
   name              = "/aws/lambda/${local.function_name}"
@@ -39,13 +32,6 @@ resource "aws_cloudwatch_log_group" "lambda_execution" {
   })
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Security Group
-#
-# Transformation reads raw Parquet from S3 and writes to the curated layer —
-# all via VPC endpoints.  Only HTTPS (443) egress is required.
-# No ingress — Lambda is invoked by Step Functions only.
-# ---------------------------------------------------------------------------
 
 data "aws_vpc" "selected" {
   filter {
@@ -55,7 +41,7 @@ data "aws_vpc" "selected" {
 }
 
 resource "aws_security_group" "transformation_lambda" {
-  name        = "${local.function_name}Sg"
+  name        = "${local.function_name}-sg"
   description = "Security group for the transformation pipeline Lambda. HTTPS egress to AWS service endpoints only."
   vpc_id      = data.aws_vpc.selected.id
 
@@ -68,7 +54,7 @@ resource "aws_security_group" "transformation_lambda" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${local.function_name}Sg"
+    Name = "${local.function_name}-sg"
   })
 
   lifecycle {
@@ -76,27 +62,21 @@ resource "aws_security_group" "transformation_lambda" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Function — Transformation Pipeline
-#
-# Handler: transformation.transformation_pipeline_handler.lambda_handler
-#
-# Runtime: python3.13 (closest GA runtime to 3.14 at time of writing;
-# update to python3.14 when AWS adds it to Lambda runtimes).
-#
-# VPC: deployed into private subnets so S3 traffic routes through the VPC
-# S3 gateway endpoint rather than the public internet.  Glue and CloudWatch
-# API calls go through the corresponding interface VPC endpoints.
-#
-# Environment variables:
-#   PLATFORM_ENVIRONMENT      — "dev" | "staging" | "prod"
-#   RAW_S3_BUCKET             — raw layer bucket name (read-only)
-#   CURATED_S3_BUCKET         — curated layer bucket name (read + write)
-#   FIELD_MAPPING_S3_BUCKET   — bucket storing field mapping JSON files
-#   GOVERNANCE_S3_BUCKET      — lineage bucket (optional; empty = disabled)
-#   GLUE_CATALOG_DATABASE     — Glue database (optional; empty = disabled)
-#   AWS_REGION                — injected automatically by Lambda runtime
-# ---------------------------------------------------------------------------
+
+locals {
+  required_resource_names = [
+    "DATA_QUALITY_EXCEPTION_TABLE",
+    "ENTITY_CONFIG_TABLE",
+    "QUALITY_POLICY_TABLE",
+    "RESOURCE_NAME_PREFIX",
+    "SCOPE_UNIT_TABLE",
+    "SECRET_PATH_PREFIX",
+    "SOURCE_CONNECTION_TABLE",
+  ]
+  resource_name_variables = {
+    for key in local.required_resource_names : key => var.resource_names[key]
+  }
+}
 
 resource "aws_lambda_function" "transformation_pipeline" {
   function_name = local.function_name
@@ -126,7 +106,7 @@ resource "aws_lambda_function" "transformation_pipeline" {
   kms_key_arn = var.kms_key_arn
 
   environment {
-    variables = {
+    variables = merge({
       PLATFORM_ENVIRONMENT    = var.environment
       RAW_S3_BUCKET           = var.raw_s3_bucket_name
       CURATED_S3_BUCKET       = var.curated_s3_bucket_name
@@ -134,7 +114,7 @@ resource "aws_lambda_function" "transformation_pipeline" {
       GOVERNANCE_S3_BUCKET    = var.governance_s3_bucket_name
       # DL-SERV-08: wired so curated-layer registration is live rather than dead code.
       GLUE_CATALOG_DATABASE = var.glue_catalog_database
-    }
+    }, local.resource_name_variables)
   }
 
   vpc_config {
@@ -146,7 +126,6 @@ resource "aws_lambda_function" "transformation_pipeline" {
     mode = var.enable_xray_tracing ? "Active" : "PassThrough"
   }
 
-  # Ensure log group exists and is owned by Terraform before Lambda starts.
   depends_on = [aws_cloudwatch_log_group.lambda_execution]
 
   tags = merge(local.common_tags, {
@@ -154,41 +133,24 @@ resource "aws_lambda_function" "transformation_pipeline" {
   })
 
   lifecycle {
-    # Prevent accidental destruction of the function in staging/prod.
-    # destroy is still possible via targeted apply.
     ignore_changes = []
   }
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Permission — allow Step Functions to invoke the Lambda
-#
-# Step Functions assumes the orchestration role (configured in the
-# orchestration module) which has lambda:InvokeFunction permission.
-# This resource-based policy is defence-in-depth: rejects invocations from
-# principals other than the Step Functions service in this account.
-# ---------------------------------------------------------------------------
 
 resource "aws_lambda_permission" "allow_step_functions" {
   statement_id  = "AllowStepFunctionsInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.transformation_pipeline.function_name
   principal     = "states.amazonaws.com"
-  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:EdlExtractionPipeline"
+  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.name_prefix}-extraction-workflow-${var.environment}"
 }
 
-# ---------------------------------------------------------------------------
-# Async-invocation dead letter queue (CKV_AWS_116). An asynchronous Lambda failure with no
-# DLQ is discarded after the retries with nothing left to inspect. Named `EdlStageDlq-*` so
-# the existing `sqs:SendMessage` grant on that prefix covers it rather than adding a new one.
-# SSE-SQS rather than a CMK: no per-module KMS input exists, and the payload here is a failed
-# event envelope, not tenant data.
-# ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "async_dlq" {
-  name                      = "EdlStageDlq-TransformationAsync"
+  name                      = "${var.name_prefix}-transformation-async-dlq-${var.environment}"
   message_retention_seconds = 1209600 # 14 days, the maximum — a DLQ that expires loses the evidence
   sqs_managed_sse_enabled   = true
 
-  tags = merge(local.common_tags, { Name = "EdlStageDlq-TransformationAsync" })
+  tags = merge(local.common_tags, { Name = "${var.name_prefix}-transformation-async-dlq-${var.environment}" })
 }

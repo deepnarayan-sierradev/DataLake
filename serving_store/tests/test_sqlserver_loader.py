@@ -45,7 +45,7 @@ def _fetchone_sequence(
     user, table existence checks — in that order."""
     return [
         {"exists": 1} if schema_exists else None,
-        {"db_name": "edl_serving"},
+        {"db_name": "datalake_serving"},
         {"exists": 1} if login_exists else None,
         {"exists": 1} if user_exists else None,
         {"exists": 1} if table_exists else None,
@@ -153,7 +153,6 @@ class TestSqlServerLoader:
         assert "CREATE USER" not in executed_sql
 
     def test_platform_sqlserver_bootstraps_connection_database(self):
-        # Resolved via the registry so engine_id == "sqlserver" (platform-provisioned).
         admin_conn, admin_cursor = _make_bootstrap_connection(db_exists=False)
         main_conn, _ = _make_connection()
         loader = serving_store_registry.resolve(
@@ -164,10 +163,9 @@ class TestSqlServerLoader:
             loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         admin_sql = " ".join(str(c.args[0]) for c in admin_cursor.execute.call_args_list)
-        assert "CREATE DATABASE [edl_serving]" in admin_sql
+        assert "CREATE DATABASE [datalake_serving]" in admin_sql
 
     def test_azure_sql_skips_connection_database_bootstrap(self):
-        # engine_id == "azure_sql" is always BYO-DB — bootstrap must never connect to master.
         main_conn, _ = _make_connection()
         loader = serving_store_registry.resolve(
             "azure_sql", secret_arn=_SECRET_ARN, region_name=_REGION

@@ -1,7 +1,7 @@
 """
 Semantic model repository (FR-2.1).
 
-Persists versioned SemanticModel records in DynamoDB (table EdlSemanticModel):
+Persists versioned SemanticModel records in DynamoDB (table datalake-semantic-model-dev):
 PK tenant_code, SK model_version, with the model stored as JSON and a
 "$latest" pointer item naming the active version. Tenant-partitioned from
 creation.
@@ -9,17 +9,16 @@ creation.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import boto3
 
 from contracts.identifier_policy import validate_tenant_code
+from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
 from semantic.semantic_model import SemanticModel
 
 _logger = get_platform_logger(__name__)
-_DYNAMODB_TABLE_NAME = "EdlSemanticModel"
 _LATEST_POINTER = "$latest"
 
 
@@ -30,7 +29,7 @@ class SemanticModelNotFoundError(Exception):
 class SemanticModelRepository:
     def __init__(self, region_name: str) -> None:
         self._dynamodb = boto3.resource("dynamodb", region_name=region_name)
-        self._table_name = os.environ.get("SEMANTIC_MODEL_TABLE") or _DYNAMODB_TABLE_NAME
+        self._table_name = require_env("SEMANTIC_MODEL_TABLE")
         self._table = self._dynamodb.Table(self._table_name)
 
     def publish(self, model: SemanticModel) -> None:

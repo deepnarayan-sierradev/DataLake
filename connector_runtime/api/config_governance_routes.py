@@ -28,8 +28,6 @@ from config_propagation.capability import (
 )
 from contracts.identifier_policy import ENTITY_TYPE_PATTERN
 
-# The capability path segment must resolve to a declared capability; anything else is rejected
-# before it reaches a repository (OWASP A03).
 _KNOWN_CAPABILITIES: Final[frozenset[str]] = frozenset(c.value for c in ConfigCapability)
 
 
@@ -110,8 +108,6 @@ class RollbackRequestParams:
         if not self.requested_by.strip():
             raise ConfigRouteError("A rollback must name its requester.")
         if not self.approved_by.strip() or self.approved_by == self.requested_by:
-            # Maker-checker: reverting a governed definition is as high-blast-radius as
-            # changing it, so one actor must not be able to do it alone (OWASP A04).
             raise ConfigRouteError("A rollback requires an approver distinct from the requester.")
 
 
@@ -153,7 +149,6 @@ def build_config_routes(
     can be asserted without standing up a control plane.
     """
     return (
-        # DL-11 §Interfaces
         ConfigRoute("GET", 4, "config", "effective", lambda e, s: effective_config(e, s[1])),
         ConfigRoute(
             "GET",
@@ -177,7 +172,6 @@ def build_config_routes(
             lambda e, s: reprocess(e, s[1], s[3], s[4]),
         ),
         ConfigRoute("GET", 4, "config", "restatements", lambda e, s: restatements(e, s[1])),
-        # DL-03 §Interfaces
         ConfigRoute("GET", 6, "semantic", "lineage", lambda e, s: metric_lineage(e, s[1], s[4])),
         ConfigRoute("GET", 5, "semantic", "versions", lambda e, s: model_versions(e, s[1])),
         ConfigRoute("GET", 4, "semantic", "model", lambda e, s: active_model(e, s[1])),

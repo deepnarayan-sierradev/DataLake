@@ -6,7 +6,7 @@ One adapter serves both `sqlserver` (RDS-provisioned, license-included) and
 speak the same T-SQL dialect; only the credential's origin differs.
 
 Security (OWASP A01):
-  - One schema per tenant, inside a fixed connection database (`edl_serving`
+  - One schema per tenant, inside a fixed connection database (`datalake_serving`
     by default, or a tenant-supplied database for BYO-DB) — the isolation
     boundary a tenant's BI tool credential is scoped to.
   - A read-only login, GRANTed SELECT on only that tenant's schema
@@ -29,6 +29,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Final
 
+from contracts.resource_naming import secret_path
 from serving_store.interfaces.loader_interface import (
     RESERVED_COLUMNS,
     SAFE_COLUMN_PATTERN,
@@ -48,8 +49,6 @@ __all__ = [
     "TransientServingError",
 ]
 
-# One MERGE statement per chunk (not a driver-level executemany loop) — kept
-# smaller than MySQL/Postgres's 2,000-5,000 to bound one statement's parameter count.
 _UPSERT_CHUNK_SIZE: Final[int] = 500
 
 
@@ -60,7 +59,7 @@ class SqlServerLoader(ServingStoreLoaderInterface):
 
     max_identifier_length = 128  # SQL Server identifier length limit
     default_port = 1433
-    default_connection_database = "edl_serving"
+    default_connection_database = "datalake_serving"
 
     def _ensure_connection_database(
         self, credentials: dict[str, str], connection_database: str
@@ -124,7 +123,7 @@ class SqlServerLoader(ServingStoreLoaderInterface):
         self, connection: Any, tenant_code: str, container_name: str, writer_creds: dict[str, str]
     ) -> None:
         """Create/refresh a per-tenant read-only login, scoped to container_name only."""
-        secret_name = f"edl/serving-store/{tenant_code}/sqlserver/reader-credentials"
+        secret_name = secret_path("serving-store", tenant_code, "sqlserver", "reader-credentials")
         username = reader_username(tenant_code, self.max_identifier_length)
         connection_database = self._current_database(connection)
         password = self._get_or_create_reader_password(
@@ -137,8 +136,6 @@ class SqlServerLoader(ServingStoreLoaderInterface):
             cur.execute("SELECT 1 FROM sys.database_principals WHERE name = %s", (username,))
             if cur.fetchone() is None:
                 cur.execute(f"CREATE USER [{username}] FOR LOGIN [{username}]")
-            # Deliberately schema-scoped, not `ALTER ROLE db_datareader ADD MEMBER`,
-            # which would grant read access to every other tenant's schema too.
             cur.execute(f"GRANT SELECT ON SCHEMA::[{container_name}] TO [{username}]")
         connection.commit()
 
@@ -193,8 +190,6 @@ class SqlServerLoader(ServingStoreLoaderInterface):
         join_clause = " AND ".join(f"t.[{k}] = v.pk{i}" for i, k in enumerate(primary_keys))
         row_placeholder = "(" + ", ".join(["%s"] * len(primary_keys)) + ")"
         values_clause = ", ".join([row_placeholder] * len(pk_tuples))
-        # T-SQL has no row-value IN list (unlike MySQL/Postgres) — a VALUES-derived
-        # table join is the portable equivalent. Identifiers validated above.
         sql = (
             f"SELECT t.{pk_cols}, t.[_row_hash] "  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
             f"FROM [{container_name}].[{table_name}] t "

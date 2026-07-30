@@ -28,8 +28,8 @@ Usage:
         --entity-id sage-intacct-customer --window-days 7
 
 Note:
-    Local scripts cannot write to edl-raw-087972550871 (bucket policy restricts
-    writes to the EdlExtractionRuntimeRole Lambda IAM role only).
+    Local scripts cannot write to datalake-raw-<env>-<region> (bucket policy restricts
+    writes to the datalake-extraction-dev-exec Lambda IAM role only).
     Use --dry-run for local connectivity and schema validation.
     Full extraction must be triggered via Step Functions.
 """
@@ -41,21 +41,16 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-# ── Make project root importable when run directly ──────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import os  # noqa: E402
 
-# ── Default to dev profile/region if not already configured ─────────────────
 if "AWS_PROFILE" not in os.environ:
     os.environ["AWS_PROFILE"] = "dev"
 if "AWS_DEFAULT_REGION" not in os.environ:
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
-# Register the Sage connector at import time (triggers @register decorator).
-# These imports must come after the sys.path manipulation above (this script
-# runs standalone, not as an installed package), hence noqa: E402 throughout.
 import connector_runtime.adapters.sage.sage_connector  # noqa: E402, F401
 from connector_runtime.adapters.sage.sage_connector import SageConnector  # noqa: E402
 from connector_runtime.adapters.sage.substrate.sage_http_client import SageHttpClient  # noqa: E402
@@ -74,10 +69,9 @@ _logger = get_platform_logger(__name__)
 
 _ENVIRONMENT = "dev"
 _REGION = "us-east-1"
-_RAW_S3_BUCKET = "edl-raw-087972550871"
+_RAW_S3_BUCKET = os.environ.get("RAW_S3_BUCKET", "")
 _SOURCE_ID = "sage"
 
-# Known entity IDs and their Sage object paths
 _ENTITY_CONFIG: dict[str, dict[str, str]] = {
     "sage-intacct-customer": {
         "sage_product": "intacct",
@@ -100,11 +94,6 @@ _ENTITY_CONFIG: dict[str, dict[str, str]] = {
 _DRY_RUN_RECORD_LIMIT = 5
 
 
-# ---------------------------------------------------------------------------
-# Step 1 + 2: Credential fetch + OAuth token validation
-# ---------------------------------------------------------------------------
-
-
 def test_connection(entity_id: str) -> tuple[bool, object]:
     """
     Fetch credentials from Secrets Manager and obtain an Intacct OAuth token.
@@ -115,7 +104,7 @@ def test_connection(entity_id: str) -> tuple[bool, object]:
     sage_product = cfg["sage_product"]
 
     print("\n[1/4] Fetching credentials from Secrets Manager ...")
-    print(f"      Secret path: edl/sources/sage/{sage_product}/credentials")
+    print(f"      Secret path: datalake/<env>/sources/sage/{sage_product}/credentials")
 
     from connector_runtime.adapters.sage.products.intacct.intacct_auth import IntacctAuthClient
     from connector_runtime.adapters.sage.substrate.sage_credential_provider import (
@@ -139,7 +128,6 @@ def test_connection(entity_id: str) -> tuple[bool, object]:
     try:
         token = auth_client.get_access_token()
         base_url = auth_client.base_url
-        # Show only a hint — never the full token value (OWASP A09)
         token_hint = f"{token[:4]}...{token[-4:]}" if len(token) >= 8 else "****"
         print(f"      base_url     : {base_url}")
         print(f"      token (hint) : {token_hint}")
@@ -148,11 +136,6 @@ def test_connection(entity_id: str) -> tuple[bool, object]:
     except Exception as exc:
         print(f"      OAuth FAILED : {type(exc).__name__}: {exc}\n", file=sys.stderr)
         return False, None
-
-
-# ---------------------------------------------------------------------------
-# Step 3: Schema discovery via Intacct Models endpoint
-# ---------------------------------------------------------------------------
 
 
 def discover_schema(
@@ -178,11 +161,6 @@ def discover_schema(
         print(f"        ... and {len(field_contract.fields) - 20} more (omitted for brevity)")
     print(f"      Fingerprint: {field_contract.schema_fingerprint}\n")
     return field_contract
-
-
-# ---------------------------------------------------------------------------
-# Step 4: Extraction (dry-run peeks first N records, full run writes Parquet)
-# ---------------------------------------------------------------------------
 
 
 def run_extraction(
@@ -227,22 +205,17 @@ def run_extraction(
         print(f"\n      Dry-run complete. Records seen: {records_seen}")
     else:
         print(
-            "\n      NOTE: Local scripts cannot write to edl-raw-087972550871.\n"
-            "      The bucket policy restricts writes to EdlExtractionRuntimeRole only.\n"
+            "\n      NOTE: Local scripts cannot write to datalake-raw-<env>-<region>.\n"
+            "      The bucket policy restricts writes to datalake-extraction-dev-exec only.\n"
             "      To run a full extraction, trigger via Step Functions:\n\n"
             f"        AWS_PROFILE=dev python scripts/trigger_extraction.py \\\n"
             f"          --source-id {_SOURCE_ID} --entity-id {entity_id} \\\n"
             f"          --environment {_ENVIRONMENT} --region {_REGION} \\\n"
             f"          --state-machine-arn "
-            f"arn:aws:states:{_REGION}:087972550871:stateMachine:EdlExtractionPipeline \\\n"
+            f"arn:aws:states:{_REGION}:087972550871:stateMachine:datalake-extraction-dev \\\n"
             f"          --param sage_product={_ENTITY_CONFIG[entity_id]['sage_product']} \\\n"
             f"          --param object_path={_ENTITY_CONFIG[entity_id]['object_path']}"
         )
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 
 def main() -> None:
@@ -258,7 +231,7 @@ def main() -> None:
     parser.add_argument(
         "--environment",
         default=_ENVIRONMENT,
-        choices=["dev", "staging", "prod"],
+        choices=["dev", "uat", "prod"],
         help="Deployment environment (default: dev).",
     )
     parser.add_argument(
@@ -283,26 +256,19 @@ def main() -> None:
     environment: str = args.environment
     region: str = args.region
 
-    # ── Step 1 + 2: Connection test ──────────────────────────────────────────
     ok, _auth = test_connection(entity_id)
     if not ok:
         print("Aborting: cannot obtain access token.", file=sys.stderr)
         sys.exit(1)
 
-    # ── Load entity config from DynamoDB ─────────────────────────────────────
     print("Loading entity config from DynamoDB ...")
     config_client = ConfigurationRepositoryClient(environment=environment, region_name=region)
-    # `load_entity_config` has never existed on this client — the method is `load_config`, and it
-    # requires the tenant the caller acts for. This is a local developer harness with no tenant
-    # argument, so it uses the platform default explicitly rather than implying one. Nothing
-    # caught either problem because `scripts/` was outside the type-check scope until 2026-07-29.
     config: EntityExtractionConfig = config_client.load_config(
         source_id=_SOURCE_ID,
         entity_id=entity_id,
         tenant_code=DEFAULT_TENANT_CODE,
     )
     if args.window_days is not None:
-        # Patch the config to use the overridden window (useful for testing)
         import dataclasses
 
         config = dataclasses.replace(config, extraction_window_days=args.window_days)
@@ -310,7 +276,6 @@ def main() -> None:
     print(f"  watermark_field: {config.watermark_field or '(none)'}")
     print(f"  field_mode     : {config.field_mode}\n")
 
-    # ── Load watermark (incremental lower bound) ─────────────────────────────
     watermark_lower: str | None = None
     if config.load_type == LoadType.INCREMENTAL:
         watermark_repo = WatermarkRepository(environment=environment, region_name=region)
@@ -322,7 +287,6 @@ def main() -> None:
             print("  watermark_lower: (no prior watermark — first run will use epoch)")
     watermark_upper = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # ── Build connector ───────────────────────────────────────────────────────
     cfg = _ENTITY_CONFIG[entity_id]
     connector = SageConnector(
         environment=environment,
@@ -331,10 +295,8 @@ def main() -> None:
         object_path=cfg["object_path"],
     )
 
-    # ── Step 3: Schema discovery ──────────────────────────────────────────────
     field_contract = discover_schema(connector, entity_id, config)
 
-    # ── Step 4: Extraction ────────────────────────────────────────────────────
     run_extraction(
         connector=connector,
         entity_id=entity_id,

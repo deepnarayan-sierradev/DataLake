@@ -20,6 +20,7 @@ import pytest
 from moto import mock_aws
 
 import connector_runtime.api.control_plane_handler as cp
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from knowledge.twin import Twin, TwinEdge
 from knowledge.twin_repository import TwinRepository
 from tenancy.scope_contract import (
@@ -40,9 +41,9 @@ _UNIT_B: Final[str] = "franchisee-0002"
 def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AWS_REGION", _REGION)
     monkeypatch.setenv("PLATFORM_ENVIRONMENT", "dev")
-    monkeypatch.setenv("ANALYTICS_S3_BUCKET", "edl-analytics-1")
-    monkeypatch.setenv("TWIN_INDEX_TABLE", "EdlTwinIndex")
-    monkeypatch.setenv("SCOPE_UNIT_TABLE", "EdlScopeUnit")
+    monkeypatch.setenv("ANALYTICS_S3_BUCKET", "datalake-analytics-1")
+    monkeypatch.setenv("TWIN_INDEX_TABLE", RESOURCE_NAME_ENVIRONMENT["TWIN_INDEX_TABLE"])
+    monkeypatch.setenv("SCOPE_UNIT_TABLE", RESOURCE_NAME_ENVIRONMENT["SCOPE_UNIT_TABLE"])
 
 
 def _event(path: str, *, units: str | None = None, tenant_wide: bool = False) -> dict[str, Any]:
@@ -60,7 +61,10 @@ def _event(path: str, *, units: str | None = None, tenant_wide: bool = False) ->
 
 
 def _create_tables(dynamodb: Any) -> None:
-    for name, sort_key in (("EdlTwinIndex", "sk"), ("EdlScopeUnit", "scope_unit_id")):
+    for name, sort_key in (
+        (RESOURCE_NAME_ENVIRONMENT["TWIN_INDEX_TABLE"], "sk"),
+        (RESOURCE_NAME_ENVIRONMENT["SCOPE_UNIT_TABLE"], "scope_unit_id"),
+    ):
         dynamodb.create_table(
             TableName=name,
             KeySchema=[
@@ -133,7 +137,6 @@ class TestGetTwinAcrossScopeUnits:
 
     @mock_aws
     def test_foreign_units_twin_is_404_not_403(self) -> None:
-        # 404, because 403 confirms the twin exists — that is the disclosure DL-SCOPE-13 forbids.
         _create_tables(boto3.resource("dynamodb", region_name=_REGION))
         _seed_partitioned_tenant()
         _seed_twins()
@@ -185,7 +188,6 @@ class TestListTwinsAcrossScopeUnits:
 
     @mock_aws
     def test_empty_scope_grant_is_denied_not_unfiltered(self) -> None:
-        # The single most likely implementation defect in DL-12: reading "no units" as "no filter".
         _create_tables(boto3.resource("dynamodb", region_name=_REGION))
         _seed_partitioned_tenant()
         _seed_twins()
@@ -196,8 +198,6 @@ class TestListTwinsAcrossScopeUnits:
 class TestEdgeFanOutIsFiltered:
     @mock_aws
     def test_edge_to_a_foreign_unit_is_hidden(self) -> None:
-        # A node the caller may see can still point at another unit's entity; listing that edge
-        # discloses the target exists, which is the half of DL-SCOPE-13 left open until now.
         _create_tables(boto3.resource("dynamodb", region_name=_REGION))
         _seed_partitioned_tenant()
         TwinRepository(region_name=_REGION).upsert_twin(
@@ -221,7 +221,4 @@ class TestEdgeFanOutIsFiltered:
         body = json.loads(resp["body"])
         assert resp["statusCode"] == 200
         assert [edge["to_golden_id"] for edge in body["edges"]] == ["v-own"]
-        # The suppressed count is deliberately absent from the response: it lets a franchisee
-        # enumerate how many peer relationships exist, which is a weaker form of the disclosure this
-        # filter prevents. It is logged and metered instead.
         assert "edges_hidden_by_scope" not in body

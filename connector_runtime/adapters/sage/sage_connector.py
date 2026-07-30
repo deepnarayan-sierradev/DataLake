@@ -16,7 +16,7 @@ connector_params schema (supplied in Step Functions execution input):
     }
 
 Credentials are NOT in connector_params.  They live in Secrets Manager at:
-    edl/sources/sage/{sage_product}/credentials
+    datalake/<env>/sources/sage/{sage_product}/credentials
 
 Design principles enforced:
     1. No hardcoded field lists — fields discovered at runtime via metadata strategy.
@@ -103,26 +103,19 @@ _logger = get_platform_logger(__name__)
 
 _SOURCE_ID: Final[str] = "sage"
 
-# Required keys in connector_params (validated in __init__).
 _REQUIRED_CONNECTOR_PARAMS: Final[frozenset[str]] = frozenset({"sage_product", "object_path"})
 
-# Required credential keys shared by all Sage products (validated by SageCredentialProvider).
-# Product-specific required keys are declared in each auth client module.
 _INTACCT_REQUIRED_KEYS: Final[frozenset[str]] = frozenset(
     {"base_url", "token_url", "client_id", "client_secret", "company_id"}
 )
 
-# Mapping of sage_product → required credential keys.
-# Extend this when new products are added.
 _PRODUCT_REQUIRED_CREDENTIAL_KEYS: Final[dict[str, frozenset[str]]] = {
     "intacct": _INTACCT_REQUIRED_KEYS,
     "x3": frozenset({"base_url", "token_url", "client_id", "client_secret", "folder"}),
 }
 
-# Intacct query service endpoint path (relative to base_url).
 _INTACCT_QUERY_PATH: Final[str] = "/services/v1/query"
 
-# One exception type, or a tuple of exception types, for an isinstance() check.
 type _ExceptionTypesT = type[Exception] | tuple[type[Exception], ...]
 
 
@@ -147,7 +140,6 @@ class SageConnector(ConnectorInterface):
         sage_product: str,
         object_path: str,
     ) -> None:
-        # ── Validate sage_product against whitelist FIRST (OWASP A03) ─────────
         if sage_product not in SUPPORTED_SAGE_PRODUCTS:
             raise ValueError(
                 f"Unsupported sage_product {sage_product!r}. "
@@ -159,10 +151,8 @@ class SageConnector(ConnectorInterface):
         self._sage_product = sage_product
         self._object_path = object_path
 
-        # ── Resolve product-specific strategy classes ─────────────────────────
         strategies = resolve_product_strategies(sage_product)
 
-        # ── Instantiate shared infrastructure (one per extraction run) ────────
         required_keys = _PRODUCT_REQUIRED_CREDENTIAL_KEYS.get(sage_product, frozenset())
         self._credential_manager = SageCredentialProvider(
             environment=environment,
@@ -172,13 +162,10 @@ class SageConnector(ConnectorInterface):
         )
         self._http_client = SageHttpClient()
 
-        # ── Instantiate product strategies (constructor-injected deps) ────────
         self._auth = strategies.auth_class(
             credential_manager=self._credential_manager,
             http_client=self._http_client,
         )
-        # Annotated with the protocols the registry's bare `type` fields only assert in a
-        # comment, so a strategy that drifts from the contract fails the type check.
         self._metadata_client: SageMetadataProtocol = strategies.metadata_client_class(
             auth_client=self._auth,
             http_client=self._http_client,
@@ -187,8 +174,6 @@ class SageConnector(ConnectorInterface):
         self._query_engine: SageQueryProtocol = strategies.query_engine_class(
             object_path=object_path
         )
-
-    # ── ConnectorInterface implementation ─────────────────────────────────────
 
     def get_capability_declaration(self) -> ConnectorCapabilities:
         return ConnectorCapabilities(
@@ -278,14 +263,11 @@ class SageConnector(ConnectorInterface):
         Sets source_timestamp from the watermark field value on each record when
         the watermark field is present in the record payload.
         """
-        # Deserialise the query template to inspect the product discriminant.
         query_body: dict[str, Any] = json.loads(query_contract.query_text)
 
         if query_body.get(X3_ODATA_DISCRIMINANT):
-            # ── Sage X3 OData GET-based extraction path ──────────────────────
             yield from self._execute_x3_extraction(query_contract, query_body, run_id)
         else:
-            # ── Sage Intacct JSON-POST extraction path (default) ─────────────
             yield from self._execute_intacct_extraction(query_contract, query_body, run_id)
 
     def classify_extraction_error(self, exc: Exception) -> ExtractionErrorClassification:
@@ -295,11 +277,7 @@ class SageConnector(ConnectorInterface):
         TRANSIENT_* errors are retry-eligible (Step Functions retries).
         DETERMINISTIC_* errors trigger immediate fail-fast with DLQ routing.
         """
-        # Ordered (exception types, classification) rules — first isinstance match wins.
-        # Order matters: SageMetadataDeterministicError/TransientError are subclasses of
-        # SageMetadataError, so they must be checked before the generic base class.
         rules: tuple[tuple[_ExceptionTypesT, ExtractionErrorClassification], ...] = (
-            # ── Credential / auth failures — deterministic ─────────────────
             (
                 (IntacctCredentialError, X3CredentialError, SageCredentialError),
                 ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS,
@@ -312,7 +290,6 @@ class SageConnector(ConnectorInterface):
                 SageAuthenticationError,
                 ExtractionErrorClassification.DETERMINISTIC_INVALID_CREDENTIALS,
             ),
-            # ── Configuration / query failures — deterministic ─────────────────
             (SageObjectNotFoundError, ExtractionErrorClassification.DETERMINISTIC_INVALID_OBJECT),
             (
                 (SageQueryBuildError, X3QueryBuildError),
@@ -323,13 +300,11 @@ class SageConnector(ConnectorInterface):
                 ExtractionErrorClassification.DETERMINISTIC_INVALID_OBJECT,
             ),
             (SageMetadataTransientError, ExtractionErrorClassification.TRANSIENT_NETWORK),
-            # Generic metadata base — unknown subtype; route to UNKNOWN for DLQ + manual review.
             (SageMetadataError, ExtractionErrorClassification.UNKNOWN),
             (
                 SageInvalidRequestError,
                 ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION,
             ),
-            # ── Transient infrastructure failures — retry eligible ─────────────
             (SageRateLimitError, ExtractionErrorClassification.TRANSIENT_THROTTLE),
             (SageServiceUnavailableError, ExtractionErrorClassification.TRANSIENT_NETWORK),
             (SageTimeoutError, ExtractionErrorClassification.TRANSIENT_TIMEOUT),
@@ -340,8 +315,6 @@ class SageConnector(ConnectorInterface):
                 return classification
 
         return ExtractionErrorClassification.UNKNOWN
-
-    # ── Private ────────────────────────────────────────────────────────────────
 
     def _execute_intacct_extraction(
         self,
@@ -453,7 +426,6 @@ class SageConnector(ConnectorInterface):
             load_type=str(query_contract.load_type),
         )
 
-        # Bind watermark parameter placeholders (ISO-8601 validation enforced).
         if query_contract.query_parameters:
             query_body = X3QueryEngine.bind_parameters(query_body, query_contract.query_parameters)
 
@@ -463,7 +435,6 @@ class SageConnector(ConnectorInterface):
         orderby_str: str = query_body["orderby"]
         base_endpoint_url = f"{self._auth.base_url}/{endpoint}"
 
-        # OData query parameters for the initial page.
         odata_params: dict[str, str] = {
             "$select": select_str,
             "$orderby": orderby_str,
@@ -535,7 +506,6 @@ class SageConnector(ConnectorInterface):
         or falling back to ``$skip`` offset pagination otherwise.
         """
         if next_link:
-            # Follow the full nextLink URL — server provides all params.
             return self._fetch_page(
                 query_url=next_link,
                 query_body=None,  # GET request — body is None
@@ -569,15 +539,10 @@ class SageConnector(ConnectorInterface):
         Returns (is_done, next_skip).
         """
         if not records:
-            # Empty page — extraction complete regardless of pagination mode.
             return True, skip
         if next_link:
-            # Server has more pages — follow nextLink on the next iteration.
-            # Do NOT stop on a partial page here: the last nextLink page may
-            # legitimately contain fewer than X3_PAGE_SIZE records.
             return False, 0  # skip is irrelevant when following nextLink
         if len(records) < X3_PAGE_SIZE:
-            # Partial page with no nextLink — last page of skip pagination.
             return True, skip
         return False, skip + X3_PAGE_SIZE
 
@@ -620,7 +585,6 @@ class SageConnector(ConnectorInterface):
                 json_body=post_body,
             )
         except SageAuthenticationError:
-            # Token may have just expired — invalidate and retry once.
             _logger.info(
                 "sage_token_expired_mid_extraction_retry",
                 sage_product=self._sage_product,
@@ -643,11 +607,6 @@ class SageConnector(ConnectorInterface):
             )
 
 
-# ---------------------------------------------------------------------------
-# Builder function — wires connector + writer, registered with ConnectorRegistry
-# ---------------------------------------------------------------------------
-
-
 def _build_sage(
     environment: str,
     region_name: str,
@@ -663,7 +622,7 @@ def _build_sage(
     ExtractionWorkflow.
 
     Args:
-        environment:      Deployment environment (dev/staging/prod).
+        environment:      Deployment environment (dev/uat/prod).
         region_name:      AWS region name.
         connector_params: Step Functions input dict — must contain sage_product
                           and object_path.

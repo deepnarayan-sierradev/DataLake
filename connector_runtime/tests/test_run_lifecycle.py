@@ -17,23 +17,20 @@ import re
 import boto3
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime.run_lifecycle.run_lifecycle import (
     RunCoordinator,
     generate_run_id,
     make_partial_run_id,
 )
+from contracts.dlq_routing import DlqStage, dlq_queue_name
 from contracts.observability_contract import PipelineStage, RunStatus
 from contracts.pipeline_stage_contract import PipelineStageContract
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_AUDIT_TABLE = "EdlRunAuditLog"
-_DLQ_NAME = "EdlExtractionFailureDlq"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+_AUDIT_TABLE = RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"]
+_DLQ_NAME = f"{RESOURCE_NAME_ENVIRONMENT['RESOURCE_NAME_PREFIX']}-extraction-failure-dlq-{_ENV}"
 
 
 def _create_audit_table(dynamodb: object) -> None:
@@ -63,11 +60,6 @@ def _create_dlq(sqs: object) -> str:
     return url
 
 
-# ---------------------------------------------------------------------------
-# generate_run_id
-# ---------------------------------------------------------------------------
-
-
 class TestGenerateRunId:
     _RUN_ID_PATTERN = re.compile(r"^run-\d{8}-\d{6}\d{6}-[0-9a-f]{8}$")
 
@@ -85,11 +77,6 @@ class TestGenerateRunId:
 
     def test_starts_with_run_prefix(self) -> None:
         assert generate_run_id().startswith("run-")
-
-
-# ---------------------------------------------------------------------------
-# RunCoordinator
-# ---------------------------------------------------------------------------
 
 
 class TestRunCoordinator:
@@ -184,7 +171,6 @@ class TestRunCoordinator:
 
     @mock_aws
     def test_enqueue_dlq_entry_sends_sqs_message(self) -> None:
-        # Create audit table (required by coordinator construction)
         boto3.resource("dynamodb", region_name=_REGION).create_table(
             TableName=_AUDIT_TABLE,
             KeySchema=[
@@ -222,14 +208,12 @@ class TestRunCoordinator:
     @mock_aws
     def test_audit_write_failure_does_not_propagate(self) -> None:
         """If the audit table does not exist, emit_stage must not raise."""
-        # Intentionally do NOT create the audit table
         coord = RunCoordinator(
             environment=_ENV,
             region_name=_REGION,
             source_id="salesforce",
             entity_id="salesforce-account",
         )
-        # Should not raise even though the table doesn't exist
         contract = coord.emit_stage(
             stage=PipelineStage.CONFIGURATION_LOAD,
             status=RunStatus.FAILED,
@@ -257,17 +241,11 @@ class TestRunCoordinator:
             source_id="salesforce",
             entity_id="salesforce-account",
         )
-        # Should not raise even though the DLQ doesn't exist
         coord.enqueue_dlq_entry(
             error_message="Something went wrong",
             error_code="unknown",
             failed_stage=PipelineStage.EXTRACTION,
         )
-
-
-# ---------------------------------------------------------------------------
-# source_entity_key / started_at GSI population (ARCH-18)
-# ---------------------------------------------------------------------------
 
 
 @mock_aws
@@ -300,8 +278,6 @@ class TestAuditRecordGsiFields:
             Key={"run_id": coord.run_id, "stage": "extraction"},
             ConsistentRead=True,
         )["Item"]
-        # Must match dlq_processor_handler's "{tenant_code}#{source_id}#{entity_id}"
-        # format exactly so both write paths land in the same GSI partition.
         assert item["source_entity_key"] == "acme-corp#salesforce#salesforce-account"
 
     def test_emit_stage_populates_started_at(self) -> None:
@@ -345,11 +321,6 @@ class TestAuditRecordGsiFields:
         assert item["started_at"] == coord.started_at.isoformat()
 
 
-# ---------------------------------------------------------------------------
-# Regression tests for fixed bugs
-# ---------------------------------------------------------------------------
-
-
 class TestDlqScrubbing:
     """
     Regression test for Bug #2: DLQ payload error_message was not scrubbed.
@@ -382,7 +353,6 @@ class TestDlqScrubbing:
             source_id="salesforce",
             entity_id="salesforce-account",
         )
-        # Pass a message containing a sensitive pattern
         coord.enqueue_dlq_entry(
             error_message="Auth failed: token=sup3rs3cr3t expired",
             error_code="deterministic_invalid_credentials",
@@ -391,9 +361,7 @@ class TestDlqScrubbing:
 
         messages = sqs.receive_message(QueueUrl=queue_url, MaxNumberOfMessages=1)
         body = json.loads(messages["Messages"][0]["Body"])
-        # The raw secret value must not appear in the SQS message body.
         assert "sup3rs3cr3t" not in body["error_message"]
-        # The message is present but scrubbed
         assert body["error_message"] != ""
 
     @mock_aws
@@ -413,9 +381,7 @@ class TestDlqScrubbing:
         )
         sqs = boto3.client("sqs", region_name=_REGION)
         sqs.create_queue(QueueName=_DLQ_NAME)
-        # Extraction now routes to its own per-stage queue as well as the legacy one, so the cache
-        # is keyed by queue name rather than holding a single URL.
-        sqs.create_queue(QueueName="EdlStageDlq-Extraction")
+        sqs.create_queue(QueueName=dlq_queue_name(DlqStage.EXTRACTION, _ENV))
 
         coord = RunCoordinator(
             environment=_ENV,
@@ -423,20 +389,13 @@ class TestDlqScrubbing:
             source_id="salesforce",
             entity_id="salesforce-account",
         )
-        # First enqueue — resolves and caches both URLs
         coord.enqueue_dlq_entry("error one", "unknown", PipelineStage.EXTRACTION)
         first_cached = dict(coord._dlq_urls)
-        assert set(first_cached) == {"EdlStageDlq-Extraction", _DLQ_NAME}
-        # Second enqueue — same two queues, served from the cache
+        assert set(first_cached) == {dlq_queue_name(DlqStage.EXTRACTION, _ENV), _DLQ_NAME}
         coord.enqueue_dlq_entry("error two", "unknown", PipelineStage.RAW_WRITE)
         assert coord._dlq_urls == first_cached
         for queue_name, url in first_cached.items():
             assert coord._dlq_urls[queue_name] is url  # same string object (cached)
-
-
-# ---------------------------------------------------------------------------
-# Properties: source_id, entity_id, started_at
-# ---------------------------------------------------------------------------
 
 
 @mock_aws
@@ -501,13 +460,7 @@ class TestRunCoordinatorProperties:
                 "SendMessage",
             )
         )
-        # Should not raise; DLQ failure is logged and swallowed
         coord.enqueue_dlq_entry("some error", "unknown", PipelineStage.EXTRACTION)
-
-
-# ---------------------------------------------------------------------------
-# make_partial_run_id (PERF-5)
-# ---------------------------------------------------------------------------
 
 
 class TestMakePartialRunId:
@@ -531,11 +484,6 @@ class TestMakePartialRunId:
 
         with pytest.raises(ValueError, match="part_number"):
             make_partial_run_id("run-x", -1)
-
-
-# ---------------------------------------------------------------------------
-# RunCoordinator.emit_checkpoint_stage (PERF-5)
-# ---------------------------------------------------------------------------
 
 
 @mock_aws
@@ -580,8 +528,6 @@ class TestEmitCheckpointStage:
         assert partial_item["record_count"] == 1_234
         assert partial_item["status"] == "partial"
 
-        # The MAIN run_id's own audit trail is untouched by the checkpoint —
-        # no item exists under the plain run_id for this stage.
         main_item = table.get_item(
             Key={"run_id": coord.run_id, "stage": "run_completion"},
             ConsistentRead=True,
@@ -596,7 +542,6 @@ class TestEmitCheckpointStage:
             source_id="mysql-rds",
             entity_id="mysql-rds-orders",
         )
-        # Intentionally do NOT create the audit table.
         contract = coord.emit_checkpoint_stage(part_number=1, record_count=100)
         assert contract.status == RunStatus.PARTIAL
 

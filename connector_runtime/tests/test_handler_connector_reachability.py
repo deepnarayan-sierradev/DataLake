@@ -17,14 +17,9 @@ from typing import Final
 
 import pytest
 
-# The only import allowed here: the deployed entry point. Importing an adapter module would
-# register it as a side effect and make the assertions below vacuous.
 import connector_runtime.extraction_pipeline_handler  # noqa: F401
 from connector_runtime.registry import connector_registry
 
-# The sources the platform claims to support: the four pre-DL-01 adapters plus the ten from the
-# SOW source list (DL-01). Hard-coded on purpose — deriving it from a registry that the imports
-# under test populate would make this test unable to fail.
 LEGACY_SOURCE_IDS: Final[frozenset[str]] = frozenset(
     {"salesforce", "netsuite", "mysql-rds", "sage"}
 )
@@ -42,10 +37,6 @@ SOW_SOURCE_IDS: Final[frozenset[str]] = frozenset(
         "meta-ads",
     }
 )
-# Added 2026-07-29 from the customer's supplementary API documentation: ServiceBridge is the
-# system Brothers Gutters is migrating away from (row 10's "migrating from Service Bridge"),
-# and BePro is a new source. Listed separately from the original ten so a regression names
-# which programme the missing source belongs to.
 SUPPLEMENTARY_SOURCE_IDS: Final[frozenset[str]] = frozenset({"servicebridge", "bepro"})
 ALL_SUPPORTED_SOURCE_IDS: Final[frozenset[str]] = (
     LEGACY_SOURCE_IDS | SOW_SOURCE_IDS | SUPPLEMENTARY_SOURCE_IDS
@@ -72,7 +63,6 @@ class TestEverySupportedSourceResolvesFromTheHandler:
         )
 
     def test_the_ten_sow_sources_are_all_present(self) -> None:
-        # Stated separately from the assertion above so a regression names DL-01 explicitly.
         registered = set(connector_registry.registered_source_ids)
         assert SOW_SOURCE_IDS <= registered, (
             "DL-01 requires ten source systems to be extractable. Missing from the handler's "

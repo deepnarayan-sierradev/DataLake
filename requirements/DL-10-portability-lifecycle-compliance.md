@@ -84,9 +84,9 @@ PHI gating; retention policies are not attached to entities.
 
 | Store | Purpose |
 |---|---|
-| `EdlExportJob` (new) | PK `tenant_code`, SK `job_id` — scope, format, status, artefact location, expiry |
-| `EdlDeletionCertificate` (new) | PK `tenant_code`, SK `certificate_id` — scope, executed_at, retained items and basis |
-| `EdlSourceOnboardingRegistry` (existing) | add `phi_bearing` and `baa_executed` gate attributes |
+| `datalake-export-jobs-dev` (new) | PK `tenant_code`, SK `job_id` — scope, format, status, artefact location, expiry |
+| `datalake-deletion-certificates-dev` (new) | PK `tenant_code`, SK `certificate_id` — scope, executed_at, retained items and basis |
+| `datalake-source-onboarding-registry-dev` (existing) | add `phi_bearing` and `baa_executed` gate attributes |
 
 Retention configuration attaches to the entity configuration record rather than a parallel store.
 

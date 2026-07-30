@@ -42,7 +42,7 @@ Missing:
 - **No concrete `LlmStructuredClient` implementation.** `agent/llm_client.py` is 23 lines of ABC.
   A Claude-specific adapter was written and deliberately deleted to keep the port neutral.
 - **No API endpoint, no Lambda, no deployable.** The agent is library code nothing calls.
-- **No `EdlAgentSession` / `EdlAgentAudit` tables** — Terraform intentionally omitted them.
+- **No `datalake-agent-sessions-dev` / `datalake-agent-audit-dev` tables** — Terraform intentionally omitted them.
 - No conversation memory, no streaming, no cost controls, no provider configuration.
 
 The agent layer was explicitly deferred by the user during the platform-evolution effort. This
@@ -63,7 +63,7 @@ requirement un-defers it.
   control-plane API, or its own ECS service if streaming demands it), never on the ingestion path.
   Routes: `POST /tenants/{tc}/agent/ask` (streamed), `GET/POST /tenants/{tc}/agent/sessions`,
   `GET /tenants/{tc}/agent/sessions/{id}`.
-- **DL-AGENT-03** **Session and turn persistence.** `EdlAgentSession` and `EdlAgentAudit` tables;
+- **DL-AGENT-03** **Session and turn persistence.** `datalake-agent-sessions-dev` and `datalake-agent-audit-dev` tables;
   every turn persists question, resolved semantic request, compiled query, per-check verification
   results, retry count, final answer, and cited sources (FR-3.3).
 - **DL-AGENT-04** **Streaming responses** with incremental token delivery and a final verified
@@ -99,8 +99,8 @@ requirement un-defers it.
 
 | Table | Key | Contents |
 |---|---|---|
-| `EdlAgentSession` | PK `tenant_code`, SK `session_id` | user, created/updated, turn count, token usage, TTL |
-| `EdlAgentAudit` | PK `tenant_code`, SK `{session_id}#{turn_seq}` | question, semantic request, compiled query hash, verification results, retries, answer, citations, latency, cost |
+| `datalake-agent-sessions-dev` | PK `tenant_code`, SK `session_id` | user, created/updated, turn count, token usage, TTL |
+| `datalake-agent-audit-dev` | PK `tenant_code`, SK `{session_id}#{turn_seq}` | question, semantic request, compiled query hash, verification results, retries, answer, citations, latency, cost |
 
 Agent configuration per tenant at S3 `{tenant_code}/agent-config/{version}.json` — provider, model
 id, limits, enabled tools — versioned through the same repository pattern as the semantic model.

@@ -18,16 +18,8 @@ locals {
     Module      = "control-plane"
   })
 
-  control_plane_lambda_name = "EdlControlPlane"
+  control_plane_lambda_name = "${var.name_prefix}-control-plane-${var.environment}"
 
-  # Route table for the control-plane HTTP API. Each entry maps a stable
-  # for_each key to an API Gateway v2 route_key ("METHOD /path"), matching
-  # the endpoints implemented in connector_runtime/api/control_plane_handler.py.
-  # `POST /tenants` is deliberately absent: tenants are owned by the Identity API, and this
-  # system only ever consumes a verified claim. It was provisioned here for months while the
-  # handler correctly refused it — the Python test asserted a 404 and could not see Terraform
-  # publishing the route regardless. `tests/test_control_plane_route_boundary.py` now checks
-  # this map directly.
   routes = {
     list_entities      = "GET /tenants/{tenant_code}/entities"
     create_entity      = "POST /tenants/{tenant_code}/entities"
@@ -44,17 +36,9 @@ locals {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Cognito User Pool — tenant/operator authentication
-#
-# A "tenant_code" custom attribute is carried on each user so the Lambda's
-# fail-closed authorization check (connector_runtime/api/control_plane_handler
-# ._authenticated_tenant_code) can cross-check the caller's tenant against
-# the {tenant_code} path parameter on every tenant-scoped route.
-# ---------------------------------------------------------------------------
 
 resource "aws_cognito_user_pool" "control_plane" {
-  name = "EdlControlPlaneUsers"
+  name = "${var.name_prefix}-control-plane-users-${var.environment}"
 
   password_policy {
     minimum_length    = var.cognito_password_minimum_length
@@ -64,8 +48,6 @@ resource "aws_cognito_user_pool" "control_plane" {
     require_symbols   = true
   }
 
-  # Custom attribute surfaced in the JWT as "custom:tenant_code" — read by
-  # the control-plane Lambda to authorize the {tenant_code} path parameter.
   schema {
     name                = "tenant_code"
     attribute_data_type = "String"
@@ -80,12 +62,12 @@ resource "aws_cognito_user_pool" "control_plane" {
   auto_verified_attributes = ["email"]
 
   tags = merge(local.common_tags, {
-    Name = "EdlControlPlaneUsers"
+    Name = "${var.name_prefix}-control-plane-users-${var.environment}"
   })
 }
 
 resource "aws_cognito_user_pool_client" "control_plane" {
-  name         = "EdlControlPlaneClient"
+  name         = "${var.name_prefix}-control-plane-client-${var.environment}"
   user_pool_id = aws_cognito_user_pool.control_plane.id
 
   generate_secret = false
@@ -105,29 +87,14 @@ resource "aws_cognito_user_pool_client" "control_plane" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# HTTP API (API Gateway v2) — simpler/cheaper than a REST API and sufficient
-# for a JSON proxy-integration control plane. payload_format_version = "1.0"
-# is pinned on the Lambda integration below so the Lambda receives the
-# classic {httpMethod, path, pathParameters, body, requestContext...} proxy
-# event shape that connector_runtime/api/control_plane_handler.py parses.
-#
-# NOTE (honesty flag): AWS's documented location for JWT-authorizer claims
-# on an HTTP API is requestContext.authorizer.jwt.claims, which may differ
-# from the requestContext.authorizer.claims shape produced by a REST API +
-# COGNITO_USER_POOLS authorizer. The Lambda's _extract_claims() checks BOTH
-# locations defensively, but this authorizer wiring has not been exercised
-# against a live deployment in this change — treat it as functionally wired
-# but unverified end-to-end until a real login/token round-trip is tested.
-# ---------------------------------------------------------------------------
 
 resource "aws_apigatewayv2_api" "control_plane" {
-  name          = "EdlControlPlaneApi"
+  name          = "${var.name_prefix}-control-plane-api-${var.environment}"
   protocol_type = "HTTP"
   description   = "Multi-tenant control-plane API: tenant provisioning, entity registration, pipeline triggering, run status."
 
   tags = merge(local.common_tags, {
-    Name = "EdlControlPlaneApi"
+    Name = "${var.name_prefix}-control-plane-api-${var.environment}"
   })
 }
 
@@ -135,7 +102,7 @@ resource "aws_apigatewayv2_authorizer" "cognito" {
   api_id           = aws_apigatewayv2_api.control_plane.id
   authorizer_type  = "JWT"
   identity_sources = ["$request.header.Authorization"]
-  name             = "EdlControlPlaneCognitoAuthorizer"
+  name             = "${var.name_prefix}-control-plane-authorizer-${var.environment}"
 
   jwt_configuration {
     audience = [aws_cognito_user_pool_client.control_plane.id]
@@ -162,12 +129,12 @@ resource "aws_apigatewayv2_route" "routes" {
 }
 
 resource "aws_cloudwatch_log_group" "api_gw_access_logs" {
-  name              = "/edl/control-plane-api-gw-access-logs"
+  name              = "/${var.name_prefix}/control-plane-api-access-${var.environment}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.kms_key_arn
 
   tags = merge(local.common_tags, {
-    Name = "/edl/control-plane-api-gw-access-logs"
+    Name = "/${var.name_prefix}/control-plane-api-access-${var.environment}"
   })
 }
 
@@ -192,7 +159,7 @@ resource "aws_apigatewayv2_stage" "default" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "EdlControlPlaneApiDefaultStage"
+    Name = "${var.name_prefix}-control-plane-api-default-stage-${var.environment}"
   })
 }
 
@@ -204,13 +171,28 @@ resource "aws_lambda_permission" "apigw_invoke" {
   source_arn    = "${aws_apigatewayv2_api.control_plane.execution_arn}/*/*"
 }
 
-# ---------------------------------------------------------------------------
-# Control-Plane Lambda
-# Ships in the same deployment package as the rest of connector_runtime
-# (same pattern as transformation_lambda / entity_resolution_lambda reusing
-# the extraction-pipeline.zip). IAM role is centralised in the iam module
-# (aws_iam_role.control_plane) — not defined here.
-# ---------------------------------------------------------------------------
+
+locals {
+  required_resource_names = [
+    "BACKFILL_JOB_TABLE",
+    "BRAND_REGISTRY_TABLE",
+    "CONFIG_GOVERNANCE_TABLE",
+    "CONFIG_RESTATEMENT_TABLE",
+    "DATA_QUALITY_EXCEPTION_TABLE",
+    "EFFECTIVE_CONFIG_TABLE",
+    "RECONCILIATION_REPORT_TABLE",
+    "RESOURCE_NAME_PREFIX",
+    "SCOPE_UNIT_TABLE",
+    "SECRET_PATH_PREFIX",
+    "SEMANTIC_APPROVAL_TABLE",
+    "SERVING_STORE_CONFIG_TABLE",
+    "SOURCE_CONNECTION_TABLE",
+    "SOURCE_ONBOARDING_TABLE",
+  ]
+  resource_name_variables = {
+    for key in local.required_resource_names : key => var.resource_names[key]
+  }
+}
 
 resource "aws_lambda_function" "control_plane" {
   function_name = local.control_plane_lambda_name
@@ -242,18 +224,15 @@ resource "aws_lambda_function" "control_plane" {
     }
 
   }
-  # 29s: just under the HTTP API integration's hard 30s timeout cap.
   timeout     = 29
   memory_size = 512
 
-  # The control plane fronts every tenant's API calls; an unbounded burst from one tenant
-  # would otherwise consume the account pool and throttle the pipeline Lambdas too.
   reserved_concurrent_executions = var.reserved_concurrent_executions
 
   role = var.control_plane_role_arn
 
   environment {
-    variables = {
+    variables = merge({
       PLATFORM_ENVIRONMENT       = var.environment
       PIPELINE_TRIGGER_QUEUE_URL = var.pipeline_trigger_queue_url
       ENTITY_CONFIG_TABLE        = var.entity_config_table_name
@@ -263,10 +242,7 @@ resource "aws_lambda_function" "control_plane" {
       TWIN_INDEX_TABLE           = var.twin_index_table_name
       SEMANTIC_MODEL_TABLE       = var.semantic_model_table_name
       SAVED_QUERY_TABLE          = var.saved_query_table_name
-      # AWS_REGION is a reserved Lambda environment variable injected
-      # automatically by the runtime — Lambda rejects CreateFunction/
-      # UpdateFunctionConfiguration if it's set explicitly here.
-    }
+    }, local.resource_name_variables)
   }
 
   kms_key_arn = var.kms_key_arn
@@ -290,35 +266,21 @@ resource "aws_cloudwatch_log_group" "control_plane" {
   })
 }
 
-# ---------------------------------------------------------------------------
-# Async-invocation dead letter queue (CKV_AWS_116). An asynchronous Lambda failure with no
-# DLQ is discarded after the retries with nothing left to inspect. Named `EdlStageDlq-*` so
-# the existing `sqs:SendMessage` grant on that prefix covers it rather than adding a new one.
-# SSE-SQS rather than a CMK: no per-module KMS input exists, and the payload here is a failed
-# event envelope, not tenant data.
-# ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "async_dlq" {
-  name                      = "EdlStageDlq-ControlPlaneAsync"
+  name                      = "${var.name_prefix}-control-plane-async-dlq-${var.environment}"
   message_retention_seconds = 1209600 # 14 days, the maximum — a DLQ that expires loses the evidence
   sqs_managed_sse_enabled   = true
 
-  tags = merge(local.common_tags, { Name = "EdlStageDlq-ControlPlaneAsync" })
+  tags = merge(local.common_tags, { Name = "${var.name_prefix}-control-plane-async-dlq-${var.environment}" })
 }
 
-# ---------------------------------------------------------------------------
-# The function runs inside the VPC (CKV_AWS_117) so its egress is attributable and
-# controllable. HTTPS only: S3 and DynamoDB go via gateway endpoints, the rest via the
-# interface endpoints and NAT the networking module already provisions.
-# ---------------------------------------------------------------------------
 
 resource "aws_security_group" "control_plane_lambda" {
-  # Attached to this module's function(s) through the `vpc_config` block below. Checkov's graph
-  # does not traverse a dynamic block, so it reads the group as orphaned.
   #checkov:skip=CKV2_AWS_5:Attached via dynamic vpc_config in this module.
   count = var.vpc_id == null ? 0 : 1
 
-  name        = "ControlPlaneLambdaSg"
+  name        = "${var.name_prefix}-control-plane-${var.environment}-sg"
   description = "HTTPS egress only for the ControlPlane Lambda function(s)."
   vpc_id      = var.vpc_id
 
@@ -330,7 +292,7 @@ resource "aws_security_group" "control_plane_lambda" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = merge(local.common_tags, { Name = "ControlPlaneLambdaSg" })
+  tags = merge(local.common_tags, { Name = "${var.name_prefix}-control-plane-${var.environment}-sg" })
 
   lifecycle {
     create_before_destroy = true

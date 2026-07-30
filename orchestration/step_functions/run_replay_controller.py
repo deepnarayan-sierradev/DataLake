@@ -46,7 +46,6 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# DLQ entry must have all of these keys.
 _REQUIRED_DLQ_FIELDS: Final[frozenset[str]] = frozenset(
     {
         "run_id",
@@ -61,16 +60,9 @@ _REQUIRED_DLQ_FIELDS: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Known deployment environments — matches Terraform variable validation.
-_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
+_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "uat", "prod"})
 
-# Step Functions execution names: alphanumeric + hyphens, max 80 chars.
 _SFN_EXEC_NAME_MAX: Final[int] = 80
-
-
-# ---------------------------------------------------------------------------
-# Value objects and exceptions
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -102,11 +94,6 @@ class ReplayValidationError(Exception):
     """
 
 
-# ---------------------------------------------------------------------------
-# Controller
-# ---------------------------------------------------------------------------
-
-
 class RunReplayController:
     """
     Triggers replay executions for failed extraction runs.
@@ -132,12 +119,8 @@ class RunReplayController:
             raise ValueError("state_machine_arn must not be empty.")
         self._state_machine_arn = state_machine_arn
         self._sfn = boto3.client("stepfunctions", region_name=region_name)
-        # Running counters for ReplaySuccessRate; a consistently-failing replay path is a
-        # different problem from a deep DLQ and must be visible separately.
         self._replay_attempts = 0
         self._replay_started = 0
-
-    # ── Public API ──────────────────────────────────────────────────────────
 
     def parse_dlq_entry(self, message_body: str) -> DlqEntry:
         """
@@ -177,8 +160,6 @@ class RunReplayController:
         environment = str(raw["environment"])
         tenant_code = str(raw["tenant_code"])
 
-        # Validate run_id before it is used in a Step Functions execution name
-        # (OWASP A03 — injection prevention in resource identifiers).
         if not _RUN_ID_PATTERN.match(run_id):
             raise ReplayValidationError(
                 f"run_id {run_id!r} in DLQ entry contains characters not permitted "
@@ -252,9 +233,6 @@ class RunReplayController:
         ClientError
             When the Step Functions StartExecution API call fails.
         """
-        # Build a unique, deterministic execution name from the original run_id.
-        # The "replay-" prefix makes replay executions easy to identify in the
-        # Step Functions console.  Truncate to fit the 80-char limit.
         raw_name = f"replay-{entry.run_id}"
         execution_name = raw_name[:_SFN_EXEC_NAME_MAX]
 
@@ -286,11 +264,6 @@ class RunReplayController:
         except ClientError as exc:
             error_code = exc.response["Error"]["Code"]
             if error_code == "ExecutionAlreadyExists":
-                # Idempotent: a replay execution for this run_id was already submitted
-                # (e.g. SQS duplicate delivery or a concurrent DLQ consumer).
-                # Construct the deterministic execution ARN and return it so the caller
-                # can safely delete the SQS message without re-triggering the pipeline.
-                # ARN pattern: arn:aws:states:{region}:{account}:execution:{sm_name}:{exec_name}
                 arn_parts = self._state_machine_arn.split(":")
                 idempotent_arn = (
                     ":".join(arn_parts[:-2]) + ":execution:" + arn_parts[-1] + ":" + execution_name

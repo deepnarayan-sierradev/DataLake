@@ -86,9 +86,9 @@ platform has no reconciliation capability of any kind.
 
 | Store | Purpose |
 |---|---|
-| `EdlDataQualityException` (new) | PK `tenant_code`, SK `{run_id}#{rule_id}#{seq}`; GSI on `entity_id`+`detected_at`; TTL configurable |
-| `EdlReconciliationReport` (new) | PK `tenant_code`, SK `{entity_id}#{period}#{run_id}` — counts, sums, variance, verdict |
-| `EdlBackfillJob` (new) | PK `tenant_code`, SK `{entity_id}#{job_id}` — chunk plan, per-chunk state, resume pointer |
+| `datalake-data-quality-exceptions-dev` (new) | PK `tenant_code`, SK `{run_id}#{rule_id}#{seq}`; GSI on `entity_id`+`detected_at`; TTL configurable |
+| `datalake-reconciliation-reports-dev` (new) | PK `tenant_code`, SK `{entity_id}#{period}#{run_id}` — counts, sums, variance, verdict |
+| `datalake-backfill-jobs-dev` (new) | PK `tenant_code`, SK `{entity_id}#{job_id}` — chunk plan, per-chunk state, resume pointer |
 | S3 | `{tenant_code}/quality-reports/{source_id}/{entity_id}/{run_id}/` — **note the new tenant prefix**, closing gap register item 10 |
 | S3 | `{tenant_code}/reconciliation/{entity_id}/{period}/report.json` |
 | S3 | `{tenant_code}/data-dictionary/{entity_id}/{version}.md` |

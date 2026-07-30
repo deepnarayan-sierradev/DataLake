@@ -3,7 +3,8 @@ Tests for the scope-filter reconciliation (F14, DL-SEC-11).
 
 Athena row-level isolation is `aws_lakeformation_data_cells_filter` — the only Lake Formation
 construct that filters rows, so the mechanism is correct. The lifecycle is not: scope units are
-runtime data in `EdlScopeUnit`, published when a franchisee is onboarded, while the filters that
+runtime data in `datalake-scope-units-dev`, published when a franchisee is onboarded, while the
+filters that
 enforce their boundary are static Terraform. A unit could therefore exist, own rows, and have no
 filter — readable by any principal holding the tenant tag, which is the wildcard grant the filters
 replaced, and with nothing reporting it.
@@ -62,7 +63,6 @@ class TestFragmentGeneration:
 
 class TestDriftDetection:
     def test_a_registered_unit_with_no_filter_is_unenforced(self) -> None:
-        # The security-relevant direction: the franchisee exists and nothing filters its rows.
         drift = detect_drift({"evive:f-1:t", "evive:f-2:t"}, {"evive:f-1:t"})
         assert drift["unenforced_units"] == ["evive:f-2:t"]
 
@@ -71,12 +71,10 @@ class TestDriftDetection:
         assert drift["stale_filters"] == ["evive:gone:t"]
 
     def test_no_drift_when_they_agree(self) -> None:
-        # Positive control: a detector that always reported drift would pass both tests above.
         drift = detect_drift({"evive:f-1:t"}, {"evive:f-1:t"})
         assert drift == {"unenforced_units": [], "stale_filters": []}
 
     def test_generated_keys_round_trip_through_drift_detection(self) -> None:
-        # The generator and the detector must agree on the key shape, or every run reports drift.
         fragment = build_fragment(_UNITS, _TABLES, "123456789012", {})
         keys = set(fragment["scope_unit_row_filters"])
         assert detect_drift(keys, keys) == {"unenforced_units": [], "stale_filters": []}

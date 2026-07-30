@@ -41,16 +41,10 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Refresh this far before expiry so a long stage never runs past its credentials mid-operation.
 REFRESH_MARGIN: Final[timedelta] = timedelta(minutes=5)
 
-# One hour is the default maximum for a role chained from another role; shorter than the Lambda's
-# own 15-minute ceiling matters less than not having to refresh inside a single invocation.
 SESSION_DURATION_SECONDS: Final[int] = 3600
 
-# Set by Terraform on each stage Lambda. Absent means the tenant-tagged path is not deployed for
-# this
-# function, which is a deployment state the caller must handle explicitly rather than silently skip.
 TENANT_DATA_ROLE_ARN_ENV: Final[str] = "TENANT_DATA_ROLE_ARN"
 
 
@@ -71,8 +65,6 @@ class _CachedCredentials:
         return now + REFRESH_MARGIN < self.expires_at
 
 
-# Keyed by (role_arn, tenant_code) — never by role alone, or a warm container would hand one
-# tenant's credentials to the next tenant it happens to serve.
 _CACHE: dict[tuple[str, str], _CachedCredentials] = {}
 
 
@@ -122,11 +114,8 @@ def tenant_scoped_session(
     try:
         response = client.assume_role(
             RoleArn=resolved_role,
-            # The session name is an audit label; CloudTrail shows which tenant a call acted for.
-            RoleSessionName=f"edl-{tenant_code}"[:64],
+            RoleSessionName=f"datalake-{tenant_code}"[:64],
             DurationSeconds=SESSION_DURATION_SECONDS,
-            # The tag the boundary conditions read. `sts:TagSession` must be granted by the data
-            # role's trust policy, which also constrains which tag values are acceptable.
             Tags=[{"Key": "tenant_code", "Value": tenant_code}],
         )
     except ClientError as exc:

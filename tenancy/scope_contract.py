@@ -17,11 +17,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from contracts.identifier_policy import TENANT_CODE_PATTERN, validate_tenant_code
 
-# Scope unit ids share the stable-id charset but also permit underscores so the
-# implicit sentinel below is expressible without a second pattern.
 SCOPE_UNIT_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z_][a-z0-9_\-]{1,63}$")
 
-# The single implicit unit every `single`-partition tenant owns.
 IMPLICIT_SCOPE_UNIT_ID: Final[str] = "__tenant__"
 
 

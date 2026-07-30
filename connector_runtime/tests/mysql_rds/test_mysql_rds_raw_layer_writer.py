@@ -77,9 +77,6 @@ class TestPartitionPath:
             f"/extraction_date={_DATE}/run_id={_RUN_ID}/data.parquet"
         )
         assert data_key == expected
-        # entity_id itself legitimately contains "mysql-rds" once — assert the
-        # *source segment* isn't doubled by checking the path component right
-        # after tenant_code, not a raw substring count.
         assert data_key.split("/")[1] == "mysql-rds"
         assert "mysql_rds" not in data_key
 

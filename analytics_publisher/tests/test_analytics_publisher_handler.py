@@ -63,7 +63,6 @@ class TestContextvarsAndErrorHandling:
         structlog.contextvars.clear_contextvars()
 
     def test_contextvars_cleared_after_success(self, monkeypatch) -> None:
-        # The stage lifecycle needs the region the Lambda runtime always injects (DL-OPS-05).
         monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.setattr(
             handler_module,
@@ -114,8 +113,6 @@ class TestEndToEndSlaMetric:
 
         started_at = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
 
-        # Directly exercise the metrics block via the private helper's inputs
-        # by calling it with pre-baked outputs — avoids mocking S3/Glue.
         handler_module._emit_metrics_and_e2e_sla(
             region_name="us-east-1",
             tenant_code="demo",
@@ -165,11 +162,6 @@ class TestEndToEndSlaMetric:
         assert captured_stages == ["analytics_publication"]
 
 
-# ---------------------------------------------------------------------------
-# PERF-3 regression-guard fakes (module level to keep the test itself simple)
-# ---------------------------------------------------------------------------
-
-
 class _NoFromPylistTable:
     """Stand-in for pa.Table that fails the test if from_pylist is called
     directly from analytics_publisher_handler's own scope — the handler must
@@ -203,8 +195,6 @@ class _FakeEntityTypeRegistry:
 
 
 class _FakeGlueExceptions:
-    # Named to match the real boto3 Glue client's exceptions.AlreadyExistsException
-    # for duck-typed except-clause compatibility with the handler under test.
     class AlreadyExistsException(Exception):  # noqa: N818 -- mirrors boto3's exception name
         pass
 
@@ -212,7 +202,6 @@ class _FakeGlueExceptions:
 class _FakeGlueClient:
     exceptions = _FakeGlueExceptions
 
-    # DatabaseName/Name mirror the real boto3 Glue client's get_table() kwargs.
     def get_table(self, DatabaseName: str, Name: str) -> dict[str, Any]:  # noqa: N803
         return {"Table": {"StorageDescriptor": {"Columns": [], "Location": "s3://x/"}}}
 
@@ -221,7 +210,7 @@ class _FakeGlueClient:
 
 
 class _FakeCatalogResult:
-    database_name = "edl_analytics"
+    database_name = "datalake_analytics_dev"
     table_name = "company"
     operation = "created"
 
@@ -269,7 +258,7 @@ class TestPerf3SchemaReuse:
         env_values = {
             "AWS_REGION": "us-east-1",
             "ANALYTICS_S3_BUCKET": "analytics-bucket",
-            "GLUE_CATALOG_DATABASE": "edl_analytics",
+            "GLUE_CATALOG_DATABASE": "datalake_analytics_dev",
         }
         monkeypatch.setattr(handler_module, "require_env", lambda name: env_values[name])
         monkeypatch.setattr(handler_module, "EntityTypeRegistryClient", _FakeEntityTypeRegistry)
@@ -278,8 +267,6 @@ class TestPerf3SchemaReuse:
             {"golden_id": "g1", "name": "Acme", "_record_id": "sf:1", "_source_id": "salesforce"},
             {"golden_id": "g2", "name": "Globex", "_record_id": "sf:2", "_source_id": "salesforce"},
         ]
-        # Patches the shared streaming reader rather than the old materialising loader: the handler
-        # now streams golden records so it never holds two full copies in a 512 MB Lambda.
         monkeypatch.setattr(
             handler_module,
             "iter_parquet_records",
@@ -320,8 +307,6 @@ class TestPerf3SchemaReuse:
         assert result["record_count"] == 2
         assert len(captured_specs) == 1
         column_names = {c["Name"] for c in captured_specs[0].schema}
-        # _record_id/_source_id are internal ER fields and must be stripped
-        # before the schema reaches Glue registration.
         assert column_names == {"golden_id", "name"}
 
 
@@ -340,7 +325,7 @@ class TestTenantIsolation:
         env_values = {
             "AWS_REGION": "us-east-1",
             "ANALYTICS_S3_BUCKET": "analytics-bucket",
-            "GLUE_CATALOG_DATABASE": "edl_analytics",
+            "GLUE_CATALOG_DATABASE": "datalake_analytics_dev",
         }
         monkeypatch.setattr(handler_module, "require_env", lambda name: env_values[name])
         monkeypatch.setattr(handler_module, "EntityTypeRegistryClient", _FakeEntityTypeRegistry)
@@ -349,8 +334,6 @@ class TestTenantIsolation:
         golden_records = [
             {"golden_id": "g1", "name": "Acme", "_record_id": "sf:1", "_source_id": "salesforce"},
         ]
-        # Patches the shared streaming reader rather than the old materialising loader: the handler
-        # now streams golden records so it never holds two full copies in a 512 MB Lambda.
         monkeypatch.setattr(
             handler_module,
             "iter_parquet_records",
@@ -395,17 +378,13 @@ class TestTenantIsolation:
                 stage_start_ms=0.0,
             )
 
-            # Distinct prefixes — the bug would have both write to the same key.
             assert result_a["analytics_s3_prefix"] != result_b["analytics_s3_prefix"]
             assert result_a["analytics_s3_prefix"].startswith("acme-corp/")
             assert result_b["analytics_s3_prefix"].startswith("globex-eu/")
 
-            # Both objects genuinely exist independently — neither write
-            # overwrote the other.
             key_a = result_a["analytics_s3_prefix"] + "data.parquet"
             key_b = result_b["analytics_s3_prefix"] + "data.parquet"
             assert s3_client.get_object(Bucket="analytics-bucket", Key=key_a)["Body"].read()
             assert s3_client.get_object(Bucket="analytics-bucket", Key=key_b)["Body"].read()
 
-            # Distinct Glue tables too (tenant_code folded into the table name).
             assert result_a["glue_table"] != result_b["glue_table"]

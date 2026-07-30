@@ -142,7 +142,7 @@ These are recorded rather than fixed, and each is a real gap:
 
 1. **Five of six pipeline stages enqueue nothing to any DLQ.**
    `RunCoordinator.enqueue_dlq_entry(...)` accepts a `failed_stage` argument but hardcodes
-   `_DLQ_NAME = "EdlExtractionFailureDlq"`, and its only production caller is
+   `_DLQ_NAME = "datalake-extraction-failure-dlq-dev"`, and its only production caller is
    `orchestration/step_functions/extraction_workflow.py`. Transformation, entity resolution,
    analytics publish, twin build and serving store load failures reach the Step Functions
    execution history and the audit table, but no queue.
@@ -153,10 +153,10 @@ These are recorded rather than fixed, and each is a real gap:
    `maxReceiveCount = 3` never counts — it only decrements on *receive*.
 
 3. **`maxReceiveCount` on a DLQ presumes a replaying consumer.** Today's processor records and
-   notifies but never re-drives, so `EdlStageReplayExhausted` will stay empty even once (1) and (2)
+   notifies but never re-drives, so `datalake-replay-exhausted-dev` will stay empty even once (1) and (2)
    are fixed.
 
-4. **Scheduled runs bypass the burst buffer.** `EdlPipelineTrigger.fifo` exists to absorb
+4. **Scheduled runs bypass the burst buffer.** `datalake-pipeline-trigger-dev.fifo` exists to absorb
    simultaneous schedule fires, but `scripts/seed_schedules.py` sets the schedule target to the
    **state machine ARN**, so EventBridge Scheduler calls `StartExecution` directly. The queue is
    fed only by the control-plane manual trigger route. Either point schedules at the queue or

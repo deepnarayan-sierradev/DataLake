@@ -19,14 +19,15 @@ import pyarrow.parquet as pq
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from transformation.transformation_pipeline_handler import _validate_event, lambda_handler
 
 _REGION = "us-east-1"
 _ENVIRONMENT = "dev"
-_RAW_BUCKET = "edl-raw-087972550871"
-_CURATED_BUCKET = "edl-curated-087972550871"
-_MAPPING_BUCKET = "edl-curated-087972550871"
-_CONFIG_TABLE = "EdlEntityExtractionConfig"
+_RAW_BUCKET = "datalake-raw-dev-use1"
+_CURATED_BUCKET = "datalake-curated-dev-use1"
+_MAPPING_BUCKET = "datalake-curated-dev-use1"
+_CONFIG_TABLE = RESOURCE_NAME_ENVIRONMENT["ENTITY_CONFIG_TABLE"]
 
 
 @pytest.fixture()
@@ -55,12 +56,8 @@ def aws_env(monkeypatch):
             ],
             BillingMode="PAY_PER_REQUEST",
         )
-        # The scope table must exist: since 2026-07-29 an unreadable scope store raises rather
-        # than answering `single`, because `single` for a partitioned tenant stamps `__tenant__` on
-        # its rows. A missing table is exactly that unreadable case, so the fixture provisions it
-        # rather than letting the handler assume its way past it.
         dynamodb.create_table(
-            TableName="EdlScopeUnit",
+            TableName=RESOURCE_NAME_ENVIRONMENT["SCOPE_UNIT_TABLE"],
             KeySchema=[
                 {"AttributeName": "tenant_code", "KeyType": "HASH"},
                 {"AttributeName": "scope_unit_id", "KeyType": "RANGE"},
@@ -120,9 +117,6 @@ class TestConfigurationRepositoryClientRealConstructor:
 
         result = lambda_handler(_base_event("raw/handler-scd/"), context=None)
 
-        # If the constructor call site regresses to `table_name=`, this raises
-        # TypeError deep inside the handler's try/except and the test fails
-        # loudly (the except clause no longer swallows programming errors).
         assert result["canonical_record_count"] == 1
         assert result["is_publication_blocked"] is False
 
@@ -153,7 +147,6 @@ class TestConfigurationRepositoryClientRealConstructor:
                 table_name="anything", region_name=_REGION
             )
 
-        # The real, required signature:
         ConfigurationRepositoryClient(environment=_ENVIRONMENT, region_name=_REGION)
 
 

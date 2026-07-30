@@ -26,7 +26,7 @@ from schema_management.snapshot_repository.snapshot_repository import (
 )
 
 _REGION = "us-east-1"
-_BUCKET = "edl-schema-snapshots-087972550871"
+_BUCKET = "datalake-schema-snapshots-dev-use1"
 
 
 def _make_snapshot(
@@ -69,11 +69,6 @@ def _repo() -> SchemaSnapshotRepository:
     return SchemaSnapshotRepository(bucket_name=_BUCKET, region_name=_REGION)
 
 
-# ---------------------------------------------------------------------------
-# write_snapshot
-# ---------------------------------------------------------------------------
-
-
 class TestWriteSnapshot:
     @mock_aws
     def test_write_returns_correct_s3_key(self) -> None:
@@ -104,11 +99,6 @@ class TestWriteSnapshot:
 
         index = json.loads(pointer["Body"].read().decode("utf-8"))
         assert index["snapshot_key"] == key
-
-
-# ---------------------------------------------------------------------------
-# load_latest_snapshot
-# ---------------------------------------------------------------------------
 
 
 class TestLoadLatestSnapshot:
@@ -142,11 +132,6 @@ class TestLoadLatestSnapshot:
         assert loaded.schema_version == "v2fingerprint2"
 
 
-# ---------------------------------------------------------------------------
-# load_snapshot_by_key
-# ---------------------------------------------------------------------------
-
-
 class TestLoadSnapshotByKey:
     @mock_aws
     def test_round_trip_via_key(self) -> None:
@@ -160,11 +145,6 @@ class TestLoadSnapshotByKey:
         assert loaded.schema_version == snap.schema_version
         assert loaded.record_count == snap.record_count
         assert len(loaded.fields) == len(snap.fields)
-
-
-# ---------------------------------------------------------------------------
-# Round-trip serialisation
-# ---------------------------------------------------------------------------
 
 
 class TestSerialisation:
@@ -184,7 +164,6 @@ class TestSerialisation:
         """Confirm the schema is structural only — no data values."""
         snap = _make_snapshot()
         raw = _serialise_snapshot(snap)
-        # Only structural attributes present; values never stored
         field_keys = set(raw["fields"][0].keys())
         assert field_keys == {
             "name",
@@ -196,11 +175,6 @@ class TestSerialisation:
             "scale",
             "is_custom",
         }
-
-
-# ---------------------------------------------------------------------------
-# Regression tests for fixed bugs
-# ---------------------------------------------------------------------------
 
 
 class TestWriteDriftReport:
@@ -243,7 +217,6 @@ class TestWriteDriftReport:
             extraction_date=snap.extraction_date,
             report_json='{"overall_classification":"no_drift","field_changes":[]}',
         )
-        # Snapshot and drift report share the same schema_version directory.
         snapshot_prefix = "/".join(snapshot_key.split("/")[:3])
         drift_prefix = "/".join(drift_key.split("/")[:3])
         assert snapshot_prefix == drift_prefix
@@ -259,7 +232,6 @@ class TestInputValidationOnWrite:
     def test_invalid_source_id_raises_before_s3_call(self) -> None:
         _create_bucket()
         snap = _make_snapshot()
-        # Construct a snapshot with an invalid source_id bypassing Pydantic
         import dataclasses
 
         bad_snap = dataclasses.replace(snap, source_id="INVALID_SOURCE")
@@ -281,7 +253,6 @@ class TestSnapshotPointerWriteFailureHandling:
         _create_bucket()
         repo = _repo()
 
-        # Patch _write_latest_pointer to simulate failure
         from botocore.exceptions import ClientError
 
         def _fail_pointer(*args: object, **kwargs: object) -> None:
@@ -293,11 +264,9 @@ class TestSnapshotPointerWriteFailureHandling:
         monkeypatch.setattr(repo, "_write_latest_pointer", _fail_pointer)
 
         snap = _make_snapshot()
-        # Must not raise; key must still be returned
         key = repo.write_snapshot(snap)
         assert key == "demo/salesforce/salesforce-account/abc123def456/2026-06-11.json"
 
-        # Snapshot object must exist in S3 (was written before pointer failure)
         import boto3 as _boto3
 
         s3 = _boto3.client("s3", region_name=_REGION)
@@ -337,5 +306,4 @@ class TestTenantScoping:
         _create_bucket()
         repo = _repo()
         repo.write_snapshot(_make_snapshot(), tenant_code="acme-corp")
-        # No snapshot written for "demo" — must not see acme-corp's.
         assert repo.load_latest_snapshot("salesforce", "salesforce-account") is None

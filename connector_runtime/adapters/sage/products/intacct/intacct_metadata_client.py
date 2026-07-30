@@ -45,24 +45,15 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Validates Intacct object paths like "accounts-receivable/customer" and
-# derived paths like "order-entry/document::Contract Invoice".
-# Prevents path traversal (no "..", no leading slash, no query string chars).
 _SAFE_OBJECT_PATH_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^[a-z][a-z0-9\-]+/[a-z][a-z0-9\-]+(::[A-Za-z0-9 ]+)?$"
 )
 
-# Intacct custom field name prefix.
 _CUSTOM_FIELD_PREFIX: Final[str] = "nsp::"
 
-# Field attribute names that mark a field as non-queryable in the Models response.
 _NON_QUERYABLE_ATTRIBUTES: Final[frozenset[str]] = frozenset({"writeOnly", "deprecated"})
 
 
-# These shared exception types are defined in common/sage_errors.py and
-# re-exported here so existing imports from this module keep working.
-# Intentionally placed after the module constants above, not at top of file,
-# since it is a re-export rather than a dependency of this module.
 from connector_runtime.adapters.sage.substrate.sage_errors import (  # noqa: E402
     SageMetadataDeterministicError,
     SageMetadataError,
@@ -113,7 +104,6 @@ class IntacctMetadataClient:
         )
     """
 
-    # This client queries the live Intacct Models endpoint.
     supports_live_discovery: bool = True
 
     def __init__(
@@ -201,8 +191,6 @@ class IntacctMetadataClient:
         """Force the next discover_fields() call to re-fetch from the Models endpoint."""
         self._cached_fields = None
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _fetch_fields(self) -> list[IntacctFieldSchema]:
         """
         Fetch field schema from the Intacct Models endpoint.
@@ -217,9 +205,7 @@ class IntacctMetadataClient:
         if self._cached_fields is not None:
             return self._cached_fields
 
-        # build_auth_headers() authenticates first, which populates auth.base_url.
         headers = self._auth.build_auth_headers()
-        # object_path is validated in __init__ — safe to interpolate.
         models_url = f"{self._auth.base_url}/objects/{self._object_path}"
 
         try:
@@ -283,7 +269,6 @@ class IntacctMetadataClient:
             if not name:
                 continue  # Skip unnamed fields — defensive; should not occur.
 
-            # A field is non-queryable if writeOnly or deprecated.
             is_write_only = bool(field_def.get("writeOnly", False))
             is_deprecated = bool(field_def.get("deprecated", False))
             is_queryable = (
@@ -333,5 +318,4 @@ class IntacctMetadataClient:
         if field_mode == FieldMode.CUSTOM:
             return [f for f in fields if f.is_custom and f.name not in exclude_set]
 
-        # FieldMode.ALL — return everything not excluded
         return [f for f in fields if f.name not in exclude_set]

@@ -11,7 +11,6 @@ would make the console unusable at scale.
 
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -23,14 +22,13 @@ import boto3
 from config_propagation.capability import ConfigCapability
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-_TABLE_NAME: Final[str] = "EdlConfigGovernance"
 
-# Capabilities a run consumes mid-flight and therefore cannot tolerate changing under it.
 MID_FLIGHT_SENSITIVE_CAPABILITIES: Final[frozenset[ConfigCapability]] = frozenset(
     {
         ConfigCapability.ENTITY_RESOLUTION,
@@ -115,10 +113,8 @@ class ConfigGovernanceService:
             raise ValueError("environment must not be empty.")
         self._environment = environment
         self._pointers = pointer_store
-        table_name = os.environ.get("CONFIG_GOVERNANCE_TABLE") or _TABLE_NAME
+        table_name = require_env("CONFIG_GOVERNANCE_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
-
-    # ── Rollback (DL-CFG-09) ──────────────────────────────────────────────────
 
     def rollback(self, request: RollbackRequest) -> RollbackResult:
         if not self._pointers.version_exists(
@@ -156,9 +152,6 @@ class ConfigGovernanceService:
         record_platform_metric(
             PlatformMetric.CONFIG_ROLLBACKS, 1.0, Capability=request.capability.value
         )
-        # A rollback is a privileged operation this system owns outright (unlike tenant or
-        # user administration, which belongs to the Identity API), so it is the correct
-        # producer for AdminActions.
         record_platform_metric(PlatformMetric.ADMIN_ACTIONS, 1.0, Capability="config_rollback")
         _logger.warning(
             "config_rollback_applied",
@@ -175,8 +168,6 @@ class ConfigGovernanceService:
             previous_version=previous,
             target_version=request.target_version,
         )
-
-    # ── In-flight coordination (DL-CFG-07) ────────────────────────────────────
 
     def coordinate_publish(
         self,
@@ -245,8 +236,6 @@ class ConfigGovernanceService:
             if item.get("disposition") == PublishDisposition.QUEUED_FOR_NEXT_RUN_BOUNDARY.value
         ]
         return sorted(queued, key=lambda item: str(item.get("recorded_at", "")))
-
-    # ── Private ───────────────────────────────────────────────────────────────
 
     def _audit(self, tenant_code: str, record_key: str, payload: dict[str, Any]) -> None:
         self._table.put_item(

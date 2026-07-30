@@ -55,7 +55,6 @@ def _make_mock_connection(rows: list[dict]) -> MagicMock:
     cursor = MagicMock()
     col_names = list(rows[0].keys()) if rows else ["id"]
     cursor.description = [(col,) for col in col_names]
-    # fetchmany: first call returns all rows, second returns []
     cursor.fetchmany.side_effect = [
         [tuple(row[col] for col in col_names) for row in rows],
         [],

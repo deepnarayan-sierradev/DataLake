@@ -42,8 +42,8 @@ variable "cicd_deployment_policy_arns" {
 
 variable "lambda_package_s3_bucket" {
   type        = string
-  description = "S3 bucket that holds the extraction pipeline Lambda deployment zip."
-  default     = "edl-terraform-state-087972550871"
+  description = "S3 bucket that holds the Lambda deployment artefacts (separate from Terraform state)."
+  default     = "datalake-lambda-artefacts-dev-use1"
 }
 
 variable "lambda_package_s3_key" {
@@ -58,12 +58,6 @@ variable "lambda_package_source_hash" {
   default     = ""
 }
 
-# ---------------------------------------------------------------------------
-# Pipeline Lambda ARNs
-# Passed in from CI/CD after Lambda packages are deployed. These are not
-# computed by Terraform because Lambda packages are deployed separately from
-# infrastructure; the ARNs are stable once Lambdas are first created.
-# ---------------------------------------------------------------------------
 
 variable "extraction_pipeline_lambda_arn" {
   type        = string
@@ -77,9 +71,6 @@ variable "analytics_reader_principals" {
   default     = []
 }
 
-# ---------------------------------------------------------------------------
-# SOW requirements programme variables (requirements/DL-01…DL-12)
-# ---------------------------------------------------------------------------
 
 variable "waf_enforcement_mode" {
   description = <<-EOT

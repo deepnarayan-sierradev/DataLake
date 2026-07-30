@@ -32,7 +32,6 @@ from serving_store.serving_store_config_repository import ServingStoreConfigRepo
 
 _logger = get_platform_logger(__name__)
 
-# One page of findings; the cursor carries the rest.
 MAX_EXCEPTIONS_LISTED = 200
 
 

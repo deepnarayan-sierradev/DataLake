@@ -8,6 +8,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from semantic.semantic_model import Dimension, Metric, SemanticEntity, SemanticModel
 from semantic.semantic_model_repository import (
     SemanticModelNotFoundError,
@@ -19,7 +20,7 @@ _REGION = "us-east-1"
 
 def _create_table(dynamodb: Any) -> Any:
     return dynamodb.create_table(
-        TableName="EdlSemanticModel",
+        TableName=RESOURCE_NAME_ENVIRONMENT["SEMANTIC_MODEL_TABLE"],
         KeySchema=[
             {"AttributeName": "tenant_code", "KeyType": "HASH"},
             {"AttributeName": "model_version", "KeyType": "RANGE"},

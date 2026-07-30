@@ -8,24 +8,19 @@ terraform {
   }
 }
 
-# ---------------------------------------------------------------------------
-# KMS key
-# ---------------------------------------------------------------------------
 
 resource "aws_kms_key" "this" {
   description             = var.description
   deletion_window_in_days = var.deletion_window_in_days
 
-  # Mandatory: annual automatic rotation — never disable
   enable_key_rotation = true
 
-  # Stay single-region unless explicitly needed (multi_region adds cost and complexity)
   multi_region = false
 
   policy = var.key_policy != null ? var.key_policy : data.aws_iam_policy_document.default_key_policy.json
 
   tags = merge(var.tags, {
-    Name        = "Edl${title(var.capability)}KmsKey"
+    Name        = "${var.name_prefix}-${var.capability}-${var.environment}-kms-key"
     Environment = var.environment
     Capability  = var.capability
     ManagedBy   = "terraform"
@@ -33,25 +28,17 @@ resource "aws_kms_key" "this" {
 }
 
 resource "aws_kms_alias" "this" {
-  name          = "alias/Edl${title(var.capability)}"
+  name          = "alias/${var.name_prefix}-${var.capability}-${var.environment}"
   target_key_id = aws_kms_key.this.key_id
 }
 
-# ---------------------------------------------------------------------------
-# Default key policy
-# Principle of least privilege: only account root and the listed service
-# principals can use this key. No wildcard resources or actions.
-# ---------------------------------------------------------------------------
 
 data "aws_caller_identity" "current" {}
 
 data "aws_iam_policy_document" "default_key_policy" {
-  # A KMS key policy is attached *to* the key, so `Resource = "*"` means "this key" and nothing
-  # wider — there is no ARN to narrow it to. Scoping is done by principal and condition below.
   #checkov:skip=CKV_AWS_109:Key policy resource is the key itself.
   #checkov:skip=CKV_AWS_111:Key policy resource is the key itself; principals are enumerated.
   #checkov:skip=CKV_AWS_356:A key policy cannot name its own ARN as a resource.
-  # Allow account root full access — required for key management
   statement {
     sid    = "AllowAccountRoot"
     effect = "Allow"
@@ -63,7 +50,6 @@ data "aws_iam_policy_document" "default_key_policy" {
     resources = ["*"]
   }
 
-  # Allow specified IAM roles to use the key (encrypt/decrypt only — no admin)
   dynamic "statement" {
     for_each = length(var.key_user_role_arns) > 0 ? [1] : []
     content {
@@ -85,7 +71,6 @@ data "aws_iam_policy_document" "default_key_policy" {
     }
   }
 
-  # Allow CloudWatch Logs service to use the key for log group encryption
   dynamic "statement" {
     for_each = var.allow_cloudwatch_logs ? [1] : []
     content {
@@ -113,7 +98,6 @@ data "aws_iam_policy_document" "default_key_policy" {
     }
   }
 
-  # Allow SNS service to use the key for topic encryption
   dynamic "statement" {
     for_each = var.allow_sns ? [1] : []
     content {

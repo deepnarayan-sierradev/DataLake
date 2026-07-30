@@ -127,7 +127,7 @@ until confirmed.
 
 ### Connection model
 
-- **DL-SCOPE-03** **Source connection as a first-class entity.** `EdlSourceConnection` holds
+- **DL-SCOPE-03** **Source connection as a first-class entity.** `datalake-source-connections-dev` holds
   `connection_id`, `source_id`, `owner_type` (`tenant` \| `scope_unit`), `owner_id`,
   `credential_path`, capability overrides, and lifecycle state. A connection is an instance of a
   connector bound to credentials and an owner.
@@ -140,7 +140,7 @@ until confirmed.
   | Raw S3 | `{tenant_code}/{source_id}/{connection_id}/{entity_id}/extraction_date=…/run_id=…` |
   | Curated / analytics | `{tenant_code}/…/{connection_id}/…` where per-connection separation is required |
   | Schedule name | `{tenant_code}--{connection_id}--{entity_id}` |
-  | Credentials | `edl/tenants/{tenant_code}/connections/{connection_id}/credentials` |
+  | Credentials | `datalake/<env>/tenants/{tenant_code}/connections/{connection_id}/credentials` |
   | Glue curated table | `{tenant_code}_{connection_id}_{entity_id}_{domain}_curated` |
 
   `source_id` is retained as an attribute for browsing, routing to the adapter, and catalog display
@@ -166,7 +166,7 @@ until confirmed.
 
 ### Scope model
 
-- **DL-SCOPE-01** **Scope unit as a first-class dimension.** `EdlScopeUnit` per tenant:
+- **DL-SCOPE-01** **Scope unit as a first-class dimension.** `datalake-scope-units-dev` per tenant:
   `scope_unit_id`, `partition_kind`, display name, external reference (franchisee number, legal
   entity code), parent for hierarchy, and effective date range.
 - **DL-SCOPE-02** **Tenant partition profile.** `partition_model` and `partition_kind` on the tenant
@@ -248,13 +248,13 @@ until confirmed.
 
 | Store | Key | Purpose |
 |---|---|---|
-| `EdlSourceConnection` (new) | PK `tenant_code`, SK `connection_id` | source, owner, credential path, capabilities, health state |
-| `EdlScopeUnit` (new) | PK `tenant_code`, SK `scope_unit_id` | kind, display name, external ref, parent, effective dates |
+| `datalake-source-connections-dev` (new) | PK `tenant_code`, SK `connection_id` | source, owner, credential path, capabilities, health state |
+| `datalake-scope-units-dev` (new) | PK `tenant_code`, SK `scope_unit_id` | kind, display name, external ref, parent, effective dates |
 | Tenant record | — | `partition_model`, `partition_kind` |
-| `EdlEntityExtractionConfig` | PK → `tenant#connection_id` | **key change, requires migration** |
-| `EdlWatermarkRepository` | PK → `tenant#connection_id` | **key change, requires migration** |
+| `datalake-entity-extraction-config-dev` | PK → `tenant#connection_id` | **key change, requires migration** |
+| `datalake-watermark-dev` | PK → `tenant#connection_id` | **key change, requires migration** |
 | All data layers | — | `scope_unit_id` column, nullable = tenant-level |
-| `EdlEntityTypeRegistry` | — | `resolution_scope` per entity type |
+| `datalake-entity-type-registry-dev` | — | `resolution_scope` per entity type |
 
 ## Design and patterns
 

@@ -1,17 +1,3 @@
-# ---------------------------------------------------------------------------
-# Execution roles for the four functions added in S8/S9.
-#
-# One role per function, never a shared one. The reason is concrete rather than doctrinal:
-#
-#   - the write-back role reads the `-writeback` secret suffix ONLY, so a compromised ingestion
-#     path cannot mutate a source system (DL-CONN-02);
-#   - the portability role is the only role in the platform with bulk `s3:DeleteObject`, so
-#     nothing on the pipeline can delete a tenant's data even by defect;
-#   - the webhook role can enqueue but not read tenant data at all, because the endpoint it
-#     serves is unauthenticated by necessity (the provider signature is the credential).
-#
-# Sharing one role across the four would grant every one of those to all of them.
-# ---------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "platform_lambda_assume_role" {
   statement {
@@ -35,10 +21,9 @@ locals {
   ]
 }
 
-# ─── Webhook receiver ────────────────────────────────────────────────────────
 
 resource "aws_iam_role" "webhook_receiver" {
-  name               = "EdlWebhookReceiverRole"
+  name               = "${var.name_prefix}-webhook-receiver-${var.environment}-exec"
   assume_role_policy = data.aws_iam_policy_document.platform_lambda_assume_role.json
   description        = "Webhook receiver: verify signature, dedupe, enqueue. No tenant data access."
   tags               = local.common_tags
@@ -46,19 +31,17 @@ resource "aws_iam_role" "webhook_receiver" {
 
 data "aws_iam_policy_document" "webhook_receiver_permissions" {
 
-  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
-  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
   statement {
     sid       = "SendToStageDlq"
     effect    = "Allow"
     actions   = ["sqs:SendMessage"]
-    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:${var.name_prefix}-*-dlq-${var.environment}"]
   }
   statement {
     sid       = "WriteOwnLogs"
     effect    = "Allow"
     actions   = local.platform_lambda_log_actions
-    resources = ["arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlWebhookReceiver:*"]
+    resources = ["arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.name_prefix}-webhook-receiver-${var.environment}:*"]
   }
 
   statement {
@@ -72,38 +55,33 @@ data "aws_iam_policy_document" "webhook_receiver_permissions" {
     sid       = "EnqueueVerifiedEvents"
     effect    = "Allow"
     actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes"]
-    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlWebhookIngest.fifo"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:${var.name_prefix}-webhook-ingest-${var.environment}.fifo"]
   }
 
   statement {
-    sid    = "DeduplicateProviderEvents"
-    effect = "Allow"
-    # PutItem only: the receiver's conditional write is the dedupe. It has no read need, and
-    # GetItem would let a compromised receiver enumerate which events a tenant has received.
+    sid       = "DeduplicateProviderEvents"
+    effect    = "Allow"
     actions   = ["dynamodb:PutItem"]
-    resources = ["arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlWebhookEventDedup"]
+    resources = ["arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-webhook-event-dedup-${var.environment}"]
   }
 
   statement {
-    sid    = "ReadWebhookSigningSecretOnly"
-    effect = "Allow"
-    # Scoped to the `webhook-secret` suffix: the receiver must not be able to read the
-    # extraction or write-back credentials for the same connection.
+    sid       = "ReadWebhookSigningSecretOnly"
+    effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:edl/tenants/*/connections/*/webhook-secret-*"]
+    resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:datalake/<env>/tenants/*/connections/*/webhook-secret-*"]
   }
 }
 
 resource "aws_iam_role_policy" "webhook_receiver" {
-  name   = "EdlWebhookReceiverPermissions"
+  name   = "${var.name_prefix}-webhook-receiver-${var.environment}-exec-policy"
   role   = aws_iam_role.webhook_receiver.id
   policy = data.aws_iam_policy_document.webhook_receiver_permissions.json
 }
 
-# ─── Write-back ──────────────────────────────────────────────────────────────
 
 resource "aws_iam_role" "writeback" {
-  name               = "EdlConnectorWritebackRole"
+  name               = "${var.name_prefix}-connector-writeback-${var.environment}-exec"
   assume_role_policy = data.aws_iam_policy_document.platform_lambda_assume_role.json
   description        = "Write-back to a source system. Reads the -writeback secret suffix only."
   tags               = local.common_tags
@@ -111,19 +89,17 @@ resource "aws_iam_role" "writeback" {
 
 data "aws_iam_policy_document" "writeback_permissions" {
 
-  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
-  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
   statement {
     sid       = "SendToStageDlq"
     effect    = "Allow"
     actions   = ["sqs:SendMessage"]
-    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:${var.name_prefix}-*-dlq-${var.environment}"]
   }
   statement {
     sid       = "WriteOwnLogs"
     effect    = "Allow"
     actions   = local.platform_lambda_log_actions
-    resources = ["arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlConnectorWriteback:*"]
+    resources = ["arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.name_prefix}-connector-writeback-${var.environment}:*"]
   }
 
   statement {
@@ -134,39 +110,36 @@ data "aws_iam_policy_document" "writeback_permissions" {
   }
 
   statement {
-    sid    = "ReadWritebackCredentialOnly"
-    effect = "Allow"
-    # The whole point of the separate secret: a read-only deployment cannot mutate a source, and
-    # this role cannot read the read-path credential either.
+    sid       = "ReadWritebackCredentialOnly"
+    effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:edl/tenants/*/connections/*/credentials-writeback-*"]
+    resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:datalake/<env>/tenants/*/connections/*/credentials-writeback-*"]
   }
 
   statement {
     sid       = "ReadEntityConfigForOptInFlag"
     effect    = "Allow"
     actions   = ["dynamodb:GetItem"]
-    resources = ["arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlEntityExtractionConfig"]
+    resources = ["arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-entity-extraction-config-${var.environment}"]
   }
 
   statement {
     sid       = "AuditTheWrite"
     effect    = "Allow"
     actions   = ["dynamodb:PutItem"]
-    resources = ["arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlRunAuditLog"]
+    resources = ["arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-run-audit-log-${var.environment}"]
   }
 }
 
 resource "aws_iam_role_policy" "writeback" {
-  name   = "EdlConnectorWritebackPermissions"
+  name   = "${var.name_prefix}-connector-writeback-${var.environment}-exec-policy"
   role   = aws_iam_role.writeback.id
   policy = data.aws_iam_policy_document.writeback_permissions.json
 }
 
-# ─── Workflow runner ─────────────────────────────────────────────────────────
 
 resource "aws_iam_role" "workflow_runner" {
-  name               = "EdlWorkflowRunnerRole"
+  name               = "${var.name_prefix}-workflow-runner-${var.environment}-exec"
   assume_role_policy = data.aws_iam_policy_document.platform_lambda_assume_role.json
   description        = "Scheduled workflow evaluation and action execution."
   tags               = local.common_tags
@@ -174,19 +147,17 @@ resource "aws_iam_role" "workflow_runner" {
 
 data "aws_iam_policy_document" "workflow_runner_permissions" {
 
-  # Every stage now enqueues its own failures (gap item 20), so each producing role needs
-  # SendMessage on the per-stage queues. Scoped by name prefix, never `Resource = "*"`.
   statement {
     sid       = "SendToStageDlq"
     effect    = "Allow"
     actions   = ["sqs:SendMessage"]
-    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:${var.name_prefix}-*-dlq-${var.environment}"]
   }
   statement {
     sid       = "WriteOwnLogs"
     effect    = "Allow"
     actions   = local.platform_lambda_log_actions
-    resources = ["arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlWorkflowRunner:*"]
+    resources = ["arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.name_prefix}-workflow-runner-${var.environment}:*"]
   }
 
   statement {
@@ -206,64 +177,60 @@ data "aws_iam_policy_document" "workflow_runner_permissions" {
       "dynamodb:UpdateItem",
     ]
     resources = [
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlWorkflowDefinition",
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlWorkflowExecution",
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlWorkflowIdempotency",
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlWorkflowTask",
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlWorkflowDestination",
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlDataQualityException",
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-workflow-definitions-${var.environment}",
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-workflow-executions-${var.environment}",
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-workflow-idempotency-${var.environment}",
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-workflow-tasks-${var.environment}",
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-workflow-destinations-${var.environment}",
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-data-quality-exceptions-${var.environment}",
     ]
   }
 
   statement {
-    sid    = "PublishNotifications"
-    effect = "Allow"
-    # Restricted to the platform's own topics: a workflow must not be able to publish to an
-    # arbitrary topic in the account even if a definition names one.
+    sid       = "PublishNotifications"
+    effect    = "Allow"
     actions   = ["sns:Publish"]
-    resources = ["arn:aws:sns:${local.region}:${local.account_id}:edl-*"]
+    resources = ["arn:aws:sns:${local.region}:${local.account_id}:${var.name_prefix}-*"]
   }
 
   statement {
     sid       = "RequestReportDistribution"
     effect    = "Allow"
     actions   = ["sqs:SendMessage"]
-    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlReportDistribution"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:${var.name_prefix}-report-distribution-${var.environment}"]
   }
 
   statement {
     sid       = "InvokeWritebackAndPipeline"
     effect    = "Allow"
     actions   = ["lambda:InvokeFunction"]
-    resources = ["arn:aws:lambda:${local.region}:${local.account_id}:function:EdlConnectorWriteback"]
+    resources = ["arn:aws:lambda:${local.region}:${local.account_id}:function:${var.name_prefix}-connector-writeback-${var.environment}"]
   }
 
   statement {
     sid       = "StartPipelineRun"
     effect    = "Allow"
     actions   = ["states:StartExecution"]
-    resources = ["arn:aws:states:${local.region}:${local.account_id}:stateMachine:EdlExtractionPipeline"]
+    resources = ["arn:aws:states:${local.region}:${local.account_id}:stateMachine:${var.name_prefix}-extraction-workflow-${var.environment}"]
   }
 
   statement {
-    sid    = "ReadOutboundDestinationSecrets"
-    effect = "Allow"
-    # Signing secrets for allowlisted webhook destinations only.
+    sid       = "ReadOutboundDestinationSecrets"
+    effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:edl/tenants/*/workflow-destinations/*"]
+    resources = ["arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:datalake/<env>/tenants/*/workflow-destinations/*"]
   }
 }
 
 resource "aws_iam_role_policy" "workflow_runner" {
-  name   = "EdlWorkflowRunnerPermissions"
+  name   = "${var.name_prefix}-workflow-runner-${var.environment}-exec-policy"
   role   = aws_iam_role.workflow_runner.id
   policy = data.aws_iam_policy_document.workflow_runner_permissions.json
 }
 
-# ─── Portability ─────────────────────────────────────────────────────────────
 
 resource "aws_iam_role" "portability" {
-  name               = "EdlPortabilityRole"
+  name               = "${var.name_prefix}-portability-${var.environment}-exec"
   assume_role_policy = data.aws_iam_policy_document.platform_lambda_assume_role.json
   description        = "Tenant export and deletion. The only role with bulk object deletion."
   tags               = local.common_tags
@@ -271,19 +238,17 @@ resource "aws_iam_role" "portability" {
 
 data "aws_iam_policy_document" "portability_permissions" {
 
-  # Async invocation failures land on this function's own DLQ (CKV_AWS_116). A DLQ the role
-  # cannot write to is inert, which is the failure mode this repo keeps finding.
   statement {
     sid       = "AsyncInvocationDlq"
     effect    = "Allow"
     actions   = ["sqs:SendMessage"]
-    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:EdlStageDlq-*"]
+    resources = ["arn:aws:sqs:${local.region}:${local.account_id}:${var.name_prefix}-*-dlq-${var.environment}"]
   }
   statement {
     sid       = "WriteOwnLogs"
     effect    = "Allow"
     actions   = local.platform_lambda_log_actions
-    resources = ["arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/EdlPortability:*"]
+    resources = ["arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${var.name_prefix}-portability-${var.environment}:*"]
   }
 
   statement {
@@ -309,8 +274,6 @@ data "aws_iam_policy_document" "portability_permissions" {
   statement {
     sid    = "DeleteTenantDataOnCertifiedDeletion"
     effect = "Allow"
-    # Bulk delete lives here and nowhere else in the platform. The deletion saga verifies each
-    # prefix is empty afterwards by re-listing, so a partial delete cannot be certified complete.
     actions = [
       "s3:DeleteObject",
       "s3:DeleteObjectVersion",
@@ -335,14 +298,14 @@ data "aws_iam_policy_document" "portability_permissions" {
       "dynamodb:UpdateItem",
     ]
     resources = [
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlExportJob",
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/EdlDeletionCertificate",
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-export-jobs-${var.environment}",
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${var.name_prefix}-deletion-certificates-${var.environment}",
     ]
   }
 }
 
 resource "aws_iam_role_policy" "portability" {
-  name   = "EdlPortabilityPermissions"
+  name   = "${var.name_prefix}-portability-${var.environment}-exec-policy"
   role   = aws_iam_role.portability.id
   policy = data.aws_iam_policy_document.portability_permissions.json
 }

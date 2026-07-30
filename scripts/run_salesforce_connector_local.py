@@ -34,19 +34,14 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-# ── Make project root importable when run directly ──────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# ── Force boto3 to use the dev profile when AWS_PROFILE is not already set ──
 if "AWS_PROFILE" not in os.environ:
     os.environ["AWS_PROFILE"] = "dev"
 if "AWS_DEFAULT_REGION" not in os.environ:
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
-# Register connector by importing its module (triggers @register decorator).
-# These imports must come after the sys.path manipulation above (this script
-# runs standalone, not as an installed package), hence noqa: E402 throughout.
 import connector_runtime.adapters.salesforce.salesforce_connector  # noqa: E402, F401
 from connector_runtime.adapters.salesforce.salesforce_auth_client import (  # noqa: E402
     SalesforceAuthClient,
@@ -75,19 +70,13 @@ _logger = get_platform_logger(__name__)
 
 _ENVIRONMENT = "dev"
 _REGION = "us-east-1"
-_RAW_S3_BUCKET = "edl-raw-087972550871"
+_RAW_S3_BUCKET = os.environ.get("RAW_S3_BUCKET", "")
 _SOURCE_ID = "salesforce"
 
-# Map entity_id → Salesforce object API name
 _ENTITY_OBJECT_MAP: dict[str, str] = {
     "salesforce-account": "Account",
     "salesforce-contact": "Contact",
 }
-
-
-# ---------------------------------------------------------------------------
-# Step 1 + 2: Connection test (OAuth token fetch)
-# ---------------------------------------------------------------------------
 
 
 def test_connection(region: str, environment: str) -> tuple[bool, SalesforceAuthClient]:
@@ -99,7 +88,6 @@ def test_connection(region: str, environment: str) -> tuple[bool, SalesforceAuth
     try:
         token = auth_client.get_access_token()
         instance_url = auth_client.instance_url
-        # Log only first/last 4 chars of token as a liveness indicator — never the full value.
         token_hint = f"{token[:4]}...{token[-4:]}" if len(token) >= 8 else "****"
         print(f"      instance_url  : {instance_url}")
         print(f"      token (hint)  : {token_hint}")
@@ -108,11 +96,6 @@ def test_connection(region: str, environment: str) -> tuple[bool, SalesforceAuth
     except Exception as exc:
         print(f"      OAuth FAILED  : {exc}\n", file=sys.stderr)
         return False, auth_client
-
-
-# ---------------------------------------------------------------------------
-# Step 3: Schema discovery
-# ---------------------------------------------------------------------------
 
 
 def discover_schema(
@@ -138,11 +121,6 @@ def discover_schema(
         print(f"        ... and {remaining} more fields (omitted for brevity)")
     print(f"      Fingerprint: {field_contract.schema_fingerprint}\n")
     return field_contract
-
-
-# ---------------------------------------------------------------------------
-# Step 4: Extraction + S3 write
-# ---------------------------------------------------------------------------
 
 
 def run_extraction(
@@ -179,8 +157,6 @@ def run_extraction(
     extraction_date = datetime.now(UTC).strftime("%Y-%m-%d")
 
     if dry_run:
-        # For dry-run: execute via Bulk API but collect only first 5 records.
-        # This validates end-to-end connectivity without writing to S3.
         print("      [DRY RUN] Submitting Bulk API job and collecting first 5 records ...")
         sample_rows: list[dict] = []
         try:
@@ -201,7 +177,6 @@ def run_extraction(
         print("\n      [DRY RUN] OAuth + schema + Bulk API query verified. No S3 write.")
         return
 
-    # Full run — stream directly to S3 in 50k-row chunks (O(chunk) memory, not O(table))
     print("      Streaming records to S3 in batches ...")
     writer = SalesforceRawLayerWriter(
         s3_bucket=raw_s3_bucket,
@@ -227,11 +202,6 @@ def run_extraction(
         f"      Browse          : https://s3.console.aws.amazon.com/s3/buckets/"
         f"{raw_s3_bucket}?prefix={partition_prefix}/"
     )
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 
 def main() -> None:
@@ -280,12 +250,10 @@ def main() -> None:
     print(f"  Dry run     : {args.dry_run}")
     print("=" * 60)
 
-    # ── Steps 1 + 2: OAuth connection test ───────────────────────────────────
     ok, _auth = test_connection(region=region, environment=environment)
     if not ok:
         sys.exit(1)
 
-    # ── Load entity config from DynamoDB ─────────────────────────────────────
     config_client = ConfigurationRepositoryClient(environment=environment, region_name=region)
     config = config_client.load_config(
         source_id=_SOURCE_ID, entity_id=entity_id, tenant_code=tenant_code
@@ -300,17 +268,14 @@ def main() -> None:
         f"watermark_field={config.watermark_field}\n"
     )
 
-    # ── Build connector ───────────────────────────────────────────────────────
     connector = SalesforceConnector(
         environment=environment,
         region_name=region,
         object_name=object_name,
     )
 
-    # ── Step 3: Schema discovery ──────────────────────────────────────────────
     field_contract = discover_schema(connector=connector, entity_id=entity_id, config=config)
 
-    # ── Resolve watermark bounds ──────────────────────────────────────────────
     watermark_lower: str | None = None
     watermark_upper: str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -323,8 +288,6 @@ def main() -> None:
             watermark_lower = record.last_successful_watermark.strftime("%Y-%m-%dT%H:%M:%SZ")
             print(f"  Watermark lower : {watermark_lower}")
         else:
-            # First-time incremental run — use an epoch lower bound to capture all records.
-            # The upper bound limits how much data we pull on this first pass.
             watermark_lower = "2000-01-01T00:00:00Z"
             print(
                 f"  No prior watermark — first-time incremental, "
@@ -333,7 +296,6 @@ def main() -> None:
 
     print(f"  Watermark upper : {watermark_upper}\n")
 
-    # ── Step 4: Extraction + optional S3 write ────────────────────────────────
     run_extraction(
         connector=connector,
         entity_id=entity_id,

@@ -53,7 +53,7 @@ code exists, and until the entry point lands it cannot run.
   no point delivering a reader credential nobody can connect with. Note the RLS policy it would
   deliver against is now correct as of 2026-07-29 (the loader is exempted by role, so applying the
   policy no longer breaks the loader's own next upsert) — what remains is the network path and the
-  component that sets `edl.scope_units` on a BI connection.
+  component that sets `datalake.scope_units` on a BI connection.
 
 ### Deferred phase — DL-04 (AI agent runtime)
 
@@ -176,7 +176,7 @@ document itself rather than here, so a waiver cannot hide a half-done requiremen
 
 **DL-SCOPE-13 is closed**, and how it was previously recorded here is worth keeping. This file
 used to say the twin *API* filtered and only edge fan-out was open. That was wrong in the safer-
-sounding direction: `Twin`, `TwinEdge` and the `EdlTwinIndex` item carried **no** `scope_unit_id`,
+sounding direction: `Twin`, `TwinEdge` and the `datalake-twin-index-dev` item carried **no** `scope_unit_id`,
 so `getattr(twin, "scope_unit_id", None)` made the node filter read every twin as unattributed —
 match-all for a `single` tenant and deny-all for a partitioned one. Both halves are now real: the
 model carries the column, the writer persists it, the node filter uses direct attribute access so

@@ -34,10 +34,8 @@ _logger = get_platform_logger(__name__)
 
 SOURCE_ID: Final[str] = "meta-ads"
 
-# Date span above which the connector submits an async report run instead of a sync read.
 ASYNC_JOB_THRESHOLD_DAYS: Final[int] = 30
 
-# Poll ceiling — a report that has not completed by here is reported, not waited on.
 MAX_JOB_POLLS: Final[int] = 8
 
 
@@ -86,8 +84,6 @@ META_ADS_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     ),
     default_pagination_strategy="cursor",
     default_rate_limit_policy="meta-ads-standard",
-    # Inherited by a config-declared entity (DL-CONN-21); must match what this
-    # source's own entities use, or a console-added entity silently reads zero rows.
     default_records_json_path=("data",),
     default_page_size=500,
     required_credential_keys=frozenset({"access_token", "ad_account_id"}),

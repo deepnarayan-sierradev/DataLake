@@ -39,15 +39,12 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# SQL identifier pattern — table names and column names must satisfy this.
 _IDENTIFIER_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,254}$")
 
-# ISO-8601 UTC date-time pattern for watermark bound validation.
 _ISO8601_UTC_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?Z?([+-]\d{2}:\d{2})?)?$"
 )
 
-# Number of rows to fetch per round-trip (server-side cursor batch size).
 _FETCH_BATCH_SIZE: Final[int] = 1_000
 
 
@@ -117,7 +114,6 @@ class MySqlIncrementalExtractor:
                     if not rows:
                         break
                     for row in rows:
-                        # DictCursor returns dict rows; default cursors return tuples.
                         if isinstance(row, dict):
                             payload = dict(row)
                         else:
@@ -205,11 +201,6 @@ class MySqlIncrementalExtractor:
                     f"watermark_upper {watermark_upper!r} is not a valid ISO-8601 value."
                 )
 
-        # DUP-4: the actual SELECT/FROM/WHERE/ORDER BY assembly is shared with
-        # Salesforce SOQL and NetSuite SuiteQL — see build_incremental_select().
-        # MySQL is the only one of the three that backtick-quotes identifiers
-        # and appends an ORDER BY clause (needed since MySQL, unlike SOQL/
-        # SuiteQL, has no source-side guarantee of watermark-field ordering).
         query_text, query_parameters, effective_watermark_field = build_incremental_select(
             field_names=field_names,
             table=table_name,

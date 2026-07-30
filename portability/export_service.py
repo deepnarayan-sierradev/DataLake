@@ -15,7 +15,6 @@ from __future__ import annotations
 import csv
 import io
 import json
-import os
 import uuid
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
@@ -27,21 +26,18 @@ import boto3
 
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from tenancy.scope_predicate import ConsumptionSurface, ScopePredicate
 
 _logger = get_platform_logger(__name__)
 
-_TABLE_NAME: Final[str] = "EdlExportJob"
 
-# Signed-URL lifetime; long enough to download a large artefact, short enough to matter.
 SIGNED_URL_TTL_SECONDS: Final[int] = 3_600
 
-# Export artefacts expire so a forgotten download does not become a permanent copy.
 ARTEFACT_LIFECYCLE_DAYS: Final[int] = 7
 
-# CSV/JSON conversion batch size — columnar batches, never row-wise materialisation.
 CONVERSION_BATCH_ROWS: Final[int] = 10_000
 
 
@@ -78,7 +74,6 @@ class ExportCapabilityRequiredError(PermissionError):
     """Raised when the caller lacks the distinct export capability (OWASP A01)."""
 
 
-# Export requires an affirmative capability distinct from read.
 EXPORT_CAPABILITY: Final[str] = "datalake:export:execute"
 
 
@@ -171,7 +166,7 @@ class ExportJobRepository:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("EXPORT_JOB_TABLE") or _TABLE_NAME
+        table_name = require_env("EXPORT_JOB_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def save(self, job: ExportJob) -> None:
@@ -241,9 +236,6 @@ class ExportService:
         *,
         requested_by: str,
         granted_capabilities: frozenset[str],
-        # Non-nullable: an export that omitted the predicate ships every unit's rows in one file,
-        # which is the least recoverable form of the defect because the artefact leaves the
-        # platform (DL-SCOPE-14).
         scope_predicate: ScopePredicate,
         delivery_bucket: str | None = None,
     ) -> ExportJob:
@@ -292,7 +284,6 @@ class ExportService:
         job: ExportJob,
         rows: Iterable[dict[str, Any]],
         *,
-        # Non-nullable: see request_export.
         scope_predicate: ScopePredicate,
     ) -> ExportJob:
         """

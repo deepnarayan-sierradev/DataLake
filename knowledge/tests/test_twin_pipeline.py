@@ -21,8 +21,8 @@ _RULE = RelationshipRule(
 def _rel_input() -> RelationshipInput:
     return RelationshipInput(
         rule=_RULE,
-        to_uri="s3://edl-analytics-1/demo/canonical/contract",
-        edges_bucket="edl-analytics-1",
+        to_uri="s3://datalake-analytics-1/demo/canonical/contract",
+        edges_bucket="datalake-analytics-1",
         edges_prefix="demo/relationships/contract_of_company",
     )
 
@@ -30,7 +30,6 @@ def _rel_input() -> RelationshipInput:
 class TestTwinPipeline:
     def test_builds_and_upserts_twins_with_edges(self):
         engine = MagicMock()
-        # first stream() call → edges; second → golden records
         engine.stream.side_effect = [
             [[{"from_golden_id": "c1", "to_golden_id": "k1"}]],
             [[{"golden_id": "c1", "full_name": "Acme", "stage": "ramp"}]],
@@ -46,14 +45,13 @@ class TestTwinPipeline:
         summary = pipeline.build_twins(
             tenant_code="demo",
             entity_type="company",
-            golden_uri="s3://edl-analytics-1/demo/canonical/company",
+            golden_uri="s3://datalake-analytics-1/demo/canonical/company",
             relationships=[_rel_input()],
             lifecycle_field="stage",
         )
 
         assert summary.twin_count == 1
         assert summary.edge_count == 1
-        # one twin upserted, with the enriched edge + lifecycle
         repository.upsert_twin.assert_called_once()
         tenant_arg, twin_arg = repository.upsert_twin.call_args[0]
         assert tenant_arg == "demo"
@@ -70,7 +68,7 @@ class TestTwinPipeline:
         summary = pipeline.build_twins(
             tenant_code="demo",
             entity_type="company",
-            golden_uri="s3://edl-analytics-1/demo/canonical/company",
+            golden_uri="s3://datalake-analytics-1/demo/canonical/company",
             relationships=[],
         )
         assert summary.twin_count == 1
@@ -90,7 +88,7 @@ class TestTwinPipeline:
         TwinPipeline(engine=engine, resolver=resolver, repository=MagicMock()).build_twins(
             tenant_code="demo",
             entity_type="company",
-            golden_uri="s3://edl-analytics-1/demo/canonical/company",
+            golden_uri="s3://datalake-analytics-1/demo/canonical/company",
             relationships=[_rel_input()],
         )
         resolver.resolve.assert_called_once()

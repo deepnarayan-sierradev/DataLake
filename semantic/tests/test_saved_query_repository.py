@@ -8,6 +8,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from semantic.saved_query import SavedQuery
 from semantic.saved_query_repository import SavedQueryNotFoundError, SavedQueryRepository
 
@@ -16,7 +17,7 @@ _REGION = "us-east-1"
 
 def _create_table(dynamodb: Any) -> Any:
     return dynamodb.create_table(
-        TableName="EdlSavedQuery",
+        TableName=RESOURCE_NAME_ENVIRONMENT["SAVED_QUERY_TABLE"],
         KeySchema=[
             {"AttributeName": "tenant_code", "KeyType": "HASH"},
             {"AttributeName": "query_id", "KeyType": "RANGE"},
@@ -123,7 +124,6 @@ class TestEveryDeclaredFieldRoundTrips:
         assert reloaded.time_grain is TimeGrain.QUARTER
         assert reloaded.time_range == stored.time_range
         assert reloaded.row_limit == 250
-        # And the request the compiler receives carries them too.
         assert reloaded.to_request().filters == stored.filters
 
     @mock_aws

@@ -23,10 +23,6 @@ from observability.s3_writer import (
     S3ParquetWriter,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _make_records(n: int) -> list[dict[str, Any]]:
     """Generate n simple test records."""
@@ -35,11 +31,6 @@ def _make_records(n: int) -> list[dict[str, Any]]:
 
 def _iter_records(n: int) -> Iterator[dict[str, Any]]:
     yield from _make_records(n)
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -53,11 +44,6 @@ def s3_client():
 @pytest.fixture()
 def writer(s3_client):
     return S3ParquetWriter(s3_client)
-
-
-# ---------------------------------------------------------------------------
-# Single PUT tests (small files < 8MB)
-# ---------------------------------------------------------------------------
 
 
 class TestS3ParquetWriterSinglePut:
@@ -177,11 +163,6 @@ class TestS3ParquetWriterSinglePut:
         assert table.num_rows == total
 
 
-# ---------------------------------------------------------------------------
-# Multipart upload tests
-# ---------------------------------------------------------------------------
-
-
 class TestS3ParquetWriterMultipart:
     def test_multipart_abort_on_s3_error(self) -> None:
         """Verify abort_multipart_upload is called when upload_part fails."""
@@ -206,7 +187,6 @@ class TestS3ParquetWriterMultipart:
         mock_s3 = MagicMock()
 
         writer = S3ParquetWriter(mock_s3)
-        # Force a very small file
         records = [{"id": "1"}]
         writer.write(
             records_iter=iter(records),
@@ -224,7 +204,6 @@ class TestS3ParquetWriterMultipart:
         mock_s3.upload_part.return_value = {"ETag": '"etag-001"'}
         mock_s3.complete_multipart_upload.return_value = {}
 
-        # Produce data that exceeds 8MB threshold: 60K records x ~200 byte values
         large_records = [{"id": str(i), "blob": "x" * 200} for i in range(60_000)]
 
         writer = S3ParquetWriter(mock_s3)
@@ -234,17 +213,8 @@ class TestS3ParquetWriterMultipart:
             key="key/large.parquet",
         )
 
-        # Either put_object (single) OR multipart was called — both are valid
-        # depending on whether snappy compression kept it under 8MB.
-        # The important invariant is that all records were written.
         assert count == 60_000
-        # At least one write method was called
         assert mock_s3.put_object.called or mock_s3.create_multipart_upload.called
-
-
-# ---------------------------------------------------------------------------
-# last_written_schema (PERF-3)
-# ---------------------------------------------------------------------------
 
 
 class TestLastWrittenSchema:

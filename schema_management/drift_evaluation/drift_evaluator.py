@@ -48,18 +48,12 @@ from typing import Any, Final
 from contracts.pipeline_stage_contract import DriftClassification
 from schema_management.snapshot_repository.snapshot_repository import FieldSnapshot, SchemaSnapshot
 
-# Severity ordering — used to promote the overall classification.
 _SEVERITY: Final[dict[DriftClassification, int]] = {
     DriftClassification.NO_DRIFT: 0,
     DriftClassification.NON_BREAKING: 1,
     DriftClassification.POTENTIALLY_BREAKING: 2,
     DriftClassification.BREAKING: 3,
 }
-
-
-# ---------------------------------------------------------------------------
-# Value objects
-# ---------------------------------------------------------------------------
 
 
 class FieldChangeKind(StrEnum):
@@ -145,11 +139,6 @@ class DriftReport:
         return json.dumps(self.to_dict(), separators=(",", ":"))
 
 
-# ---------------------------------------------------------------------------
-# Evaluator
-# ---------------------------------------------------------------------------
-
-
 class SchemaDriftEvaluator:
     """
     Stateless evaluator that compares two SchemaSnapshot instances.
@@ -194,7 +183,6 @@ class SchemaDriftEvaluator:
 
         changes: list[FieldDriftDetail] = []
 
-        # 1. Removed fields — always BREAKING
         for name, prev_field in previous_by_name.items():
             if name not in current_by_name:
                 changes.append(
@@ -207,7 +195,6 @@ class SchemaDriftEvaluator:
                     )
                 )
 
-        # 2. Added fields — classification depends on nullability
         for name, curr_field in current_by_name.items():
             if name not in previous_by_name:
                 classification = (
@@ -225,7 +212,6 @@ class SchemaDriftEvaluator:
                     )
                 )
 
-        # 3. Modified fields — evaluate attribute-by-attribute
         for name in previous_by_name:
             if name not in current_by_name:
                 continue  # already captured as REMOVED above
@@ -240,18 +226,9 @@ class SchemaDriftEvaluator:
             evaluated_at=evaluated_at,
             previous_schema_version=previous.schema_version,
             current_schema_version=current.schema_version,
-            # _compute_overall_classification returns NO_DRIFT when changes is empty,
-            # which covers the case where schema_version strings differ but the fields
-            # are structurally identical (e.g. fingerprint computed with a different
-            # algorithm version).
             overall_classification=overall,
             field_changes=tuple(changes),
         )
-
-
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
 
 
 def _evaluate_field_modifications(
@@ -306,8 +283,6 @@ def _evaluate_field_modifications(
         )
 
     if prev.is_nullable != curr.is_nullable:
-        # nullable → non-nullable: downstream data may break on unexpected NULLs → BREAKING
-        # non-nullable → nullable: additive relaxation → NON_BREAKING
         classification = (
             DriftClassification.BREAKING
             if not curr.is_nullable

@@ -32,11 +32,9 @@ class TestPartitionedFixtureCanDeny:
         assert _predicate(unit_a_claims).matches(UNIT_A) is True
 
     def test_unit_a_denies_the_sibling_unit(self, unit_a_claims: ScopeClaims) -> None:
-        # The single assertion that makes every downstream isolation test meaningful.
         assert _predicate(unit_a_claims).matches(UNIT_B) is False
 
     def test_unit_a_denies_unattributed_rows(self, unit_a_claims: ScopeClaims) -> None:
-        # A NULL scope unit is tenant-level and must not leak into a unit-scoped caller (D2).
         assert _predicate(unit_a_claims).matches(None) is False
 
     def test_unit_a_is_not_match_all(self, unit_a_claims: ScopeClaims) -> None:
@@ -62,8 +60,6 @@ class TestWhyTheDefaultTenantProvesNothing:
     def test_single_tenant_claim_matches_unattributed_rows(
         self, single_tenant_claims: ScopeClaims
     ) -> None:
-        # `demo` carries `__tenant__`, so a filter reading a field that does not exist still
-        # returns True here. This is why an isolation test written against `demo` cannot fail.
         assert single_tenant_claims.scope_unit_ids == frozenset({IMPLICIT_SCOPE_UNIT_ID})
         assert _predicate(single_tenant_claims).matches(None) is True
 

@@ -31,16 +31,16 @@ class TestResolve:
     def test_resolve_materializes_and_returns_result(self):
         engine = MagicMock()
         engine.materialize.return_value = QueryOutput(
-            output_uri="s3://edl-analytics-1/demo/relationships/contract_of_company/data.parquet",
+            output_uri="s3://datalake-analytics-1/demo/relationships/contract_of_company/data.parquet",
             row_count=42,
         )
         resolver = RelationshipResolver(engine)
 
         result = resolver.resolve(
             rule=_RULE,
-            from_uri="s3://edl-analytics-1/demo/canonical/contract",
-            to_uri="s3://edl-analytics-1/demo/canonical/company",
-            output_bucket="edl-analytics-1",
+            from_uri="s3://datalake-analytics-1/demo/canonical/contract",
+            to_uri="s3://datalake-analytics-1/demo/canonical/company",
+            output_bucket="datalake-analytics-1",
             output_prefix="demo/relationships/contract_of_company",
         )
 
@@ -48,8 +48,8 @@ class TestResolve:
         assert result.output.row_count == 42
         _, kwargs = engine.materialize.call_args
         assert kwargs["inputs"] == {
-            "from_rel": "s3://edl-analytics-1/demo/canonical/contract",
-            "to_rel": "s3://edl-analytics-1/demo/canonical/company",
+            "from_rel": "s3://datalake-analytics-1/demo/canonical/contract",
+            "to_rel": "s3://datalake-analytics-1/demo/canonical/company",
         }
-        assert kwargs["output_bucket"] == "edl-analytics-1"
+        assert kwargs["output_bucket"] == "datalake-analytics-1"
         assert "f.company_id = t.account_id" in kwargs["sql"]

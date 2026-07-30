@@ -15,7 +15,7 @@ number the same way. The engine exists; the business model does not.
 `semantic/` contains a complete, tested engine: `SemanticModel` / `SemanticEntity` / `Dimension` /
 `Metric` (`semantic_model.py`), a `QueryCompiler` that emits parameterised SQL with per-field access
 tags and never accepts raw SQL (`query_compiler.py`), `SavedQuery` + repository,
-`SemanticModelRepository` over `EdlSemanticModel`, and `SemanticQueryService`. Control-plane routes
+`SemanticModelRepository` over `datalake-semantic-model-dev`, and `SemanticQueryService`. Control-plane routes
 exist for `POST /tenants/{tc}/semantic/query` and saved-query CRUD.
 
 **Zero business content is authored.** None of the SOW §4 named definitions exist: Sales, Revenue,
@@ -104,12 +104,12 @@ Engine gaps that block authoring real content:
 
 ## Data model
 
-`EdlSemanticModel` (existing, PK `tenant_code`, SK `model_version`) gains an active-version pointer
+`datalake-semantic-model-dev` (existing, PK `tenant_code`, SK `model_version`) gains an active-version pointer
 row. Model bodies move to S3 at `{tenant_code}/semantic-models/{version}.json` with the DynamoDB row
 holding the pointer, hash, status (`draft`/`approved`/`active`/`retired`), and approval metadata —
 models will exceed the DynamoDB item limit once joins and full KPI coverage land.
 
-New: `EdlSemanticApproval` (PK `tenant_code`, SK `{model_version}#{approver}`).
+New: `datalake-semantic-approvals-dev` (PK `tenant_code`, SK `{model_version}#{approver}`).
 
 ---
 

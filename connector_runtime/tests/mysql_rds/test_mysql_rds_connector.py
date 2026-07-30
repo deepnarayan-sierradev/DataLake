@@ -250,11 +250,8 @@ class TestSslEnforcement:
                 watermark_upper=None,
                 extraction_window_days=0,
             )
-            # discover_queryable_fields opens its own connection
-            # We test via _open_connection directly
             MySqlRdsConnector._open_connection(params)
 
-        # Verify ssl_disabled=False was passed
         connect_kwargs = mock_pymysql.connect.call_args
         if connect_kwargs is not None:
             _, kwargs = connect_kwargs
@@ -434,7 +431,6 @@ class TestGeneratorCleanup:
     def test_connection_closed_on_early_exit(self) -> None:
         """conn.close() is called by the finally block when caller breaks early."""
         connector, _ = _make_connector_with_mock_creds()
-        # Use more rows than the caller will consume.
         rows = [{"id": str(i)} for i in range(10)]
         mock_conn = _make_mock_connection(rows)
 
@@ -454,7 +450,6 @@ class TestGeneratorCleanup:
             return_value=mock_conn,
         ):
             gen = connector.execute_extraction(qc, run_id="run-gc-01")
-            # Consume only the first record, then close the generator.
             next(gen)
             gen.close()  # triggers GeneratorExit → finally: conn.close()
 

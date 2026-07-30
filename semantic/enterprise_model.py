@@ -31,9 +31,6 @@ from semantic.semantic_model import (
 
 ENTERPRISE_MODEL_VERSION: Final[str] = "enterprise-2026-07-v1"
 
-# ── Access tag taxonomy (DL-SEC-09, DL-SEC-10) ──────────────────────────────
-# Departments map to tags; the executive tier spans them. A Sales analyst holding
-# `dept-sales` cannot see `dept-finance` metrics such as AP bills.
 TAG_FINANCE: Final[str] = "dept_finance"
 TAG_OPERATIONS: Final[str] = "dept_operations"
 TAG_SALES_MARKETING: Final[str] = "dept_sales_marketing"
@@ -44,10 +41,8 @@ DEPARTMENT_TAGS: Final[frozenset[str]] = frozenset(
     {TAG_FINANCE, TAG_OPERATIONS, TAG_SALES_MARKETING}
 )
 
-# The executive tier spans every department for the brands a caller is granted.
 EXECUTIVE_TAG_EXPANSION: Final[frozenset[str]] = DEPARTMENT_TAGS | {TAG_EXECUTIVE}
 
-# ── Owner roles ─────────────────────────────────────────────────────────────
 OWNER_CFO: Final[str] = "role:cfo"
 OWNER_CONTROLLER: Final[str] = "role:controller"
 OWNER_VP_OPERATIONS: Final[str] = "role:vp-operations"
@@ -150,11 +145,6 @@ _SCOPE_DIMENSION = _dimension(
     OWNER_VP_FRANCHISE,
     description="Owning franchisee or scope unit; the row-security column (DL-SCOPE-09).",
 )
-
-
-# ---------------------------------------------------------------------------
-# Entities (DL-SEM-03)
-# ---------------------------------------------------------------------------
 
 
 def _company_entity() -> SemanticEntity:
@@ -572,7 +562,6 @@ def _bill_entity() -> SemanticEntity:
                 "bill_total_amount",
                 OWNER_CONTROLLER,
                 "Total bills posted in the period, excluding recoverable tax.",
-                # Finance-tagged so a Sales analyst cannot query AP bills (DL-SEC-10).
                 access_tag=TAG_FINANCE,
                 unit="currency",
             ),
@@ -1074,8 +1063,6 @@ def build_enterprise_model(
     )
 
 
-# The SOW §4 named KPIs, mapped to their entity and metric. The traceability the
-# `KpiValidationHarness` and `SOW_TRACEABILITY.md` both read.
 SOW_KPI_MAP: Final[dict[str, tuple[str, str]]] = {
     "Sales": ("sales_order", "sales"),
     "Revenue": ("ar_invoice", "revenue"),

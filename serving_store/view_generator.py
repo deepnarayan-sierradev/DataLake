@@ -43,7 +43,6 @@ class ServingEngine(StrEnum):
     REDSHIFT = "redshift"
 
 
-# Engines with native row-level security. MySQL is deliberately absent — it has none.
 NATIVE_RLS_ENGINES: Final[frozenset[ServingEngine]] = frozenset(
     {
         ServingEngine.POSTGRESQL,
@@ -67,11 +66,6 @@ class EngineUnsuitableError(Exception):
     """Raised when an engine cannot provide the isolation a partitioned tenant requires."""
 
 
-# Two engine enums exist: `ServingStoreEngine` (contracts, persisted in EdlServingStoreConfig)
-# and `ServingEngine` (here, drives SQL dialect). Their member values diverge — `mysql_rds` vs
-# `mysql` — because the config value names the *hosting* (RDS) and this one names the *dialect*.
-# Renaming either would invalidate stored config records, so the divergence is mapped once here
-# rather than coerced with `ServingEngine(value)` at each call site, which raises for MySQL.
 _CONFIG_ENGINE_TO_DIALECT: Final[dict[str, str]] = {
     "mysql_rds": "mysql",
     "mysql": "mysql",
@@ -164,19 +158,12 @@ def require_suitable_engine(
         engine, profile, allow_schema_per_scope_unit=allow_schema_per_scope_unit
     )
     if not decision.is_permitted:
-        # A partitioned tenant on an engine that cannot isolate its units is a resolution-scope
-        # violation waiting to happen, so it pages rather than merely failing the apply.
         record_platform_metric(PlatformMetric.RESOLUTION_SCOPE_VIOLATIONS, 1.0, Engine=engine.value)
         raise EngineUnsuitableError(
             f"Engine {engine.value!r} cannot isolate scope units for tenant "
             f"{profile.tenant_code!r}: {decision.rationale}."
         )
     return decision
-
-
-# ---------------------------------------------------------------------------
-# View generation (DL-SERV-04)
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -228,14 +215,11 @@ def generate_entity_view(
         columns.append(time_dimension.column)
     for metric in entity.metrics:
         if metric.is_derived or metric.column == "*":
-            # A derived metric is computed at read time by the compiler; materialising it in a
-            # view would create a second definition of the same number.
             continue
         if metric.access_tag and metric.access_tag not in granted_access_tags:
             continue
         columns.append(metric.column)
     if include_scope_column and SCOPE_UNIT_COLUMN not in columns:
-        # The security column must be present or the RLS policy has nothing to filter on.
         columns.append(SCOPE_UNIT_COLUMN)
 
     ordered = tuple(dict.fromkeys(columns))
@@ -289,11 +273,6 @@ def generate_views(
     return tuple(views)
 
 
-# ---------------------------------------------------------------------------
-# Row-level security (DL-SEC-09, DL-SEC-10, DL-SEC-11)
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class RowSecurityPolicy:
     """A native RLS policy for one table on one engine."""
@@ -305,15 +284,15 @@ class RowSecurityPolicy:
     security_columns: tuple[str, ...] = field(default_factory=tuple)
 
 
-DEFAULT_LOADER_ROLE: Final[str] = "edl_loader"
+DEFAULT_LOADER_ROLE: Final[str] = "datalake_loader"
 
 
 def generate_row_security_policy(
     table_name: str,
     engine: ServingEngine,
     *,
-    session_scope_setting: str = "edl.scope_units",
-    session_brand_setting: str = "edl.brand_codes",
+    session_scope_setting: str = "datalake.scope_units",
+    session_brand_setting: str = "datalake.brand_codes",
     include_brand: bool = True,
     loader_role: str = DEFAULT_LOADER_ROLE,
 ) -> RowSecurityPolicy:
@@ -362,31 +341,16 @@ def generate_row_security_policy(
             f"current_setting('{session_scope_setting}', true), ','))"
         )
         if include_brand:
-            # A NULL brand is visible to every brand, deliberately: brand is a *reporting*
-            # dimension layered on top of the scope boundary, not the boundary itself, and a row
-            # with no brand belongs to the tenant rather than to none of it. Stated here because
-            # the scope clause above makes the opposite choice for NULL — that asymmetry is
-            # intentional and was previously undocumented, which is how it reads as an oversight.
             predicate += (
                 f" AND ({brand_column} IS NULL OR {brand_column} = ANY (string_to_array("
                 f"current_setting('{session_brand_setting}', true), ',')))"
             )
-        # `CREATE ... IF NOT EXISTS` then `ALTER` rather than `DROP` then `CREATE`.
-        #
-        # The drop-then-create form left a window in which RLS was ENABLED with no SELECT policy,
-        # and under RLS a command with no policy is denied — so every BI reader saw zero rows for
-        # the duration of every load. Fail-closed, but a read outage on the freshness path, and
-        # freshness loads are the frequent case. PostgreSQL has no `CREATE OR REPLACE POLICY`, so
-        # the idempotent form is create-if-absent followed by an unconditional `ALTER` that
-        # re-asserts the predicate.
         statements = (
             f"ALTER TABLE {quoted_table} ENABLE ROW LEVEL SECURITY;",
             f"ALTER TABLE {quoted_table} FORCE ROW LEVEL SECURITY;",
             f"CREATE POLICY IF NOT EXISTS {policy_name} ON {quoted_table} "
             f"FOR SELECT USING ({predicate});",
             f"ALTER POLICY {policy_name} ON {quoted_table} USING ({predicate});",
-            # Without this the loader's own next upsert is refused: RLS denies any command with no
-            # policy, and FORCE removes the owner exemption.
             f"CREATE POLICY IF NOT EXISTS {loader_policy_name} ON {quoted_table} FOR ALL "
             f"TO {loader_role} USING (true) WITH CHECK (true);",
         )
@@ -397,9 +361,6 @@ def generate_row_security_policy(
             "RETURNS TABLE WITH SCHEMABINDING AS RETURN "
             "SELECT 1 AS is_visible WHERE @scope_unit_id IN "
             f"(SELECT value FROM STRING_SPLIT(SESSION_CONTEXT(N'{session_scope_setting}'), ',')) "
-            # T-SQL has no per-command policy, so the loader exemption lives in the predicate. A
-            # filter predicate also constrains the read side of MERGE, which is what the loader
-            # uses to decide what changed.
             f"OR IS_ROLEMEMBER('{loader_role}') = 1;",
             f"DROP SECURITY POLICY IF EXISTS {policy_name};",
             f"CREATE SECURITY POLICY {policy_name} ADD FILTER PREDICATE "
@@ -427,7 +388,6 @@ def schema_per_scope_unit_statements(
     it explicitly is what makes the engine-selection trade-off visible rather than hidden.
     """
     validate_tenant_code(tenant_code)
-    # Both reach generated DDL by interpolation, so both are allowlisted first (OWASP A03).
     for scope_unit_id in scope_unit_ids:
         validate_scope_unit_id(scope_unit_id)
     for table_name in table_names:
@@ -447,7 +407,6 @@ def schema_per_scope_unit_statements(
                 f"WHERE `{SCOPE_UNIT_COLUMN}` = '{scope_unit_id}';"
             )
         statements.append(f"GRANT SELECT ON `{schema}`.* TO '{reader}'@'%';")
-        # No grant on the tenant-wide database: the view reads it, the reader cannot.
         statements.append(f"REVOKE ALL ON `{tenant_code.replace('-', '_')}`.* FROM '{reader}'@'%';")
     return tuple(statements)
 

@@ -8,6 +8,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from knowledge.twin import Twin, TwinEdge
 from knowledge.twin_repository import TwinNotFoundError, TwinRepository
 
@@ -16,7 +17,7 @@ _REGION = "us-east-1"
 
 def _create_table(dynamodb: Any) -> Any:
     return dynamodb.create_table(
-        TableName="EdlTwinIndex",
+        TableName=RESOURCE_NAME_ENVIRONMENT["TWIN_INDEX_TABLE"],
         KeySchema=[
             {"AttributeName": "tenant_code", "KeyType": "HASH"},
             {"AttributeName": "sk", "KeyType": "RANGE"},

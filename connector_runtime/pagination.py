@@ -22,7 +22,6 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Hard stop so a provider that never signals exhaustion cannot loop forever (OWASP A05).
 MAX_PAGES: Final[int] = 10_000
 
 
@@ -163,7 +162,6 @@ class CursorPagination(PaginationStrategy):
             if not page.next_cursor:
                 return
             if page.next_cursor in seen_cursors:
-                # A repeated cursor is a provider defect that would otherwise loop forever.
                 raise PaginationExhaustionError(
                     f"Entity {request.entity_id!r} returned a repeated pagination cursor; "
                     "the provider is not advancing."
@@ -205,8 +203,6 @@ class KeysetPagination(PaginationStrategy):
                 return
             next_key = page.records[-1].get(request.keyset_field)
             if last_key is not None and next_key == last_key:
-                # The provider returned the same terminal key again, so this page repeats the
-                # previous one. Stopping before yielding avoids duplicating a whole page.
                 return
             yield page
             if next_key is None:

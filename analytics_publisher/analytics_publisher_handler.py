@@ -10,7 +10,7 @@ Step Functions input schema (Parameters block in PublishAnalytics state):
   {
     "source_id":         str  — source_id from the triggering extraction run
     "entity_id":         str  — entity_id from the triggering extraction run
-    "environment":       str  — "dev" | "staging" | "prod"
+    "environment":       str  — "dev" | "uat" | "prod"
     "run_id":            str  — run_id produced by the extraction stage
     "tenant_code":       str  — tenant identity for this run (ARCH-4: required, fails closed)
     "canonical_prefix":  str  — S3 prefix of golden records (entity_resolution output)
@@ -84,16 +84,8 @@ from persistence.parquet_reader import iter_parquet_records
 
 _logger = get_platform_logger(__name__)
 
-# ARCH-2: module-level warm-invocation cache, mirroring the pattern already
-# used for ResolutionConfigRegistry in entity_resolution_pipeline_handler.py.
 _entity_type_registry: EntityTypeRegistryClient | None = None
 
-# ---------------------------------------------------------------------------
-# Fields removed from golden records before writing the BI analytics layer.
-# These are internal entity resolution system fields that are useful for
-# debugging/auditing but create noise in BI tools and Athena queries.
-# golden_id is KEPT — it is the stable key for joins across entity types.
-# ---------------------------------------------------------------------------
 
 _INTERNAL_FIELDS_TO_DROP: Final[frozenset[str]] = frozenset(
     {
@@ -106,9 +98,6 @@ _INTERNAL_FIELDS_TO_DROP: Final[frozenset[str]] = frozenset(
     }
 )
 
-# ---------------------------------------------------------------------------
-# Validation constants (OWASP A03)
-# ---------------------------------------------------------------------------
 
 _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
     {
@@ -121,9 +110,8 @@ _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
         "tenant_code",
     }
 )
-_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
+_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "uat", "prod"})
 
-# PyArrow type → Glue/Athena column type string
 _ARROW_TO_GLUE_TYPE: Final[dict[str, str]] = {
     "int8": "tinyint",
     "int16": "smallint",
@@ -163,8 +151,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     _validate_event(event)
 
-    # Abort early if insufficient Lambda time remains.
-    # Lambda timeout is 300 s; 60 s margin prevents a wasted invocation.
     check_lambda_timeout(context, min_remaining_ms=60_000)
 
     source_id: str = event["source_id"]
@@ -173,16 +159,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     run_id: str = event["run_id"]
     canonical_prefix: str = event["canonical_prefix"]
     tenant_code: str = str(event["tenant_code"])
-    # Optional — set by the extraction stage and threaded through Step
-    # Functions Parameters at each stage boundary (§5.7 / OBS-4). Absent on
-    # manually-triggered or older-format executions; e2e metric is skipped then.
     run_started_at: str | None = event.get("run_started_at")
 
     _stage_start_ms = time.monotonic() * 1000
 
-    # DL-OPS-05: the shared lifecycle replaces the hand-rolled bind/try/finally. It also covers
-    # the case this handler could not: a hard Lambda kill, where no `finally` runs at all and the
-    # run previously left no failure record behind.
     identity = StageIdentity(
         tenant_code=tenant_code,
         source_id=source_id,
@@ -205,9 +185,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             run_started_at=run_started_at,
             stage_start_ms=_stage_start_ms,
         )
-        # L17: the analytics publish is where a run finishes, so it is where the period's usage
-        # can be recomputed from the audit log. Recomputed rather than incremented — see
-        # `TenantUsageRepository.save` for why an increment would double-count on a retry.
         _record_tenant_usage(
             tenant_code=tenant_code,
             environment=environment,
@@ -227,14 +204,10 @@ def _run_analytics_publication(
     stage_start_ms: float,
 ) -> dict[str, Any]:
     """Business logic for the analytics publication stage, isolated from handler plumbing."""
-    # ── Env vars ─────────────────────────────────────────────────────────────
     region_name = require_env("AWS_REGION")
     analytics_s3_bucket = require_env("ANALYTICS_S3_BUCKET")
     glue_catalog_database = require_env("GLUE_CATALOG_DATABASE")
-    # GOVERNANCE_S3_BUCKET (see module docstring) is read by future lineage-recording
-    # logic once it lands; not consumed yet, so it is intentionally not read here.
 
-    # ── Resolve entity type (ARCH-2: tenant-scoped, DynamoDB-backed) ──────────
     global _entity_type_registry
     if _entity_type_registry is None:
         _entity_type_registry = EntityTypeRegistryClient(
@@ -266,20 +239,11 @@ def _run_analytics_publication(
 
     s3 = boto3.client("s3", region_name=region_name)
 
-    # ── Stream golden records from the analytics layer (written by the ER stage) ────
-    # Two full copies of every golden record used to be resident at once in a 512 MB Lambda: one
-    # list from the loader, and a second list comprehension stripping internal fields. Both are now
-    # generators, so peak memory is one Parquet row group rather than the entity's whole dataset.
     analytics_records = (
         {key: value for key, value in record.items() if key not in _INTERNAL_FIELDS_TO_DROP}
         for record in iter_parquet_records(s3, analytics_s3_bucket, canonical_prefix)
     )
 
-    # ── Write analytics Parquet (§3.3 — multipart upload for large files) ─────
-    # Tenant-scoped root prefix, matching the {tenant_code}/... convention
-    # already used by the raw and curated layers — without it, two tenants
-    # publishing the same entity_type on the same day overwrite each other's
-    # entire daily analytics dataset (no run_id in this key to disambiguate).
     analytics_prefix = f"{tenant_code}/analytics/{entity_type}/analytics_date={analytics_date_str}/"
     analytics_key = f"{analytics_prefix}data.parquet"
 
@@ -291,17 +255,11 @@ def _run_analytics_publication(
         compression="snappy",
     )
 
-    # PERF-3: reuse the schema S3ParquetWriter already inferred while writing
-    # the Parquet file, instead of a second full pa.Table.from_pylist(...)
-    # materialisation of analytics_records purely to recompute the same
-    # schema for Glue registration.
     arrow_schema = s3_writer.last_written_schema
     if arrow_schema is None:
         arrow_schema = pa.schema([])
 
     if record_count == 0:
-        # Checked from the writer's own count rather than by testing the iterator for emptiness,
-        # which would consume it. Same failure, same message, no second materialisation.
         raise ValueError(
             f"No golden records found at s3://{analytics_s3_bucket}/{canonical_prefix}. "
             "Ensure the entity resolution stage completed successfully."
@@ -314,13 +272,6 @@ def _run_analytics_publication(
         record_count=record_count,
     )
 
-    # ── Register / update Glue catalog table ─────────────────────────────────
-    # One Glue table per (tenant, entity_type) — Glue/Athena table names only
-    # allow [a-z0-9_] (governance/data_catalog_registration.py's
-    # _SAFE_NAME_PATTERN), so tenant_code's hyphens are normalised to
-    # underscores. Without this, two tenants' analytics for the same
-    # entity_type would register the same table pointing at the same S3
-    # location/partition, one clobbering the other's catalog entry.
     glue_table_name = f"{tenant_code.replace('-', '_')}_{entity_type}"
     glue_columns = _arrow_schema_to_glue_columns(
         arrow_schema, drop_partition_keys={"analytics_date"}
@@ -355,9 +306,6 @@ def _run_analytics_publication(
             operation=catalog_result.operation,
         )
 
-        # ── Register the partition for today so Athena can query it ──────────
-        # The table uses Hive-style partitions; we register the value explicitly
-        # so MSCK REPAIR TABLE is not needed after every run.
         glue_client = boto3.client("glue", region_name=region_name)
         glue_table_meta = glue_client.get_table(
             DatabaseName=glue_catalog_database, Name=glue_table_name
@@ -380,9 +328,6 @@ def _run_analytics_publication(
         _logger.info("analytics_publisher_partition_registered", analytics_date=analytics_date_str)
 
     except Exception as exc:
-        # Catalog registration failure does not fail the pipeline — the Parquet
-        # is already written and queryable via direct S3 path.  Log the error
-        # for investigation and continue.
         _logger.warning(
             "analytics_publisher_catalog_registration_failed",
             entity_type=entity_type,
@@ -410,11 +355,6 @@ def _run_analytics_publication(
         "analytics_date": analytics_date_str,
         "published_at": published_at,
     }
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _emit_metrics_and_e2e_sla(
@@ -453,8 +393,6 @@ def _emit_metrics_and_e2e_sla(
             stage="analytics_publication",
         )
         if run_started_at is not None:
-            # Skipped gracefully when run_started_at was not threaded through
-            # Step Functions Parameters for this run (e.g. older executions).
             try:
                 e2e_duration_ms = (
                     datetime.now(UTC) - datetime.fromisoformat(run_started_at)
@@ -522,7 +460,6 @@ def _arrow_schema_to_glue_columns(
 def _arrow_type_to_glue(arrow_type: pa.DataType) -> str:
     """Map a PyArrow DataType to the nearest Glue/Athena type string."""
     type_str = str(arrow_type)
-    # Normalise timestamp variants: timestamp[us, tz=UTC] → "timestamp[us]"
     if type_str.startswith("timestamp"):
         return "timestamp"
     return _ARROW_TO_GLUE_TYPE.get(type_str, "string")
@@ -550,9 +487,6 @@ def _validate_event(event: dict[str, Any]) -> None:
         if not _SAFE_S3_PREFIX_PATTERN.match(val.rstrip("/")):
             raise ValueError(f"{prefix_field}={val!r} contains disallowed characters.")
 
-    # tenant_code is required (ARCH-4) and must always be well-formed
-    # (OWASP A03 / SEC-5) — a missing or malformed tenant_code must fail
-    # closed rather than silently default to another tenant's identity.
     tenant_code = str(event["tenant_code"])
     if not TENANT_CODE_PATTERN.match(tenant_code):
         raise ValueError(f"tenant_code={tenant_code!r} does not conform to the tenant code format.")

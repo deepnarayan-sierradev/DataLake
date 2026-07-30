@@ -75,8 +75,6 @@ class TestScopeUnitGrainedResolution:
         )
 
     def test_the_guarantee_holds_without_a_blocking_strategy(self) -> None:
-        # A rule set with no blocking strategy used to mean one brute-force block spanning every
-        # unit, so the guarantee must not depend on a strategy having been declared.
         engine = MatchRuleEngine(
             _rule_set(with_blocking=False), resolution_scope=ResolutionScope.SCOPE_UNIT
         )
@@ -84,7 +82,6 @@ class TestScopeUnitGrainedResolution:
         assert len(clusters) == 2
 
     def test_records_within_one_unit_still_merge(self) -> None:
-        # Partitioning must not break resolution inside a unit, which is its actual job.
         records = [
             {_ID_FIELD: "a-1", "company_name": "Acme", "scope_unit_id": "franchisee-0001"},
             {_ID_FIELD: "a-2", "company_name": "Acme", "scope_unit_id": "franchisee-0001"},
@@ -96,8 +93,6 @@ class TestScopeUnitGrainedResolution:
         assert len(clusters) == 1
 
     def test_unattributed_records_do_not_join_every_unit(self) -> None:
-        # An unattributed row blocks under its own sentinel, matching the read path where NULL
-        # fails closed rather than matching everything.
         records = [
             {_ID_FIELD: "a-1", "company_name": "Acme", "scope_unit_id": "franchisee-0001"},
             {_ID_FIELD: "x-1", "company_name": "Acme", "scope_unit_id": None},
@@ -111,8 +106,6 @@ class TestScopeUnitGrainedResolution:
 
 class TestTenantGrainedResolutionUnchanged:
     def test_a_tenant_scoped_entity_still_merges_across_units(self) -> None:
-        # A shared vendor is deliberately tenant-grained: two units referring to the same
-        # supplier should resolve to one record (DL-SCOPE-09).
         engine = MatchRuleEngine(
             _rule_set(with_blocking=True), resolution_scope=ResolutionScope.TENANT
         )
@@ -120,8 +113,6 @@ class TestTenantGrainedResolutionUnchanged:
         assert len(clusters) == 1
 
     def test_the_default_is_tenant_grained_for_backward_compatibility(self) -> None:
-        # Omitting the scope preserves pre-DL-12 behaviour, so a single-tenant deployment is
-        # unaffected. The handler is what selects unit-grained resolution from the profile.
         engine = MatchRuleEngine(_rule_set(with_blocking=True))
         clusters, _ = engine.cluster(_two_franchisees_same_customer(), _ID_FIELD)
         assert len(clusters) == 1

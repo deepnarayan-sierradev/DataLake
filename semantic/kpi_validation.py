@@ -163,8 +163,6 @@ class KpiValidationHarness:
         self._executor = executor
 
     def run(self, *, granted_access_tags: frozenset[str]) -> KpiValidationReport:
-        # Non-nullable: `None` and `frozenset()` meant the same thing here, so the union bought
-        # nothing and left a guarded parameter looking omittable (G4).
         tags = expand_access_tags(granted_access_tags)
         results = [self._run_one(expectation, tags) for expectation in self._expectations]
         report = KpiValidationReport(results=tuple(results))
@@ -176,10 +174,6 @@ class KpiValidationHarness:
             compiled = self._compiler.compile(
                 expectation.to_request(),
                 granted_access_tags=granted_tags | expectation.required_access_tags,
-                # Validation compiles the definition, not a caller's request: there is no
-                # end-user claim to scope by. Expressed as an affirmative, audited object rather
-                # than `None`, so this decision is countable in `UnrestrictedScopeReads` instead
-                # of being indistinguishable from a caller who forgot (DL-SCOPE-14).
                 scope_predicate=unrestricted_predicate(
                     UnrestrictedScopeReason.DEFINITION_VALIDATION
                 ),

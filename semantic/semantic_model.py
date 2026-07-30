@@ -87,7 +87,6 @@ class Dimension(BaseModel):
     name: str
     column: str
     access_tag: str | None = None
-    # DL-SEM-06: ownership is enforced at publish; an unowned field cannot be published.
     business_owner: str | None = None
     steward: str | None = None
     classification: str = "internal"
@@ -107,8 +106,6 @@ class TimeDimension(BaseModel):
     name: str
     column: str
     grain: TimeGrain = TimeGrain.DAY
-    # Fiscal calendars differ from the Gregorian year for franchise finance, so the
-    # fiscal-year start is tenant configuration rather than a constant.
     supports_fiscal: bool = True
     access_tag: str | None = None
     description: str = ""
@@ -156,7 +153,6 @@ class Metric(BaseModel):
     numerator_metric: str | None = None
     denominator_metric: str | None = None
     null_denominator: NullDenominatorBehaviour = NullDenominatorBehaviour.NULL
-    # DL-SEM-06 governance, DL-SEM-04 definition obligation.
     business_owner: str | None = None
     steward: str | None = None
     classification: str = "internal"
@@ -246,8 +242,6 @@ class SemanticEntity(BaseModel):
             )
         join_targets = [j.target_entity for j in self.joins]
         if len(set(join_targets)) != len(join_targets):
-            # Two joins to the same entity make the path ambiguous, which DL-SEM-01
-            # requires be rejected rather than guessed.
             raise ValueError(
                 f"Entity {self.name!r} declares more than one join to the same target entity; "
                 "an ambiguous join path is rejected, not guessed."

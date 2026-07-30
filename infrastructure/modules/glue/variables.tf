@@ -1,9 +1,9 @@
 variable "environment" {
-  description = "Deployment environment (dev | staging | prod)."
+  description = "Deployment environment (dev | uat | prod)."
   type        = string
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment must be dev, staging, or prod."
+    condition     = contains(["dev", "uat", "prod"], var.environment)
+    error_message = "environment must be dev, uat, or prod."
   }
 }
 
@@ -37,4 +37,9 @@ variable "analytics_reader_principals" {
   description = "IAM principal ARNs granted explicit Lake Formation SELECT+DESCRIBE (table wildcard) on the curated and analytics databases — required because IAM_ALLOWED_PRINCIPALS doesn't satisfy Athena's GetUnfilteredTableMetadata path. Covers all tenants automatically (shared databases, tenant-scoped by table name)."
   type        = list(string)
   default     = []
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
 }

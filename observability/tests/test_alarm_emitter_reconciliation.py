@@ -28,8 +28,6 @@ _ALARMS_TF = _OBSERVABILITY_TF / "main.tf"
 _PLATFORM_ALARMS_TF = _OBSERVABILITY_TF / "platform_metric_alarms.tf"
 _EMITTER_SRC = _REPO_ROOT / "observability" / "metrics_emitter.py"
 
-# Production packages searched for emit calls. Tests are excluded deliberately: a metric
-# emitted only from a test has no producer in the running system.
 _PRODUCTION_PACKAGES = (
     "connector_runtime",
     "transformation",
@@ -50,35 +48,18 @@ _PRODUCTION_PACKAGES = (
     "portability",
 )
 
-# Metrics produced by AWS or by infrastructure rather than by application code. Each entry is
-# a deliberate exemption from the "must be emitted from Python" check, with the producer named.
 _INFRASTRUCTURE_PRODUCED: dict[str, str] = {
-    # The application's own claim check emits CrossTenantAccessAttempts (request_context.py), so it
-    # is NOT infrastructure-produced. The CloudTrail metric filter emits IamBoundaryAccessDenied —
-    # deliberately a different name, because one metric carrying both events made the enforce gate's
-    # "sustained zero" satisfiable without saying anything about IAM.
     "IamBoundaryAccessDenied": "CloudTrail metric filter (iam/tenant_boundary.tf)",
-    # AWS/WAFV2 BlockedRequests, republished by the WAF module's own alarm.
     "WafBlockedRequests": "AWS WAF",
-    # AWS/ClientVPN and AWS/CertificateManager.
     "VpnClientConnections": "AWS Client VPN",
     "VpnCertificateDaysToExpiry": "AWS Certificate Manager",
-    # AWS/SQS queue depth, alarmed directly on the queue dimension.
     "DlqDepth": "AWS SQS queue depth",
     "WorkflowDlqDepth": "AWS SQS queue depth",
-    # LambdaInsights extension.
     "LambdaMemoryUtilization": "Lambda Insights extension",
-    # Emitted by the deploy pipeline and the post-deploy smoke suite, not by the runtime.
     "DeploymentDurationMs": "deployment pipeline",
     "PostDeploySmokeFailures": "post-deploy smoke suite",
-    # Emitted by `scripts/generate_scope_unit_filters.py --check`, which reconciles the runtime
-    # scope-unit registry against the committed Lake Formation filters. It is an operator/CI step
-    # rather than a runtime path because the filters are Terraform-owned — see that script's
-    # docstring for why the lifecycle mismatch exists at all.
     "ScopeFilterDrift": "scope-filter reconciliation script",
-    # Derived from the CloudWatch metric stream by the cost-attribution job (DL-OPS-13).
     "CostPerTenantUsd": "cost attribution job",
-    # Serving-engine metrics read from the database's own CloudWatch namespace.
     "ServingQueryLatencyMs": "RDS/Redshift performance insights",
     "ServingConcurrentConnections": "RDS/Redshift performance insights",
 }
@@ -249,7 +230,6 @@ class TestEmitterSurface:
                 PlatformMetric.SEMANTIC_QUERIES_COMPILED, dimensions={"CustomerName": "Acme"}
             )
         except ValueError as exc:
-            # Unbounded dimension cardinality is both a cost and a PII risk (OWASP A09).
             assert "not in the permitted dimension set" in str(exc)
         else:  # pragma: no cover — the raise is the assertion
             raise AssertionError("An unpermitted dimension must be rejected.")

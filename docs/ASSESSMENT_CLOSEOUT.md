@@ -116,7 +116,7 @@ on purpose. New findings go to `docs/KNOWN_GAPS_AND_ROADMAP.md` as roadmap items
 ### Before any BI tool connects
 
 7. **Decide the serving-store network path** (gap 4). AWS Client VPN is the recommended default.
-8. **Build the component that sets `edl.scope_units`** on a BI connection. The RLS policy is correct
+8. **Build the component that sets `datalake.scope_units`** on a BI connection. The RLS policy is correct
    and inert without it.
 9. **Prove RLS behaviourally** against a real PostgreSQL: load → apply → load → reader sees only its
    own unit. The 18 existing tests are SQL-shape assertions and say so.

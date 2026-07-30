@@ -33,10 +33,7 @@ class RelationshipResolver:
         self._engine = engine
 
     def build_edge_query(self, rule: RelationshipRule) -> str:
-        # from_field/to_field allowlisted by RelationshipRule (OWASP A03).
         on_clause = f"f.{rule.from_field} = t.{rule.to_field}"
-        # The target's scope unit travels with the edge so twin fan-out can be filtered without a
-        # second lookup; without it an edge leaks the existence of another unit's entity.
         query = (
             "SELECT "  # noqa: S608  # nosec B608
             "f.golden_id AS from_golden_id, t.golden_id AS to_golden_id, "

@@ -78,14 +78,8 @@ from transformation.quality_evaluation.quality_policy_evaluator import (
 
 _logger = get_platform_logger(__name__)
 
-# _SAFE_S3_PREFIX_PATTERN imported from curated_layer_reader — single definition, no duplication.
-# Domain must be a lowercase safe identifier suitable for Glue table name construction (OWASP A03)
 _SAFE_DOMAIN_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-# Max prefix segment length to prevent S3 path traversal (OWASP A03)
 _MAX_PREFIX_SEGMENT_LEN: Final[int] = 256
-# Extracts the curated_date=YYYY-MM-DD partition value from a curated S3
-# prefix, so Glue partition registration always reflects the exact date the
-# curated writer used rather than re-deriving it independently.
 _CURATED_DATE_PARTITION_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"curated_date=(\d{4}-\d{2}-\d{2})"
 )
@@ -106,32 +100,21 @@ class TransformationContext:
     region_name: str
     mapping_version: str = "latest"
     curated_date: date | None = None
-    # Optional: governance bucket for lineage + catalog registration
     governance_s3_bucket: str | None = None
     glue_catalog_database: str | None = None
     environment: str = "dev"
-    # Multi-tenancy (§1.1): tenant slug prefixed to all curated S3 paths.
-    # Default "demo" preserves backward-compat with single-tenant dev pipelines.
     tenant_code: str = "demo"
-    # Optional Lambda context for mid-execution timeout checks (§3.5).
-    # When set, the pipeline checks remaining time before the curated write.
-    # None = no periodic checks (safe; pre-execution check still applies).
     lambda_context: Any | None = None
-    # Scope attribution (DL-SCOPE-07). Both must be present for a partitioned tenant: the
-    # connection says which unit owns the rows, the profile says whether units exist at all.
-    # Absent for a `single` tenant, where every row belongs to the one implicit unit.
     source_connection: SourceConnection | None = None
     partition_profile: TenantPartitionProfile | None = None
     known_scope_unit_ids: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
-        # Validate domain before it is used in Glue table name construction (OWASP A03 / F06)
         if not _SAFE_DOMAIN_PATTERN.match(self.domain):
             raise ValueError(
                 f"domain {self.domain!r} must match pattern '^[a-z][a-z0-9_]{{0,63}}$'; "
                 "dots, hyphens, and uppercase are not permitted."
             )
-        # Validate raw_s3_prefix to prevent path traversal (OWASP A03 / F05)
         if ".." in self.raw_s3_prefix or self.raw_s3_prefix.startswith("/"):
             raise ValueError(
                 f"raw_s3_prefix {self.raw_s3_prefix!r} contains invalid path components."
@@ -141,7 +124,6 @@ class TransformationContext:
                 f"raw_s3_prefix {self.raw_s3_prefix!r} contains characters not permitted "
                 "in an S3 prefix."
             )
-        # Validate tenant_code (OWASP A03 / §1.1)
         from contracts.identifier_policy import (
             TENANT_CODE_PATTERN as _TC_PATTERN,  # local import to avoid circular
         )
@@ -198,8 +180,6 @@ class TransformationPipeline:
         self._quality_policy = quality_policy
         self._classification_policy = classification_policy
         self._metrics_emitter = metrics_emitter
-        # Optional — injected only for incremental entities with primary_key_field set.
-        # When None, pipeline behaviour is identical to the original (no merge).
         self._curated_accumulator = curated_accumulator
 
     def execute(self, ctx: TransformationContext) -> TransformationResult:
@@ -214,9 +194,6 @@ class TransformationPipeline:
 
         s3: Any = boto3.client("s3", region_name=ctx.region_name)
 
-        # Load mapping rule set before streaming so the same rule_set instance
-        # is reused for every record without re-fetching from S3 (graceful
-        # degradation: identity pass-through when absent).
         rule_set: FieldMappingRuleSet | None = None
         try:
             rule_set = self._mapping_registry.load_rule_set(
@@ -234,21 +211,10 @@ class TransformationPipeline:
         mapping_version = rule_set.mapping_version if rule_set else "identity"
         applicator = FieldMappingApplicator()
 
-        # Single lazy iterator over raw Parquet records, created once so both
-        # the classification peek below and the actual read (streaming or
-        # list) consume the same underlying S3 reads exactly once.
         raw_records_iter: Iterator[dict[str, Any]] = _iter_raw_records(
             s3, ctx.raw_s3_bucket, ctx.raw_s3_prefix
         )
 
-        # ── Data classification (OWASP A01 / spec §6.4) ──────────────────────
-        # An explicit, data-steward-reviewed policy always wins. Absent one,
-        # auto-classify from the mapped (canonical) field names using
-        # name-pattern heuristics — this is a best-effort safety net, not a
-        # substitute for a reviewed policy, but it ensures PII/SENSITIVE_PII
-        # fields are never written unmasked purely because no policy exists
-        # yet for this entity. Computed per-run (never cached on `self`) since
-        # one pipeline instance may be reused across entities in a warm Lambda.
         effective_classification_policy = self._classification_policy
         if effective_classification_policy is None:
             if rule_set is not None:
@@ -260,13 +226,6 @@ class TransformationPipeline:
                         field_names=candidate_fields,
                     )
             else:
-                # No mapping rule set (identity pass-through) means canonical
-                # field names equal raw field names, which are unknown until
-                # raw records are read. Peek the first raw record's field
-                # names and auto-classify from those — pass-through entities
-                # must never bypass PII protection purely because no rule set
-                # was registered (OWASP A01). The peeked record is restored to
-                # the front of the iterator so no data is lost.
                 effective_classification_policy, raw_records_iter = _classify_pass_through_entity(
                     raw_records_iter=raw_records_iter,
                     source_id=ctx.source_id,
@@ -279,10 +238,6 @@ class TransformationPipeline:
                     masking_required=effective_classification_policy is not None,
                 )
 
-        # ── Fast path: no quality policy, no masking, no SCD merge ───────────
-        # When all features that require an in-memory list are absent, stream
-        # records directly from raw Parquet → mapping → curated writer.
-        # Peak memory is O(write_batch_size) regardless of total record count.
         can_stream = (
             self._quality_policy is None
             and effective_classification_policy is None
@@ -299,7 +254,6 @@ class TransformationPipeline:
                 started_at=started_at,
             )
 
-        # ── Standard path: quality / masking / SCD merge requires full list ──
         return self._execute_with_list(
             ctx=ctx,
             s3=s3,
@@ -340,8 +294,6 @@ class TransformationPipeline:
                         nonlocal _streaming_failures
                         _streaming_failures += 1
 
-        # Pre-write timeout guard: if Lambda has < 120s remaining, abort before
-        # starting the potentially large S3 multipart write (§3.5 / graceful shutdown).
         _check_timeout(
             ctx.lambda_context, min_remaining_ms=120_000, operation_name="curated_streaming_write"
         )
@@ -483,10 +435,6 @@ class TransformationPipeline:
         context fails the stage rather than writing rows nobody can scope.
         """
         if ctx.partition_profile is None:
-            # The profile is published configuration; its absence is a wiring defect, not a data
-            # condition. Defaulting to `single` here would be the fail-open this exists to
-            # prevent: a partitioned tenant whose profile failed to load would stamp every row
-            # with the implicit unit, which the predicate treats as match-all.
             raise TransformationPipelineError(
                 f"Entity {ctx.entity_id!r} of tenant {ctx.tenant_code!r} has no partition "
                 "profile, so `scope_unit_id` cannot be attributed. Curated rows without it "
@@ -508,9 +456,6 @@ class TransformationPipeline:
             ctx.partition_profile.partition_model is PartitionModel.PARTITIONED
             and attributor.outcome.exceeds()
         ):
-            # Above the declared threshold the rows are not merely imperfect: a unit-scoped
-            # caller sees none of them (NULL fails closed), so the entity silently disappears
-            # from every franchisee's view. Fail the run instead.
             raise TransformationPipelineError(
                 f"Entity {ctx.entity_id!r}: "
                 f"{attributor.outcome.unattributed_rate_pct:.1f}% of rows could not be "
@@ -530,7 +475,6 @@ class TransformationPipeline:
 
         Returns the curated S3 prefix, or None if there was nothing to write.
         """
-        # Pre-write timeout guard (§3.5): abort before large S3 write if < 120s remain.
         _check_timeout(ctx.lambda_context, min_remaining_ms=120_000, operation_name="curated_write")
         attributed = self._attribute_scope(ctx, records_to_write)
         write_result = self._curated_writer.write(
@@ -571,21 +515,17 @@ class TransformationPipeline:
         Peak memory is O(delta_records) — acceptable for incremental deltas;
         full-load entities with these features require sufficient Lambda memory.
         """
-        # Stream raw Parquet records through the mapping applicator without
-        # materialising the full raw dataset in memory.
         canonical_records, mapping_failures, raw_record_count = self._map_raw_records(
             raw_records_iter, rule_set, applicator
         )
 
         _logger.info("raw_records_streamed", count=raw_record_count, run_id=ctx.run_id)
 
-        # Apply data classification masking before any write (OWASP A04, spec §6.4)
         if classification_policy is not None and canonical_records:
             canonical_records = FieldMaskingApplier().apply(
                 canonical_records, classification_policy
             )
 
-        # Quality evaluation — runs on the delta (today's extracted records only).
         curated_prefix: str | None = None
         quality_report_key: str | None = None
         is_blocked = False
@@ -597,8 +537,6 @@ class TransformationPipeline:
             )
             quality_report_key = _write_quality_report(s3, ctx.mapping_bucket, ctx, quality_report)
             is_blocked = quality_report.is_publication_blocked
-            # DL-DQ-14: the report is an artefact in S3; the exception store is what an operator
-            # triages from. Writing only the report left every violation invisible to the console.
             persist_record_violations(
                 violations=quality_report.violations,
                 tenant_code=ctx.tenant_code,
@@ -609,12 +547,9 @@ class TransformationPipeline:
                 region_name=ctx.region_name,
             )
 
-        # Batch-level gate (DL-DQ-01..04): field checks pass record by record, but a batch can
-        # still be 40% incomplete or 5% duplicated.
         if canonical_records:
             is_blocked = self._batch_gate_blocks(ctx, canonical_records) or is_blocked
 
-        # SCD Type 1 merge — only active when a CuratedAccumulator is injected.
         records_to_write = canonical_records
         if not is_blocked and canonical_records and self._curated_accumulator is not None:
             acc_result = self._curated_accumulator.accumulate(
@@ -625,7 +560,6 @@ class TransformationPipeline:
             )
             records_to_write = acc_result.merged_records
 
-        # Write curated layer (only when not blocked and records exist)
         if not is_blocked and records_to_write:
             curated_prefix = self._write_curated_and_register(
                 ctx, records_to_write, len(canonical_records)
@@ -661,7 +595,6 @@ class TransformationPipeline:
             accumulator_active=self._curated_accumulator is not None,
         )
 
-        # Emit CloudWatch metrics (spec §6.3)
         if self._metrics_emitter is not None:
             _emit_transformation_metrics(
                 emitter=self._metrics_emitter,
@@ -670,16 +603,10 @@ class TransformationPipeline:
                 quality_report=quality_report,
             )
 
-        # Capture lineage record (spec §9.1)
         if ctx.governance_s3_bucket and curated_prefix:
             _emit_transformation_lineage(ctx=ctx, curated_prefix=curated_prefix)
 
         return result
-
-
-# ---------------------------------------------------------------------------
-# Module-level helpers (pure functions; no class state)
-# ---------------------------------------------------------------------------
 
 
 def _iter_raw_records_batched(
@@ -786,7 +713,6 @@ def _write_quality_report(
     report: QualityReport,
 ) -> str:
     """Persist quality report JSON to the mapping bucket; returns S3 key."""
-    # DL-SEC-04 (gap 10): tenant-prefixed so the key is IAM-enforceable like every other layer.
     key = (
         f"{ctx.tenant_code}/quality-reports/{ctx.source_id}/{ctx.entity_id}/"
         f"{ctx.run_id}/quality-report.json"
@@ -859,7 +785,6 @@ def _emit_transformation_metrics(
         stage="transformation",
     )
     if quality_report is not None:
-        # Emit quality blocking violations as "failed" records
         emitter.emit_records_failed(
             source_id=ctx.source_id,
             entity_id=ctx.entity_id,
@@ -897,20 +822,10 @@ def _register_curated_catalog(
     """Register the curated dataset in Glue Data Catalog (spec §6.4 AC)."""
     if not ctx.glue_catalog_database:
         return
-    # Tenant-scoped Glue table name (OWASP A01 — broken access control). The
-    # curated S3 *location* is already tenant-scoped (tenant_code prefix from
-    # CuratedLayerWriter), but without a matching tenant_code prefix on the
-    # *table name*, two tenants running the same entity_id/domain register
-    # the SAME table in the shared edl_curated database — the second
-    # tenant's register_dataset() call silently overwrites the first
-    # tenant's table Location, so an Athena query against that table then
-    # returns the other tenant's rows. Mirrors the analytics publisher's
-    # tenant-scoped table naming (analytics_publisher_handler.py:322).
     table_name = (
         f"{ctx.tenant_code.replace('-', '_')}_"
         f"{ctx.entity_id.replace('-', '_')}_{ctx.domain}_curated"
     )
-    # Truncate to Glue max table name length (255) and enforce safe chars
     table_name = table_name[:128]
     spec = CatalogDatasetSpec(
         database_name=ctx.glue_catalog_database,
@@ -934,14 +849,6 @@ def _register_curated_catalog(
             database=ctx.glue_catalog_database,
         )
 
-        # Register this run's curated_date partition so Athena can query the
-        # newly-written data immediately, without a manual MSCK REPAIR TABLE.
-        # Mirrors the analytics publisher's per-run create_partition call
-        # (analytics_publisher_handler.py:357-375). Without this, the table
-        # declared partition_keys=("curated_date",) but no partition value
-        # was ever registered against it, so any partitioned Athena query
-        # (including the implicit ones most BI tools issue) returns zero
-        # rows even though the curated Parquet data exists in S3.
         partition_value = _extract_curated_date_partition(s3_prefix)
         glue_client = boto3.client("glue", region_name=ctx.region_name)
         glue_table_meta = glue_client.get_table(
@@ -969,7 +876,6 @@ def _register_curated_catalog(
             curated_date=partition_value,
         )
     except Exception as exc:
-        # Catalog registration failure must not block curated write
         _logger.warning(
             "curated_catalog_registration_failed",
             run_id=ctx.run_id,
@@ -1003,7 +909,6 @@ def _emit_transformation_lineage(
         )
         emitter.emit(record)
     except Exception as exc:
-        # Lineage failure must never block pipeline output
         _logger.warning(
             "transformation_lineage_emission_failed",
             run_id=ctx.run_id,

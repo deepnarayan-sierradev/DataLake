@@ -1,7 +1,8 @@
 """
 Backfill orchestrator (DL-DQ-01) and reprocessing execution (DL-CFG-11).
 
-`EdlBackfillJob` holds the chunk plan, per-chunk state, and resume pointer. Each chunk is an
+`datalake-backfill-jobs-dev` holds the chunk plan, per-chunk state, and resume pointer. Each chunk
+is an
 independent, resumable Step Functions execution with its own watermark checkpoint, so a
 multi-million-row backfill never restarts from zero.
 
@@ -14,7 +15,6 @@ version — deliberately the same engine, not a second chunked-replay implementa
 
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -26,12 +26,11 @@ import boto3
 from config_propagation.capability import ConfigCapability
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
-
-_TABLE_NAME: Final[str] = "EdlBackfillJob"
 
 
 def _as_item_list(value: Any) -> list[dict[str, Any]]:
@@ -45,12 +44,8 @@ def _optional_str(value: Any) -> str | None:
     return None if value is None else str(value)
 
 
-# Observed throughput floor used when no measurement exists yet; chunk size is derived from
-# measured rows-per-second thereafter rather than fixed (DL-02 performance clause).
 DEFAULT_ASSUMED_ROWS_PER_SECOND: Final[float] = 500.0
 
-# Target wall-clock per chunk. Well inside the 900s Lambda ceiling so a chunk has room to
-# checkpoint and write its audit record before the runtime kills it.
 TARGET_CHUNK_SECONDS: Final[float] = 600.0
 
 MIN_CHUNK_DAYS: Final[int] = 1
@@ -240,12 +235,10 @@ class BackfillOrchestrator:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("BACKFILL_JOB_TABLE") or _TABLE_NAME
+        table_name = require_env("BACKFILL_JOB_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
         self._s3 = s3_client
         self._raw_bucket = raw_s3_bucket
-
-    # ── Planning ──────────────────────────────────────────────────────────────
 
     def plan_job(
         self,
@@ -290,8 +283,6 @@ class BackfillOrchestrator:
             is_reprocess=job.is_reprocess,
         )
         return job
-
-    # ── Execution ─────────────────────────────────────────────────────────────
 
     def next_chunk(self, tenant_code: str, entity_id: str, job_id: str) -> BackfillChunk | None:
         """
@@ -417,8 +408,6 @@ class BackfillOrchestrator:
         )
         self._save(job)
 
-    # ── Persistence ───────────────────────────────────────────────────────────
-
     def load_job(self, tenant_code: str, entity_id: str, job_id: str) -> BackfillJob:
         tenant_code = validate_tenant_code(tenant_code)
         response = self._table.get_item(
@@ -493,8 +482,6 @@ class BackfillOrchestrator:
 
     def _delete_prefix(self, prefix: str) -> None:
         if self._s3 is None or not self._raw_bucket:
-            # Compensation without an S3 client would silently leave the partition in place,
-            # which is worse than refusing: the caller believes the chunk was cleaned.
             raise ValueError(
                 "Chunk compensation requires both an S3 client and a raw bucket; without them "
                 "a failed chunk's partition would silently survive."

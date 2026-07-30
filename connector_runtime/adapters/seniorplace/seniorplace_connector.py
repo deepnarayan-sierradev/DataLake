@@ -58,12 +58,9 @@ def _entity(suffix: str, path: str, *, watermark: str | None = None) -> RestEnti
     return RestEntitySpec(
         entity_id=f"{SOURCE_ID}-{suffix}",
         path=path,
-        # Collections come back as a bare JSON array, so the record path is empty and the
-        # body itself is the list.
         records_json_path=(),
         watermark_field=watermark,
         natural_key_field="id",
-        # The specification documents no paging parameters — see the module docstring.
         pagination_strategy="single_request",
     )
 
@@ -82,9 +79,6 @@ SENIORPLACE_SPEC: Final[RestSourceSpec] = RestSourceSpec(
         _entity("user", "/api/v1/users"),
         _entity("referral-contact", "/api/v1/referral-contacts"),
         _entity("referral-organization", "/api/v1/referral-organizations"),
-        # `GET /me` returns the caller and **the offices it can act on**. Extracted because
-        # it is the only published way to enumerate offices, which a multi-office tenant
-        # needs before it can read completely — see MULTI_OFFICE_SCOPE_REQUIRED.
         _entity("office", "/api/v1/me"),
     ),
     capabilities=frozenset(
@@ -95,11 +89,8 @@ SENIORPLACE_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     ),
     default_pagination_strategy="single_request",
     default_rate_limit_policy="seniorplace-standard",
-    # SeniorPlace returns a bare JSON array, so the body itself is the record list.
     default_records_json_path=(),
     required_credential_keys=frozenset({"api_key"}),
-    # The one documented incremental filter, on `/clients`. There is no upper-bound
-    # parameter, so the window is left open at the top rather than closed with a guess.
     watermark_lower_parameter="updatedAfter",
     watermark_upper_parameter="updatedBefore",
     notes=(
@@ -115,15 +106,6 @@ register_rest_source(SENIORPLACE_SPEC)
 
 IS_PHI_BEARING: Final[bool] = True
 
-# The specification states: "If your organization has multiple offices, you must specify
-# which office to operate in using the `officeId` parameter on search and create endpoints."
-#
-# Nothing here supplies `officeId`, and the API does not say what it does without one. The
-# dangerous reading is that it silently scopes to a default office — which would extract a
-# subset while reporting success, the worst failure mode this platform has. It is recorded
-# here, and in docs/KNOWN_GAPS_AND_ROADMAP.md, rather than papered over: a single-office
-# agency is unaffected, and a multi-office one needs a per-office fan-out driven by the
-# `seniorplace-office` entity above before its extraction can be called complete.
 MULTI_OFFICE_SCOPE_REQUIRED: Final[bool] = True
 OFFICE_SCOPED_ENTITY_IDS: Final[frozenset[str]] = frozenset(
     {f"{SOURCE_ID}-client", f"{SOURCE_ID}-referral-organization"}
@@ -151,7 +133,6 @@ def build_odata_incremental_filter(
 def _odata_datetime(value: str) -> str:
     from datetime import datetime
 
-    # Raises on anything that is not a timestamp, so no arbitrary text reaches the clause.
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return parsed.isoformat()
 

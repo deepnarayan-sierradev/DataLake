@@ -87,19 +87,15 @@ class TestScopeUnit:
             self._unit(parent_scope_unit_id="franchisee-0042")
 
     def test_history_inheritance_defaults_to_none(self):
-        # A contractual question the platform must not decide silently (DL-SCOPE-11).
         assert self._unit().history_inheritance is HistoryInheritancePolicy.NONE
 
 
 class TestScopeUnitIdValidation:
     def test_the_implicit_sentinel_is_not_a_registrable_unit_id(self) -> None:
-        # It satisfies the charset, so without an explicit guard a unit named `__tenant__` in a
-        # partitioned tenant collapses scope_predicate() to match-all (DL-SCOPE-02).
         with pytest.raises(ValueError, match="reserved"):
             validate_scope_unit_id("__tenant__")
 
     def test_the_sentinel_is_permitted_inside_a_claim(self) -> None:
-        # A single-partition tenant's claim legitimately contains it.
         assert validate_scope_unit_id("__tenant__", allow_reserved=True) == "__tenant__"
 
     @pytest.mark.parametrize("value", ["franchisee-0042", "region_north", "_internal-01"])

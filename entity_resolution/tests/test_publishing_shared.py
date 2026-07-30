@@ -30,7 +30,6 @@ class TestFlattenListFields:
     def test_non_list_fields_passed_through(self):
         records = [{"id": "g1", "count": 3, "score": 1.5, "meta": {"k": "v"}}]
         out = list(flatten_list_fields(records))
-        # dicts and scalars are left untouched; only lists become JSON strings
         assert out == [{"id": "g1", "count": 3, "score": 1.5, "meta": {"k": "v"}}]
 
     def test_empty_input_yields_nothing(self):
@@ -38,7 +37,6 @@ class TestFlattenListFields:
 
     def test_is_lazy_iterator(self):
         gen = flatten_list_fields(iter([{"x": [1]}]))
-        # Nothing consumed until iterated
         assert next(gen) == {"x": "[1]"}
 
 
@@ -96,8 +94,6 @@ class TestEmitGoldenRecordLineage:
         assert resp.get("KeyCount", 0) >= 1
 
     def test_emission_failure_is_swallowed(self):
-        # Governance bucket does not exist → S3 write fails, but best-effort
-        # emission must never raise.
         emit_golden_record_lineage(
             s3_governance_bucket="nonexistent-bucket",
             curated_s3_bucket="curated-bucket",

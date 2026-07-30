@@ -17,16 +17,9 @@ locals {
     ManagedBy   = "terraform"
     Module      = "lambda_pipeline"
   })
-  function_name = "EdlExtractionPipeline"
+  function_name = "${var.name_prefix}-extraction-${var.environment}"
 }
 
-# ---------------------------------------------------------------------------
-# CloudWatch Log Group for Lambda execution logs
-#
-# Created before the Lambda so Terraform manages retention and encryption.
-# If Lambda creates the log group automatically it inherits no retention
-# and no KMS encryption.
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "lambda_execution" {
   name              = "/aws/lambda/${local.function_name}"
@@ -39,12 +32,6 @@ resource "aws_cloudwatch_log_group" "lambda_execution" {
   })
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Security Group
-#
-# Allows all egress (needed for HTTPS calls to Salesforce/NetSuite APIs
-# and AWS service endpoints).  No ingress — Lambda is invoked by SFN only.
-# ---------------------------------------------------------------------------
 
 data "aws_vpc" "selected" {
   filter {
@@ -54,7 +41,7 @@ data "aws_vpc" "selected" {
 }
 
 resource "aws_security_group" "lambda_pipeline" {
-  name        = "${local.function_name}Sg"
+  name        = "${local.function_name}-sg"
   description = "Security group for the extraction pipeline Lambda. Egress to AWS APIs and external sources only."
   vpc_id      = data.aws_vpc.selected.id
 
@@ -75,7 +62,7 @@ resource "aws_security_group" "lambda_pipeline" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${local.function_name}Sg"
+    Name = "${local.function_name}-sg"
   })
 
   lifecycle {
@@ -83,24 +70,16 @@ resource "aws_security_group" "lambda_pipeline" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Function — Extraction Pipeline
-#
-# Handler: connector_runtime.extraction_pipeline_handler.lambda_handler
-#
-# Runtime: python3.13 (closest GA runtime to 3.14 at time of writing;
-# update to python3.14 when AWS adds it to Lambda runtimes).
-#
-# VPC: deployed into private subnets so it can reach MySQL RDS and the
-# VPC interface endpoints for S3, DynamoDB, SQS, Secrets Manager, and SFN
-# without crossing the public internet.
-#
-# Environment variables:
-#   PLATFORM_ENVIRONMENT  — "dev" | "staging" | "prod"
-#   RAW_S3_BUCKET         — raw layer bucket name
-#   SCHEMA_SNAPSHOT_S3_BUCKET — schema snapshot bucket name
-#   AWS_REGION            — injected by Lambda runtime automatically
-# ---------------------------------------------------------------------------
+
+locals {
+  required_resource_names = [
+    "RESOURCE_NAME_PREFIX",
+    "SECRET_PATH_PREFIX",
+  ]
+  resource_name_variables = {
+    for key in local.required_resource_names : key => var.resource_names[key]
+  }
+}
 
 resource "aws_lambda_function" "extraction_pipeline" {
   function_name = local.function_name
@@ -130,14 +109,14 @@ resource "aws_lambda_function" "extraction_pipeline" {
   kms_key_arn = var.kms_key_arn
 
   environment {
-    variables = {
+    variables = merge({
       PLATFORM_ENVIRONMENT      = var.environment
       RAW_S3_BUCKET             = var.raw_s3_bucket_name
       SCHEMA_SNAPSHOT_S3_BUCKET = var.schema_snapshot_s3_bucket_name
       ENTITY_CONFIG_TABLE       = var.entity_config_table_name
       WATERMARK_TABLE           = var.watermark_table_name
       AUDIT_LOG_TABLE           = var.audit_log_table_name
-    }
+    }, local.resource_name_variables)
   }
 
   vpc_config {
@@ -149,7 +128,6 @@ resource "aws_lambda_function" "extraction_pipeline" {
     mode = var.enable_xray_tracing ? "Active" : "PassThrough"
   }
 
-  # Ensure log group is created before Lambda so Terraform owns retention/encryption.
   depends_on = [aws_cloudwatch_log_group.lambda_execution]
 
   tags = merge(local.common_tags, {
@@ -157,41 +135,24 @@ resource "aws_lambda_function" "extraction_pipeline" {
   })
 
   lifecycle {
-    # Prevent accidental destruction of the function in staging/prod.
-    # destroy is still possible via targeted apply.
     ignore_changes = []
   }
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Permission — allow Step Functions to invoke the Lambda
-#
-# Step Functions assumes the step_functions_role_arn (passed via orchestration
-# module) which has lambda:InvokeFunction permission.  This resource-based
-# policy is defence-in-depth: rejects invocations from principals other than
-# the Step Functions service in this account.
-# ---------------------------------------------------------------------------
 
 resource "aws_lambda_permission" "allow_step_functions" {
   statement_id  = "AllowStepFunctionsInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.extraction_pipeline.function_name
   principal     = "states.amazonaws.com"
-  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:EdlExtractionPipeline"
+  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.name_prefix}-extraction-workflow-${var.environment}"
 }
 
-# ---------------------------------------------------------------------------
-# Async-invocation dead letter queue (CKV_AWS_116). An asynchronous Lambda failure with no
-# DLQ is discarded after the retries with nothing left to inspect. Named `EdlStageDlq-*` so
-# the existing `sqs:SendMessage` grant on that prefix covers it rather than adding a new one.
-# SSE-SQS rather than a CMK: no per-module KMS input exists, and the payload here is a failed
-# event envelope, not tenant data.
-# ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "async_dlq" {
-  name                      = "EdlStageDlq-ExtractionAsync"
+  name                      = "${var.name_prefix}-extraction-async-dlq-${var.environment}"
   message_retention_seconds = 1209600 # 14 days, the maximum — a DLQ that expires loses the evidence
   sqs_managed_sse_enabled   = true
 
-  tags = merge(local.common_tags, { Name = "EdlStageDlq-ExtractionAsync" })
+  tags = merge(local.common_tags, { Name = "${var.name_prefix}-extraction-async-dlq-${var.environment}" })
 }

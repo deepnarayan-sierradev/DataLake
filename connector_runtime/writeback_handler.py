@@ -2,7 +2,7 @@
 Bi-directional write-back stage (DL-CONN-02, §3.8 Franchise Management System).
 
 Writes are opt-in per entity, idempotent by external-id upsert, rate-limit aware, and
-audited to `EdlRunAuditLog` under a distinct `writeback` stage value.
+audited to `datalake-run-audit-log-dev` under a distinct `writeback` stage value.
 
 Security: the write path uses a *separate* secret from the read path, so a read-only
 deployment cannot mutate a source, and `writeback_enabled` is a distinct config flag from
@@ -125,7 +125,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         execution.emit(PlatformMetric.WRITEBACK_RECORDS, float(written))
         execution.emit(PlatformMetric.RATE_LIMIT_HITS, float(telemetry.hits))
         execution.emit(PlatformMetric.RATE_LIMIT_BACKOFF_MS, telemetry.backoff_ms)
-        # Audited under a distinct stage value so a write is never mistaken for a read.
         coordinator.emit_stage(
             stage=PipelineStage.EXTRACTION,
             status=RunStatus.SUCCESS,

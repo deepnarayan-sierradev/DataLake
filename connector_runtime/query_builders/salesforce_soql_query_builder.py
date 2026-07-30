@@ -33,11 +33,8 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Salesforce object names: letters, digits, underscores, may end with __c/__e etc.
-# Validated before inclusion in query_text to prevent injection via config.
 _OBJECT_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,254}$")
 
-# Salesforce field names follow the same pattern.
 _FIELD_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,254}$")
 
 
@@ -119,10 +116,6 @@ class SalesforceSoqlQueryBuilder:
                     "in a Salesforce field name."
                 )
 
-        # DUP-4: the actual SELECT/FROM/WHERE assembly is shared with NetSuite
-        # SuiteQL and MySQL — see build_incremental_select(). SOQL uses no
-        # identifier quoting and ":lower_bound"/":upper_bound" bind-variable
-        # placeholders, bound by the Bulk API job controller at submission.
         query_text, params, effective_watermark_field = build_incremental_select(
             field_names=field_names,
             table=self._object_name,

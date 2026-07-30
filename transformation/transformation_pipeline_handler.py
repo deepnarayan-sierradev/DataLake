@@ -11,7 +11,7 @@ Step Functions input schema (Parameters block in RunTransformation state):
   {
     "source_id":       str   — stable source identifier (e.g. "mysql-rds")
     "entity_id":       str   — stable entity identifier (e.g. "mysql-rds-contracts")
-    "environment":     str   — "dev" | "staging" | "prod"
+    "environment":     str   — "dev" | "uat" | "prod"
     "run_id":          str   — run_id produced by the extraction stage
     "tenant_code":     str   — tenant identity for this run (ARCH-4: required, fails closed)
     "raw_s3_prefix":   str   — S3 prefix where raw Parquet files were written
@@ -20,7 +20,7 @@ Step Functions input schema (Parameters block in RunTransformation state):
 
 Required Lambda environment variables:
   AWS_REGION                — injected automatically by the Lambda runtime
-  PLATFORM_ENVIRONMENT      — deployment environment (dev / staging / prod)
+  PLATFORM_ENVIRONMENT      — deployment environment (dev / uat / prod)
   RAW_S3_BUCKET             — name of the raw layer S3 bucket
   CURATED_S3_BUCKET         — name of the curated layer S3 bucket
   FIELD_MAPPING_S3_BUCKET   — bucket that holds field mapping JSON files
@@ -86,10 +86,8 @@ _logger = get_platform_logger(__name__)
 _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
     {"source_id", "entity_id", "environment", "run_id", "raw_s3_prefix", "tenant_code"}
 )
-_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
+_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "uat", "prod"})
 
-# mapping_version must be "latest" or a safe version tag like "v1", "v2-beta"
-# Rejects path traversal characters and excessively long strings (OWASP A03).
 _MAPPING_VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-_\.]{0,31}$")
 
 
@@ -115,8 +113,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     _validate_event(event)
 
-    # Abort early if insufficient Lambda time remains to run the full pipeline.
-    # Lambda timeout is 900 s; 60 s margin prevents a wasted invocation.
     check_lambda_timeout(context, min_remaining_ms=60_000)
 
     source_id: str = event["source_id"]
@@ -125,18 +121,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     run_id: str = event["run_id"]
     raw_s3_prefix: str = event["raw_s3_prefix"]
     mapping_version: str = str(event.get("mapping_version") or "latest")
-    # DL-SCOPE-05: the connection is the identity dimension; for a single-connection source it
-    # equals source_id, which is what keeps pre-migration payloads working unchanged.
     connection_id: str | None = str(event["connection_id"]) if event.get("connection_id") else None
-    # Tenant code for S3 path isolation (§1.1 / ARCH-4). Required — a missing
-    # or malformed tenant_code must fail closed rather than silently run as
-    # another tenant (OWASP A03).
     tenant_code: str = str(event["tenant_code"])
 
-    # DL-OPS-05: one lifecycle for every stage. `stage_execution` binds and clears contextvars,
-    # configures X-Ray, flushes metrics, emits the stage duration, and writes a failure record on
-    # both an exception and a hard Lambda kill — the `finally` this handler used to hand-roll
-    # could not cover the hard-kill case at all.
     stage_identity = StageIdentity(
         tenant_code=tenant_code,
         source_id=source_id,
@@ -155,13 +142,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "Expected 'latest' or a version tag like 'v1'."
         )
 
-    # ── Env vars ─────────────────────────────────────────────────────────────
     region_name = require_env("AWS_REGION")
     raw_s3_bucket = require_env("RAW_S3_BUCKET")
     curated_s3_bucket = require_env("CURATED_S3_BUCKET")
     field_mapping_s3_bucket = require_env("FIELD_MAPPING_S3_BUCKET")
 
-    # Optional governance / catalog wiring — disabled when not configured.
     governance_s3_bucket: str | None = os.environ.get("GOVERNANCE_S3_BUCKET") or None
     glue_catalog_database: str | None = os.environ.get("GLUE_CATALOG_DATABASE") or None
 
@@ -177,13 +162,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         lineage_enabled=governance_s3_bucket is not None,
     )
 
-    # ── Derive domain ─────────────────────────────────────────────────────────
-    # domain is used for Glue table name construction and curated S3 path
-    # partitioning. Derived server-side to prevent injection (OWASP A03).
-    # "mysql-rds" → "mysql_rds", "salesforce" → "salesforce", etc.
     domain = _source_id_to_domain(source_id)
 
-    # ── Wire dependencies ─────────────────────────────────────────────────────
     mapping_registry = FieldMappingRegistryClient(
         s3_bucket=field_mapping_s3_bucket,
         region_name=region_name,
@@ -199,16 +179,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     metrics_emitter = CloudWatchMetricsEmitter(region_name=region_name)
     metrics_emitter.set_tenant_context(tenant_code)
 
-    # ── Load entity config (for incremental merge settings) ───────────────────
-    # Reads primary_key_field and soft_delete_field from the entity config record
-    # stored in DynamoDB.  These fields drive SCD Type 1 merge behaviour.
-    # For entities without primary_key_field set (all full-load entities and
-    # incremental entities not yet migrated), config loading succeeds but returns
-    # None for both fields — accumulator is not created and pipeline is unchanged.
-    #
-    # Security: environment is validated against _KNOWN_ENVIRONMENTS above and
-    # is the only input to table-name construction inside the repository
-    # client; never interpolated from unvalidated user event input (OWASP A03).
     curated_accumulator: CuratedAccumulator | None = None
     try:
         config_repo = ConfigurationRepositoryClient(
@@ -237,28 +207,18 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 soft_delete_field=entity_config.soft_delete_field,
             )
     except ConfigurationNotFoundError:
-        # Entity config not found — not a blocker for transformation.
-        # Pipeline runs in append-only mode (accumulator remains None).
         _logger.warning(
             "entity_config_not_found_accumulator_disabled",
             source_id=source_id,
             entity_id=entity_id,
         )
     except ConfigurationValidationError as exc:
-        # Stored config record failed Pydantic validation — not a blocker for
-        # transformation. Append-only fallback is safe (data is written, merge
-        # is simply skipped), but this is unexpected enough to warrant a warning.
         _logger.warning(
             "entity_config_invalid_accumulator_disabled",
             source_id=source_id,
             entity_id=entity_id,
             error=str(exc),
         )
-    # Deliberately narrow: a bare `except Exception` here previously masked a
-    # constructor signature mismatch (TypeError) as a benign config-load
-    # failure, silently disabling the SCD merge for every entity. Programming
-    # errors (TypeError, AttributeError, etc.) must propagate and fail the
-    # invocation loudly rather than degrade into "accumulator disabled."
 
     pipeline = TransformationPipeline(
         mapping_registry_client=mapping_registry,
@@ -270,7 +230,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         curated_accumulator=curated_accumulator,
     )
 
-    # ── Build context ─────────────────────────────────────────────────────────
     scope_units = ScopeUnitRepository(environment=environment, region_name=region_name)
 
     ctx = TransformationContext(
@@ -290,9 +249,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         environment=environment,
         tenant_code=tenant_code,
         lambda_context=context,  # for mid-execution timeout checks (§3.5)
-        # DL-SCOPE-07: the pipeline stamps `scope_unit_id` on every curated row, so it needs the
-        # tenant's partition model and the owning connection. Without these the row filter every
-        # consumption surface applies would have nothing to filter on.
         partition_profile=scope_units.get_partition_profile(tenant_code),
         source_connection=_scope_connection(
             environment=environment,
@@ -304,7 +260,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         known_scope_unit_ids=scope_units.known_unit_ids(tenant_code),
     )
 
-    # ── Execute pipeline ──────────────────────────────────────────────────────
     with stage_execution(
         stage_identity,
         region_name=region_name,
@@ -326,11 +281,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     )
 
     return dataclasses.asdict(result)
-
-
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
 
 
 def _validate_event(event: dict[str, Any]) -> None:
@@ -367,9 +317,6 @@ def _validate_event(event: dict[str, Any]) -> None:
             f"Expected one of {sorted(_KNOWN_ENVIRONMENTS)}."
         )
 
-    # tenant_code is required (ARCH-4) and must always be well-formed
-    # (OWASP A03 / SEC-5) — a missing or malformed tenant_code must fail
-    # closed rather than silently default to another tenant's identity.
     tenant_code = str(event["tenant_code"])
     if not _TENANT_CODE_PATTERN.match(tenant_code):
         raise ValueError(f"tenant_code={tenant_code!r} does not conform to the tenant code format.")

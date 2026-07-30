@@ -58,37 +58,24 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Maximum records per Intacct REST query page (Sage hard limit).
 PAGE_SIZE: Final[int] = 4_000
 
-# Validated Intacct object path pattern.
 _SAFE_OBJECT_PATH_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^[a-z][a-z0-9\-]+/[a-z][a-z0-9\-]+(::[A-Za-z0-9 ]+)?$"
 )
 
-# Validates Intacct field names including:
-#   - Simple names:        "key", "id", "name"
-#   - Dot-notation:        "primaryContact.name", "auditInfo.modifiedAt"
-#   - Custom fields:       "nsp::CUSTOM_FIELD_NAME"
 _SAFE_FIELD_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)*(::([A-Z][A-Z0-9_]*))?$"
 )
 
-# ISO-8601 UTC pattern used to validate watermark parameter values before
-# substituting them into the query body (injection prevention).
 _ISO8601_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$"
 )
 
-# Placeholder markers embedded in query_text for watermark values.
-# Double-underscore delimiters ensure they cannot match real field values.
 _LOWER_BOUND_PLACEHOLDER: Final[str] = "__SAGE_LOWER_BOUND__"
 _UPPER_BOUND_PLACEHOLDER: Final[str] = "__SAGE_UPPER_BOUND__"
 
 
-# SageQueryBuildError is defined in common/sage_errors.py and re-exported here
-# so existing imports from this module keep working. Intentionally placed
-# after the module constants above rather than at top of file.
 from connector_runtime.adapters.sage.substrate.sage_errors import SageQueryBuildError  # noqa: E402
 
 
@@ -161,7 +148,6 @@ class IntacctQueryEngine:
         if load_type == LoadType.INCREMENTAL and not watermark_field:
             raise SageQueryBuildError("watermark_field is required for INCREMENTAL load type.")
 
-        # Validate and collect field names from the FieldContract.
         field_names: list[str] = []
         for descriptor in field_contract.fields:
             if not _SAFE_FIELD_NAME_PATTERN.match(descriptor.name):
@@ -176,8 +162,6 @@ class IntacctQueryEngine:
                 "FieldContract contains no queryable fields — cannot build query."
             )
 
-        # Always include "key" as the ordering anchor for stable pagination.
-        # Insert only if not already present in the discovered fields.
         if "key" not in field_names:
             field_names = ["key", *field_names]
 
@@ -196,8 +180,6 @@ class IntacctQueryEngine:
                     f"watermark_field {watermark_field!r} does not match the "
                     "required Intacct field name pattern."
                 )
-            # Embed placeholder markers — NOT the actual values.
-            # Actual values are in query_parameters and substituted at execution time.
             query_body["filters"] = [
                 {"$gte": {watermark_field: _LOWER_BOUND_PLACEHOLDER}},
                 {"$lt": {watermark_field: _UPPER_BOUND_PLACEHOLDER}},
@@ -265,7 +247,6 @@ class IntacctQueryEngine:
                 "Injection-safe substitution requires ISO-8601 values."
             )
 
-        # Deep copy the query body and replace placeholder strings in filters.
         import copy  # local import to keep module-level imports lean
 
         bound = copy.deepcopy(query_body)

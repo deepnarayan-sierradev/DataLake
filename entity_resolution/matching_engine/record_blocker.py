@@ -46,11 +46,6 @@ from tenancy.scope_predicate import SCOPE_UNIT_COLUMN
 _logger = get_platform_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Blocking key types
-# ---------------------------------------------------------------------------
-
-
 class BlockingKeyType(StrEnum):
     """Determines how the blocking key is computed from a source field value."""
 
@@ -78,11 +73,6 @@ class BlockingStrategy:
     max_block_size: int = 1_000
 
 
-# ---------------------------------------------------------------------------
-# Blocking implementation
-# ---------------------------------------------------------------------------
-
-
 class RecordBlocker:
     """
     Partitions a record list into blocks using a blocking key.
@@ -107,10 +97,6 @@ class RecordBlocker:
         self, strategy: BlockingStrategy, *, resolution_scope: ResolutionScope | None = None
     ) -> None:
         self._strategy = strategy
-        # DL-SCOPE-08: when resolution is scope-unit-grained, the scope unit participates in the
-        # blocking key. Two franchisees' identical customer then lands in two different blocks and
-        # cannot be compared, which is the only place a cross-unit merge can be prevented — no
-        # downstream row filter repairs a golden record that already merged two units' data.
         self._resolution_scope = resolution_scope or ResolutionScope.TENANT
 
     def partition(self, records: Iterable[dict[str, Any]]) -> list[list[dict[str, Any]]]:
@@ -132,8 +118,6 @@ class RecordBlocker:
             record_count += 1
             key = self._compute_key(record)
             if self._resolution_scope is ResolutionScope.SCOPE_UNIT:
-                # An unattributed record (None) blocks under its own sentinel rather than
-                # joining every unit's block — fail closed, matching the read-path predicate.
                 unit = record.get(SCOPE_UNIT_COLUMN) or "__unattributed__"
                 key = f"{unit}::{key}"
             buckets[key].append(record)
@@ -143,9 +127,6 @@ class RecordBlocker:
             if len(bucket) <= self._strategy.max_block_size:
                 blocks.append(bucket)
             else:
-                # Subdivide oversized blocks into max_block_size slices.
-                # This preserves the hard memory bound while ensuring no records
-                # are dropped — cross-slice false negatives are acceptable.
                 for i in range(0, len(bucket), self._strategy.max_block_size):
                     blocks.append(bucket[i : i + self._strategy.max_block_size])
 
@@ -173,15 +154,12 @@ class RecordBlocker:
 
         if self._strategy.key_type == BlockingKeyType.PHONE_NORMALIZED:
             digits = "".join(c for c in value if c.isdigit())
-            # First 7 digits cover country code + area code, providing
-            # enough discrimination without over-splitting.
             return digits[:7] if len(digits) >= 7 else digits or "__no_phone__"
 
         if self._strategy.key_type == BlockingKeyType.NAME_FIRST3:
             stripped = "".join(c for c in value if c.isalpha())
             return stripped[:3].lower() if len(stripped) >= 3 else stripped.lower() or "__empty__"
 
-        # RECORD_ID_PREFIX: use first 8 chars of normalised ID
         return value[:8] if len(value) >= 8 else value
 
 

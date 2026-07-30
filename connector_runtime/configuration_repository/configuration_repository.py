@@ -5,7 +5,7 @@ Loads EntityExtractionConfig records from DynamoDB (primary) or S3 (alternate).
 All records are Pydantic-validated before being returned — invalid configurations
 are rejected before the connector runtime starts.
 
-DynamoDB table: EdlEntityExtractionConfig
+DynamoDB table: datalake-entity-extraction-config-dev
   PK: source_id (str) — stores tenant_scoped_key(tenant_code, source_id) (ARCH-1/ARCH-03),
       e.g. "demo#salesforce", so two tenants configuring the same source_id/entity_id
       never collide on the same item. The plain source_id is restored on read.
@@ -23,7 +23,6 @@ Security:
 from __future__ import annotations
 
 import json
-import os
 from enum import StrEnum
 from typing import Any, Final
 
@@ -40,6 +39,7 @@ from contracts.identifier_policy import (
 )
 from contracts.identifier_policy import STABLE_ID_PATTERN as _STABLE_ID_PATTERN
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from persistence.dynamodb_paging import (
@@ -52,10 +52,7 @@ from tenancy.connection_keys import resolve_connection_id
 
 _logger = get_platform_logger(__name__)
 
-_DYNAMODB_TABLE_NAME: str = "EdlEntityExtractionConfig"
 
-# Config schema generations this runtime can parse (DL-CFG-14). A config outside the
-# range fails closed with an actionable error rather than being parsed leniently.
 SUPPORTED_CONFIG_SCHEMA_VERSIONS: range = range(1, 2)
 
 
@@ -82,7 +79,6 @@ class ConfigurationSchemaIncompatibleError(Exception):
     """Raised when a stored config declares a schema version this runtime cannot parse."""
 
 
-# GSI added in S12 so a tenant listing is a Query rather than a Scan over every tenant.
 _TENANT_ENTITY_INDEX: Final[str] = "tenant-entity-index"
 
 
@@ -112,17 +108,14 @@ class ConfigurationRepositoryClient:
 
         if backend == ConfigurationBackend.DYNAMODB:
             self._dynamodb = boto3.resource("dynamodb", region_name=region_name)
-            self._table_name = os.environ.get("ENTITY_CONFIG_TABLE") or _DYNAMODB_TABLE_NAME
+            self._table_name = require_env("ENTITY_CONFIG_TABLE")
             self._table = self._dynamodb.Table(self._table_name)
-            # Shared per-instance cache for the GSI-presence probe (persistence.index_available).
             self._index_presence: dict[str, bool] = {}
         else:
             if not s3_bucket:
                 raise ValueError("s3_bucket is required when backend is ConfigurationBackend.S3")
             self._s3 = boto3.client("s3", region_name=region_name)
             self._s3_bucket = s3_bucket
-
-    # ── Public API ─────────────────────────────────────────────────────────────
 
     def load_config(
         self,
@@ -163,8 +156,6 @@ class ConfigurationRepositoryClient:
                 "with a letter). Example: 'salesforce-account', 'netsuite-customer'."
             )
         tenant_code = validate_tenant_code(tenant_code)
-        # DL-SCOPE-04: the key's identity component is the connection, which for a
-        # single-connection source is the source_id itself.
         key_id = resolve_connection_id(source_id, connection_id)
         if self._backend == ConfigurationBackend.DYNAMODB:
             config = self._load_from_dynamodb(source_id, entity_id, tenant_code, key_id)
@@ -198,9 +189,6 @@ class ConfigurationRepositoryClient:
             raise NotImplementedError("save_config is only implemented for the DynamoDB backend.")
 
         item = config.model_dump(mode="json")
-        # The PK attribute is named `source_id` for table-compatibility but now holds the
-        # tenant-scoped *connection* id (DL-SCOPE-04). The plain source_id moves to
-        # `source_system_id` so it survives the round trip for browsing and adapter routing.
         item["source_system_id"] = config.source_id
         item["source_id"] = tenant_scoped_key(config.tenant_code, config.effective_connection_id)
         put_kwargs: dict[str, Any] = {"Item": item}
@@ -241,8 +229,6 @@ class ConfigurationRepositoryClient:
     def _to_config(self, tenant_code: str, item: dict[str, Any]) -> EntityExtractionConfig | None:
         """Validate one stored record; a malformed one is skipped, never fatal to the listing."""
         record: dict[str, Any] = dict(item)
-        # The PK holds the tenant-scoped connection id; the stored `connection_id` attribute (when
-        # present) is authoritative for the plain source_id, carried separately as an attribute.
         scoped = strip_tenant_prefix(tenant_code, str(record.get("source_id", "")))
         record["source_id"] = str(record.pop("source_system_id", "") or scoped)
         try:
@@ -323,8 +309,6 @@ class ConfigurationRepositoryClient:
         """One shared probe, cached per client: the GSI may not exist yet in an environment."""
         return index_available(self._table, _TENANT_ENTITY_INDEX, self._index_presence)
 
-    # ── DynamoDB backend ───────────────────────────────────────────────────────
-
     def _load_from_dynamodb(
         self, source_id: str, entity_id: str, tenant_code: str, key_id: str
     ) -> EntityExtractionConfig:
@@ -354,21 +338,13 @@ class ConfigurationRepositoryClient:
                 f"entity_id={entity_id!r} in table {self._table_name!r}."
             )
 
-        # The stored "source_id" attribute is the tenant-scoped composite key value;
-        # restore the plain source_id before constructing the model.
         record = {**dict(item), "source_id": source_id}
         record.pop("source_system_id", None)
         return self._validate(source_id, entity_id, record)
 
-    # ── S3 backend ─────────────────────────────────────────────────────────────
-
     def _load_from_s3(
         self, source_id: str, entity_id: str, tenant_code: str, key_id: str
     ) -> EntityExtractionConfig:
-        # Tenant-prefixed path (matches the convention already established in
-        # transformation/curated_layer_writer.py) — genuinely IAM-enforceable
-        # via an S3 bucket-policy condition on the key prefix, unlike the
-        # DynamoDB backend above.
         s3_key = f"{tenant_code}/{key_id}/{entity_id}/config.json"
         try:
             response = self._s3.get_object(Bucket=self._s3_bucket, Key=s3_key)
@@ -379,9 +355,6 @@ class ConfigurationRepositoryClient:
                 raise ConfigurationNotFoundError(
                     f"No configuration record found at s3://{self._s3_bucket}/{s3_key}"
                 ) from exc
-            # Non-404 errors (throttle, AccessDenied, VPC endpoint failure) must
-            # propagate as the original ClientError so callers can distinguish
-            # infrastructure failures from genuinely absent records.
             raise
 
         return self._validate(source_id, entity_id, raw)
@@ -425,8 +398,6 @@ class ConfigurationRepositoryClient:
                 f"{SUPPORTED_CONFIG_SCHEMA_VERSIONS.stop - 1}]. Upgrade the runtime or "
                 "republish the config at a supported version."
             )
-
-    # ── Validation ─────────────────────────────────────────────────────────────
 
     @staticmethod
     def _validate(source_id: str, entity_id: str, record: dict[str, Any]) -> EntityExtractionConfig:

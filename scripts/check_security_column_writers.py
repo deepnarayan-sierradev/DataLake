@@ -43,8 +43,6 @@ class FilteredStore:
     column_aliases: tuple[str, ...] = ()
 
 
-# Every store whose rows are filtered by a `ConsumptionSurface` predicate. Adding a surface that
-# filters a new store means adding it here — the entry is what makes the filter checkable.
 FILTERED_STORES: Final[tuple[FilteredStore, ...]] = (
     FilteredStore(
         name="twin node (TWIN_TRAVERSAL)",

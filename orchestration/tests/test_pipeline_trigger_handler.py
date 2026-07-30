@@ -24,10 +24,6 @@ from orchestration.pipeline_trigger.pipeline_trigger_handler import (
     lambda_handler,
 )
 
-# ---------------------------------------------------------------------------
-# TriggerMessage validation
-# ---------------------------------------------------------------------------
-
 
 class TestTriggerMessageValidation:
     def test_valid_message_parses(self) -> None:
@@ -130,16 +126,16 @@ class TestTriggerMessageValidation:
                 }
             )
 
-    def test_staging_environment_valid(self) -> None:
+    def test_uat_environment_valid(self) -> None:
         msg = TriggerMessage.model_validate(
             {
                 "source_id": "netsuite",
                 "entity_id": "netsuite-customer",
-                "environment": "staging",
+                "environment": "uat",
                 "tenant_code": "demo",
             }
         )
-        assert msg.environment == "staging"
+        assert msg.environment == "uat"
 
     def test_prod_environment_valid(self) -> None:
         msg = TriggerMessage.model_validate(
@@ -151,11 +147,6 @@ class TestTriggerMessageValidation:
             }
         )
         assert msg.environment == "prod"
-
-
-# ---------------------------------------------------------------------------
-# _process_record
-# ---------------------------------------------------------------------------
 
 
 class TestProcessRecord:
@@ -199,7 +190,6 @@ class TestProcessRecord:
         )
 
         with patch("orchestration.pipeline_trigger.pipeline_trigger_handler._sfn_client", mock_sfn):
-            # Should not raise
             _process_record(self._make_sqs_record(self._valid_body()), "arn:sfn:test")
 
     def test_invalid_json_body_raises_value_error(self) -> None:
@@ -244,7 +234,6 @@ class TestProcessRecord:
 
         call_kwargs = mock_sfn.start_execution.call_args[1]
         exec_name = call_kwargs["name"]
-        # Must contain source_id, entity_id, and tick components
         assert "salesforce" in exec_name
         assert "salesforce-account" in exec_name
         assert len(exec_name) <= 80

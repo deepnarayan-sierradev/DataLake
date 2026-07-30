@@ -1,5 +1,5 @@
 variable "environment" {
-  description = "Deployment environment (dev/staging/prod)."
+  description = "Deployment environment (dev/uat/prod)."
   type        = string
 }
 
@@ -9,7 +9,6 @@ variable "tags" {
   default     = {}
 }
 
-# ─── Package ─────────────────────────────────────────────────────────────────
 
 variable "lambda_package_s3_bucket" {
   description = "S3 bucket holding the shared Lambda deployment package."
@@ -27,9 +26,6 @@ variable "lambda_package_source_hash" {
   default     = null
 }
 
-# ─── Roles: one per function, never shared ───────────────────────────────────
-# The write-back function must not be able to read the webhook secret, and the portability
-# function's delete permissions must not be granted to anything on the ingestion path.
 
 variable "webhook_receiver_role_arn" {
   description = "Execution role for the webhook receiver."
@@ -51,7 +47,6 @@ variable "portability_role_arn" {
   type        = string
 }
 
-# ─── Shared infrastructure references ────────────────────────────────────────
 
 variable "kms_key_arn" {
   description = "CMK for Lambda environment-variable encryption."
@@ -77,7 +72,6 @@ variable "enable_xray_tracing" {
   default     = true
 }
 
-# ─── Webhook receiver ────────────────────────────────────────────────────────
 
 variable "webhook_ingest_queue_url" {
   description = "FIFO queue the receiver enqueues to; nothing is processed inline."
@@ -88,7 +82,6 @@ variable "webhook_ingest_queue_url" {
 variable "webhook_dedup_table_name" {
   description = "Short-TTL table for provider event ids."
   type        = string
-  default     = "EdlWebhookEventDedup"
 }
 
 variable "control_plane_api_id" {
@@ -107,45 +100,36 @@ variable "control_plane_api_execution_arn" {
   default     = ""
 }
 
-# ─── Write-back ──────────────────────────────────────────────────────────────
 
 variable "entity_config_table_name" {
   description = "Entity configuration table; write-back reads writeback_enabled from it."
   type        = string
-  default     = "EdlEntityExtractionConfig"
 }
 
 variable "run_audit_log_table_name" {
   description = "Run audit log; write-back is audited under a distinct stage value."
   type        = string
-  default     = "EdlRunAuditLog"
 }
 
-# ─── Workflow runner ─────────────────────────────────────────────────────────
 
 variable "workflow_definition_table_name" {
-  type    = string
-  default = "EdlWorkflowDefinition"
+  type = string
 }
 
 variable "workflow_execution_table_name" {
-  type    = string
-  default = "EdlWorkflowExecution"
+  type = string
 }
 
 variable "workflow_idempotency_table_name" {
-  type    = string
-  default = "EdlWorkflowIdempotency"
+  type = string
 }
 
 variable "workflow_destination_table_name" {
-  type    = string
-  default = "EdlWorkflowDestination"
+  type = string
 }
 
 variable "workflow_task_table_name" {
-  type    = string
-  default = "EdlWorkflowTask"
+  type = string
 }
 
 variable "workflow_schedule_enabled" {
@@ -188,7 +172,6 @@ variable "workflow_dlq_arn" {
   default     = ""
 }
 
-# ─── Portability ─────────────────────────────────────────────────────────────
 
 variable "export_artefact_bucket_name" {
   description = "Bucket the export artefact is written to."
@@ -197,13 +180,11 @@ variable "export_artefact_bucket_name" {
 }
 
 variable "export_job_table_name" {
-  type    = string
-  default = "EdlExportJob"
+  type = string
 }
 
 variable "deletion_certificate_table_name" {
-  type    = string
-  default = "EdlDeletionCertificate"
+  type = string
 }
 
 variable "raw_s3_bucket_name" {
@@ -252,4 +233,14 @@ variable "security_group_ids" {
   description = "Additional security groups, alongside the one this module creates."
   type        = list(string)
   default     = []
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
+}
+
+variable "resource_names" {
+  type        = map(string)
+  description = "Every physical resource name this Lambda reads from its environment, built once in the environment root from the resources Terraform actually created."
 }

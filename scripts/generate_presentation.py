@@ -20,7 +20,6 @@ import os
 import tempfile
 from pathlib import Path
 
-# ── Palette ───────────────────────────────────────────────────────────────────
 CHARCOAL  = RGBColor(0x38, 0x3E, 0x48)  # title text  (#383E48)
 DEEP_BLUE = RGBColor(0x15, 0x60, 0x82)  # accent1
 ORANGE    = RGBColor(0xE9, 0x71, 0x32)  # accent2
@@ -45,12 +44,10 @@ FM = "Courier New"
 SW = Inches(13.33)
 SH = Inches(7.5)
 
-# Gradient strip geometry
 GX = Inches(10.9)   # strip left edge
 GW = Inches(2.43)   # strip width
 _STRIP = str(Path(tempfile.gettempdir()) / "gradient_strip.png")
 
-# Safe content geometry
 CX  = Inches(0.55)   # left margin
 CW  = Inches(10.1)   # content width (leaves gap before strip)
 TY  = Inches(0.42)   # title top
@@ -62,8 +59,6 @@ BY  = Inches(1.82)   # body start y
 BH  = Inches(5.15)   # body height (to y=6.97)
 FTY = Inches(7.10)   # footer y
 
-
-# ── Primitives ────────────────────────────────────────────────────────────────
 
 def _blank(prs):
     return prs.slides.add_slide(prs.slide_layouts[6])
@@ -121,7 +116,6 @@ def _blt(s, items, l, t, w, h, sz=Pt(13), color=TEXT, bchar="•  ",
     return txb
 
 def _rule(s, y, color=RULE_C, thick=Pt(1.5)):
-    # Stop 0.15" before the gradient strip so the line never crosses it
     _box(s, CX, y, GX - CX - Inches(0.15), thick, fill=color)
 
 def _vline(s, x, y_top, height, color=RULE_C, w=Pt(1)):
@@ -137,8 +131,6 @@ def _header(s, title, subtitle=None):
 def _footer(s, txt="Enterprise Data Lake Platform  ·  July 2026"):
     _t(s, txt, CX, FTY, CW, Inches(0.32), sz=Pt(10), color=MUTED, font=FB)
 
-
-# ── Slide builders ────────────────────────────────────────────────────────────
 
 def s01_title(prs):
     s = _blank(prs); _white(s); _strip(s)
@@ -174,7 +166,6 @@ def s02_problem(prs):
     _header(s, "The Problem We Solved",
             "Data lived in silos — disconnected, delayed, and insecure")
 
-    # Table
     cx  = [CX, Inches(3.15), Inches(5.8),  Inches(8.3)]
     cw  = [Inches(2.45), Inches(2.45), Inches(2.35), Inches(2.3)]
     hdrs = ["System", "What it held", "Who used it", "Pain point"]
@@ -198,13 +189,11 @@ def s02_problem(prs):
             _t(s, val, x+Inches(0.08), rt+Inches(0.07), w-Inches(0.12), Inches(0.38),
                sz=Pt(11.5), color=TEXT, font=FB)
 
-    # Summary banner
     _box(s, CX, Inches(5.0), Inches(10.1), Inches(0.5), fill=DEEP_BLUE)
     _t(s, "Result: stale data  ·  no audit trail  ·  no single source of truth  ·  weeks to onboard any new data source",
        CX+Inches(0.15), Inches(5.07), Inches(9.8), Inches(0.38),
        sz=Pt(13), bold=True, color=WHITE, align=PP_ALIGN.CENTER, font=FH)
 
-    # Before → After mini strip
     pairs = [("24–72 hr delay","1–4 hr automated"),
              ("3 disconnected views","1 golden record"),
              ("No audit trail","Full lineage"),
@@ -243,12 +232,10 @@ def s03_overview(prs):
         _box(s, x, BY, cw, Inches(4.3), fill=c)
         _t(s, title, x+Inches(0.15), BY+Inches(0.15), cw-Inches(0.25), Inches(0.85),
            sz=Pt(17), bold=True, color=WHITE, font=FH)
-        # Rule within card bounds only — never full-width
         _box(s, x+Inches(0.08), BY+Inches(1.05), cw-Inches(0.16), Pt(1), fill=WHITE)
         _t(s, body, x+Inches(0.15), BY+Inches(1.18), cw-Inches(0.25), Inches(3.0),
            sz=Pt(14), color=WHITE, font=FB)
 
-    # Stat strip — DEEP_BLUE background for contrast
     _box(s, CX, Inches(6.5), Inches(10.1), Inches(0.68), fill=DEEP_BLUE)
     stats = [("4 sources","connected"), ("35,971+","records live"), ("0 code","to add a source"),
              ("< 4 hrs","end-to-end"), ("~$469/mo","AWS cost")]
@@ -268,7 +255,6 @@ def s04_architecture(prs):
     _header(s, "Architecture Overview",
             "Event-driven  ·  Serverless  ·  Three governed data layers")
 
-    # Layer definitions: (x, y, w, h, light-fill, border-color, label, description)
     layers = [
         (CX, BY, Inches(10.1), Inches(0.72),
          LITE_BLUE, DEEP_BLUE,
@@ -287,7 +273,6 @@ def s04_architecture(prs):
         _t(s, ld, lx+Inches(0.12), ly+Inches(0.37), lw-Inches(0.18), Inches(0.32),
            sz=Pt(11.5), color=TEXT, font=FB)
 
-    # Three data layer boxes
     dlayers = [
         (CX,                     "RAW LAYER  (S3)",    LITE_GRNN,           GREEN,
          "Immutable · Parquet\nObject Lock\nSchema snapshots\nDrift detection"),
@@ -304,12 +289,10 @@ def s04_architecture(prs):
         _t(s, dd, dx+Inches(0.12), BY+Inches(1.97), dlw-Inches(0.18), Inches(2.1),
            sz=Pt(12), color=TEXT, font=FB)
 
-    # Arrows
     for ax in [CX+Inches(3.25), CX+Inches(6.7)]:
         _t(s, "→", ax, BY+Inches(2.5), Inches(0.32), Inches(0.4),
            sz=Pt(22), bold=True, color=ORANGE, align=PP_ALIGN.CENTER)
 
-    # Lambda boxes
     lambdas = [(CX, "Lambda 1\nExtraction", DEEP_BLUE),
                (CX+Inches(2.6), "Lambda 2\nTransformation", PURPLE),
                (CX+Inches(5.2), "Lambda 3\nEntity Resolution", GREEN),
@@ -364,10 +347,8 @@ def s06_extraction(prs):
     _header(s, "Pipeline Stage 1 — Extraction",
             "Source systems  →  S3 Raw Layer")
 
-    # Two columns with vertical divider
     C1X, C1W = CX, Inches(4.75)
     C2X, C2W = CX+Inches(5.2), Inches(4.75)
-    # Vline stops just before the S3 example box (y=5.3"), not through it
     _vline(s, CX+Inches(5.0), BY, Inches(3.3), color=RULE_C)
 
     _blt(s, ["Config from DynamoDB: entity_id, load_type, watermark_field",
@@ -405,7 +386,6 @@ def s07_transformation(prs):
 
     C1X, C1W = CX, Inches(4.75)
     C2X, C2W = CX+Inches(5.2), Inches(4.75)
-    # Vline stops just before the JSON example box (y=5.5"), not through it
     _vline(s, CX+Inches(5.0), BY, Inches(3.5), color=RULE_C)
 
     _blt(s, ["Reads Parquet from raw layer — streaming, no full load",
@@ -443,7 +423,6 @@ def s08_entity_res(prs):
     _header(s, "Pipeline Stage 3 — Entity Resolution",
             "Cross-source deduplication  →  one Golden Record per real-world entity")
 
-    # Three source boxes
     for i, (c, nm, flds) in enumerate([
         (DEEP_BLUE, "Salesforce Account",
          "account_id\naccount_name\nbilling_country\nis_active · annual_revenue"),
@@ -464,7 +443,6 @@ def s08_entity_res(prs):
        CX+Inches(3.5), BY+Inches(2.12), Inches(3.0), Inches(0.42),
        sz=Pt(14), bold=True, color=ORANGE, align=PP_ALIGN.CENTER, font=FH)
 
-    # Golden record box
     _box(s, CX, BY+Inches(2.62), Inches(10.1), Inches(1.45), fill=RGBColor(0xFF,0xF8,0xF0), lc=ORANGE, lw=Pt(1.5))
     _t(s, "🏆  GOLDEN RECORD  —  company entity",
        CX+Inches(0.15), BY+Inches(2.70), Inches(9.8), Inches(0.38),
@@ -499,7 +477,6 @@ def s09_analytics(prs):
          CX, BY, Inches(4.75), Inches(3.5),
          sz=Pt(13), color=TEXT, hdg="What it does", hc=DEEP_BLUE)
 
-    # Athena query box
     _box(s, CX+Inches(5.1), BY, Inches(4.85), Inches(4.8), fill=RGBColor(0xF5,0xF8,0xFF))
     _t(s, "Query in Amazon Athena", CX+Inches(5.25), BY+Inches(0.1), Inches(4.55), Inches(0.35),
        sz=Pt(13), bold=True, color=DEEP_BLUE, font=FH)
@@ -524,7 +501,6 @@ def s09_analytics(prs):
         _t(s, ln, CX+Inches(5.25), BY+Inches(0.55)+i*Inches(0.22),
            Inches(4.55), Inches(0.22), sz=Pt(10), color=c, font=FM)
 
-    # Live data strip
     _box(s, CX, BY+Inches(5.0), Inches(10.1), Inches(0.46), fill=DEEP_BLUE)
     _t(s, "Live today (dev):  34 companies  ·  49 persons  ·  35,971 contracts  — queryable via Athena right now",
        CX+Inches(0.15), BY+Inches(5.07), Inches(9.8), Inches(0.35),
@@ -564,7 +540,6 @@ def s10_governance(prs):
         _box(s, x, BY, pw, Inches(3.1), fill=c)
         _t(s, title, x+Inches(0.12), BY+Inches(0.12), pw-Inches(0.2), Inches(0.42),
            sz=Pt(13), bold=True, color=WHITE, font=FH)
-        # Rule within panel bounds only
         _box(s, x+Inches(0.08), BY+Inches(0.58), pw-Inches(0.16), Pt(1), fill=WHITE)
         _t(s, body, x+Inches(0.12), BY+Inches(0.72), pw-Inches(0.2), Inches(2.3),
            sz=Pt(11.5), color=RGBColor(0xEE,0xEE,0xEE), font=FB)
@@ -674,7 +649,6 @@ def s13_live(prs):
         _t(s, lbl, mx, BY+Inches(1.1), mw-Inches(0.1), Inches(0.75),
            sz=Pt(11), color=RGBColor(0xEE,0xEE,0xEE), align=PP_ALIGN.CENTER, font=FB)
 
-    # Run table
     run_cx = [CX, CX+Inches(2.8), CX+Inches(4.7), CX+Inches(6.35), CX+Inches(9.3)]
     run_cw = [Inches(2.65), Inches(1.75), Inches(1.5), Inches(2.8), Inches(0.68)]
     run_hdrs = ["Entity", "Load type", "Records", "Athena table", "Status"]
@@ -706,8 +680,6 @@ def s14_roi(prs):
     _header(s, "Business Outcomes & ROI",
             "Measurable improvements delivered — compared to before the platform")
 
-    # Columns must end before the gradient strip (GX=10.9")
-    # cx[2]+cw[2] = 0.55+6.35+3.75 = 10.65"  ✓
     cx  = [CX, CX+Inches(3.3), CX+Inches(6.35)]
     cw  = [Inches(3.3), Inches(3.05), Inches(3.75)]
     for h, x, w, c in zip(["Metric","Before","After"], cx, cw, [CHARCOAL, RED, GREEN_OK]):
@@ -776,7 +748,6 @@ def s15_stack(prs):
         _box(s, x, BY, cw, Inches(5.1), fill=c)
         _t(s, cat, x+Inches(0.1), BY+Inches(0.1), cw-Inches(0.16), Inches(0.42),
            sz=Pt(12), bold=True, color=WHITE, font=FH)
-        # Rule within category card bounds only
         _box(s, x+Inches(0.08), BY+Inches(0.56), cw-Inches(0.16), Pt(1), fill=WHITE)
         for i, item in enumerate(items):
             _t(s, f"• {item}", x+Inches(0.1), BY+Inches(0.68)+i*Inches(0.55),
@@ -863,8 +834,6 @@ def s17_closing(prs):
     _t(s, "Enterprise Data Lake Platform  ·  Platform Engineering  ·  July 2026",
        CX, FTY, Inches(9.0), Inches(0.32), sz=Pt(11), color=MUTED, font=FB)
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     prs = Presentation()

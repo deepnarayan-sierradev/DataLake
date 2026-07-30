@@ -79,7 +79,6 @@ class TestTheGateRejectsEveryShapeOfOmission:
         assert any("defaults to None" in d for d in _violations(_NONE_DEFAULT, tmp_path))
 
     def test_an_optional_annotation_is_rejected(self, tmp_path: Path) -> None:
-        # The exact shape that survived the previous fix: required in position, nullable in type.
         assert any(
             "annotated as optional" in d for d in _violations(_OPTIONAL_ANNOTATION, tmp_path)
         )
@@ -93,11 +92,9 @@ class TestTheGateRejectsEveryShapeOfOmission:
         assert any("compared against None" in d for d in _violations(_SKIP_BRANCH, tmp_path))
 
     def test_a_yield_from_skip_branch_is_rejected(self, tmp_path: Path) -> None:
-        # The export defect: `yield from rows` returns every scope unit's rows unfiltered.
         assert any("compared against None" in d for d in _violations(_YIELD_FROM_SKIP, tmp_path))
 
     def test_the_attribute_form_of_the_skip_is_rejected(self, tmp_path: Path) -> None:
-        # `self._idempotency is not None and ...` is the same skip written the other way round.
         assert any(
             "compared against None" in d for d in _violations(_SKIP_BRANCH_ON_ATTRIBUTE, tmp_path)
         )
@@ -105,11 +102,9 @@ class TestTheGateRejectsEveryShapeOfOmission:
 
 class TestPositiveControl:
     def test_a_correctly_written_function_is_accepted(self, tmp_path: Path) -> None:
-        # Without this, a gate that flagged every file would pass every test above.
         assert _violations(_CLEAN, tmp_path) == []
 
     def test_an_unguarded_parameter_name_is_ignored(self, tmp_path: Path) -> None:
-        # The gate is scoped to the named security parameters, not to `| None` in general.
         source = "def f(retry_limit: int | None = None) -> None:\n    return None\n"
         assert _violations(source, tmp_path) == []
 

@@ -109,7 +109,6 @@ class WatermarkPollingSyncStrategy(SyncStrategy):
         )
 
 
-# A webhook stream is considered to have a gap once the watermark falls this far behind.
 DEFAULT_WEBHOOK_GAP_TOLERANCE_HOURS: Final[int] = 6
 
 

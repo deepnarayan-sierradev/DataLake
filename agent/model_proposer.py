@@ -64,8 +64,6 @@ class ModelSemanticRequestProposer(SemanticRequestProposer):
 
     @staticmethod
     def _to_request(raw: Mapping[str, Any]) -> SemanticQueryRequest:
-        # Model output is untrusted — coerce shape only; the compiler re-validates
-        # names and enforces access tags downstream (OWASP A03 / A01).
         entity = raw.get("entity")
         if not isinstance(entity, str) or not entity:
             raise ValueError("Proposer response is missing a non-empty string 'entity'.")

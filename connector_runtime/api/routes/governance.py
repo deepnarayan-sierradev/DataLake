@@ -136,8 +136,6 @@ def handle_config_rollback(
             approved_by=str(body.get("approved_by") or ""),
         )
     except ConfigRouteError as exc:
-        # Maker-checker violations surface as 400 rather than 403: the request is malformed
-        # (it names one actor for both roles), not unauthorized.
         raise ValidationFailedError(str(exc)) from exc
 
     service = ConfigGovernanceService(

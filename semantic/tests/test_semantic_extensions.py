@@ -8,6 +8,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from semantic.enterprise_model import (
     SOW_KPI_MAP,
     TAG_EXECUTIVE,
@@ -159,8 +160,6 @@ def _model() -> SemanticModel:
     )
 
 
-# The audited stand-in for "no end-user claim applies here". Tests used `None`, which is the
-# fail-open this parameter was made non-nullable to remove.
 _UNSCOPED = unrestricted_predicate(UnrestrictedScopeReason.DEFINITION_VALIDATION)
 
 _COMPILER = QueryCompiler(_model())
@@ -323,7 +322,6 @@ class TestJoinsAndGrain:
             today=date(2026, 7, 28),
             scope_predicate=_UNSCOPED,
         )
-        # Fiscal year starts in April, so the prior fiscal year begins 2025-04-01.
         assert compiled.parameters == ["2025-04-01", "2026-04-01"]
 
     def test_time_range_without_a_time_dimension_is_rejected(self):
@@ -647,8 +645,8 @@ class TestModelGovernance:
         boto3.client("s3", region_name=_REGION).create_bucket(Bucket="curated-bucket")
         client = boto3.client("dynamodb", region_name=_REGION)
         tables = (
-            ("EdlSemanticModel", "model_version"),
-            ("EdlSemanticApproval", "approval_key"),
+            (RESOURCE_NAME_ENVIRONMENT["SEMANTIC_MODEL_TABLE"], "model_version"),
+            (RESOURCE_NAME_ENVIRONMENT["SEMANTIC_APPROVAL_TABLE"], "approval_key"),
         )
         for name, sk in tables:
             client.create_table(

@@ -64,8 +64,6 @@ class CapabilityPolicy:
         return self.policy is ReprocessingPolicy.REPROCESS_ELIGIBLE
 
 
-# Defaults per DL-CFG-10's table. Business owners confirm per capability; the values are
-# data so a confirmation is a config change, not a code change.
 CAPABILITY_POLICIES: Final[dict[ConfigCapability, CapabilityPolicy]] = {
     ConfigCapability.ENTITY_SELECTION: CapabilityPolicy(
         ConfigCapability.ENTITY_SELECTION, ReprocessingPolicy.APPLY_FORWARD

@@ -145,8 +145,6 @@ class FieldMappingApplicator:
                 )
                 return _MAPPING_FAILURE
             if rule.missing_field_behavior == MissingFieldBehavior.USE_DEFAULT:
-                # For CAST rules, apply the type cast to the default value so the
-                # column type is consistent across all records (e.g. "0" → 0.0).
                 if (
                     rule.transformation == MappingTransformation.CAST
                     and rule.default_value is not None
@@ -161,12 +159,6 @@ class FieldMappingApplicator:
         if handler is not None:
             return handler(record, rule)
         return record[rule.source_fields[0]]  # fallback: pass-through for unknown types
-
-
-# ---------------------------------------------------------------------------
-# Transformation handlers (module-level pure functions; one per transformation type)
-# These are referenced by _TRANSFORMATION_DISPATCH below and can be tested directly.
-# ---------------------------------------------------------------------------
 
 
 def _transform_rename(record: dict[str, Any], rule: FieldMappingRule) -> Any:
@@ -201,8 +193,6 @@ def _transform_mask(record: dict[str, Any], rule: FieldMappingRule) -> Any:
     return "*" * (len(raw_val) - visible) + raw_val[-visible:]
 
 
-# Dispatch table: MappingTransformation → handler function.
-# Adding a new transformation type requires only a new function + one dict entry.
 _TRANSFORMATION_DISPATCH: Final[
     dict[MappingTransformation, Callable[[dict[str, Any], FieldMappingRule], Any]]
 ] = {
@@ -297,7 +287,6 @@ class FieldMappingRegistryClient:
                 ) from exc
             raise  # access denied, throttling, network errors — propagate, do not hide
         except (json.JSONDecodeError, KeyError) as exc:
-            # Malformed or incomplete pointer file — treat as not found.
             raise MappingRuleSetNotFoundError(source_id, entity_id, "latest", tenant_code) from exc
 
     def publish_rule_set(self, rule_set: FieldMappingRuleSet, tenant_code: str) -> str:

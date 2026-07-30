@@ -4,7 +4,8 @@ Migration: register a default source connection per existing source (DL-SCOPE-05
 `connection_id` becomes the identity component of every composite key. An existing
 single-connection source migrates to `connection_id == source_id`, so every DynamoDB key and
 schedule name is byte-identical to the pre-DL-12 form and nothing goes dark. What this script
-does is create the missing `EdlSourceConnection` rows and stamp the `connection_id` attribute
+does is create the missing `datalake-source-connections-dev` rows and stamp the `connection_id`
+attribute
 onto existing config and watermark items, so the connection model is populated before any
 franchisee-specific connection is added.
 
@@ -17,6 +18,7 @@ Run **before** deploying the connection-aware code to each environment.
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -161,9 +163,9 @@ def main() -> None:
         description="Register a default source connection per existing source (DL-SCOPE-05)."
     )
     parser.add_argument("--region", default="us-east-1")
-    parser.add_argument("--connection-table", default="EdlSourceConnection")
-    parser.add_argument("--config-table", default="EdlEntityExtractionConfig")
-    parser.add_argument("--watermark-table", default="EdlWatermarkRepository")
+    parser.add_argument("--connection-table", default=os.environ.get("SOURCE_CONNECTION_TABLE"))
+    parser.add_argument("--config-table", default=os.environ.get("ENTITY_CONFIG_TABLE"))
+    parser.add_argument("--watermark-table", default=os.environ.get("WATERMARK_TABLE"))
     parser.add_argument("--apply", action="store_true", help="Perform writes (default: dry-run).")
     parser.add_argument(
         "--rollback",

@@ -28,6 +28,7 @@ from typing import Any, Final
 import pymysql
 import pymysql.cursors
 
+from contracts.resource_naming import secret_path
 from serving_store.interfaces.loader_interface import (
     RESERVED_COLUMNS,
     SAFE_COLUMN_PATTERN,
@@ -80,7 +81,7 @@ class ServingStoreLoader(ServingStoreLoaderInterface):
         self, connection: Any, tenant_code: str, container_name: str, writer_creds: dict[str, str]
     ) -> None:
         """Create/refresh a per-tenant read-only MySQL user, scoped to container_name only."""
-        secret_name = f"edl/serving-store/{tenant_code}/mysql_rds/reader-credentials"
+        secret_name = secret_path("serving-store", tenant_code, "mysql_rds", "reader-credentials")
         username = reader_username(tenant_code, self.max_identifier_length)
         password = self._get_or_create_reader_password(
             secret_name, username, container_name, writer_creds, container_name
@@ -131,7 +132,6 @@ class ServingStoreLoader(ServingStoreLoaderInterface):
         pk_cols = ", ".join(f"`{k}`" for k in primary_keys)
         row_placeholder = "(" + ", ".join(["%s"] * len(primary_keys)) + ")"
         placeholders = ", ".join([row_placeholder] * len(pk_tuples))
-        # Identifiers validated by load_batches()/_ensure_table() above; values bound as params.
         sql = (
             f"SELECT {pk_cols}, `_row_hash` FROM `{table_name}` "  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
             f"WHERE ({pk_cols}) IN ({placeholders})"

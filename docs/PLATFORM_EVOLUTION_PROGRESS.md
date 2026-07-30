@@ -50,8 +50,8 @@ Commands: `.venv/bin/ruff check .` · `.venv/bin/pytest -q` · `.venv/bin/bandit
 | Module | Contents |
 |---|---|
 | `processing_engine/` | Set-based `SetBasedQueryEngine` interface + registry + `DuckDbSetBasedEngine` (stream/materialize over S3 Parquet, bind-params, injection-free via relation API) — the substrate everything runs on |
-| `knowledge/` | `RelationshipRule`/`RelationshipRuleSet`, `RelationshipResolver` (set-based edge joins), `Twin`/`TwinEdge`, `TwinBuilder`, `TwinRepository` (DynamoDB `EdlTwinIndex`), `TwinPipeline` (end-to-end orchestration) |
-| `semantic/` | `SemanticModel`/`SemanticEntity`/`Dimension`/`Metric`, `QueryCompiler` (structured→parameterized SQL, access-tag enforcement, never raw SQL), `SavedQuery` + `SavedQueryRepository` (`EdlSavedQuery`), `SemanticModelRepository` (`EdlSemanticModel`), `SemanticQueryService` (compile+execute) |
+| `knowledge/` | `RelationshipRule`/`RelationshipRuleSet`, `RelationshipResolver` (set-based edge joins), `Twin`/`TwinEdge`, `TwinBuilder`, `TwinRepository` (DynamoDB `datalake-twin-index-dev`), `TwinPipeline` (end-to-end orchestration) |
+| `semantic/` | `SemanticModel`/`SemanticEntity`/`Dimension`/`Metric`, `QueryCompiler` (structured→parameterized SQL, access-tag enforcement, never raw SQL), `SavedQuery` + `SavedQueryRepository` (`datalake-saved-query-dev`), `SemanticModelRepository` (`datalake-semantic-model-dev`), `SemanticQueryService` (compile+execute) |
 | `agent/` | `SemanticRequestProposer` interface + `ConversationalAgent` (mandatory verification loop: schema-check → execute → ground; self-correct on hallucination; access-denied terminal; "cannot answer" fallback). **No concrete proposer** — see Loose Ends. |
 
 All registered in `pyproject.toml` (`testpaths`, `[tool.coverage.run].source`, isort `known-first-party`,
@@ -67,8 +67,8 @@ hatch wheel `packages`).
 
 `infrastructure/modules/metadata_persistence/` — three new DynamoDB tables (KMS-encrypted, PITR,
 `prevent_destroy`, tenant-partitioned; wired via the shared module into all 3 envs) + module outputs:
-`EdlTwinIndex` (PK `tenant_code`, SK `sk`), `EdlSemanticModel` (PK `tenant_code`, SK `model_version`),
-`EdlSavedQuery` (PK `tenant_code`, SK `query_id`). Repos default to these names via env-var fallback,
+`datalake-twin-index-dev` (PK `tenant_code`, SK `sk`), `datalake-semantic-model-dev` (PK `tenant_code`, SK `model_version`),
+`datalake-saved-query-dev` (PK `tenant_code`, SK `query_id`). Repos default to these names via env-var fallback,
 so no consumer wiring is needed until a Lambda/endpoint uses them. **Agent tables intentionally omitted.**
 
 ### Docs
@@ -108,14 +108,14 @@ so no consumer wiring is needed until a Lambda/endpoint uses them. **Agent table
    versioned, like the ER config registry) + `knowledge/twin_build_handler.py` (canonical handler;
    resolves entity_type, loads rules, targets the latest analytics partition via the shared
    `analytics_publisher/analytics_location.py` locator, skips cleanly when no rules) + tests.
-   Terraform: `infrastructure/modules/twin_build_lambda/` (`EdlTwinBuilder`, no VPC) + IAM role
-   `EdlTwinBuilderRuntimeRole` (analytics R/W-edges, curated read, `EdlTwinIndex` write, registry read)
+   Terraform: `infrastructure/modules/twin_build_lambda/` (`datalake-twin-builder-dev`, no VPC) + IAM role
+   `datalake-twin-builder-devRuntimeRole` (analytics R/W-edges, curated read, `datalake-twin-index-dev` write, registry read)
    + additive **`BuildTwin` Step Functions stage** (skippable Pass; twin failures caught → pipeline
    never fails) wired into dev/staging/prod.
 3. ✅ **Control-plane API endpoints** — twin read (get/list), semantic query execution, saved-query
    CRUD + run — table-driven dispatcher (`_route_intelligence_layer`) to stay under the complexity
    gate; access tags from verified claims (OWASP A01); + resource-scoped IAM grants on
-   `EdlTwinIndex`/`EdlSemanticModel`/`EdlSavedQuery` + analytics-S3 read on `EdlControlPlaneRole`;
+   `datalake-twin-index-dev`/`datalake-semantic-model-dev`/`datalake-saved-query-dev` + analytics-S3 read on `datalake-control-plane-devRole`;
    + control-plane module routes + env vars. Tests in `test_control_plane_intelligence_routes.py`.
 
 ## Phase-0 hardening — status (2026-07-23)
@@ -143,7 +143,7 @@ so no consumer wiring is needed until a Lambda/endpoint uses them. **Agent table
 
 ## Remaining work (ordered; agent layer deferred per user)
 
-1. **Agent layer (deferred)** — conversational-agent endpoint + `EdlAgentAudit`/`EdlAgentSession` tables +
+1. **Agent layer (deferred)** — conversational-agent endpoint + `datalake-agent-audit-dev`/`datalake-agent-sessions-dev` tables +
    verification-loop audit persistence.
 2. **Enterprise-platform track** (after DataLake) — IaC + CI (both currently absent), security defaults
    (SEC-01 fail-open `env` default, SEC-02 JWT audience), `async def`→`def` fix, generic

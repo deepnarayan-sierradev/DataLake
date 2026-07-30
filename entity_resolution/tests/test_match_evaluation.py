@@ -15,10 +15,6 @@ from entity_resolution.matching_engine.match_evaluation import (
 )
 from entity_resolution.matching_engine.match_rule_engine import MatchDecision, MatchStrategy
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _decision(a: str, b: str, *, is_match: bool, version: str = "v1.0") -> MatchDecision:
     return MatchDecision(
@@ -35,11 +31,6 @@ def _decision(a: str, b: str, *, is_match: bool, version: str = "v1.0") -> Match
 
 def _label(a: str, b: str, *, is_true_match: bool) -> MatchPairLabel:
     return MatchPairLabel(record_a_id=a, record_b_id=b, is_true_match=is_true_match)
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 class TestMatchEvaluator:
@@ -199,5 +190,4 @@ class TestAccuracyEdgeCases:
     def test_accuracy_zero_when_no_labels_and_no_decisions(self) -> None:
         evaluator = MatchEvaluator()
         report = evaluator.evaluate([], [], run_id="zero", rule_set_version="v1.0")
-        # TP=FP=FN=TN=0 → total=0 → accuracy returns 0.0
         assert report.accuracy == pytest.approx(0.0)

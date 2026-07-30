@@ -21,6 +21,7 @@ import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from orchestration.dlq_processor.dlq_processor_handler import (
     DLQMessage,
     _process_dlq_record,
@@ -28,10 +29,6 @@ from orchestration.dlq_processor.dlq_processor_handler import (
     _send_sns_notification,
     _write_audit_record,
 )
-
-# ---------------------------------------------------------------------------
-# DLQMessage validation
-# ---------------------------------------------------------------------------
 
 
 class TestDLQMessageValidation:
@@ -123,7 +120,7 @@ class TestDLQMessageValidation:
         assert msg.source_id == "salesforce"
 
     def test_all_environments_valid(self) -> None:
-        for env in ("dev", "staging", "prod"):
+        for env in ("dev", "uat", "prod"):
             msg = DLQMessage.model_validate(
                 {
                     "run_id": "run-abc",
@@ -136,17 +133,12 @@ class TestDLQMessageValidation:
             assert msg.environment == env
 
 
-# ---------------------------------------------------------------------------
-# _write_audit_record
-# ---------------------------------------------------------------------------
-
-
 class TestWriteAuditRecord:
     @mock_aws
     def test_writes_item_to_dynamodb(self) -> None:
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
         dynamodb.create_table(
-            TableName="EdlRunAuditLog",
+            TableName=RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"],
             KeySchema=[
                 {"AttributeName": "run_id", "KeyType": "HASH"},
                 {"AttributeName": "stage", "KeyType": "RANGE"},
@@ -172,18 +164,16 @@ class TestWriteAuditRecord:
 
         with patch("orchestration.dlq_processor.dlq_processor_handler._dynamodb", dynamodb):
             _write_audit_record(
-                audit_table_name="EdlRunAuditLog",
+                audit_table_name=RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"],
                 msg=msg,
                 received_at="2026-07-07T12:00:00+00:00",
             )
 
-        table = dynamodb.Table("EdlRunAuditLog")
+        table = dynamodb.Table(RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"])
         item = table.get_item(Key={"run_id": "run-test-audit", "stage": "dlq_received"})
         assert "Item" in item
         assert item["Item"]["source_id"] == "salesforce"
         assert item["Item"]["failure_reason"] == "timeout"
-        # ARCH-18: source_entity_key (the source-entity-time-index GSI hash key)
-        # must be tenant-scoped, not just source/entity.
         assert item["Item"]["source_entity_key"] == "demo#salesforce#salesforce-account"
 
     @mock_aws
@@ -193,7 +183,7 @@ class TestWriteAuditRecord:
         run history."""
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
         dynamodb.create_table(
-            TableName="EdlRunAuditLog",
+            TableName=RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"],
             KeySchema=[
                 {"AttributeName": "run_id", "KeyType": "HASH"},
                 {"AttributeName": "stage", "KeyType": "RANGE"},
@@ -204,7 +194,7 @@ class TestWriteAuditRecord:
             ],
             BillingMode="PAY_PER_REQUEST",
         )
-        table = dynamodb.Table("EdlRunAuditLog")
+        table = dynamodb.Table(RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"])
 
         msg_a = DLQMessage.model_validate(
             {
@@ -226,8 +216,12 @@ class TestWriteAuditRecord:
         )
 
         with patch("orchestration.dlq_processor.dlq_processor_handler._dynamodb", dynamodb):
-            _write_audit_record("EdlRunAuditLog", msg_a, "2026-07-08T00:00:00+00:00")
-            _write_audit_record("EdlRunAuditLog", msg_b, "2026-07-08T00:00:01+00:00")
+            _write_audit_record(
+                RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"], msg_a, "2026-07-08T00:00:00+00:00"
+            )
+            _write_audit_record(
+                RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"], msg_b, "2026-07-08T00:00:01+00:00"
+            )
 
         item_a = table.get_item(Key={"run_id": "run-tenant-a", "stage": "dlq_received"})["Item"]
         item_b = table.get_item(Key={"run_id": "run-tenant-b", "stage": "dlq_received"})["Item"]
@@ -256,13 +250,7 @@ class TestWriteAuditRecord:
         )
 
         with patch("orchestration.dlq_processor.dlq_processor_handler._dynamodb", mock_dynamodb):
-            # Must not raise
             _write_audit_record("table", msg, "2026-07-07T12:00:00+00:00")
-
-
-# ---------------------------------------------------------------------------
-# _send_sns_notification
-# ---------------------------------------------------------------------------
 
 
 class TestSendSnsNotification:
@@ -283,7 +271,7 @@ class TestSendSnsNotification:
 
         with patch("orchestration.dlq_processor.dlq_processor_handler._sns", mock_sns):
             _send_sns_notification(
-                topic_arn="arn:aws:sns:us-east-1:123:EdlPlatformAlerts",
+                topic_arn="arn:aws:sns:us-east-1:123:datalake-platform-alerts-dev",
                 msg=msg,
                 environment="dev",
             )
@@ -293,7 +281,6 @@ class TestSendSnsNotification:
         assert "DEV" in call_kwargs["Subject"]
         assert "salesforce" in call_kwargs["Subject"]
 
-        # Message body should be JSON with no PII
         body = json.loads(call_kwargs["Message"])
         assert body["run_id"] == "run-notify-test"
         assert body["source_id"] == "salesforce"
@@ -335,13 +322,7 @@ class TestSendSnsNotification:
         )
 
         with patch("orchestration.dlq_processor.dlq_processor_handler._sns", mock_sns):
-            # Must not raise
             _send_sns_notification("arn:fake", msg, "dev")
-
-
-# ---------------------------------------------------------------------------
-# _replay_failed_run
-# ---------------------------------------------------------------------------
 
 
 class TestReplayFailedRun:
@@ -387,7 +368,6 @@ class TestReplayFailedRun:
         )
 
         with patch("orchestration.dlq_processor.dlq_processor_handler._sfn", mock_sfn):
-            # Must not raise
             _replay_failed_run("arn:sfn:test", msg)
 
     def test_replay_preserves_tenant_code(self) -> None:
@@ -433,11 +413,6 @@ class TestReplayFailedRun:
         assert "run-abc-def-123" in exec_name
         assert "replay" in exec_name
         assert len(exec_name) <= 80
-
-
-# ---------------------------------------------------------------------------
-# _process_dlq_record integration
-# ---------------------------------------------------------------------------
 
 
 class TestProcessDLQRecord:

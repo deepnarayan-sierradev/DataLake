@@ -1,7 +1,7 @@
 """
 Pipeline Trigger Lambda — SQS FIFO to Step Functions burst buffer.
 
-Consumes messages from the EdlPipelineTrigger.fifo FIFO queue
+Consumes messages from the datalake-pipeline-trigger-dev.fifo FIFO queue
 (populated by EventBridge Scheduler) and starts one Step Functions execution
 per message.
 
@@ -9,7 +9,7 @@ Architecture:
   EventBridge Scheduler (N simultaneous fires)
       │
       ▼ (writes to SQS FIFO queue — absorbs burst instantly)
-  SQS FIFO Queue: EdlPipelineTrigger.fifo
+  SQS FIFO Queue: datalake-pipeline-trigger-dev.fifo
       │
       ▼ (ESM batch_size=1, reserved_concurrency=50 caps execution rate)
   This Lambda (pipeline_trigger_handler)
@@ -38,7 +38,7 @@ Security (OWASP A03, A05):
 
 Required Lambda environment variables:
   AWS_REGION              — injected by Lambda runtime
-  PLATFORM_ENVIRONMENT    — deployment environment (dev/staging/prod)
+  PLATFORM_ENVIRONMENT    — deployment environment (dev/uat/prod)
   STATE_MACHINE_ARN       — ARN of the Step Functions extraction pipeline state machine
 """
 
@@ -67,17 +67,9 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Compiled once — used for execution name sanitisation.
 _EXEC_NAME_SAFE: Final[re.Pattern[str]] = re.compile(r"[^a-zA-Z0-9\-_]")
-# Step Functions execution name max length is 80 characters.
 _EXEC_NAME_MAX_LEN: Final[int] = 80
-# Reuse boto3 client across warm invocations (module-level singleton).
 _sfn_client = boto3.client("stepfunctions", region_name=os.environ.get("AWS_REGION", "us-east-1"))
-
-
-# ---------------------------------------------------------------------------
-# Pydantic model for SQS message body validation (OWASP A03)
-# ---------------------------------------------------------------------------
 
 
 class TriggerMessage(BaseModel):
@@ -87,15 +79,9 @@ class TriggerMessage(BaseModel):
 
     source_id: str = Field(..., min_length=2, max_length=64)
     entity_id: str = Field(..., min_length=2, max_length=64)
-    environment: str = Field(..., pattern=r"^(dev|staging|prod)$")
+    environment: str = Field(..., pattern=r"^(dev|uat|prod)$")
     connector_params: dict[str, str] = Field(default_factory=dict)
     is_replay: bool = Field(default=False)
-    # No default (ARCH-17, pre-go-live fix): a message that omits tenant_code
-    # must fail Pydantic validation, not silently run under the "demo" tenant.
-    # A fail-open default here would let a malformed or truncated message
-    # start a real Step Functions execution against the wrong tenant's data
-    # (OWASP A01 — broken access control via an implicit, attacker-reachable
-    # default identity).
     tenant_code: str = Field(..., min_length=2, max_length=48)
     schedule_tick_iso: str = Field(
         default="",
@@ -117,11 +103,6 @@ class TriggerMessage(BaseModel):
         return v
 
 
-# ---------------------------------------------------------------------------
-# Lambda handler
-# ---------------------------------------------------------------------------
-
-
 def lambda_handler(event: dict[str, Any], context: Any) -> None:
     """
     AWS Lambda entry point — processes one SQS message per invocation.
@@ -132,8 +113,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> None:
     Raises on failure (SQS will retry the message after VisibilityTimeout).
     """
     check_lambda_timeout(context, min_remaining_ms=30_000)
-    # Bound and cleared here so every line this invocation emits carries the request id, and so
-    # nothing leaks into the next invocation on a warm container.
     structlog.contextvars.bind_contextvars(aws_request_id=getattr(context, "aws_request_id", ""))
     try:
         _dispatch_records(event)
@@ -150,9 +129,6 @@ def _dispatch_records(event: dict[str, Any]) -> None:
         _logger.warning("pipeline_trigger_no_records_in_event")
         return
 
-    # Enforce the batch_size=1 contract — if the ESM is misconfigured to send
-    # multiple records, fail loudly rather than silently start multiple executions.
-    # This is a defensive guard against operational misconfiguration (OWASP A05).
     if len(records) != 1:
         raise ValueError(
             f"pipeline_trigger: SQS ESM batch_size must be 1; "
@@ -189,7 +165,6 @@ def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
     message_id: str = record.get("messageId", "unknown")
     body_str: str = record.get("body", "{}")
 
-    # --- Parse and validate message body (OWASP A03) ---
     try:
         body_dict = json.loads(body_str)
     except json.JSONDecodeError as exc:
@@ -213,17 +188,11 @@ def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
         )
         raise ValueError(f"SQS message {message_id!r} failed validation: {exc}") from exc
 
-    # --- Build deterministic, idempotent execution name ---
     tick = msg.schedule_tick_iso or datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     exec_name = _build_execution_name(msg.tenant_code, msg.source_id, msg.entity_id, tick)
 
-    # --- Pin the configuration set once, at the run boundary (DL-CFG-01) ---
-    # Every `latest` pointer is resolved here and carried in the payload, so a publish landing
-    # mid-run cannot change behaviour under a stage that already started. Without this the run
-    # reads whatever `latest` means at the moment each stage happens to look.
     pinned = _pin_configuration(msg)
 
-    # --- Build Step Functions input payload ---
     sfn_input = json.dumps(
         {
             "source_id": msg.source_id,
@@ -233,14 +202,11 @@ def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
             "is_replay": msg.is_replay,
             "tenant_code": msg.tenant_code,
             "pinned_config_versions": pinned.to_payload(),
-            # L14: seeds the checkpoint-resume loop's bound. `States.MathAdd($.resume_attempts, 1)`
-            # in the state machine needs the field to exist on the first pass.
             "resume_attempts": 0,
         },
         separators=(",", ":"),
     )
 
-    # --- Start Step Functions execution (idempotent via execution name) ---
     try:
         _sfn_client.start_execution(
             stateMachineArn=state_machine_arn,
@@ -258,7 +224,6 @@ def _process_record(record: dict[str, Any], state_machine_arn: str) -> None:
     except ClientError as exc:
         error_code = exc.response["Error"]["Code"]
         if error_code == "ExecutionAlreadyExists":
-            # Idempotent re-delivery — safe to treat as success.
             _logger.info(
                 "pipeline_trigger_execution_already_exists",
                 source_id=msg.source_id,
@@ -284,10 +249,6 @@ def _pin_configuration(msg: Any) -> PinnedConfigVersions:
     nothing rather than failing the pin, because blocking a run on an unrelated capability's
     registry being unavailable would trade a consistency guarantee for an availability loss.
     """
-    # The Lambda runtime always sets AWS_REGION, so its absence means we are not in a Lambda.
-    # Read it rather than require it: failing the trigger on a missing pin would trade a
-    # consistency guarantee for an availability loss, and an unpinned run is still correct —
-    # just not protected against a mid-run publish (DL-CFG-01).
     region_name = os.environ.get("AWS_REGION", "")
     curated_bucket = os.environ.get("CURATED_S3_BUCKET", "")
     if not region_name:

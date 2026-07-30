@@ -29,7 +29,6 @@ from seed_entity_config import (
 
 class TestSeededConfigsAreExtractable:
     def test_every_seeded_record_passes_its_params_model(self) -> None:
-        # The regression assertion: this failed before `record_type` was added.
         _validate_connector_params(_build_records("123456789012", tenant_code="demo"))
 
     def test_netsuite_customer_declares_a_record_type(self) -> None:
@@ -41,7 +40,6 @@ class TestSeededConfigsAreExtractable:
 
 class TestValidatorRejectsWhatShipped:
     def test_empty_params_for_netsuite_is_rejected(self) -> None:
-        # The exact record that was live: reproduce it and assert the gate now refuses it.
         records = _build_records("123456789012", tenant_code="demo")
         for record in records:
             if record["entity_id"] == "netsuite-customer":
@@ -50,7 +48,6 @@ class TestValidatorRejectsWhatShipped:
             _validate_connector_params(records)
 
     def test_unknown_param_is_rejected(self) -> None:
-        # extra="forbid" is the other half; a typo'd key must not pass silently.
         records = _build_records("123456789012", tenant_code="demo")
         for record in records:
             if record["entity_id"] == "netsuite-customer":
@@ -59,5 +56,4 @@ class TestValidatorRejectsWhatShipped:
             _validate_connector_params(records)
 
     def test_a_valid_record_set_raises_nothing(self) -> None:
-        # Positive control: a validator that always raised would pass both tests above.
         _validate_connector_params(_build_records("123456789012", tenant_code="evive"))

@@ -18,6 +18,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime import webhook_receiver_handler as receiver
 from connector_runtime.webhook_signature import (
     SignatureAlgorithm,
@@ -27,7 +28,7 @@ from connector_runtime.webhook_signature import (
 
 _REGION = "us-east-1"
 _SECRET = "webhook-shared-secret"  # nosec B105 — test fixture value
-_QUEUE_NAME = "EdlWebhookIngest.fifo"
+_QUEUE_NAME = "datalake-webhook-ingest-dev.fifo"
 
 
 class _NullContext:
@@ -41,12 +42,12 @@ def _env(monkeypatch: Any) -> None:
     monkeypatch.setenv("PLATFORM_ENVIRONMENT", "dev")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")  # nosec B106 — moto stub
-    monkeypatch.setenv("WEBHOOK_DEDUP_TABLE", "EdlWebhookEventDedup")
+    monkeypatch.setenv("WEBHOOK_DEDUP_TABLE", RESOURCE_NAME_ENVIRONMENT["WEBHOOK_DEDUP_TABLE"])
 
 
 def _create_dedup_table() -> None:
     boto3.client("dynamodb", region_name=_REGION).create_table(
-        TableName="EdlWebhookEventDedup",
+        TableName=RESOURCE_NAME_ENVIRONMENT["WEBHOOK_DEDUP_TABLE"],
         KeySchema=[
             {"AttributeName": "tenant_code", "KeyType": "HASH"},
             {"AttributeName": "provider_event_id", "KeyType": "RANGE"},
@@ -68,7 +69,7 @@ def _create_queue() -> str:
 
 def _create_secret(tenant_code: str = "demo", connection_id: str = "dialpad") -> None:
     boto3.client("secretsmanager", region_name=_REGION).create_secret(
-        Name=f"edl/tenants/{tenant_code}/connections/{connection_id}/webhook-secret",
+        Name=f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/tenants/{tenant_code}/connections/{connection_id}/webhook-secret",
         SecretString=json.dumps({"webhook_secret": _SECRET}),
     )
 
@@ -174,7 +175,6 @@ class TestRequestParsing:
         )
 
     def test_the_event_key_differs_across_tenants_for_the_same_provider_event(self) -> None:
-        # Otherwise one tenant's event could deduplicate another tenant's.
         body = '{"id": "evt-1"}'
         first = receiver._parse_request(
             {"pathParameters": {"tenant_code": "demo", "source_id": "dialpad"}, "body": body}
@@ -213,7 +213,8 @@ class TestEntityAndEventIdDerivation:
 class TestSecretResolution:
     def test_a_plain_string_secret_is_used_as_is(self) -> None:
         boto3.client("secretsmanager", region_name=_REGION).create_secret(
-            Name="edl/tenants/demo/connections/dialpad/webhook-secret", SecretString="raw-secret"
+            Name=f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/tenants/demo/connections/dialpad/webhook-secret",
+            SecretString="raw-secret",
         )
         secret = receiver._webhook_secret(
             {"tenant_code": "demo", "connection_id": "dialpad"}, _REGION
@@ -233,14 +234,13 @@ class TestSecretResolution:
 
     def test_a_json_secret_without_the_expected_key_fails_closed(self) -> None:
         boto3.client("secretsmanager", region_name=_REGION).create_secret(
-            Name="edl/tenants/demo/connections/dialpad/webhook-secret",
+            Name=f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/tenants/demo/connections/dialpad/webhook-secret",
             SecretString=json.dumps({"api_key": "x"}),
         )
         with pytest.raises(WebhookSignatureError, match="webhook_secret"):
             receiver._webhook_secret({"tenant_code": "demo", "connection_id": "dialpad"}, _REGION)
 
     def test_the_secret_path_is_per_connection_not_per_source(self) -> None:
-        # DL-SEC-05: two tenants on the same connector must not share a webhook secret.
         _create_secret(tenant_code="demo")
         with pytest.raises(WebhookSignatureError):
             receiver._webhook_secret({"tenant_code": "acme", "connection_id": "dialpad"}, _REGION)
@@ -284,7 +284,6 @@ class TestHandler:
     def test_the_rejection_body_does_not_explain_why_the_signature_failed(
         self, monkeypatch: Any
     ) -> None:
-        # A specific reason would let a forger tune their attempt.
         self._prepare(monkeypatch)
         response = receiver.lambda_handler(_dialpad_event(signature="deadbeef"), _NullContext())
         assert json.loads(response["body"]) == {"message": "signature verification failed"}
@@ -358,7 +357,6 @@ def _patched_client(sqs_double: Any) -> Any:
 
 class TestHubspotStyleSigning:
     def test_hubspot_signs_body_and_timestamp_together(self) -> None:
-        # Documents the template contract the receiver relies on for HubSpot.
         from connector_runtime.webhook_signature import (
             spec_for_source,
             verify_webhook_signature,
@@ -400,7 +398,6 @@ class TestHubspotStyleSigning:
             )
 
     def test_signature_comparison_is_not_a_plain_equality_on_the_raw_header(self) -> None:
-        # Surrounding whitespace from a proxy must not cause a false rejection.
         from connector_runtime.webhook_signature import (
             spec_for_source,
             verify_webhook_signature,

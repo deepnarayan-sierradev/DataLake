@@ -38,8 +38,8 @@ from typing import Any
 import boto3
 
 from contracts.identifier_policy import validate_tenant_code
+from observability.lambda_runtime import require_env
 
-# Root of the repo — two levels up from scripts/
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _MAPPINGS_DIR = _REPO_ROOT / "config" / "field_mappings"
 
@@ -47,16 +47,14 @@ _MAPPINGS_DIR = _REPO_ROOT / "config" / "field_mappings"
 def _account_id(region: str) -> str:
     """Resolve the AWS account ID of the caller's credentials.
 
-    Bucket names are suffixed with the account ID rather than the
-    environment name — S3 bucket names are unique across all of AWS, and
-    each environment is already a separate AWS account, so the account ID
-    is what actually guarantees no collision with dev/staging/prod.
+    Retained for callers that still need the account id; bucket names no longer use it.
     """
     return boto3.client("sts", region_name=region).get_caller_identity()["Account"]
 
 
 def _bucket_name(region: str) -> str:
-    return f"edl-curated-{_account_id(region)}"
+    """The curated bucket, supplied by the environment rather than derived from the account."""
+    return require_env("CURATED_S3_BUCKET")
 
 
 def _collect_mapping_files(
@@ -127,7 +125,6 @@ def seed(
 
     if dry_run:
         print("[DRY RUN] Would publish the following rule sets:")
-        # Group by (source_id, entity_id) to show latest pointer
         groups: dict[tuple[str, str], list[str]] = {}
         for src, ent, ver, path in mapping_files:
             groups.setdefault((src, ent), []).append(ver)
@@ -145,14 +142,11 @@ def seed(
 
     s3 = boto3.client("s3", region_name=region)
 
-    # Track published versions per (source_id, entity_id) to update pointer once
     published_versions: dict[tuple[str, str], list[str]] = {}
 
     for src, ent, ver, path in mapping_files:
-        # Validate the JSON is well-formed before uploading
         raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
 
-        # Basic contract check — ensure the file matches the directory it lives in
         if raw.get("source_id") != src:
             print(f"  ERROR: source_id in {path} is {raw.get('source_id')!r}, expected {src!r}")
             sys.exit(1)
@@ -176,7 +170,6 @@ def seed(
         print(f"  Published : s3://{bucket}/{key}")
         published_versions.setdefault((src, ent), []).append(ver)
 
-    # Update latest.json pointer for each source/entity to the highest version
     for (src, ent), versions in published_versions.items():
         latest = _resolve_latest_version(versions)
         pointer_key = f"{tenant_code}/field-mappings/{src}/{ent}/latest.json"
@@ -205,7 +198,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Publish field mapping rule sets from config/field_mappings/ to S3."
     )
-    parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"])
+    parser.add_argument("--environment", required=True, choices=["dev", "uat", "prod"])
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument(
         "--tenant-code",

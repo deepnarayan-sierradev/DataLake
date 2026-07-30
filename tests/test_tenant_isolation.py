@@ -76,6 +76,7 @@ import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime.adapters.mysql_rds.mysql_rds_raw_layer_writer import (
     MySqlRdsRawLayerWriter,
 )
@@ -167,13 +168,8 @@ _TENANT_A = "tenant-alpha"
 _TENANT_B = "tenant-beta"
 
 
-# ---------------------------------------------------------------------------
-# ConfigurationRepositoryClient — S3 backend (genuine prefix isolation)
-# ---------------------------------------------------------------------------
-
-
 class TestConfigurationRepositoryS3Isolation:
-    _BUCKET = "edl-entity-config"
+    _BUCKET = "datalake-entity-config-test"
 
     def _config(self, tenant_code: str) -> EntityExtractionConfig:
         return EntityExtractionConfig(
@@ -203,23 +199,15 @@ class TestConfigurationRepositoryS3Isolation:
             Body=self._config(_TENANT_A).model_dump_json().encode("utf-8"),
         )
 
-        # Tenant A reads its own record — succeeds.
         loaded = client.load_config("salesforce", "salesforce-account", tenant_code=_TENANT_A)
         assert loaded.tenant_code == _TENANT_A
 
-        # Tenant B requests the same source/entity — its own prefix has no
-        # object, so it gets NotFound, never Tenant A's data.
         with pytest.raises(ConfigurationNotFoundError):
             client.load_config("salesforce", "salesforce-account", tenant_code=_TENANT_B)
 
 
-# ---------------------------------------------------------------------------
-# ConfigurationRepositoryClient — DynamoDB backend (app-level guard)
-# ---------------------------------------------------------------------------
-
-
 class TestConfigurationRepositoryDynamoDbIsolation:
-    _TABLE = "EdlEntityExtractionConfig"
+    _TABLE = RESOURCE_NAME_ENVIRONMENT["ENTITY_CONFIG_TABLE"]
 
     def _create_table(self) -> None:
         boto3.resource("dynamodb", region_name=_REGION).create_table(
@@ -251,25 +239,15 @@ class TestConfigurationRepositoryDynamoDbIsolation:
         )
         client.save_config(config)
 
-        # Tenant A reads its own record — succeeds.
         loaded = client.load_config("salesforce", "salesforce-account", tenant_code=_TENANT_A)
         assert loaded.tenant_code == _TENANT_A
 
-        # Tenant B requests the same (source_id, entity_id) key — the table
-        # is not yet tenant-partitioned, but the app-level guard must still
-        # reject the cross-tenant read rather than handing back Tenant A's
-        # record.
         with pytest.raises(ConfigurationNotFoundError):
             client.load_config("salesforce", "salesforce-account", tenant_code=_TENANT_B)
 
 
-# ---------------------------------------------------------------------------
-# ServingStoreConfigRepositoryClient — DynamoDB backend (genuine partition isolation)
-# ---------------------------------------------------------------------------
-
-
 class TestServingStoreConfigRepositoryIsolation:
-    _TABLE = "EdlServingStoreConfig"
+    _TABLE = RESOURCE_NAME_ENVIRONMENT["SERVING_STORE_CONFIG_TABLE"]
 
     def _create_table(self) -> None:
         boto3.resource("dynamodb", region_name=_REGION).create_table(
@@ -313,8 +291,6 @@ class TestServingStoreConfigRepositoryIsolation:
         loaded = client.load_config(_TENANT_A, "company")
         assert loaded.tenant_code == _TENANT_A
 
-        # tenant_code is the DynamoDB partition key here — Tenant B's key literally
-        # cannot address Tenant A's item, unlike the app-level guard above.
         with pytest.raises(ServingStoreConfigNotFoundError):
             client.load_config(_TENANT_B, "company")
 
@@ -338,13 +314,8 @@ class TestServingStoreConfigRepositoryIsolation:
         assert [c.entity_type for c in tenant_a_configs] == ["company"]
 
 
-# ---------------------------------------------------------------------------
-# WatermarkRepository (app-level guard)
-# ---------------------------------------------------------------------------
-
-
 class TestWatermarkRepositoryIsolation:
-    _TABLE = "EdlWatermarkRepository"
+    _TABLE = RESOURCE_NAME_ENVIRONMENT["WATERMARK_TABLE"]
 
     def _create_table(self) -> None:
         boto3.resource("dynamodb", region_name=_REGION).create_table(
@@ -372,20 +343,12 @@ class TestWatermarkRepositoryIsolation:
             tenant_code=_TENANT_A,
         )
 
-        # Tenant A sees its own watermark.
         record_a = repo.get_watermark("salesforce", "salesforce-account", tenant_code=_TENANT_A)
         assert record_a is not None
         assert record_a.tenant_code == _TENANT_A
 
-        # Tenant B, requesting the same key, must be treated as "no prior
-        # run" — never handed Tenant A's watermark.
         record_b = repo.get_watermark("salesforce", "salesforce-account", tenant_code=_TENANT_B)
         assert record_b is None
-
-
-# ---------------------------------------------------------------------------
-# WatermarkRepository — genuine key-collision proof (ARCH-1 fix)
-# ---------------------------------------------------------------------------
 
 
 class TestWatermarkRepositoryKeyIsolation:
@@ -401,7 +364,7 @@ class TestWatermarkRepositoryKeyIsolation:
     architecture/MULTI_TENANT_ROLLOUT_PLAN.md's Phase 2 exit criterion.
     """
 
-    _TABLE = "EdlWatermarkRepository"
+    _TABLE = RESOURCE_NAME_ENVIRONMENT["WATERMARK_TABLE"]
     _OTHER_TENANT = "acme-test"
 
     def _create_table(self) -> None:
@@ -448,9 +411,6 @@ class TestWatermarkRepositoryKeyIsolation:
             run_id="run-demo-002",
         )
 
-        # The other tenant's watermark must be completely untouched by
-        # demo's advance — this is the write-side proof the old
-        # post-read-only guard could never provide.
         other_record = repo.get_watermark(
             "salesforce", "salesforce-account", tenant_code=self._OTHER_TENANT
         )
@@ -463,11 +423,6 @@ class TestWatermarkRepositoryKeyIsolation:
         )
         assert demo_record_after is not None
         assert demo_record_after.upper_watermark == datetime(2026, 7, 5, tzinfo=UTC)
-
-
-# ---------------------------------------------------------------------------
-# RawLayerWriter — genuine S3 partition isolation (ARCH-1 fix)
-# ---------------------------------------------------------------------------
 
 
 def _new_salesforce_writer(bucket: str, tenant_code: str) -> Any:
@@ -491,9 +446,6 @@ def _new_sage_writer(bucket: str, tenant_code: str) -> Any:
     )
 
 
-# (writer_factory, source_id, entity_id, expected_source_segment) per connector
-# adapter. expected_source_segment is the single, hyphenated path segment
-# production wiring now produces (RAW-1) — no s3_prefix, no doubled segment.
 _RAW_LAYER_WRITER_CASES = [
     (_new_salesforce_writer, "salesforce", "salesforce-account", "salesforce"),
     (_new_netsuite_writer, "netsuite", "netsuite-customer", "netsuite"),
@@ -515,7 +467,7 @@ class TestRawLayerWriterPathIsolation:
     tenant_code to super().__init__()).
     """
 
-    _BUCKET = "edl-raw-tenant-isolation-test"
+    _BUCKET = "datalake-raw-tenant-isolation-test"
 
     @pytest.mark.parametrize(
         "make_writer, source_id, entity_id, expected_source_segment",
@@ -545,8 +497,6 @@ class TestRawLayerWriterPathIsolation:
 
         assert key_a != key_b
 
-        # RAW-1: exactly {tenant_code}/{source}/{entity_id}/... — a single
-        # source segment, no s3_prefix, no doubled "{source}/{source}".
         expected_a = (
             f"{_TENANT_A}/{expected_source_segment}/{entity_id}"
             f"/extraction_date=2026-07-01/run_id=run-shared-001/data.parquet"
@@ -560,16 +510,9 @@ class TestRawLayerWriterPathIsolation:
         assert key_a.startswith(f"{_TENANT_A}/")
         assert key_b.startswith(f"{_TENANT_B}/")
 
-        # Both objects genuinely exist independently — neither write
-        # overwrote the other.
         s3 = boto3.client("s3", region_name=_REGION)
         assert s3.get_object(Bucket=self._BUCKET, Key=key_a)["Body"].read()
         assert s3.get_object(Bucket=self._BUCKET, Key=key_b)["Body"].read()
-
-
-# ---------------------------------------------------------------------------
-# Circuit breaker — tenant isolation (ARCH-1 fix)
-# ---------------------------------------------------------------------------
 
 
 class TestCircuitBreakerTenantIsolation:
@@ -591,13 +534,8 @@ class TestCircuitBreakerTenantIsolation:
         assert policy.is_circuit_open("salesforce", tenant_code=_TENANT_B) is False
 
 
-# ---------------------------------------------------------------------------
-# SchemaSnapshotRepository (genuine S3 prefix isolation)
-# ---------------------------------------------------------------------------
-
-
 class TestSchemaSnapshotRepositoryIsolation:
-    _BUCKET = "edl-schema-snapshots-087972550871"
+    _BUCKET = "datalake-schema-snapshots-dev-use1"
 
     def _snapshot(self) -> SchemaSnapshot:
         return SchemaSnapshot(
@@ -629,13 +567,8 @@ class TestSchemaSnapshotRepositoryIsolation:
         assert loaded_b is None
 
 
-# ---------------------------------------------------------------------------
-# FieldMappingRegistryClient (S3 prefix isolation — ARCH-11)
-# ---------------------------------------------------------------------------
-
-
 class TestFieldMappingRegistryIsolation:
-    _BUCKET = "edl-curated-087972550871"
+    _BUCKET = "datalake-curated-dev-use1"
 
     def _rule_set(self) -> FieldMappingRuleSet:
         return FieldMappingRuleSet(
@@ -665,11 +598,6 @@ class TestFieldMappingRegistryIsolation:
             client.load_rule_set("salesforce", "salesforce-account", _TENANT_B)
 
 
-# ---------------------------------------------------------------------------
-# ResolutionConfigRegistry (S3 prefix isolation + in-process cache isolation
-# — ARCH-10)
-# ---------------------------------------------------------------------------
-
 _ISOLATION_MATCH_RULES_FIXTURE = {
     "entity_type": "company",
     "rule_set_version": "v1",
@@ -692,7 +620,7 @@ _ISOLATION_SURVIVORSHIP_FIXTURE = {
 
 
 class TestResolutionConfigRegistryIsolation:
-    _BUCKET = "edl-curated-087972550871"
+    _BUCKET = "datalake-curated-dev-use1"
 
     def _publish_for(self, registry: ResolutionConfigRegistry, tenant_code: str) -> None:
         registry.publish(
@@ -726,17 +654,11 @@ class TestResolutionConfigRegistryIsolation:
         with pytest.raises(ResolutionConfigNotFoundError):
             registry.load("company", _TENANT_B)
 
-        # Tenant A's own cache entry is unaffected by tenant B's failed lookup.
         assert registry.load("company", _TENANT_A) is config_a
 
 
-# ---------------------------------------------------------------------------
-# EntityTypeRegistryClient (single-table design, PK=tenant_code)
-# ---------------------------------------------------------------------------
-
-
 class TestEntityTypeRegistryIsolation:
-    _TABLE = "EdlEntityTypeRegistry"
+    _TABLE = RESOURCE_NAME_ENVIRONMENT["ENTITY_TYPE_REGISTRY_TABLE"]
 
     def _create_table(self) -> None:
         boto3.resource("dynamodb", region_name=_REGION).create_table(
@@ -779,15 +701,10 @@ class TestEntityTypeRegistryIsolation:
         assert client.get_entity_type("shared-entity-id", tenant_code=_TENANT_B) == "tenant_b_type"
 
 
-# ---------------------------------------------------------------------------
-# Control-plane API: run lookup across tenants must 404, never 403
-# ---------------------------------------------------------------------------
-
-
 class TestControlPlaneRunLookupIsolation:
-    _ENTITY_CONFIG_TABLE = "EdlEntityExtractionConfig"
-    _ENTITY_TYPE_REGISTRY_TABLE = "EdlEntityTypeRegistry"
-    _AUDIT_LOG_TABLE = "EdlRunAuditLog"
+    _ENTITY_CONFIG_TABLE = RESOURCE_NAME_ENVIRONMENT["ENTITY_CONFIG_TABLE"]
+    _ENTITY_TYPE_REGISTRY_TABLE = RESOURCE_NAME_ENVIRONMENT["ENTITY_TYPE_REGISTRY_TABLE"]
+    _AUDIT_LOG_TABLE = RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"]
 
     def _env_vars(self) -> dict[str, str]:
         return {
@@ -838,21 +755,9 @@ class TestControlPlaneRunLookupIsolation:
                 None,
             )
 
-        # 404, never 403 — the API must not confirm the run's existence to a
-        # tenant that isn't its owner.
         assert response["statusCode"] == 404
         body = json.loads(response["body"])
         assert "acme" not in body.get("error", "").lower()  # no accidental data leak in the error
-
-
-# ---------------------------------------------------------------------------
-# Secrets Manager per-connection isolation (DL-SEC-05 / DL-SCOPE-06)
-# ---------------------------------------------------------------------------
-#
-# This replaces the skipped placeholder that tracked the gap while credentials were
-# provisioned per-source-connector with no tenant dimension. `DL-SCOPE-06` established the
-# correct grain — per connection under a tenant prefix — so there is now something real to
-# assert, and the assertion is real rather than a skip.
 
 
 class TestSecretsManagerConnectionIsolation:
@@ -860,8 +765,9 @@ class TestSecretsManagerConnectionIsolation:
         acme = connection_credential_path("acme-corp", "hubspot")
         globex = connection_credential_path("globex-eu", "hubspot")
         assert acme != globex
-        assert acme.startswith("edl/tenants/acme-corp/")
-        assert globex.startswith("edl/tenants/globex-eu/")
+        prefix = RESOURCE_NAME_ENVIRONMENT["SECRET_PATH_PREFIX"]
+        assert acme.startswith(f"{prefix}/tenants/acme-corp/")
+        assert globex.startswith(f"{prefix}/tenants/globex-eu/")
 
     def test_twelve_franchisee_connections_never_share_a_secret(self) -> None:
         paths = {
@@ -893,7 +799,8 @@ class TestSecretsManagerConnectionIsolation:
     def test_the_migration_fallback_is_logged_not_silent(self) -> None:
         secrets = boto3.client("secretsmanager", region_name=_REGION)
         secrets.create_secret(
-            Name="edl/sources/hubspot/credentials", SecretString='{"access_token": "shared"}'
+            Name=f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/sources/hubspot/credentials",
+            SecretString='{"access_token": "shared"}',
         )
         resolved = ConnectionCredentialPathResolver(secrets).resolve("evive", "hubspot", "hubspot")
         assert resolved.is_legacy_shared is True
@@ -902,7 +809,8 @@ class TestSecretsManagerConnectionIsolation:
     def test_write_back_never_falls_back_to_a_shared_secret(self) -> None:
         secrets = boto3.client("secretsmanager", region_name=_REGION)
         secrets.create_secret(
-            Name="edl/sources/hubspot/credentials", SecretString='{"access_token": "shared"}'
+            Name=f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/sources/hubspot/credentials",
+            SecretString='{"access_token": "shared"}',
         )
         resolved = ConnectionCredentialPathResolver(secrets).resolve(
             "evive", "hubspot", "hubspot", write_back=True
@@ -910,15 +818,6 @@ class TestSecretsManagerConnectionIsolation:
         assert resolved.is_legacy_shared is False
         assert resolved.secret_id.endswith("-writeback")
 
-
-# ---------------------------------------------------------------------------
-# Scope-unit isolation, tested adversarially (DL-SCOPE-18)
-# ---------------------------------------------------------------------------
-#
-# Tested as an attacker, not as a filter: every surface in DL-SCOPE-17 gets an explicit
-# cross-unit reach attempt, plus a crafted claim, an empty scope set, drill-through, a merged
-# golden record, `field_provenance` in Athena, and a small-cohort aggregate. The degenerate
-# `single`-tenant case is proven by test rather than by inspection.
 
 _PARTITIONED_PROFILE = TenantPartitionProfile(
     tenant_code="evive",
@@ -995,7 +894,6 @@ class TestScopeIsolationAcrossEverySurface:
         assert "franchisee-0002" not in compiled.sql
 
     def test_drill_through_cannot_widen_the_scope(self) -> None:
-        # A drill-through is a second query on the same claim; it gets the same predicate.
         drill = scope_predicate(
             _franchisee_claims("franchisee-0001"), surface=ConsumptionSurface.DRILL_THROUGH
         )
@@ -1013,8 +911,6 @@ class TestScopeIsolationAcrossEverySurface:
         assert [row["id"] for row in visible] == ["1"]
 
     def test_field_provenance_cannot_expose_another_unit_through_athena(self) -> None:
-        # A golden record resolved at scope-unit grain carries provenance from one unit only,
-        # so `json_extract_scalar(field_provenance, ...)` has nothing foreign to reveal.
         attributor = ScopeAttributor(
             SourceConnection(
                 tenant_code="evive",
@@ -1035,8 +931,6 @@ class TestScopeIsolationAcrossEverySurface:
         assert predicate.matches(stamped["scope_unit_id"]) is False
 
     def test_a_merged_golden_record_cannot_span_two_units(self) -> None:
-        # Scope-unit resolution is the default for a partitioned tenant, so two units'
-        # identical customer produces two records rather than one merged pair.
         assert _PARTITIONED_PROFILE.default_resolution_scope is ResolutionScope.SCOPE_UNIT
         stamps = []
         for unit_id in ("franchisee-0001", "franchisee-0002"):
@@ -1077,7 +971,6 @@ class TestScopeIsolationAcrossEverySurface:
         assert predicate.matches_all_rows is True
         assert predicate.matches(None) is True
         assert predicate.matches("anything") is True
-        # Applied, not skipped: the SQL still names the security column.
         assert SCOPE_UNIT_COLUMN in predicate.sql
 
     def test_an_unattributable_row_is_tenant_level_never_universal(self) -> None:

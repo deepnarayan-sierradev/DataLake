@@ -68,11 +68,6 @@ def _make_auth(creds: dict[str, str] | None = None) -> IntacctAuthClient:
     )
 
 
-# ---------------------------------------------------------------------------
-# Token acquisition
-# ---------------------------------------------------------------------------
-
-
 class TestTokenAcquisition:
     def test_get_access_token_returns_token(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
@@ -116,7 +111,6 @@ class TestTokenAcquisition:
         requests_mock.post(_TOKEN_URL, json={**_TOKEN_RESPONSE, "expires_in": 1800})
         auth = _make_auth()
         auth.get_access_token()
-        # Token should be valid for ~1800s (with proactive refresh buffer)
         expected_min = time.time() + 1800 - _PROACTIVE_REFRESH_SECONDS - 5
         assert auth._token_expires_at > expected_min  # type: ignore[attr-defined]
 
@@ -131,11 +125,6 @@ class TestTokenAcquisition:
         assert auth._token_expires_at > expected_min  # type: ignore[attr-defined]
 
 
-# ---------------------------------------------------------------------------
-# Token refresh
-# ---------------------------------------------------------------------------
-
-
 class TestTokenRefresh:
     def test_proactive_refresh_when_near_expiry(
         self, requests_mock: requests_mock_lib.Mocker
@@ -145,7 +134,6 @@ class TestTokenRefresh:
         auth.get_access_token()
         assert requests_mock.call_count == 1
 
-        # Move expiry to within the proactive refresh window.
         auth._token_expires_at = time.time() + _PROACTIVE_REFRESH_SECONDS - 10  # type: ignore[attr-defined]
         auth.get_access_token()
         assert requests_mock.call_count == 2  # second fetch triggered
@@ -165,11 +153,6 @@ class TestTokenRefresh:
         auth.invalidate_token()
         assert auth._access_token is None  # type: ignore[attr-defined]
         assert auth._token_expires_at == 0.0  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
-# build_auth_headers
-# ---------------------------------------------------------------------------
 
 
 class TestBuildAuthHeaders:
@@ -198,14 +181,8 @@ class TestBuildAuthHeaders:
         auth = _make_auth()
         auth.get_access_token()
         request = _sent_request(requests_mock)
-        # Verify it was not a JSON body (must be form-encoded)
         assert "client_secret" not in (request.query or "")
         assert "super-secret-value" not in request.url
-
-
-# ---------------------------------------------------------------------------
-# Error cases
-# ---------------------------------------------------------------------------
 
 
 class TestErrorCases:
@@ -260,11 +237,7 @@ class TestErrorCases:
     def test_error_message_does_not_contain_token_value(
         self, requests_mock: requests_mock_lib.Mocker
     ) -> None:
-        # First fetch succeeds; simulate the token never appearing in an error.
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         token = auth.get_access_token()
-        # The token should exist but not be embedded in error messages.
         assert token == "eyJtest.token.value"
-        # IntacctAuthClient never includes the token value in logs/exceptions.
-        # (Verified by code review: _refresh_token only logs expires_in_seconds.)

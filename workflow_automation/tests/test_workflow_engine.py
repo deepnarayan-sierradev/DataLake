@@ -8,6 +8,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from workflow_automation.action_registry import (
     ActionContext,
     ActionOutcome,
@@ -81,7 +82,10 @@ def _notification_action(action_id: str = "notify-owner") -> WorkflowAction:
     return WorkflowAction(
         action_id=action_id,
         kind=ActionKind.SEND_NOTIFICATION,
-        parameters={"topic_arn": "arn:aws:sns:us-east-1:123456789012:edl", "subject": "hi"},
+        parameters={
+            "topic_arn": "arn:aws:sns:us-east-1:123456789012:datalake-alerts",
+            "subject": "hi",
+        },
     )
 
 
@@ -281,8 +285,14 @@ class TestEngine:
         retry re-fires an external action — so most of this class exercised an engine that could
         not have been deployed safely.
         """
-        _table("EdlWorkflowExecution", "tenant_code", "execution_key")
-        _table("EdlWorkflowIdempotency", "tenant_code", "idempotency_key")
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["WORKFLOW_EXECUTION_TABLE"], "tenant_code", "execution_key"
+        )
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["WORKFLOW_IDEMPOTENCY_TABLE"],
+            "tenant_code",
+            "idempotency_key",
+        )
         return WorkflowEngine(
             environment="dev",
             region_name=_REGION,
@@ -473,7 +483,9 @@ class TestScheduleBatching:
 @mock_aws
 class TestDefinitionRepository:
     def _repository(self) -> WorkflowDefinitionRepository:
-        _table("EdlWorkflowDefinition", "tenant_code", "workflow_key")
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["WORKFLOW_DEFINITION_TABLE"], "tenant_code", "workflow_key"
+        )
         return WorkflowDefinitionRepository(environment="dev", region_name=_REGION)
 
     def test_save_and_load_round_trip(self):
@@ -540,7 +552,7 @@ class TestDefinitionRepository:
 @mock_aws
 class TestTaskRepository:
     def _repository(self) -> WorkflowTaskRepository:
-        _table("EdlWorkflowTask", "tenant_code", "task_id")
+        _table(RESOURCE_NAME_ENVIRONMENT["WORKFLOW_TASK_TABLE"], "tenant_code", "task_id")
         return WorkflowTaskRepository(environment="dev", region_name=_REGION)
 
     def _task(self, repository: WorkflowTaskRepository, due_after_hours: int = 24) -> str:

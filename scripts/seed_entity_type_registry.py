@@ -90,7 +90,7 @@ def _register_one(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed the entity type registry for a tenant.")
-    parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"])
+    parser.add_argument("--environment", required=True, choices=["dev", "uat", "prod"])
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument("--tenant-code", required=True, help="Tenant code slug (e.g. acme-corp).")
     parser.add_argument(
@@ -131,7 +131,6 @@ def main() -> None:
     if args.mirror_default:
         _mirror_default(client, args.tenant_code, args.dry_run)
     else:
-        # parser.error() above already exits if any of these three are missing.
         _register_one(
             client,
             args.tenant_code,

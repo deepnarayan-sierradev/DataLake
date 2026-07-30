@@ -25,8 +25,6 @@ from connector_runtime.source_capabilities import SourceCapability
 
 SOURCE_ID: Final[str] = "hubspot"
 
-# CRM object endpoints. `properties` is supplied per run from the discovered field set, so
-# adding a HubSpot property does not require touching this table.
 _CRM_OBJECTS: Final[tuple[tuple[str, str], ...]] = (
     ("companies", "company"),
     ("contacts", "contact"),
@@ -73,8 +71,6 @@ HUBSPOT_SPEC: Final[RestSourceSpec] = RestSourceSpec(
             entity_id=f"{SOURCE_ID}-pipeline",
             path="/crm/v3/pipelines/deals",
             records_json_path=("results",),
-            # Pipelines are small reference data with no watermark; a full load each run
-            # is cheaper than tracking one.
             pagination_strategy="offset_limit",
         ),
         RestEntitySpec(
@@ -95,9 +91,6 @@ HUBSPOT_SPEC: Final[RestSourceSpec] = RestSourceSpec(
         }
     ),
     default_pagination_strategy="cursor",
-    # HubSpot CRM v3 documents `properties` as the field-projection parameter. It is
-    # declared here rather than assumed by the substrate: no other source on the platform
-    # documents one, and sending it to an API that validates its query string is a 400.
     field_projection_parameter="properties",
     default_rate_limit_policy="hubspot-standard",
     default_sync_strategy="webhook_ingest",

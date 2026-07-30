@@ -1,9 +1,9 @@
 variable "environment" {
   type        = string
-  description = "Deployment environment: dev, staging, or prod."
+  description = "Deployment environment: dev, uat, or prod."
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment must be one of: dev, staging, prod."
+    condition     = contains(["dev", "uat", "prod"], var.environment)
+    error_message = "environment must be one of: dev, uat, prod."
   }
 }
 
@@ -69,7 +69,7 @@ variable "saved_query_table_arn" {
 
 variable "serving_store_secret_arns" {
   type        = list(string)
-  description = "Secrets Manager ARNs the serving store loader role may read/create/update: the writer credential(s) plus the edl/serving-store/* reader-credential prefix."
+  description = "Secrets Manager ARNs the serving store loader role may read/create/update: the writer credential(s) plus the datalake/<env>/serving-store/* reader-credential prefix."
 }
 
 variable "kms_key_arns_for_extraction" {
@@ -134,4 +134,9 @@ variable "export_artefact_bucket_arn" {
   description = "Bucket ARN the export artefact is written to."
   type        = string
   default     = ""
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
 }

@@ -1,14 +1,3 @@
-# ---------------------------------------------------------------------------
-# WAF on the control plane (DL-SEC-13, gap 7).
-#
-# §11 forbids throttling *included platform capabilities*; it says nothing about abuse
-# protection. So the rate limits here are deliberately generous and the alarm fires well
-# before the block does — a legitimate burst produces a page for an operator, not a 403 for
-# a customer.
-#
-# Rule order matters and is explicit: managed rule sets run first (known-bad requests are
-# cheapest to drop), then per-IP rate limiting, then per-tenant rate limiting.
-# ---------------------------------------------------------------------------
 
 terraform {
   required_version = ">= 1.6"
@@ -26,9 +15,6 @@ locals {
     Component = "control-plane-perimeter"
   })
 
-  # AWS managed rule groups, in evaluation order. Each is count-only in `audit` mode so a
-  # rollout can prove no legitimate request would be blocked before enforcement (the same
-  # audit-then-enforce discipline DL-SEC-01 requires for IAM conditions).
   managed_rule_groups = [
     { name = "AWSManagedRulesCommonRuleSet", priority = 10 },
     { name = "AWSManagedRulesKnownBadInputsRuleSet", priority = 20 },
@@ -38,7 +24,7 @@ locals {
 }
 
 resource "aws_wafv2_web_acl" "control_plane" {
-  name        = "${var.environment}-edl-control-plane"
+  name        = "${var.name_prefix}-control-plane-waf-${var.environment}"
   description = "Control-plane WAF: managed rules plus per-IP and per-tenant rate limiting."
   scope       = "REGIONAL"
 
@@ -52,8 +38,6 @@ resource "aws_wafv2_web_acl" "control_plane" {
       name     = rule.value.name
       priority = rule.value.priority
 
-      # In audit mode every managed rule only counts, so CloudWatch shows exactly what would
-      # have been blocked. Flip `enforcement_mode` to "enforce" once that is verified clean.
       dynamic "override_action" {
         for_each = var.enforcement_mode == "audit" ? [1] : []
         content {
@@ -83,8 +67,6 @@ resource "aws_wafv2_web_acl" "control_plane" {
     }
   }
 
-  # Per-IP rate limit. Generous by design: the point is stopping a scripted attack, not
-  # shaping a customer's dashboard load.
   rule {
     name     = "per-ip-rate-limit"
     priority = 100
@@ -114,8 +96,6 @@ resource "aws_wafv2_web_acl" "control_plane" {
     }
   }
 
-  # Per-tenant rate limit, keyed on the tenant path segment rather than the IP, so one
-  # tenant's runaway integration cannot consume another tenant's budget.
   rule {
     name     = "per-tenant-rate-limit"
     priority = 110
@@ -154,8 +134,6 @@ resource "aws_wafv2_web_acl" "control_plane" {
     }
   }
 
-  # Oversized bodies are dropped outright in both modes: a 10 MB POST to a JSON control-plane
-  # endpoint is never legitimate, so there is nothing to audit.
   rule {
     name     = "oversized-body"
     priority = 120
@@ -190,7 +168,7 @@ resource "aws_wafv2_web_acl" "control_plane" {
 
   visibility_config {
     cloudwatch_metrics_enabled = true
-    metric_name                = "${var.environment}EdlControlPlane"
+    metric_name                = "${var.environment}ControlPlane"
     sampled_requests_enabled   = true
   }
 
@@ -204,14 +182,9 @@ resource "aws_wafv2_web_acl_association" "control_plane" {
   web_acl_arn  = aws_wafv2_web_acl.control_plane.arn
 }
 
-# ---------------------------------------------------------------------------
-# WAF logging. OWASP A09: the security log stream is separate from application logs with
-# extended retention, so an incident investigation is not competing with pipeline noise.
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "waf" {
-  # AWS requires the `aws-waf-logs-` prefix on a WAF logging destination.
-  name              = "aws-waf-logs-${var.environment}-edl-control-plane"
+  name              = "aws-waf-logs-${var.name_prefix}-control-plane-${var.environment}"
   retention_in_days = var.security_log_retention_days
   kms_key_id        = var.logs_kms_key_arn
 
@@ -224,8 +197,6 @@ resource "aws_wafv2_web_acl_logging_configuration" "control_plane" {
   resource_arn            = aws_wafv2_web_acl.control_plane.arn
   log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
 
-  # Authorization headers carry bearer tokens; redacting them keeps a credential out of the
-  # security log the way the structured logger already keeps them out of application logs.
   redacted_fields {
     single_header {
       name = "authorization"
@@ -239,15 +210,11 @@ resource "aws_wafv2_web_acl_logging_configuration" "control_plane" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Alarms. `WafBlockedRequests` is emitted by AWS into the WAF namespace, so this alarm reads
-# that namespace directly rather than the platform namespace.
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "waf_blocked_requests" {
   count = var.alarm_sns_topic_arn == "" ? 0 : 1
 
-  alarm_name          = "${var.environment}-edl-waf-blocked-requests"
+  alarm_name          = "${var.name_prefix}-waf-blocked-requests-${var.environment}"
   namespace           = "AWS/WAFV2"
   metric_name         = "BlockedRequests"
   statistic           = "Sum"
@@ -277,7 +244,7 @@ resource "aws_cloudwatch_metric_alarm" "waf_blocked_requests" {
 resource "aws_cloudwatch_metric_alarm" "waf_counted_requests" {
   count = var.alarm_sns_topic_arn == "" && var.enforcement_mode == "audit" ? 0 : 1
 
-  alarm_name          = "${var.environment}-edl-waf-counted-requests"
+  alarm_name          = "${var.name_prefix}-waf-counted-requests-${var.environment}"
   namespace           = "AWS/WAFV2"
   metric_name         = "CountedRequests"
   statistic           = "Sum"

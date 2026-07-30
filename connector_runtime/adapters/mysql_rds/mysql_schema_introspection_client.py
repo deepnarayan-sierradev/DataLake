@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 
 _logger = get_platform_logger(__name__)
 
-# MySQL types that are not directly extractable as scalar values.
 _NON_QUERYABLE_TYPES: Final[frozenset[str]] = frozenset(
     {"geometry", "geomcollection", "point", "linestring", "polygon", "json"}
 )
@@ -154,8 +153,6 @@ class MySqlSchemaIntrospectionClient:
         )
         return contract
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _query_information_schema(self, database: str, table_name: str) -> list[dict[str, Any]]:
         """
         Execute the parameterized information_schema query.
@@ -175,7 +172,6 @@ class MySqlSchemaIntrospectionClient:
                 columns = [col[0] for col in cursor.description]
                 normalised_rows: list[dict[str, Any]] = []
                 for row in cursor.fetchall():
-                    # DictCursor returns dict rows; default cursors return tuples.
                     if isinstance(row, dict):
                         normalised_rows.append(dict(row))
                     else:

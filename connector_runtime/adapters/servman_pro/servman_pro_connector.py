@@ -24,8 +24,6 @@ from connector_runtime.source_capabilities import (
 
 SOURCE_ID: Final[str] = "servman-pro"
 
-# Entities the vendor has confirmed as not yet delivered. Declared rather than omitted so
-# the console can show them as pending instead of the platform silently lacking them.
 PENDING_VENDOR_ENTITIES: Final[frozenset[str]] = frozenset(
     {
         f"{SOURCE_ID}-call-recording",
@@ -63,8 +61,6 @@ SERVMAN_PRO_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     capabilities=frozenset({SourceCapability.INCREMENTAL}),
     default_pagination_strategy="offset_limit",
     default_rate_limit_policy="servman-pro-standard",
-    # Inherited by a config-declared entity (DL-CONN-21); must match what this
-    # source's own entities use, or a console-added entity silently reads zero rows.
     default_records_json_path=("items",),
     default_page_size=100,
     required_credential_keys=frozenset({"access_token"}),

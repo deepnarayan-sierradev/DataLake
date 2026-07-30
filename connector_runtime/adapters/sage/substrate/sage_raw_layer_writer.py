@@ -71,7 +71,7 @@ class SageRawLayerWriter(RawLayerWriter):
     Usage::
 
         writer = SageRawLayerWriter(
-            s3_bucket="edl-raw-087972550871",
+            s3_bucket="datalake-raw-<env>-<region>",
             sage_product="intacct",
             region_name="us-east-1",
             tenant_code="demo",
@@ -111,8 +111,6 @@ class SageRawLayerWriter(RawLayerWriter):
 
     def _extra_log_fields(self) -> dict[str, Any]:
         return {"sage_product": self._sage_product}
-
-    # ── Overridden: Sage's streaming zero-record / naming semantics diverge ──
 
     def write_partition_streaming(
         self,
@@ -164,7 +162,6 @@ class SageRawLayerWriter(RawLayerWriter):
                 chunk = []
                 chunk_index += 1
 
-        # Write any remaining records in the final partial chunk.
         if chunk:
             self._write_chunk(
                 chunk=chunk,
@@ -178,7 +175,6 @@ class SageRawLayerWriter(RawLayerWriter):
                 "Streaming write produced zero records — cannot write empty partition."
             )
 
-        # Write sidecar metadata for the full partition.
         metadata: dict[str, Any] = {
             "run_id": run_id,
             "source_id": source_id,
@@ -231,11 +227,6 @@ class SageRawLayerWriter(RawLayerWriter):
         """
         data_key = f"{partition_prefix}/data_{chunk_index:04d}.parquet"
         self._write_parquet_part(chunk, data_key)
-
-
-# ---------------------------------------------------------------------------
-# Module-level Parquet conversion helper
-# ---------------------------------------------------------------------------
 
 
 def _records_to_parquet(records: list[ExtractionRecord]) -> bytes:

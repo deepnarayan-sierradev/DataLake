@@ -68,11 +68,6 @@ class QualityReport:
     is_publication_blocked: bool
 
 
-# ---------------------------------------------------------------------------
-# Check definitions
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class NullCheck:
     """Field value must not be null or empty string."""
@@ -126,11 +121,6 @@ class QualityPolicy:
     checks: tuple[QualityCheck, ...]
 
 
-# ---------------------------------------------------------------------------
-# Evaluator
-# ---------------------------------------------------------------------------
-
-
 class QualityPolicyEvaluator:
     """
     Evaluates a sequence of canonical records against a QualityPolicy.
@@ -149,8 +139,6 @@ class QualityPolicyEvaluator:
         blocked_indices: set[int] = set()
         warned_indices: set[int] = set()
 
-        # Pre-compile all PatternCheck regexes once before the record loop (F-06).
-        # re.compile() per-record for large datasets is O(n * pattern_count) overhead.
         compiled_patterns: dict[str, re.Pattern[str]] = {
             check.pattern: re.compile(check.pattern)
             for check in policy.checks
@@ -279,7 +267,6 @@ class QualityPolicyEvaluator:
         val = record.get(check.field_name)
         if val is None:
             return None
-        # Use pre-compiled pattern when available (avoids re.compile per record).
         compiled = (compiled_patterns or {}).get(check.pattern) or re.compile(check.pattern)
         if not compiled.match(str(val)):
             return QualityCheckViolation(

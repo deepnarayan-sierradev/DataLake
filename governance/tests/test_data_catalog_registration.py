@@ -17,7 +17,7 @@ _REGION = "us-east-1"
 
 
 def _make_spec(
-    db="edl_analytics",
+    db="datalake_analytics_dev",
     table="salesforce_account_analytics",
     layer=DataLayer.ANALYTICS,
     schema=({"Name": "account_id", "Type": "string"}, {"Name": "name", "Type": "string"}),
@@ -46,7 +46,7 @@ class TestDataCatalogRegistrationClient:
         spec = _make_spec()
         result = self.client.register_dataset(spec)
         assert result.operation == "created"
-        assert result.database_name == "edl_analytics"
+        assert result.database_name == "datalake_analytics_dev"
         assert result.table_name == "salesforce_account_analytics"
 
     def test_register_is_idempotent(self):
@@ -59,17 +59,17 @@ class TestDataCatalogRegistrationClient:
     def test_get_dataset_returns_table(self):
         spec = _make_spec()
         self.client.register_dataset(spec)
-        table = self.client.get_dataset("edl_analytics", "salesforce_account_analytics")
+        table = self.client.get_dataset("datalake_analytics_dev", "salesforce_account_analytics")
         assert table["Name"] == "salesforce_account_analytics"
 
     def test_get_nonexistent_dataset_raises(self):
         with pytest.raises(DatasetNotFoundError):
-            self.client.get_dataset("edl_analytics", "nonexistent_table")
+            self.client.get_dataset("datalake_analytics_dev", "nonexistent_table")
 
     def test_list_datasets_returns_table_names(self):
         self.client.register_dataset(_make_spec(table="table_a"))
         self.client.register_dataset(_make_spec(table="table_b"))
-        tables = self.client.list_datasets("edl_analytics")
+        tables = self.client.list_datasets("datalake_analytics_dev")
         assert "table_a" in tables
         assert "table_b" in tables
 
@@ -90,14 +90,14 @@ class TestDataCatalogRegistrationClient:
     def test_partition_keys_included_in_table_definition(self):
         spec = _make_spec()
         self.client.register_dataset(spec)
-        table = self.client.get_dataset("edl_analytics", "salesforce_account_analytics")
+        table = self.client.get_dataset("datalake_analytics_dev", "salesforce_account_analytics")
         pk_names = [k["Name"] for k in table.get("PartitionKeys", [])]
         assert "analytics_date" in pk_names
 
     def test_metadata_parameters_stored(self):
         spec = _make_spec()
         self.client.register_dataset(spec)
-        table = self.client.get_dataset("edl_analytics", "salesforce_account_analytics")
+        table = self.client.get_dataset("datalake_analytics_dev", "salesforce_account_analytics")
         params = table.get("Parameters", {})
         assert params.get("owner") == "data-eng-team"
         assert params.get("data_classification") == "internal"

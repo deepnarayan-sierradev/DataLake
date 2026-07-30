@@ -53,7 +53,6 @@ from connector_runtime.source_capabilities import SourceCapability
 
 SOURCE_ID: Final[str] = "bepro"
 
-# Documented: 1000 requests/minute per API token, burst 100 requests/second.
 DOCUMENTED_REQUESTS_PER_MINUTE: Final[int] = 1_000
 DOCUMENTED_BURST_PER_SECOND: Final[int] = 100
 DOCUMENTED_LIMITS: Final[tuple[DocumentedRateLimit, ...]] = (
@@ -64,13 +63,8 @@ DOCUMENTED_LIMITS: Final[tuple[DocumentedRateLimit, ...]] = (
 RATE_LIMIT_POLICY_NAME: Final[str] = "bepro-standard"
 rate_limit_policy_registry.register(RATE_LIMIT_POLICY_NAME, token_bucket_within(DOCUMENTED_LIMITS))
 
-# The API's own default page size is 50 and it publishes no maximum. 200 is four times the
-# default and still one request; going higher risks a provider-side cap the document does
-# not state, which would silently truncate an entity.
 _PAGE_SIZE: Final[int] = 200
 
-# Sport the schemas endpoint is read for. It is the one required parameter that a schedule
-# genuinely can supply, so it is a static spec parameter rather than a run-scope gap.
 SCHEMA_SPORT_TYPE: Final[str] = "football"
 
 
@@ -78,16 +72,11 @@ def _collection(suffix: str, path: str, natural_key: str = "id") -> RestEntitySp
     return RestEntitySpec(
         entity_id=f"{SOURCE_ID}-{suffix}",
         path=path,
-        # `{count, next, prev, data: [...]}` on every paginated endpoint.
         records_json_path=("data",),
-        # No endpoint exposes a modification timestamp — see the module docstring.
         watermark_field=None,
         natural_key_field=natural_key,
         pagination_strategy="offset_limit",
         page_size=_PAGE_SIZE,
-        # The API defaults `sort_direction` to `desc`. Under offset paging that is unsafe
-        # for anything append-heavy: a row inserted mid-sweep shifts every later page down
-        # by one and a record is skipped. Ascending order makes the offsets stable.
         static_query_parameters={"sort_direction": "asc"},
     )
 
@@ -123,8 +112,6 @@ _DATA_ENTITIES: Final[tuple[RestEntitySpec, ...]] = (
     _collection("team-stat", "/data-api/data/stats/teams"),
 )
 
-# Id cross-references between BePro's keys and the customer's own — the join surface that
-# makes this source usable alongside the rest of the lake, so it is extracted in full.
 _EXTERNAL_ENTITIES: Final[tuple[RestEntitySpec, ...]] = (
     _collection("external-club", "/data-api/external/clubs"),
     _collection("external-league", "/data-api/external/leagues"),
@@ -145,17 +132,11 @@ _EVENT_SCHEMA_ENTITY: Final[RestEntitySpec] = RestEntitySpec(
     records_json_path=("data",),
     watermark_field=None,
     natural_key_field="id",
-    # The endpoint declares no offset/limit; it returns the whole event vocabulary at once.
     pagination_strategy="single_request",
-    # Unused by a single-request read, but stated so this source has one page size rather
-    # than two — the reconciliation gate can then assert the inherited default outright
-    # instead of skipping, and a skipping gate certifies nothing.
     page_size=_PAGE_SIZE,
     static_query_parameters={"sport_type": SCHEMA_SPORT_TYPE},
 )
 
-# Declared so the console can show why they are not schedulable, and so a future fan-out
-# has a name to bind to rather than inventing one.
 MATCH_SCOPED_ENTITY_IDS: Final[frozenset[str]] = frozenset(e.entity_id for e in _SCOPED_ENTITIES)
 
 BEPRO_SPEC: Final[RestSourceSpec] = RestSourceSpec(
@@ -172,22 +153,15 @@ BEPRO_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     ),
     capabilities=frozenset(
         {
-            # INCREMENTAL is deliberately absent: no endpoint exposes a modification
-            # timestamp, so every run is a full load and the console must say so.
             SourceCapability.SCHEMA_DISCOVERY,
             SourceCapability.RECORD_COUNT,
         }
     ),
     default_pagination_strategy="offset_limit",
     default_rate_limit_policy=RATE_LIMIT_POLICY_NAME,
-    # `data/tracking` returns per-frame positional data for a whole match in one
-    # unpaginated response — minutes of play at ~25 frames/second. 30s is not enough.
     request_timeout_seconds=180.0,
     default_records_json_path=("data",),
     default_page_size=_PAGE_SIZE,
-    # Left at watermark polling because that strategy already plans a FULL extraction when
-    # the entity config declares `load_type=full`, which every BePro entity must. Adding a
-    # second "full reload" strategy would be a synonym, not a behaviour.
     default_sync_strategy="watermark_polling",
     required_credential_keys=frozenset({"access_token"}),
     notes=(

@@ -239,7 +239,6 @@ class TestHttpSessionSecurity:
         RestHttpSession(
             spec, {"username": "u", "password": "p"}, _CountingPolicy(), session=transport
         ).get("/v1/x")
-        # "u:p" base64-encoded
         assert transport.calls[0]["headers"]["Authorization"] == "Basic dTpw"
 
     def test_a_timeout_is_always_set(self) -> None:
@@ -318,7 +317,6 @@ class TestHttpSessionErrorTaxonomy:
         session = RestHttpSession(_spec(), {"access_token": "t"}, policy, session=transport)
         with pytest.raises(RestSourceThrottledError):
             session.get("/v1/x")
-        # observe() saw the 429 even though the provider sent no Retry-After header.
         assert policy.total_throttles == 1
 
 
@@ -393,7 +391,6 @@ class TestConnectorFieldDiscovery:
         assert [f.name for f in contract.fields] == ["name"]
 
     def test_an_empty_entity_still_yields_a_non_empty_contract(self) -> None:
-        # The drift evaluator needs something to compare against on the next run.
         connector, _ = _connector([_FakeHttpResponse(200, {"results": []})])
         contract = connector.discover_queryable_fields(
             "substrate-test", "widget", FieldMode.ALL, [], []
@@ -432,7 +429,6 @@ class TestConnectorQueryBuild:
         )
 
     def test_the_endpoint_path_is_the_query_text_and_values_stay_parameters(self) -> None:
-        # Interpolating a watermark into the path would be the injection this avoids.
         connector, _ = _connector()
         query = connector.build_extraction_query(
             self._contract(connector), LoadType.INCREMENTAL, None, "2026-01-01", None, 7
@@ -456,8 +452,6 @@ class TestConnectorQueryBuild:
         assert query.query_parameters["properties"] == "id,name"
 
     def test_no_projection_parameter_is_sent_when_the_source_documents_none(self) -> None:
-        # Sending an undocumented query parameter to an API that validates its query string
-        # is a 400, not a harmless extra. Projection is opt-in per source (DL-CONN-20).
         connector, _ = _connector()
         query = connector.build_extraction_query(
             self._contract(connector), LoadType.FULL, None, None, None, 7
@@ -508,7 +502,6 @@ class TestConnectorExtraction:
     def test_pagination_continues_until_a_short_page(self) -> None:
         connector, _ = _connector(
             [
-                # The first response is consumed by field discovery below.
                 _FakeHttpResponse(200, {"results": [{"id": "0"}]}),
                 _FakeHttpResponse(200, {"results": [{"id": "1"}, {"id": "2"}]}),
                 _FakeHttpResponse(200, {"results": [{"id": "3"}]}),
@@ -554,7 +547,6 @@ class TestConnectorWriteBack:
             connector.write_back([{"id": "1"}], writeback_session)
 
     def test_a_record_without_an_external_id_is_refused(self) -> None:
-        # An upsert with no external id would create a duplicate on every retry.
         connector, _ = _connector()
         writeback_session, transport = _session()
         with pytest.raises(RestSourceRequestError, match="external id"):
@@ -618,7 +610,6 @@ class TestConnectorErrorClassification:
 
 class TestAllowlistDeclarationSemantics:
     def test_a_source_declaring_no_hostnames_is_unrestricted_by_declaration(self) -> None:
-        # Documented deliberately: the gap is visible in the registry, not implied by omission.
         declaration = SourceCapabilityDeclaration(
             source_id="unrestricted-test",
             display_name="Unrestricted Test",

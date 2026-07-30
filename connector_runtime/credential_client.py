@@ -10,7 +10,7 @@ this module promotes that proven pattern to a single, parameterized base so that
 Salesforce, NetSuite, MySQL RDS, and Sage all share one implementation.
 
 Secret path convention is caller-owned: each adapter resolves its own
-``secret_id`` (e.g. ``edl/sources/salesforce/credentials``) and passes
+``secret_id`` (e.g. ``datalake/<env>/sources/salesforce/credentials``) and passes
 it in.  This client only knows how to fetch, parse, validate, and cache — it
 never constructs source-specific secret paths itself.
 
@@ -37,12 +37,6 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Re-fetch credentials this often to pick up Secrets Manager rotation (OWASP A07).
-# Reduced from one hour to five minutes (DL-CFG-06): the previous bound meant a rotated
-# or corrected credential could wait an hour, and it was unalarmed. Sized against the
-# per-run invocation rate rather than picked as a round number — one extra
-# GetSecretValue per connection per five minutes is negligible against the Secrets
-# Manager request budget, and `force_refresh()` covers the rotation case outright.
 DEFAULT_CREDENTIAL_CACHE_TTL_SECONDS: Final[int] = 300
 
 
@@ -72,7 +66,7 @@ class SecretsManagerCredentialClient:
     Usage::
 
         creds_client = SecretsManagerCredentialClient(
-            secret_id="edl/sources/salesforce/credentials",
+            secret_id=secret_path("sources", "salesforce", "credentials"),
             region_name="us-east-1",
             required_keys=frozenset({"instance_url", "client_id", "client_secret"}),
             source_label="Salesforce",
@@ -108,7 +102,6 @@ class SecretsManagerCredentialClient:
         self._log_fields = log_fields or {}
         self._secrets_client = boto3.client("secretsmanager", region_name=region_name)
 
-        # Cache state — populated lazily on first get_credentials() call.
         self._cached: dict[str, str] | None = None
         self._loaded_at: float = 0.0  # monotonic timestamp of last successful fetch
 
@@ -162,8 +155,6 @@ class SecretsManagerCredentialClient:
     def cache_ttl_seconds(self) -> int:
         """The declared TTL bound; the invalidation basis is TTL-bounded (DL-CFG-04)."""
         return self._cache_ttl_seconds
-
-    # ── Private ────────────────────────────────────────────────────────────────
 
     def _is_cache_expired(self) -> bool:
         return (time.monotonic() - self._loaded_at) >= self._cache_ttl_seconds

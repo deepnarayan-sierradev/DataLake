@@ -46,11 +46,6 @@ def _rule_set(*rules, version="1.0.0"):
     )
 
 
-# ---------------------------------------------------------------------------
-# Deterministic matching
-# ---------------------------------------------------------------------------
-
-
 class TestDeterministicMatching:
     def test_exact_email_match(self):
         rule = _det_rule(["email"])
@@ -85,7 +80,6 @@ class TestDeterministicMatching:
     def test_multi_field_all_must_match(self):
         rule = _det_rule(["first_name", "last_name"])
         engine = MatchRuleEngine(_rule_set(rule))
-        # first_name matches, last_name doesn't → no match
         decisions = engine.compare(
             {"id": "1", "first_name": "alice", "last_name": "smith"},
             {"id": "2", "first_name": "alice", "last_name": "jones"},
@@ -102,11 +96,6 @@ class TestDeterministicMatching:
             "id",
         )
         assert decisions[0].is_match is False
-
-
-# ---------------------------------------------------------------------------
-# Probabilistic matching
-# ---------------------------------------------------------------------------
 
 
 class TestProbabilisticMatching:
@@ -139,11 +128,6 @@ class TestProbabilisticMatching:
             "id",
         )
         assert 0.0 <= decisions[0].confidence_score <= 1.0
-
-
-# ---------------------------------------------------------------------------
-# Clustering
-# ---------------------------------------------------------------------------
 
 
 class TestClustering:
@@ -191,11 +175,6 @@ class TestClustering:
         assert all(d.rule_set_version == "1.0.0" for d in decisions)
 
 
-# ---------------------------------------------------------------------------
-# Normalisation helpers
-# ---------------------------------------------------------------------------
-
-
 class TestNormalisationHelpers:
     def test_normalise_unicode(self):
         assert _normalise("Ãlicé") == "alice"
@@ -216,11 +195,6 @@ class TestNormalisationHelpers:
         assert _token_set_ratio("alice", "bob") == 0.0
 
 
-# ---------------------------------------------------------------------------
-# stable_cluster_id
-# ---------------------------------------------------------------------------
-
-
 class TestStableClusterId:
     def test_same_inputs_produce_same_id(self):
         assert stable_cluster_id("sf", "customer", "k1") == stable_cluster_id(
@@ -234,11 +208,6 @@ class TestStableClusterId:
 
     def test_id_starts_with_gid_prefix(self):
         assert stable_cluster_id("sf", "customer", "k1").startswith("gid-")
-
-
-# ---------------------------------------------------------------------------
-# Uncovered branches — targeted gap-fill tests
-# ---------------------------------------------------------------------------
 
 
 class TestClusteringWithBlocking:
@@ -267,7 +236,6 @@ class TestClusteringWithBlocking:
             {"id": "3", "email": "bob@other.com"},
         ]
         clusters, _ = engine.cluster(records, "id")
-        # Records 1 and 2 share the same email → same cluster; 3 is separate
         assert len(clusters) == 2
 
     def test_cluster_with_blocking_no_cross_block_comparisons(self):
@@ -292,7 +260,6 @@ class TestClusteringWithBlocking:
             {"id": "2", "email": "x@domain-b.com"},
         ]
         clusters, _decisions = engine.cluster(records, "id")
-        # Different domains → different blocks → no cross-block decisions → 2 clusters
         assert len(clusters) == 2
 
 
@@ -313,7 +280,6 @@ class TestProbabilisticNullField:
         engine = MatchRuleEngine(
             MatchRuleSet(entity_type="x", rule_set_version="v1", rules=(rule,))
         )
-        # phone is absent on both records → field skipped, score based on name only
         decisions = engine.compare(
             {"id": "1", "name": "Alice Smith"},
             {"id": "2", "name": "Alice Smith"},
@@ -333,25 +299,19 @@ class TestFieldSimilarityHelpers:
         assert _field_similarity("hello world", "hello world", "token_set") == 1.0
 
     def test_token_set_empty_string_returns_zero(self):
-        # Covers _token_set_ratio empty tokens branch
         assert _field_similarity("", "bob", "token_set") == 0.0
 
     def test_unknown_similarity_kind_falls_back_to_exact_match(self):
-        # Covers the fallback "exact" branch for unrecognised kind
         assert _field_similarity("alice", "alice", "unknown_kind") == 1.0
         assert _field_similarity("alice", "bob", "unknown_kind") == 0.0
 
     def test_exact_similarity_kind_matching_values(self):
-        # Covers line 335: `return 1.0 if a_norm == b_norm else 0.0` inside kind=="exact"
         assert _field_similarity("alice", "alice", "exact") == 1.0
 
     def test_exact_similarity_kind_non_matching_values(self):
-        # Covers the else-branch (return 0.0) of the same line
         assert _field_similarity("alice", "bob", "exact") == 0.0
 
     def test_probabilistic_multi_field_all_present_loops_twice(self):
-        # Covers branch 300->291: loop iterates ≥2 times and appends matched_fields
-        # (sim > 0.5 for first field, loop continues to second field)
         rule = ProbabilisticMatchRule(
             rule_id="multi-exact",
             fields=(
@@ -373,14 +333,10 @@ class TestFieldSimilarityHelpers:
         assert "country" in decisions[0].matched_fields
 
     def test_probabilistic_multi_field_low_similarity_skips_append_then_loops(self):
-        # Covers branch 300->291 False path: sim <= 0.5 (no append) but loop
-        # still has another field → loop body ends without appending and iterates again.
         rule = ProbabilisticMatchRule(
             rule_id="multi-prob",
             fields=(
-                # First field: completely different strings → sim ≈ 0.0 (≤ 0.5, no append)
                 ProbabilisticMatchField(field_name="name", weight=0.2, similarity_kind="exact"),
-                # Second field: exact match → sim = 1.0 (> 0.5, appended)
                 ProbabilisticMatchField(field_name="country", weight=0.8, similarity_kind="exact"),
             ),
             match_threshold=0.7,
@@ -393,21 +349,17 @@ class TestFieldSimilarityHelpers:
             {"id": "2", "name": "Zork", "country": "US"},
             "id",
         )
-        # name has sim=0 (not appended), country has sim=1.0 (appended)
         assert "country" in decisions[0].matched_fields
         assert "name" not in decisions[0].matched_fields
 
     def test_jaro_winkler_no_common_chars_returns_zero(self):
-        # Covers the `if matches == 0: return 0.0` branch
         assert _jaro_winkler("aaa", "bbb") == 0.0
 
     def test_jaro_winkler_with_transpositions(self):
-        # Covers the transpositions increment branch
         score = _jaro_winkler("MARTHA", "MARHTA")
         assert score > 0.9  # classic jaro-winkler example
 
     def test_jaro_winkler_one_char_prefix_bonus(self):
-        # Covers the prefix loop and winkler adjustment
         score_with_common_prefix = _jaro_winkler("john", "johnny")
         score_no_prefix = _jaro_winkler("john", "alice")
         assert score_with_common_prefix > score_no_prefix

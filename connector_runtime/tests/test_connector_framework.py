@@ -86,7 +86,7 @@ class TestRateLimitHeaderParsing:
         assert parse_rate_limit_headers({"X-RateLimit-Remaining": "0"}).throttled is True
 
     def test_status_429_marks_a_throttle(self):
-        assert parse_rate_limit_headers({"x-edl-response-status": "429"}).throttled is True
+        assert parse_rate_limit_headers({"x-datalake-response-status": "429"}).throttled is True
 
     def test_healthy_headers_are_not_a_throttle(self):
         observation = parse_rate_limit_headers(
@@ -195,7 +195,7 @@ class TestRetryAfterPolicy:
         policy = RetryAfterRateLimitPolicy(connection_id="c-one", sleep=slept.append)
         policy.acquire()
         assert slept == []
-        policy.observe({"Retry-After": "4", "x-edl-response-status": "429"})
+        policy.observe({"Retry-After": "4", "x-datalake-response-status": "429"})
         policy.acquire()
         assert len(slept) == 1
         assert 2.0 <= slept[0] <= 4.0
@@ -205,54 +205,49 @@ class TestRetryAfterPolicy:
         policy = RetryAfterRateLimitPolicy(
             connection_id="c-one", base_backoff_seconds=1.0, sleep=slept.append
         )
-        policy.observe({"x-edl-response-status": "429"})
+        policy.observe({"x-datalake-response-status": "429"})
         policy.acquire()
         first = slept[-1]
-        policy.observe({"x-edl-response-status": "429"})
+        policy.observe({"x-datalake-response-status": "429"})
         policy.acquire()
         assert slept[-1] > first
 
     def test_success_resets_the_consecutive_counter(self):
         policy = RetryAfterRateLimitPolicy(connection_id="c-one", sleep=lambda s: None)
-        policy.observe({"x-edl-response-status": "429"})
+        policy.observe({"x-datalake-response-status": "429"})
         assert policy.consecutive_throttles == 1
-        policy.observe({"x-edl-response-status": "200"})
+        policy.observe({"x-datalake-response-status": "200"})
         assert policy.consecutive_throttles == 0
 
     def test_sustained_throttling_asks_the_caller_to_checkpoint(self):
         policy = RetryAfterRateLimitPolicy(
             connection_id="c-one", sustained_throttle_limit=2, sleep=lambda s: None
         )
-        policy.observe({"x-edl-response-status": "429"})
-        policy.observe({"x-edl-response-status": "429"})
+        policy.observe({"x-datalake-response-status": "429"})
+        policy.observe({"x-datalake-response-status": "429"})
         with pytest.raises(SustainedThrottleError, match="Checkpoint the extraction"):
             policy.acquire()
 
     def test_a_long_backoff_asks_to_be_resumed_rather_than_sleeping(self):
-        # L14: sleeping inside a Lambda is billed wall-clock inside a 900s budget, so a wait the
-        # policy cannot absorb becomes a checkpoint the state machine's Wait state covers for free.
         slept: list[float] = []
         policy = RetryAfterRateLimitPolicy(connection_id="c-one", sleep=slept.append)
-        policy.observe({"Retry-After": "99999", "x-edl-response-status": "429"})
+        policy.observe({"Retry-After": "99999", "x-datalake-response-status": "429"})
         with pytest.raises(ResumeAfterBackoffRequired) as caught:
             policy.acquire()
         assert slept == [], "the policy slept instead of handing the wait to the state machine"
-        # Still capped: the caller is told to wait the bounded amount, not the provider's 99999s.
         assert caught.value.retry_after_seconds <= 60.0
         assert caught.value.connection_id == "c-one"
 
     def test_a_short_backoff_is_still_absorbed_in_process(self):
-        # Handing a two-second wait to the state machine would cost a state transition to save
-        # two seconds of Lambda time, so short waits stay in-process.
         slept: list[float] = []
         policy = RetryAfterRateLimitPolicy(connection_id="c-two", sleep=slept.append)
-        policy.observe({"Retry-After": "2", "x-edl-response-status": "429"})
+        policy.observe({"Retry-After": "2", "x-datalake-response-status": "429"})
         policy.acquire()
         assert slept and slept[0] <= 2.0
 
     def test_telemetry_reports_hits_and_backoff(self):
         policy = RetryAfterRateLimitPolicy(connection_id="c-one", sleep=lambda s: None)
-        policy.observe({"x-edl-response-status": "429"})
+        policy.observe({"x-datalake-response-status": "429"})
         policy.acquire()
         telemetry = telemetry_for(policy, checkpointed=True)
         assert telemetry.hits == 1

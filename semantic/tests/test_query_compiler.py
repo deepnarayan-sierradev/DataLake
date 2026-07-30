@@ -31,8 +31,6 @@ def _model() -> SemanticModel:
     return SemanticModel(tenant_code="demo", model_version="v1", entities=(entity,))
 
 
-# The audited stand-in for "no end-user claim applies here". Tests used `None`, which is the
-# fail-open this parameter was made non-nullable to remove.
 _UNSCOPED = unrestricted_predicate(UnrestrictedScopeReason.DEFINITION_VALIDATION)
 
 _COMPILER = QueryCompiler(_model())
@@ -47,9 +45,6 @@ class TestCompile:
         compiled = _COMPILER.compile(
             req, granted_access_tags=frozenset(), scope_predicate=_UNSCOPED
         )
-        # Columns are view-qualified since DL-SEM-01: an unqualified column is ambiguous
-        # the moment a join is present. Every statement now carries a scope clause — even an
-        # unrestricted read's tautology — so there is no compiled SQL with no WHERE.
         assert compiled.sql == (
             "SELECT entity_data.industry AS industry, "
             "SUM(entity_data.annual_revenue) AS total_revenue, "
@@ -68,8 +63,6 @@ class TestCompile:
         compiled = _COMPILER.compile(
             req, granted_access_tags=frozenset(), scope_predicate=_UNSCOPED
         )
-        # The scope clause is prepended, so a caller's filter is ANDed after it — never before,
-        # and never in a position where it could shadow the scope clause.
         assert "entity_data.industry = ?" in compiled.sql
         assert compiled.sql.index("scope_unit_id") < compiled.sql.index("entity_data.industry = ?")
         assert compiled.parameters == ["Tech"]

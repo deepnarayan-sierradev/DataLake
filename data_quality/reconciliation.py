@@ -2,7 +2,7 @@
 Reconciliation to source and cross-layer (DL-DQ-02, DL-DQ-03, DL-DQ-04).
 
 Comparator strategies — count, monetary sum, min/max watermark, deterministic sampled field
-compare — producing a signed `EdlReconciliationReport`. Financial entities reconcile on
+compare — producing a signed `datalake-reconciliation-reports-dev`. Financial entities reconcile on
 monetary sums, not only counts (§3.6), and the measure definition comes from the semantic
 layer so "revenue" reconciles against the same definition the dashboards show.
 
@@ -15,7 +15,6 @@ from __future__ import annotations
 import abc
 import hashlib
 import json
-import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -27,19 +26,16 @@ import boto3
 
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-_TABLE_NAME: Final[str] = "EdlReconciliationReport"
 
-# Default tolerances. Counts may drift slightly between layers on a live source; monetary
-# sums must not — a cent of unexplained variance in revenue is a real finding.
 DEFAULT_COUNT_TOLERANCE_PCT: Final[float] = 0.1
 DEFAULT_SUM_TOLERANCE_PCT: Final[float] = 0.0
 
-# Deterministic sampling divisor; the same rows are sampled across runs so drift is visible.
 DEFAULT_SAMPLE_MODULO: Final[int] = 100
 
 
@@ -230,11 +226,6 @@ def _not_comparable(
     )
 
 
-# ---------------------------------------------------------------------------
-# Sampled field comparison (DL-DQ-03)
-# ---------------------------------------------------------------------------
-
-
 def deterministic_sample(
     records: Sequence[dict[str, Any]], natural_key_field: str, modulo: int = DEFAULT_SAMPLE_MODULO
 ) -> list[dict[str, Any]]:
@@ -299,11 +290,6 @@ def _normalise(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
-
-
-# ---------------------------------------------------------------------------
-# Report
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -374,7 +360,7 @@ class ReconciliationReportRepository:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("RECONCILIATION_REPORT_TABLE") or _TABLE_NAME
+        table_name = require_env("RECONCILIATION_REPORT_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def save(self, report: ReconciliationReport) -> str:

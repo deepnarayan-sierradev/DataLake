@@ -24,7 +24,7 @@ class _StubEngine(SetBasedQueryEngine):
 
 class TestValidateInputs:
     def test_valid_inputs_pass(self):
-        validate_inputs({"curated": "s3://edl-curated-1/demo/curated/crm/acct"})
+        validate_inputs({"curated": "s3://datalake-curated-1/demo/curated/crm/acct"})
 
     def test_empty_inputs_rejected(self):
         with pytest.raises(SetBasedQueryError):
@@ -40,13 +40,13 @@ class TestValidateInputs:
 
     def test_traversal_prefix_rejected(self):
         with pytest.raises(ValueError):
-            validate_inputs({"v": "s3://edl-curated-1/../etc"})
+            validate_inputs({"v": "s3://datalake-curated-1/../etc"})
 
 
 class TestValidateOutputTarget:
     def test_valid_target_returns_object_uri(self):
-        uri = validate_output_target("edl-analytics-1", "demo/analytics/company")
-        assert uri == "s3://edl-analytics-1/demo/analytics/company/data.parquet"
+        uri = validate_output_target("datalake-analytics-1", "demo/analytics/company")
+        assert uri == "s3://datalake-analytics-1/demo/analytics/company/data.parquet"
 
     def test_unsafe_bucket_rejected(self):
         with pytest.raises(SetBasedQueryError):
@@ -54,7 +54,7 @@ class TestValidateOutputTarget:
 
     def test_traversal_prefix_rejected(self):
         with pytest.raises(ValueError):
-            validate_output_target("edl-analytics-1", "../etc")
+            validate_output_target("datalake-analytics-1", "../etc")
 
 
 class TestRegistry:

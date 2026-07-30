@@ -70,7 +70,7 @@ open decision rather than silently modelled. See `docs/SOURCE_API_FIDELITY_AUDIT
   Highest priority: it serves rows 5, 10, 11 of the source list.
 - **DL-CONN-02** Extend the HubSpot connector with a **bi-directional write path** for the Franchise
   Management System use case (§3.8). Writes are opt-in per entity, idempotent (external-id upsert),
-  rate-limit aware, and audited to `EdlRunAuditLog` with a distinct `stage` value. A write path must
+  rate-limit aware, and audited to `datalake-run-audit-log-dev` with a distinct `stage` value. A write path must
   never be enabled by the same config flag that enables reads.
 - **DL-CONN-03** Deliver a **Maid Central** connector.
 - **DL-CONN-04** Deliver a **ServMan Pro** connector. Vendor API is still under construction —
@@ -162,10 +162,10 @@ No new pipeline layers. Additions:
 
 | Store | Change |
 |---|---|
-| `EdlEntityExtractionConfig` | new attributes: `sync_strategy`, `rate_limit_policy`, `pagination_strategy`, `writeback_enabled` |
-| `EdlWebhookEventDedup` (new) | PK `tenant_code`, SK `provider_event_id`, TTL 48h — replay protection |
-| `EdlRunAuditLog` | new `stage` values `webhook_ingest`, `writeback` |
-| Secrets Manager | one shell per new source at `edl/sources/{source_id}/credentials` |
+| `datalake-entity-extraction-config-dev` | new attributes: `sync_strategy`, `rate_limit_policy`, `pagination_strategy`, `writeback_enabled` |
+| `datalake-webhook-event-dedup-dev` (new) | PK `tenant_code`, SK `provider_event_id`, TTL 48h — replay protection |
+| `datalake-run-audit-log-dev` | new `stage` values `webhook_ingest`, `writeback` |
+| Secrets Manager | one shell per new source at `datalake/<env>/sources/{source_id}/credentials` |
 
 ---
 

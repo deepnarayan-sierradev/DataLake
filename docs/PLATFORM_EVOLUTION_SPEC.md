@@ -363,10 +363,10 @@ code behind it.
 - config artifacts under existing curated bucket: `semantic-models/{tenant}/{model_version}.json`, `relationship-rules/{tenant}/{entity_type}/{version}.json`, `quality-policies/{tenant}/{entity_id}/{version}.json`, `classification-policies/{tenant}/{entity_id}/{version}.json`, `dashboards/{tenant}/{dashboard_id}/{version}.json`, `agent-config/{tenant}/{version}.json`.
 
 **DynamoDB (new tables, tenant-partitioned from creation):**
-- `EdlTwinIndex` — PK `tenant_code`, SK `entity_type#golden_id` → current twin pointer + edge summary + lifecycle stage.
-- `EdlSemanticModel` — PK `tenant_code`, SK `model_version` → active semantic model pointer.
-- `EdlSavedQuery` — PK `tenant_code`, SK `query_id` → saved/named queries (dashboards & agent reuse).
-- `EdlAgentSession` / `EdlAgentAudit` — PK `tenant_code`, SK `session_id#turn` → agent conversation + verification-loop audit (queries issued, checks passed/failed, sources cited).
+- `datalake-twin-index-dev` — PK `tenant_code`, SK `entity_type#golden_id` → current twin pointer + edge summary + lifecycle stage.
+- `datalake-semantic-model-dev` — PK `tenant_code`, SK `model_version` → active semantic model pointer.
+- `datalake-saved-query-dev` — PK `tenant_code`, SK `query_id` → saved/named queries (dashboards & agent reuse).
+- `datalake-agent-sessions-dev` / `datalake-agent-audit-dev` — PK `tenant_code`, SK `session_id#turn` → agent conversation + verification-loop audit (queries issued, checks passed/failed, sources cited).
 - EP config tables extended with new `Capability` values (`quality_rules`, `classification_policy`, `relationship_rules`, `semantic_model`, `dashboard`, `agent_config`) — no new EP tables required beyond the registry/audit/change-request/limits set.
 
 **Serving store:** twin denormalized views and semantic-model-materialized tables land in the
@@ -427,7 +427,7 @@ inference (v2).
 - **FR-1.6** Edge/twin builds are **idempotent** and replayable (stable edge ids from sorted endpoint golden_ids + relationship type).
 - **FR-1.7** Provenance preserved: every edge and rollup traces to contributing source records (reuse `contributing_source_records`/`field_provenance`).
 
-**Data Model.** `EdlTwinIndex` (pointer + edge summary + stage); S3 `{tenant}/twin/{entity_type}/twin_date=…` (attributes+edges), `{tenant}/relationships/{relationship_type}/run_id=…` (edges), lifecycle-history partition; relationship-rule configs in curated bucket. Optional graph representation materialized into the serving store as denormalized twin views.
+**Data Model.** `datalake-twin-index-dev` (pointer + edge summary + stage); S3 `{tenant}/twin/{entity_type}/twin_date=…` (attributes+edges), `{tenant}/relationships/{relationship_type}/run_id=…` (edges), lifecycle-history partition; relationship-rule configs in curated bucket. Optional graph representation materialized into the serving store as denormalized twin views.
 
 **API/Interfaces.** New `knowledge` module: `RelationshipResolver` (strategy-driven, runs on the set-based substrate), `TwinBuilder`, `TwinRepository`. New Step Functions stage `BuildTwin` after `AnalyticsPublish`, threading `tenant_code` + `entity_type` (same pattern as serving-store stage). Twin read exposed via the control-plane API (`GET /tenants/{tc}/twins/{entity_type}/{golden_id}`, `GET …/expand`).
 
@@ -465,7 +465,7 @@ store/Athena. Out of scope: a full BI modeling GUI (v2 — start with structured
 - **FR-2.6** Metric **lineage**: each metric records the physical columns/joins it derives from.
 - **FR-2.7** Versioned + maker-checker on publish (definitions are high-blast-radius).
 
-**Data Model.** `EdlSemanticModel` (active-version pointer); S3 `semantic-models/{tenant}/{version}.json` (entities/dimensions/measures/metrics/joins/access-tags). No data movement.
+**Data Model.** `datalake-semantic-model-dev` (active-version pointer); S3 `semantic-models/{tenant}/{version}.json` (entities/dimensions/measures/metrics/joins/access-tags). No data movement.
 
 **API/Interfaces.** `semantic` service: `SemanticModelRegistry` (load/validate/version), `QueryCompiler` (semantic request → parameterized SQL), `SemanticQueryService` (compile+execute, tenant-scoped). Control-plane read: `POST /tenants/{tc}/semantic/query` (structured request), `GET …/semantic/model`.
 
@@ -504,7 +504,7 @@ scheduling.
 - **FR-3.6** Read-only + permission-scoped: the agent inherits the caller's semantic access tags (cannot surface metrics the user can't see).
 - **FR-3.7** Model/provider config is tenant-scoped and stored securely (API keys in Secrets Manager w/ CMK).
 
-**Data Model.** `EdlSavedQuery`; `EdlAgentSession`/`EdlAgentAudit` (turn-level verification audit); `agent-config/{tenant}/{version}.json` (model, tool wiring, limits). No raw data stored in sessions beyond result references.
+**Data Model.** `datalake-saved-query-dev`; `datalake-agent-sessions-dev`/`datalake-agent-audit-dev` (turn-level verification audit); `agent-config/{tenant}/{version}.json` (model, tool wiring, limits). No raw data stored in sessions beyond result references.
 
 **API/Interfaces.** New **standalone service** (own deployable, like the config service) — not on the ingestion path. `POST /tenants/{tc}/agent/ask` (streamed), `GET/POST …/agent/saved-queries`, `POST …/agent/saved-queries/{id}/run`. Consumes `SemanticQueryService` only.
 
@@ -540,7 +540,7 @@ existing QuickSight.
 - **FR-4.4** Export/report (PDF/CSV) and optional scheduled delivery.
 - **FR-4.5** Optional: register/link existing QuickSight dashboards for continuity.
 
-**Data Model.** `dashboards/{tenant}/{dashboard_id}/{version}.json`; reuses `EdlSavedQuery`.
+**Data Model.** `dashboards/{tenant}/{dashboard_id}/{version}.json`; reuses `datalake-saved-query-dev`.
 
 **API/Interfaces.** Config surface (C6) + a read `GET /tenants/{tc}/dashboards/{id}` returning definition; data via `SemanticQueryService`.
 

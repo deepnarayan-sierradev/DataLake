@@ -40,10 +40,6 @@ _BUCKET = "test-config-bucket"
 _ANALYTICS_BUCKET = "test-analytics-bucket"
 _TENANT = "acme-corp"
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 
 @pytest.fixture()
 def s3_client():
@@ -277,11 +273,6 @@ _PERSON_SURVIVORSHIP = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Helper: seed S3 objects for a single entity
-# ---------------------------------------------------------------------------
-
-
 def _seed_company(client) -> None:
     _put(client, "acme-corp/entity-resolution/company/match_rules_v1.json", _COMPANY_MATCH_RULES)
     _put(client, "acme-corp/entity-resolution/company/survivorship_v1.json", _COMPANY_SURVIVORSHIP)
@@ -300,11 +291,6 @@ def _seed_person(client) -> None:
         "acme-corp/entity-resolution/person/latest.json",
         {"match_rules_version": "v1", "survivorship_version": "v1"},
     )
-
-
-# ---------------------------------------------------------------------------
-# Tests: company match rules
-# ---------------------------------------------------------------------------
 
 
 def test_load_company_match_rules_structure(s3_client):
@@ -357,11 +343,6 @@ def test_load_company_blocking_strategy(s3_client):
     assert blocking.max_block_size == 500
 
 
-# ---------------------------------------------------------------------------
-# Tests: person survivorship
-# ---------------------------------------------------------------------------
-
-
 def test_load_person_survivorship_output_fields(s3_client):
     _seed_person(s3_client)
     registry = ResolutionConfigRegistry(s3_bucket=_BUCKET, region_name=_REGION)
@@ -395,11 +376,6 @@ def test_load_person_default_strategy(s3_client):
     assert config.survivorship_policy.default_strategy == SurvivorshipStrategy.FIRST_NON_NULL
 
 
-# ---------------------------------------------------------------------------
-# Tests: latest.json pointer resolution
-# ---------------------------------------------------------------------------
-
-
 def test_latest_pointer_resolves_version(s3_client):
     """When latest.json exists it should be used to resolve version."""
     _put(s3_client, "acme-corp/entity-resolution/company/match_rules_v1.json", _COMPANY_MATCH_RULES)
@@ -429,11 +405,6 @@ def test_explicit_version_bypasses_pointer(s3_client):
     assert config.match_rule_set.rule_set_version == "v1"
 
 
-# ---------------------------------------------------------------------------
-# Tests: caching
-# ---------------------------------------------------------------------------
-
-
 def test_registry_caches_loaded_config(s3_client):
     """Second load() call returns cached object — S3 is not called again."""
     _seed_company(s3_client)
@@ -443,11 +414,6 @@ def test_registry_caches_loaded_config(s3_client):
     second = registry.load("company", _TENANT)
 
     assert first is second  # same object in cache
-
-
-# ---------------------------------------------------------------------------
-# Tests: error cases
-# ---------------------------------------------------------------------------
 
 
 def test_not_found_for_missing_entity_type(s3_client):
@@ -524,7 +490,6 @@ def test_parse_error_when_attribute_rule_field_not_in_output_fields(s3_client):
         "output_fields": ["full_name"],  # email_address not in output_fields
         "default_strategy": "first_non_null",
         "attribute_rules": [
-            # This field is not in output_fields — should raise
             {
                 "canonical_field": "email_address",
                 "strategy": "source_priority",
@@ -552,11 +517,6 @@ def test_unsafe_version_rejected(s3_client):
         registry.load("company", _TENANT, match_rules_version="../../v1")
 
 
-# ---------------------------------------------------------------------------
-# Tests: publish()
-# ---------------------------------------------------------------------------
-
-
 def test_publish_writes_three_s3_objects(s3_client):
     registry = ResolutionConfigRegistry(s3_bucket=_BUCKET, region_name=_REGION)
     mr_key, sv_key = registry.publish(
@@ -569,7 +529,6 @@ def test_publish_writes_three_s3_objects(s3_client):
     assert mr_key == "acme-corp/entity-resolution/company/match_rules_v1.json"
     assert sv_key == "acme-corp/entity-resolution/company/survivorship_v1.json"
 
-    # Verify all three objects exist in S3
     keys_in_bucket = {
         obj["Key"]
         for obj in s3_client.list_objects_v2(
@@ -605,7 +564,6 @@ def test_publish_invalidates_cache(s3_client):
     first = registry.load("company", _TENANT)
     assert first is registry.load("company", _TENANT)  # cached
 
-    # Publish new version (still v1 content, but triggers cache invalidation)
     registry.publish(
         entity_type="company",
         tenant_code=_TENANT,
@@ -613,16 +571,10 @@ def test_publish_invalidates_cache(s3_client):
         survivorship_raw=_COMPANY_SURVIVORSHIP,
     )
 
-    # Cache cleared — next load goes back to S3
     assert not any(
         k.startswith(f"{_TENANT}/company/")
         for k in registry._cache  # type: ignore[attr-defined]
     )
-
-
-# ---------------------------------------------------------------------------
-# Tests: GoldenRecordPublisher.from_registry factory
-# ---------------------------------------------------------------------------
 
 
 def test_from_registry_constructs_publisher(s3_client):
@@ -645,22 +597,14 @@ def test_from_registry_constructs_publisher(s3_client):
         assert publisher._survivorship._policy.entity_type == "company"
 
 
-# ---------------------------------------------------------------------------
-# Tests: uncovered branches — targeted gap-fill
-# ---------------------------------------------------------------------------
-
-
 def test_load_without_latest_pointer_defaults_to_v1(s3_client):
     """_load_latest_pointer fallback: no latest.json → default to v1."""
-    # Seed the actual v1 files but deliberately omit latest.json
     _put(s3_client, "acme-corp/entity-resolution/company/match_rules_v1.json", _COMPANY_MATCH_RULES)
     _put(
         s3_client, "acme-corp/entity-resolution/company/survivorship_v1.json", _COMPANY_SURVIVORSHIP
     )
-    # No latest.json uploaded
 
     registry = ResolutionConfigRegistry(s3_bucket=_BUCKET, region_name=_REGION)
-    # load("latest") should fall back to v1 automatically
     config = registry.load("company", _TENANT)
     assert config.match_rule_set.rule_set_version == "v1"
 
@@ -696,7 +640,6 @@ def test_parse_error_for_missing_survivorship_required_field(s3_client):
     """_parse_survivorship_policy raises ResolutionConfigParseError for missing 'policy_version'."""
     bad_sv = {
         "entity_type": "company",
-        # policy_version intentionally missing
         "output_fields": [],
         "default_strategy": "first_non_null",
         "attribute_rules": [],
@@ -797,7 +740,6 @@ def test_partial_latest_version_only_survivorship_is_latest(s3_client):
     """
     _seed_company(s3_client)
     registry = ResolutionConfigRegistry(s3_bucket=_BUCKET, region_name=_REGION)
-    # Explicit match_rules_version, 'latest' survivorship_version (default)
     config = registry.load("company", _TENANT, match_rules_version="v1")
     assert config.match_rule_set.rule_set_version == "v1"
     assert config.survivorship_policy.policy_version == "v1"
@@ -810,7 +752,6 @@ def test_partial_latest_version_only_match_rules_is_latest(s3_client):
     """
     _seed_company(s3_client)
     registry = ResolutionConfigRegistry(s3_bucket=_BUCKET, region_name=_REGION)
-    # 'latest' match_rules_version (default), explicit survivorship_version
     config = registry.load("company", _TENANT, survivorship_version="v1")
     assert config.match_rule_set.rule_set_version == "v1"
     assert config.survivorship_policy.policy_version == "v1"
@@ -824,7 +765,6 @@ def test_survivorship_with_no_output_fields_skips_validation(s3_client):
     passthrough_sv = {
         "entity_type": "company",
         "policy_version": "v1",
-        # No output_fields key → defaults to [] → validation block skipped
         "default_strategy": "first_non_null",
         "attribute_rules": [],
     }

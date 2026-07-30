@@ -105,7 +105,6 @@ class TestReferentialIntegrityCheck:
         assert outcome.exceptions[0].sample_keys == ("c9",)
 
     def test_null_references_are_not_orphans(self):
-        # A nullable foreign key is a modelling choice, not an integrity failure.
         outcome = self._check().evaluate([{"company_id": None}, {"company_id": ""}], _CONTEXT)
         assert outcome.passed is True
 
@@ -140,7 +139,6 @@ class TestDateValidationCheck:
         assert "pre-epoch" in outcome.exceptions[0].sample_keys[0]
 
     def test_tomorrow_is_within_tolerance(self):
-        # A job booked for tomorrow is normal; only implausible futures are anomalies.
         outcome = self._check().evaluate([{"created_at": "2026-07-29"}], _CONTEXT)
         assert outcome.passed is True
 

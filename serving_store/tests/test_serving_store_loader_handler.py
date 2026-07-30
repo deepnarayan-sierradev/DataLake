@@ -13,12 +13,13 @@ import structlog
 from moto import mock_aws
 
 import serving_store.serving_store_loader_handler as handler_module
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from serving_store.loaders.mysql_rds_loader import ServingStoreLoadResult
 from serving_store.serving_store_loader_handler import _validate_event, lambda_handler
 
 _REGION = "us-east-1"
-_BUCKET = "edl-analytics-test"
-_CONFIG_TABLE = "EdlServingStoreConfig"
+_BUCKET = "datalake-analytics-test"
+_CONFIG_TABLE = RESOURCE_NAME_ENVIRONMENT["SERVING_STORE_CONFIG_TABLE"]
 _SECRET_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:test"
 
 _BASE_EVENT: dict[str, Any] = {
@@ -192,7 +193,6 @@ class TestRunServingStoreLoad:
                 captured["init_kwargs"] = kwargs
 
             def apply_statements(self, statements, tenant_code, table_name) -> int:
-                # DL-SERV-07: the loader applies the RLS policy after the table exists.
                 captured["rls_statements"] = list(statements)
                 return len(statements)
 

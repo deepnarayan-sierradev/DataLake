@@ -62,9 +62,6 @@ class ConversationalAgent:
         engine: SetBasedQueryEngine,
         entity_uri_resolver: Callable[[str], str],
         granted_access_tags: frozenset[str],
-        # The agent queries on a user's behalf, so it carries that user's scope predicate.
-        # Non-nullable: an agent that silently queried tenant-wide would be the worst place for
-        # the fail-open of DL-SCOPE-14, because the caller never sees the SQL it approved.
         scope_predicate: ScopePredicate,
         max_attempts: int = 3,
     ) -> None:

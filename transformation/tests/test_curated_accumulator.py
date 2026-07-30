@@ -26,10 +26,6 @@ import pytest
 
 from transformation.curated_accumulator import CuratedAccumulator, merge_records
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _make_parquet_bytes(records: list[dict[str, Any]]) -> bytes:
     """Serialize a list of dicts to Parquet bytes for mocking S3 responses."""
@@ -37,11 +33,6 @@ def _make_parquet_bytes(records: list[dict[str, Any]]) -> bytes:
     buf = io.BytesIO()
     pq.write_table(table, buf)
     return buf.getvalue()
-
-
-# ---------------------------------------------------------------------------
-# merge_records() — pure function tests (no I/O, no mocks)
-# ---------------------------------------------------------------------------
 
 
 class TestMergeRecordsFirstRun:
@@ -166,12 +157,9 @@ class TestMergeRecordsIdempotency:
         previous = {"1": {"Id": "1", "Name": "Alice"}}
         delta = [{"Id": "1", "Name": "Alice Updated"}, {"Id": "2", "Name": "Bob"}]
         result_first = merge_records(previous, delta, pk_field="Id")
-        # Build state from first result and apply delta again
         state_after_first = {str(r["Id"]): r for r in result_first}
         result_second = merge_records(state_after_first, delta, pk_field="Id")
-        # Same number of records
         assert len(result_first) == len(result_second)
-        # Same values
         first_by_id = {r["Id"]: r for r in result_first}
         second_by_id = {r["Id"]: r for r in result_second}
         assert first_by_id == second_by_id
@@ -182,11 +170,6 @@ class TestMergeRecordsIdempotency:
         previous_copy = dict(previous)
         merge_records(previous, [{"Id": "1", "Name": "Updated"}], pk_field="Id")
         assert previous == previous_copy
-
-
-# ---------------------------------------------------------------------------
-# CuratedAccumulator.accumulate() — integration tests with mocked S3
-# ---------------------------------------------------------------------------
 
 
 class TestCuratedAccumulatorAccumulate:
@@ -203,7 +186,6 @@ class TestCuratedAccumulatorAccumulate:
         mock_s3 = MagicMock()
 
         if previous_records is None:
-            # No previous partition — simulate empty S3
             mock_s3.get_paginator.return_value.paginate.return_value = iter(
                 [{"CommonPrefixes": [], "Contents": []}]
             )
@@ -213,17 +195,14 @@ class TestCuratedAccumulatorAccumulate:
             def _paginate_side_effect(Bucket, Prefix, **kwargs):  # noqa: N803 -- kwarg names mirror the real boto3 S3 API
                 delimiter = kwargs.get("Delimiter")
                 if delimiter == "/" and "curated_date=" not in Prefix:
-                    # List date partitions
                     date_prefix = f"curated/{domain}/{entity_id}/curated_date=2026-07-01/"
                     return iter([{"CommonPrefixes": [{"Prefix": date_prefix}]}])
                 elif delimiter == "/" and "curated_date=" in Prefix:
-                    # List run_id sub-prefixes
                     run_prefix = (
                         f"curated/{domain}/{entity_id}/curated_date=2026-07-01/run_id=run-001/"
                     )
                     return iter([{"CommonPrefixes": [{"Prefix": run_prefix}]}])
                 else:
-                    # List Parquet files
                     data_key = (
                         f"curated/{domain}/{entity_id}/"
                         "curated_date=2026-07-01/run_id=run-001/data.parquet"
@@ -268,8 +247,6 @@ class TestCuratedAccumulatorAccumulate:
             delta, domain="salesforce", entity_id="salesforce-contact", run_id="run-002"
         )
 
-        # previous_record_count is -1 with DuckDB merge (not loaded into Python RAM)
-        # or the actual count when DuckDB falls back to Python merge.
         assert result.previous_record_count in (-1, 3)
         assert result.delta_record_count == 2
         assert result.merged_record_count == 4  # 3 previous + 1 new - 0 deleted

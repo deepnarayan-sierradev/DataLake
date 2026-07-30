@@ -19,9 +19,6 @@ locals {
   })
 }
 
-# ---------------------------------------------------------------------------
-# VPC
-# ---------------------------------------------------------------------------
 
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
@@ -29,37 +26,27 @@ resource "aws_vpc" "this" {
   enable_dns_support   = true
 
   tags = merge(local.common_tags, {
-    Name = "EdlVpc"
+    Name = "${var.name_prefix}-${var.environment}-vpc"
   })
 }
 
-# AWS creates a default security group per VPC that permits all traffic between its own members.
-# It cannot be deleted, so the only way to make it deny is to adopt it and declare no rules — any
-# resource that lands on it by accident then has no connectivity rather than open connectivity.
 resource "aws_default_security_group" "this" {
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "${var.environment}-edl-default-deny-all"
+    Name = "${var.name_prefix}-${var.environment}-default-deny-all"
   })
 }
 
-# ---------------------------------------------------------------------------
-# Internet Gateway (for NAT Gateway egress; no public compute allowed)
-# ---------------------------------------------------------------------------
 
 resource "aws_internet_gateway" "this" {
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "EdlInternetGateway"
+    Name = "${var.name_prefix}-${var.environment}-igw"
   })
 }
 
-# ---------------------------------------------------------------------------
-# Subnets
-# Private: all data lake compute. Public: NAT gateways only.
-# ---------------------------------------------------------------------------
 
 resource "aws_subnet" "private" {
   count = length(var.private_subnet_cidrs)
@@ -70,7 +57,7 @@ resource "aws_subnet" "private" {
   map_public_ip_on_launch = false # Never assign public IPs in private subnets
 
   tags = merge(local.common_tags, {
-    Name = "EdlPrivateSubnet-${var.availability_zones[count.index]}"
+    Name = "${var.name_prefix}-${var.environment}-private-${var.availability_zones[count.index]}"
     Tier = "private"
   })
 }
@@ -84,25 +71,19 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = false # NAT GW EIPs are explicit; no auto-assignment
 
   tags = merge(local.common_tags, {
-    Name = "EdlPublicSubnet-${var.availability_zones[count.index]}"
+    Name = "${var.name_prefix}-${var.environment}-public-${var.availability_zones[count.index]}"
     Tier = "public"
   })
 }
 
-# ---------------------------------------------------------------------------
-# Elastic IPs and NAT Gateways
-# dev: 1 NAT GW (cost optimised). staging/prod: 1 per AZ (HA).
-# ---------------------------------------------------------------------------
 
 resource "aws_eip" "nat" {
-  # This EIP is associated with a NAT gateway, which is the whole point of it. The check looks
-  # for an EC2 instance or network-interface association and finds none.
   #checkov:skip=CKV2_AWS_19:Allocated to a NAT gateway, not an instance.
   count  = var.single_nat_gateway ? 1 : length(var.availability_zones)
   domain = "vpc"
 
   tags = merge(local.common_tags, {
-    Name = "EdlNatEip${count.index + 1}"
+    Name = "${var.name_prefix}-${var.environment}-nat-eip-${count.index + 1}"
   })
 
   depends_on = [aws_internet_gateway.this]
@@ -115,17 +96,13 @@ resource "aws_nat_gateway" "this" {
   subnet_id     = aws_subnet.public[count.index].id
 
   tags = merge(local.common_tags, {
-    Name = "EdlNatGateway${count.index + 1}"
+    Name = "${var.name_prefix}-${var.environment}-nat-${count.index + 1}"
   })
 
   depends_on = [aws_internet_gateway.this]
 }
 
-# ---------------------------------------------------------------------------
-# Route tables
-# ---------------------------------------------------------------------------
 
-# Public route table — routes to IGW
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
 
@@ -135,7 +112,7 @@ resource "aws_route_table" "public" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "EdlPublicRouteTable"
+    Name = "${var.name_prefix}-${var.environment}-public-rt"
   })
 }
 
@@ -145,7 +122,6 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Private route tables — route to NAT GW (one per AZ in HA mode)
 resource "aws_route_table" "private" {
   count  = var.single_nat_gateway ? 1 : length(var.availability_zones)
   vpc_id = aws_vpc.this.id
@@ -156,7 +132,7 @@ resource "aws_route_table" "private" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "EdlPrivateRouteTable${count.index + 1}"
+    Name = "${var.name_prefix}-${var.environment}-private-rt-${count.index + 1}"
   })
 }
 
@@ -168,12 +144,9 @@ resource "aws_route_table_association" "private" {
   ].id
 }
 
-# ---------------------------------------------------------------------------
-# VPC Flow Logs — mandatory for security monitoring and forensics
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
-  name              = "/aws/vpc/flowlogs/edl"
+  name              = "/aws/vpc/flowlogs/${var.name_prefix}-${var.environment}"
   retention_in_days = var.flow_log_retention_days
   kms_key_id        = var.flow_logs_kms_key_arn
 
@@ -192,7 +165,7 @@ data "aws_iam_policy_document" "vpc_flow_logs_assume_role" {
 }
 
 resource "aws_iam_role" "vpc_flow_logs" {
-  name               = "EdlVpcFlowLogsDeliveryRole"
+  name               = "${var.name_prefix}-vpc-flow-logs-${var.environment}-exec"
   assume_role_policy = data.aws_iam_policy_document.vpc_flow_logs_assume_role.json
 
   tags = local.common_tags
@@ -216,7 +189,7 @@ data "aws_iam_policy_document" "vpc_flow_logs_delivery" {
 }
 
 resource "aws_iam_role_policy" "vpc_flow_logs_delivery" {
-  name   = "EdlVpcFlowLogsDeliveryPolicy"
+  name   = "${var.name_prefix}-vpc-flow-logs-${var.environment}-exec-policy"
   role   = aws_iam_role.vpc_flow_logs.id
   policy = data.aws_iam_policy_document.vpc_flow_logs_delivery.json
 }
@@ -228,17 +201,13 @@ resource "aws_flow_log" "this" {
   vpc_id          = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "EdlVpcFlowLog"
+    Name = "${var.name_prefix}-${var.environment}-flow-log"
   })
 }
 
-# ---------------------------------------------------------------------------
-# Security Group for VPC Interface Endpoints
-# Allow only HTTPS (443) inbound from within the VPC CIDR
-# ---------------------------------------------------------------------------
 
 resource "aws_security_group" "vpc_endpoints" {
-  name        = "EdlVpcEndpointSg"
+  name        = "${var.name_prefix}-vpc-endpoint-${var.environment}-sg"
   description = "Allow HTTPS inbound from VPC CIDR for interface VPC endpoints"
   vpc_id      = aws_vpc.this.id
 
@@ -250,10 +219,6 @@ resource "aws_security_group" "vpc_endpoints" {
     cidr_blocks = [var.vpc_cidr]
   }
 
-  # Egress: allow HTTPS outbound to VPC CIDR only.
-  # Interface endpoints respond on port 443 back into the VPC — the SG
-  # must allow this return traffic outbound. Limiting to VPC CIDR prevents
-  # the endpoint SG from being used to reach the public internet.
   egress {
     description = "HTTPS outbound to VPC CIDR (endpoint responses)"
     from_port   = 443
@@ -263,14 +228,10 @@ resource "aws_security_group" "vpc_endpoints" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "EdlVpcEndpointSg"
+    Name = "${var.name_prefix}-vpc-endpoint-${var.environment}-sg"
   })
 }
 
-# ---------------------------------------------------------------------------
-# VPC Gateway Endpoints (free — no hourly charge)
-# S3 and DynamoDB use Gateway endpoints for private routing
-# ---------------------------------------------------------------------------
 
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.this.id
@@ -282,7 +243,7 @@ resource "aws_vpc_endpoint" "s3" {
   )
 
   tags = merge(local.common_tags, {
-    Name = "EdlS3GatewayEndpoint"
+    Name = "${var.name_prefix}-${var.environment}-s3-gateway-endpoint"
   })
 }
 
@@ -293,13 +254,10 @@ resource "aws_vpc_endpoint" "dynamodb" {
   route_table_ids   = aws_route_table.private[*].id
 
   tags = merge(local.common_tags, {
-    Name = "EdlDynamodbGatewayEndpoint"
+    Name = "${var.name_prefix}-${var.environment}-dynamodb-gateway-endpoint"
   })
 }
 
-# ---------------------------------------------------------------------------
-# VPC Interface Endpoints (charged — conditional on var flags for cost control)
-# ---------------------------------------------------------------------------
 
 locals {
   interface_endpoints = {
@@ -351,6 +309,6 @@ resource "aws_vpc_endpoint" "interface" {
   private_dns_enabled = each.value.private_dns
 
   tags = merge(local.common_tags, {
-    Name = "Edl${title(each.key)}InterfaceEndpoint"
+    Name = "${var.name_prefix}-${var.environment}-${each.key}-interface-endpoint"
   })
 }

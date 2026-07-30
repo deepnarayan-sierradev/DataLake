@@ -74,11 +74,6 @@ def _create_bucket() -> None:
     boto3.client("s3", region_name=_REGION).create_bucket(Bucket=_BUCKET)
 
 
-# ---------------------------------------------------------------------------
-# Constructor validation
-# ---------------------------------------------------------------------------
-
-
 class TestConstructorValidation:
     def test_empty_bucket_raises(self) -> None:
         with pytest.raises(ValueError, match="s3_bucket"):
@@ -97,11 +92,6 @@ class TestConstructorValidation:
                 region_name=_REGION,
                 tenant_code=_TENANT_CODE,
             )
-
-
-# ---------------------------------------------------------------------------
-# Partition path
-# ---------------------------------------------------------------------------
 
 
 class TestPartitionPath:
@@ -158,11 +148,6 @@ class TestPartitionPath:
             extraction_date=_DATE,
         )
         assert data_key.startswith(f"{_TENANT_CODE}/sage-{_PRODUCT}/{_ENTITY_ID}/")
-
-
-# ---------------------------------------------------------------------------
-# write_partition
-# ---------------------------------------------------------------------------
 
 
 class TestWritePartition:
@@ -275,7 +260,6 @@ class TestWritePartition:
         """Metadata sidecar failure must be a WARNING — the extraction still succeeds."""
         _create_bucket()
         writer = _make_writer()
-        # Patch put_object to fail only for metadata.json
         original_put = writer._s3.put_object  # type: ignore[attr-defined]
 
         def selective_fail(**kwargs: object) -> object:
@@ -284,7 +268,6 @@ class TestWritePartition:
             return original_put(**kwargs)
 
         writer._s3.put_object = selective_fail  # type: ignore[method-assign,assignment]
-        # Should complete without raising.
         data_key = writer.write_partition(
             records=_make_records(),
             source_id=_SOURCE_ID,
@@ -311,11 +294,6 @@ class TestWritePartition:
                 schema_fingerprint=_SCHEMA_FP,
                 extraction_date=_DATE,
             )
-
-
-# ---------------------------------------------------------------------------
-# Input validation
-# ---------------------------------------------------------------------------
 
 
 class TestInputValidation:
@@ -348,11 +326,6 @@ class TestInputValidation:
             )
 
 
-# ---------------------------------------------------------------------------
-# _records_to_parquet helper
-# ---------------------------------------------------------------------------
-
-
 class TestRecordsToParquet:
     def test_empty_records_raises(self) -> None:
         with pytest.raises(SageRawLayerWriterError, match="empty record batch"):
@@ -381,11 +354,6 @@ class TestRecordsToParquet:
             assert field.type == pa.large_utf8(), f"Expected large_utf8 for {field.name}"
 
 
-# ---------------------------------------------------------------------------
-# Streaming write
-# ---------------------------------------------------------------------------
-
-
 class TestWritePartitionStreaming:
     @mock_aws
     def test_streaming_single_chunk(self) -> None:
@@ -407,7 +375,6 @@ class TestWritePartitionStreaming:
     def test_streaming_multiple_chunks(self) -> None:
         _create_bucket()
         writer = _make_writer()
-        # chunk_size=2, 5 records → chunks 0,1,2
         records_iter = iter(_make_records(5))
         prefix, total = writer.write_partition_streaming(
             record_iter=records_iter,
@@ -419,7 +386,6 @@ class TestWritePartitionStreaming:
             chunk_size=2,
         )
         assert total == 5
-        # Verify chunk files written
         s3 = boto3.client("s3", region_name=_REGION)
         objects = s3.list_objects_v2(Bucket=_BUCKET, Prefix=prefix)["Contents"]
         parquet_keys = [o["Key"] for o in objects if o["Key"].endswith(".parquet")]

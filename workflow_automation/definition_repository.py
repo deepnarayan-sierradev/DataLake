@@ -1,5 +1,6 @@
 """
-`EdlWorkflowDefinition` and `EdlWorkflowTask` repositories (DL-WF-01, DL-WF-05, DL-WF-06).
+`datalake-workflow-definitions-<env>` and `datalake-workflow-tasks-<env>` repositories
+(DL-WF-01, DL-WF-05, DL-WF-06).
 
 Definitions adopt the DL-11 propagation contract: version-bumping publishes, an
 effective-config record, and an execution pinned to one definition version for its whole run.
@@ -11,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -23,16 +23,14 @@ from botocore.exceptions import ClientError
 
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from workflow_automation.definition import WorkflowDefinition, WorkflowStatus
 
 _logger = get_platform_logger(__name__)
 
-_DEFINITION_TABLE_NAME: Final[str] = "EdlWorkflowDefinition"
-_TASK_TABLE_NAME: Final[str] = "EdlWorkflowTask"
 
-# Above this the body goes to S3 with a hash pointer; DynamoDB's item limit is 400 KB.
 BODY_S3_THRESHOLD_BYTES: Final[int] = 200_000
 
 
@@ -87,11 +85,9 @@ class WorkflowDefinitionRepository:
         self._environment = environment
         self._bucket = s3_bucket
         self._s3 = s3_client
-        table_name = os.environ.get("WORKFLOW_DEFINITION_TABLE") or _DEFINITION_TABLE_NAME
+        table_name = require_env("WORKFLOW_DEFINITION_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
         self._cache: dict[str, WorkflowDefinition] = {}
-
-    # ── Writes ────────────────────────────────────────────────────────────────
 
     def save(self, definition: WorkflowDefinition) -> str:
         """
@@ -155,8 +151,6 @@ class WorkflowDefinitionRepository:
                 "approved_by": approved_by,
             }
         )
-        # Re-validate through the model so the maker-checker rule is enforced on the
-        # published shape, not merely on the draft.
         validated = WorkflowDefinition(**published.model_dump())
         self.save(validated)
         self._write_pointer(validated)
@@ -167,8 +161,6 @@ class WorkflowDefinitionRepository:
         disabled = definition.model_copy(update={"status": WorkflowStatus.DISABLED})
         self.save(disabled)
         return disabled
-
-    # ── Reads ─────────────────────────────────────────────────────────────────
 
     def load(self, tenant_code: str, workflow_id: str, version: str) -> WorkflowDefinition:
         tenant_code = validate_tenant_code(tenant_code)
@@ -220,8 +212,6 @@ class WorkflowDefinitionRepository:
         for key in stale:
             del self._cache[key]
         return len(stale)
-
-    # ── Private ───────────────────────────────────────────────────────────────
 
     def _materialise(self, item: dict[str, Any]) -> WorkflowDefinition:
         if "body" in item:
@@ -283,7 +273,7 @@ class WorkflowTaskRepository:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("WORKFLOW_TASK_TABLE") or _TASK_TABLE_NAME
+        table_name = require_env("WORKFLOW_TASK_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def create_task(

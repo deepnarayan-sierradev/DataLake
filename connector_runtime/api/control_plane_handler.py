@@ -40,20 +40,19 @@ Security (OWASP A01, A03, A09):
 
 Required Lambda environment variables:
   AWS_REGION                  — injected by the Lambda runtime
-  PLATFORM_ENVIRONMENT         — deployment environment (dev/staging/prod)
-  PIPELINE_TRIGGER_QUEUE_URL   — URL of the EdlPipelineTrigger.fifo queue
+  PLATFORM_ENVIRONMENT         — deployment environment (dev/uat/prod)
+  PIPELINE_TRIGGER_QUEUE_URL   — URL of the datalake-pipeline-trigger-dev.fifo queue
   ENTITY_CONFIG_TABLE          — optional override; defaults to
-                                  EdlEntityExtractionConfig
+                                  datalake-entity-extraction-config-dev
   ENTITY_TYPE_REGISTRY_TABLE   — optional override; defaults to
-                                  EdlEntityTypeRegistry
+                                  datalake-entity-type-registry-dev
   AUDIT_LOG_TABLE              — optional override; defaults to
-                                  EdlRunAuditLog
+                                  datalake-run-audit-log-dev
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -186,38 +185,26 @@ from tenancy.scope_predicate import (
 
 _logger = get_platform_logger(__name__)
 
-# Runs returned per page. This capped **audit rows**, not runs, until 2026-07-29 — and a single
-# extraction writes an item per stage (11 distinct `PipelineStage` values in the extraction workflow
-# alone, before transformation, entity resolution, analytics publish, serving-store load and twin
-# build add theirs). So a cap of 50 items returned roughly four runs, silently, behind a `count`
-# field that read as authoritative and with no cursor to reach the rest.
 _MAX_RUNS_LISTED: Final[int] = 50
 
-# One page of configured entities; the cursor carries the rest.
 _MAX_ENTITIES_LISTED: Final[int] = 100
 
-# Audit rows read per DynamoDB call while filling a page of runs. Sized above the per-run stage
-# count so a full page of runs is usually one or two reads rather than one read per run.
 _AUDIT_ROWS_PER_READ: Final[int] = 400
 
-_ENTITY_TYPE_REGISTRY_TABLE_NAME: Final[str] = "EdlEntityTypeRegistry"
-_AUDIT_LOG_TABLE_NAME: Final[str] = "EdlRunAuditLog"
 _AUDIT_TENANT_INDEX: Final[str] = "tenant-started-index"
 
-# Per-container cache of GSI presence, keyed by table name — `describe_table` on every listing
-# would add a round trip to the path the index exists to make cheaper.
 _INDEX_PRESENCE: dict[str, bool] = {}
 
 
 def _entity_type_registry_table() -> Any:
     dynamodb = boto3.resource("dynamodb", region_name=_region())
-    table_name = os.environ.get("ENTITY_TYPE_REGISTRY_TABLE") or _ENTITY_TYPE_REGISTRY_TABLE_NAME
+    table_name = require_env("ENTITY_TYPE_REGISTRY_TABLE")
     return dynamodb.Table(table_name)
 
 
 def _run_audit_log_table() -> Any:
     dynamodb = boto3.resource("dynamodb", region_name=_region())
-    table_name = os.environ.get("AUDIT_LOG_TABLE") or _AUDIT_LOG_TABLE_NAME
+    table_name = require_env("AUDIT_LOG_TABLE")
     return dynamodb.Table(table_name)
 
 
@@ -225,11 +212,6 @@ def _configuration_repository() -> ConfigurationRepositoryClient:
     return ConfigurationRepositoryClient(
         environment=_environment(), region_name=_region(), backend=ConfigurationBackend.DYNAMODB
     )
-
-
-# ---------------------------------------------------------------------------
-# Route handlers
-# ---------------------------------------------------------------------------
 
 
 def _handle_list_entities(event: dict[str, Any], path_tenant_code: str) -> dict[str, Any]:
@@ -265,7 +247,6 @@ def _handle_list_entities(event: dict[str, Any], path_tenant_code: str) -> dict[
             "tenant_code": tenant_code,
             "entities": entities,
             "count": len(entities),
-            # Follow the token, never `count`: a page can be short while more pages remain.
             "next_token": _encode_page_token(next_key, tenant_code),
         },
     )
@@ -333,10 +314,6 @@ def _handle_trigger_pipeline(event: dict[str, Any], path_tenant_code: str) -> di
         ) from exc
 
     queue_url = require_env("PIPELINE_TRIGGER_QUEUE_URL")
-    # environment is sourced from this Lambda's own deployment configuration —
-    # never from client input — so a caller hitting the dev control-plane API
-    # can never trigger a prod pipeline execution by supplying environment in
-    # the request body.
     environment = _environment()
 
     message_body = {
@@ -353,12 +330,6 @@ def _handle_trigger_pipeline(event: dict[str, Any], path_tenant_code: str) -> di
         sqs.send_message(
             QueueUrl=queue_url,
             MessageBody=json.dumps(message_body, separators=(",", ":")),
-            # FIFO queue: MessageGroupId matches the convention documented in
-            # infrastructure/modules/orchestration/main.tf. ContentBasedDeduplication
-            # is enabled on the queue, so no explicit MessageDeduplicationId is needed.
-            # tenant_code is included (ARCH-1) so two tenants triggering the same
-            # source/entity don't share a FIFO message group — without it, one
-            # tenant's burst of triggers would head-of-line-block another tenant's.
             MessageGroupId=f"{tenant_code}--{request.source_id}--{request.entity_id}",
         )
     except ClientError as exc:
@@ -428,8 +399,6 @@ def _handle_get_run(event: dict[str, Any], path_tenant_code: str, run_id: str) -
     if not items:
         raise NotFoundError(f"No run found for run_id={run_id!r}.")
 
-    # Tenant isolation (security-critical): a run belonging to a different
-    # tenant is reported as not-found, never as a permission error.
     if items[0].get("tenant_code") != tenant_code:
         raise NotFoundError(f"No run found for run_id={run_id!r}.")
 
@@ -488,11 +457,6 @@ def _handle_list_runs(event: dict[str, Any], path_tenant_code: str) -> dict[str,
     )
 
     runs_by_id: dict[str, dict[str, Any]] = {}
-    # Cursor for the row where this page stopped. Truncating the collected runs and reporting no
-    # cursor would drop runs silently — the same defect as the item-count cap, in a new shape — so
-    # the boundary is decided while reading, and the key of the first row of the first *excluded*
-    # run becomes the cursor. A run's audit rows all share its `started_at`, so on the GSI (ordered
-    # by tenant_code, started_at) a run's rows are contiguous and that boundary is exact.
     next_key: dict[str, Any] | None = None
     try:
         start_key = _decode_page_token(event, tenant_code)
@@ -551,7 +515,8 @@ def _audit_row_key(item: dict[str, Any], use_index: bool) -> dict[str, Any]:
 
     A GSI read's key is the index key *plus* the base-table key; a Scan's is the base key alone.
     This previously included `tenant_code` unconditionally so `decode_page_token` could verify
-    ownership — but on the Scan fallback `tenant_code` is not part of `EdlRunAuditLog`'s key schema,
+    ownership — but on the Scan fallback `tenant_code` is not part of `datalake-run-audit-log-dev`'s
+    key schema,
     and DynamoDB validates `ExclusiveStartKey` against that schema. The suite could not see it
     because moto accepts non-key attributes there.
 
@@ -564,14 +529,8 @@ def _audit_row_key(item: dict[str, Any], use_index: bool) -> dict[str, Any]:
     return key
 
 
-# ---------------------------------------------------------------------------
-# Intelligence layer — twins, semantic queries, saved queries
-# ---------------------------------------------------------------------------
-
 _SAFE_GOLDEN_ID: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,255}$")
 _MAX_TWINS_LISTED: Final[int] = 200
-# Triage is a working list, not an export: an operator cannot act on thousands at once, and the
-# response says when it truncated rather than implying completeness.
 _MAX_EXCEPTIONS_LISTED: Final[int] = 200
 
 
@@ -633,8 +592,6 @@ def _saved_query_to_dict(saved_query: Any) -> dict[str, Any]:
         "metrics": list(saved_query.metrics),
         "dimensions": list(saved_query.dimensions),
         "created_by": saved_query.created_by,
-        # Surfaced so a console can round-trip a saved query it did not create; without these the
-        # filters are stored, applied, and invisible.
         "filters": [
             {
                 "dimension": f.dimension,
@@ -698,11 +655,7 @@ def _handle_get_twin(
     try:
         twin = _twin_repository().get_twin(tenant_code, entity_type, golden_id)
         predicate = _scope_predicate_for(event, tenant_code, ConsumptionSurface.TWIN_TRAVERSAL)
-        # Direct attribute access, never getattr(..., None): a missing field must be a type
-        # error, not a silent None that the predicate reads as "unattributed".
         if not predicate.matches(twin.scope_unit_id):
-            # 404 rather than 403: confirming the twin exists in another unit is the disclosure
-            # DL-SCOPE-13 forbids.
             raise NotFoundError(f"No twin for {entity_type}/{golden_id}.")
     except TwinNotFoundError as exc:
         raise NotFoundError(str(exc)) from exc
@@ -716,8 +669,6 @@ def _handle_list_twins(
     tenant_code = _authorize_path_tenant(event, path_tenant_code)
     if not ENTITY_TYPE_PATTERN.match(entity_type):
         raise ValidationFailedError(f"entity_type {entity_type!r} is not valid.")
-    # DL-SCOPE-13: the fan-out itself discloses existence, so the page is filtered by the caller's
-    # scope units before it is returned — never after.
     predicate = _scope_predicate_for(event, tenant_code, ConsumptionSurface.TWIN_TRAVERSAL)
     twins, next_key = _twin_repository().page_twins(
         tenant_code,
@@ -739,9 +690,6 @@ def _handle_list_twins(
             "entity_type": entity_type,
             "twins": [_twin_to_dict(twin, predicate) for twin in visible],
             "count": len(visible),
-            # Neither `total_visible` nor `hidden_by_scope`: a total requires draining every page,
-            # and a suppressed count discloses how many peer entities exist. A page can be entirely
-            # filtered out by scope while more pages remain, so follow `next_token`, never `count`.
             "next_token": _encode_page_token(next_key, tenant_code),
         },
     )
@@ -759,8 +707,6 @@ def _handle_run_semantic_query(event: dict[str, Any], path_tenant_code: str) -> 
         ) from exc
     model = _load_active_model(tenant_code)
     service = _semantic_query_service(event, tenant_code, model)
-    # The body now carries the compiler's full surface — filters, fiscal grain, period comparison,
-    # joins, row limit — rather than the entity/metrics/dimensions subset it was restricted to.
     try:
         request = body.to_request()
     except SemanticQueryError as exc:
@@ -851,11 +797,6 @@ def _handle_run_saved_query(
     return _response(200, {"tenant_code": tenant_code, "query_id": query_id, **payload})
 
 
-# ---------------------------------------------------------------------------
-# Routing
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class _Route:
     method: str
@@ -872,15 +813,6 @@ class _Route:
             and segments[2] == self.resource
             and (self.tail is None or segments[-1] == self.tail)
         )
-
-
-# ---------------------------------------------------------------------------
-# Config- and semantic-governance handlers (DL-11, DL-03).
-#
-# `config_governance_routes.py` defined this route table and its parameter guards on 2026-07-28
-# and nothing imported it, so the console could not answer "is my change live yet", "which run
-# consumed it", or perform an audited rollback. These are the injected handlers it expects.
-# ---------------------------------------------------------------------------
 
 
 _INTELLIGENCE_ROUTES: tuple[_Route, ...] = (
@@ -940,10 +872,6 @@ def _route(event: dict[str, Any]) -> dict[str, Any]:
     path = str(event.get("path") or event.get("rawPath") or "")
     segments = [segment for segment in path.split("/") if segment]
 
-    # There is deliberately no tenant-provisioning route. Tenants, users, roles, and
-    # permissions are owned by the Identity API; this system only ever *consumes* a verified
-    # tenant claim. See the "Ownership" section of requirements/CROSS_REPO_INTERFACE_CONTRACT.md.
-
     if len(segments) == 3 and segments[0] == "tenants" and segments[2] == "entities":
         if method == "GET":
             return _handle_list_entities(event, segments[1])
@@ -988,10 +916,6 @@ def _route(event: dict[str, Any]) -> dict[str, Any]:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """AWS Lambda entry point — API Gateway Lambda-proxy integration."""
-    # The API had no correlation context at all: fields were passed ad hoc per call site, so an
-    # API-initiated action could not be traced end to end and `tenant_code` appeared only where
-    # an author remembered it. Cleared in `finally` — a warm container would otherwise carry one
-    # caller's tenant into the next request's logs.
     request_context = event.get("requestContext") or {}
     structlog.contextvars.bind_contextvars(
         request_id=str(request_context.get("requestId") or ""),

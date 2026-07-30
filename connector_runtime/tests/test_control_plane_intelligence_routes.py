@@ -17,6 +17,7 @@ import pytest
 from moto import mock_aws
 
 import connector_runtime.api.control_plane_handler as cp
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from knowledge.twin import Twin, TwinEdge
 from knowledge.twin_repository import TwinRepository
 from semantic.semantic_model import Dimension, Metric, SemanticEntity, SemanticModel
@@ -57,13 +58,10 @@ def _ct(dynamodb, name, sort_key):
 
 
 def _create_tables(dynamodb):
-    _ct(dynamodb, "EdlTwinIndex", "sk")
-    _ct(dynamodb, "EdlSavedQuery", "query_id")
-    _ct(dynamodb, "EdlSemanticModel", "model_version")
-    # Every read route now builds a scope predicate from the caller's claim, which reads the
-    # tenant's partition profile and unit list (DL-SCOPE-14). Absent table -> absent profile ->
-    # the single-partition default, which is the demo shape these tests exercise.
-    _ct(dynamodb, "EdlScopeUnit", "scope_unit_id")
+    _ct(dynamodb, RESOURCE_NAME_ENVIRONMENT["TWIN_INDEX_TABLE"], "sk")
+    _ct(dynamodb, RESOURCE_NAME_ENVIRONMENT["SAVED_QUERY_TABLE"], "query_id")
+    _ct(dynamodb, RESOURCE_NAME_ENVIRONMENT["SEMANTIC_MODEL_TABLE"], "model_version")
+    _ct(dynamodb, RESOURCE_NAME_ENVIRONMENT["SCOPE_UNIT_TABLE"], "scope_unit_id")
 
 
 def _model():
@@ -89,7 +87,9 @@ def _patch_query_runtime(monkeypatch, rows):
     monkeypatch.setattr(
         cp,
         "latest_partition_uri",
-        lambda *a, **k: "s3://edl-analytics-1/demo/analytics/company/analytics_date=2026-07-22",
+        lambda *a, **k: (
+            "s3://datalake-analytics-1/demo/analytics/company/analytics_date=2026-07-22"
+        ),
     )
     monkeypatch.setattr(cp.set_based_engine_registry, "build", lambda *a, **k: _fake_engine(rows))
 
@@ -98,10 +98,10 @@ def _patch_query_runtime(monkeypatch, rows):
 def _env(monkeypatch):
     monkeypatch.setenv("AWS_REGION", _REGION)
     monkeypatch.setenv("PLATFORM_ENVIRONMENT", "dev")
-    monkeypatch.setenv("ANALYTICS_S3_BUCKET", "edl-analytics-1")
-    monkeypatch.setenv("TWIN_INDEX_TABLE", "EdlTwinIndex")
-    monkeypatch.setenv("SAVED_QUERY_TABLE", "EdlSavedQuery")
-    monkeypatch.setenv("SEMANTIC_MODEL_TABLE", "EdlSemanticModel")
+    monkeypatch.setenv("ANALYTICS_S3_BUCKET", "datalake-analytics-1")
+    monkeypatch.setenv("TWIN_INDEX_TABLE", RESOURCE_NAME_ENVIRONMENT["TWIN_INDEX_TABLE"])
+    monkeypatch.setenv("SAVED_QUERY_TABLE", RESOURCE_NAME_ENVIRONMENT["SAVED_QUERY_TABLE"])
+    monkeypatch.setenv("SEMANTIC_MODEL_TABLE", RESOURCE_NAME_ENVIRONMENT["SEMANTIC_MODEL_TABLE"])
 
 
 class TestTwinRoutes:

@@ -55,7 +55,7 @@ _logger = get_platform_logger(__name__)
 _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
     {"source_id", "entity_id", "environment", "run_id", "tenant_code"}
 )
-_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
+_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "uat", "prod"})
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -69,10 +69,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     run_id = str(event["run_id"])
     tenant_code = str(event["tenant_code"])
 
-    # Migrated to `stage_execution` on 2026-07-29. The hand-rolled bind/try/finally worked, but it
-    # carried no DLQ routing — twin build was one of the five stages whose failures reached the Step
-    # Functions history and nothing else, so `EdlStageDlq-TwinBuild` had no producer. The scaffold
-    # makes the clear, the flush, the duration metric, and the DLQ entry structural.
     identity = StageIdentity(
         tenant_code=tenant_code,
         source_id=source_id,

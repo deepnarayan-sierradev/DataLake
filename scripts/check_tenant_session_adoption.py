@@ -30,10 +30,6 @@ from typing import Final
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 
-# Packages whose runtime touches tenant data under one of the four boundary roles. The control plane
-# is deliberately absent: it serves every tenant per request and derives scope from a verified
-# claim,
-# so a principal-tag condition would break it rather than protect anything (see tenant_boundary.tf).
 DATA_PLANE_PACKAGES: Final[frozenset[str]] = frozenset(
     {
         "connector_runtime",
@@ -51,7 +47,6 @@ DATA_PLANE_PACKAGES: Final[frozenset[str]] = frozenset(
 
 EXCLUDED_PARTS: Final[frozenset[str]] = frozenset({"tests", "__pycache__", ".venv", "dist"})
 
-# The module that implements the mechanism necessarily builds an untagged STS client.
 EXEMPT_MODULES: Final[frozenset[str]] = frozenset({"tenancy/tenant_session.py"})
 
 ADOPTION_FLAG_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -81,8 +76,6 @@ def untagged_clients_in(path: Path) -> list[UntaggedClient]:
         if node.func.attr not in {"client", "resource"}:
             continue
         base = node.func.value
-        # `boto3.client(...)` is ambient; `session.client(...)` is whatever the session is, and a
-        # tenant session is the only way to get a tagged one.
         if isinstance(base, ast.Name) and base.id == "boto3":
             service = ""
             if node.args and isinstance(node.args[0], ast.Constant):
@@ -91,10 +84,13 @@ def untagged_clients_in(path: Path) -> list[UntaggedClient]:
     return found
 
 
+ENVIRONMENTS: tuple[str, ...] = ("dev", "uat", "prod")
+
+
 def adoption_flag_states() -> dict[str, str]:
     """What each environment declares for `tenant_session_tagging_adopted`."""
     states: dict[str, str] = {}
-    for environment in ("dev", "staging", "prod"):
+    for environment in ENVIRONMENTS:
         main = REPO_ROOT / "infrastructure" / "environments" / environment / "main.tf"
         if not main.exists():
             continue

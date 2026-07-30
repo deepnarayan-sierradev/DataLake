@@ -17,7 +17,6 @@ locals {
     Module      = "observability"
   })
 
-  # Service log group definitions: name → retention
   log_groups = {
     "connector-runtime"    = var.log_retention_days
     "transformation"       = var.log_retention_days
@@ -29,34 +28,27 @@ locals {
   }
 }
 
-# ---------------------------------------------------------------------------
-# CloudWatch Log Groups — one per platform service
-# All encrypted with the platform KMS key.
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "platform_services" {
   for_each = local.log_groups
 
-  name              = "/edl/${each.key}"
+  name              = "/${var.name_prefix}/${each.key}-${var.environment}"
   retention_in_days = each.value
   kms_key_id        = var.logs_kms_key_arn
 
   tags = merge(local.common_tags, {
-    Name    = "/edl/${each.key}"
+    Name    = "/${var.name_prefix}/${each.key}-${var.environment}"
     Service = each.key
   })
 }
 
-# ---------------------------------------------------------------------------
-# SNS Alert Topic — receives CloudWatch alarm notifications
-# ---------------------------------------------------------------------------
 
 resource "aws_sns_topic" "platform_alerts" {
-  name              = "EdlPlatformAlerts"
+  name              = "${var.name_prefix}-platform-alerts-${var.environment}"
   kms_master_key_id = var.logs_kms_key_arn # Reuse log KMS key (allows SNS encryption)
 
   tags = merge(local.common_tags, {
-    Name = "EdlPlatformAlerts"
+    Name = "${var.name_prefix}-platform-alerts-${var.environment}"
   })
 }
 
@@ -67,13 +59,9 @@ resource "aws_sns_topic_subscription" "ops_email" {
   endpoint  = var.alert_email
 }
 
-# ---------------------------------------------------------------------------
-# CloudWatch Alarms — SLO-bound alerting
-# ---------------------------------------------------------------------------
 
-# Alarm: extraction failure rate > 0 (any failed run triggers alert)
 resource "aws_cloudwatch_metric_alarm" "extraction_failures" {
-  alarm_name          = "EdlExtractionFailures"
+  alarm_name          = "${var.name_prefix}-extraction-failures-${var.environment}"
   alarm_description   = "One or more extraction runs have failed. Investigate run audit log and DLQ."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
@@ -90,9 +78,8 @@ resource "aws_cloudwatch_metric_alarm" "extraction_failures" {
   tags = local.common_tags
 }
 
-# Alarm: schema drift breaking changes detected
 resource "aws_cloudwatch_metric_alarm" "schema_drift_breaking" {
-  alarm_name          = "EdlSchemaDriftBreakingDetected"
+  alarm_name          = "${var.name_prefix}-schema-drift-breaking-${var.environment}"
   alarm_description   = "Breaking schema drift detected. Downstream transformation may need updating."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
@@ -108,9 +95,8 @@ resource "aws_cloudwatch_metric_alarm" "schema_drift_breaking" {
   tags = local.common_tags
 }
 
-# Alarm: watermark lag exceeds SLO threshold (data freshness alert)
 resource "aws_cloudwatch_metric_alarm" "watermark_lag_slo_breach" {
-  alarm_name          = "EdlWatermarkLagSloBreach"
+  alarm_name          = "${var.name_prefix}-watermark-lag-slo-breach-${var.environment}"
   alarm_description   = "Watermark lag exceeds SLO threshold. Data freshness degraded."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
@@ -126,12 +112,8 @@ resource "aws_cloudwatch_metric_alarm" "watermark_lag_slo_breach" {
   tags = local.common_tags
 }
 
-# Alarm: no extraction records emitted for a full monitoring window.
-# This detects silent failures where the pipeline stops running without
-# producing explicit errors — e.g. scheduler misconfiguration, Step Functions
-# execution not triggered, or IAM permission silently blocking starts.
 resource "aws_cloudwatch_metric_alarm" "extraction_activity_absent" {
-  alarm_name          = "EdlExtractionActivityAbsent"
+  alarm_name          = "${var.name_prefix}-extraction-activity-absent-${var.environment}"
   alarm_description   = "No extraction records have been emitted in the monitoring window. Pipeline may have stopped running silently."
   comparison_operator = "LessThanOrEqualToThreshold"
   evaluation_periods  = var.extraction_absence_evaluation_periods
@@ -140,8 +122,7 @@ resource "aws_cloudwatch_metric_alarm" "extraction_activity_absent" {
   period              = var.extraction_absence_period_seconds
   statistic           = "Sum"
   threshold           = 0
-  # BREACHING on missing data: absence of metric is itself the alert condition.
-  treat_missing_data = "breaching"
+  treat_missing_data  = "breaching"
 
   alarm_actions = [aws_sns_topic.platform_alerts.arn]
   ok_actions    = [aws_sns_topic.platform_alerts.arn]
@@ -149,12 +130,9 @@ resource "aws_cloudwatch_metric_alarm" "extraction_activity_absent" {
   tags = local.common_tags
 }
 
-# ---------------------------------------------------------------------------
-# X-Ray Tracing Group — groups traces by platform service
-# ---------------------------------------------------------------------------
 
 resource "aws_xray_group" "platform" {
-  group_name        = "EdlPlatform"
+  group_name        = "${var.name_prefix}-platform-${var.environment}"
   filter_expression = "annotation.platform_env = \"${var.environment}\""
 
   insights_configuration {
@@ -165,13 +143,9 @@ resource "aws_xray_group" "platform" {
   tags = local.common_tags
 }
 
-# ---------------------------------------------------------------------------
-# CloudWatch Alarms — transformation, entity-resolution, and serving tiers
-# (spec §10.3: dashboards per source covering all pipeline stages)
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "transformation_quality_blocked" {
-  alarm_name          = "EdlTransformationQualityBlocked"
+  alarm_name          = "${var.name_prefix}-transformation-quality-blocked-${var.environment}"
   alarm_description   = "Quality policy blocking violations detected. Curated publication halted pending review."
   namespace           = "EnterpriseDatalake"
   metric_name         = "RecordsFailed"
@@ -188,7 +162,7 @@ resource "aws_cloudwatch_metric_alarm" "transformation_quality_blocked" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "serving_store_load_failures" {
-  alarm_name          = "EdlServingStoreLoadFailures"
+  alarm_name          = "${var.name_prefix}-serving-store-load-failures-${var.environment}"
   alarm_description   = "Serving store load errors detected. Target database records may be stale."
   namespace           = "EnterpriseDatalake"
   metric_name         = "RecordsFailed"
@@ -204,12 +178,9 @@ resource "aws_cloudwatch_metric_alarm" "serving_store_load_failures" {
   tags                = local.common_tags
 }
 
-# ---------------------------------------------------------------------------
-# CloudWatch Dashboards — SLO dashboard per pipeline tier (spec §10.3 AC)
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_dashboard" "extraction_slo" {
-  dashboard_name = "EdlExtractionSlo"
+  dashboard_name = "${var.name_prefix}-extraction-slo-${var.environment}"
   dashboard_body = jsonencode({
     widgets = [
       {
@@ -303,7 +274,7 @@ resource "aws_cloudwatch_dashboard" "extraction_slo" {
 }
 
 resource "aws_cloudwatch_dashboard" "transformation_slo" {
-  dashboard_name = "EdlTransformationSlo"
+  dashboard_name = "${var.name_prefix}-transformation-slo-${var.environment}"
   dashboard_body = jsonencode({
     widgets = [
       {
@@ -350,7 +321,7 @@ resource "aws_cloudwatch_dashboard" "transformation_slo" {
 }
 
 resource "aws_cloudwatch_dashboard" "serving_slo" {
-  dashboard_name = "EdlServingSlo"
+  dashboard_name = "${var.name_prefix}-serving-slo-${var.environment}"
   dashboard_body = jsonencode({
     widgets = [
       {
@@ -410,13 +381,9 @@ resource "aws_cloudwatch_dashboard" "serving_slo" {
   })
 }
 
-# ---------------------------------------------------------------------------
-# DLQ Depth Alarm (§5.3)
-# Fires as soon as any message lands in the extraction failure DLQ.
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_metric_alarm" "extraction_failure_dlq_depth" {
-  alarm_name          = "EdlDlqMessagesPresent"
+  alarm_name          = "${var.name_prefix}-dlq-messages-present-${var.environment}"
   alarm_description   = "Extraction failure DLQ contains unprocessed messages. Investigate failed runs immediately."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
@@ -437,30 +404,24 @@ resource "aws_cloudwatch_metric_alarm" "extraction_failure_dlq_depth" {
   tags = local.common_tags
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Error / Duration / Throttle Alarms (§5.4)
-# Three alarms per Lambda function: errors, duration at 85% timeout, throttles.
-# ---------------------------------------------------------------------------
 
 locals {
-  # Lambda functions to monitor. Key = display name, value = function name.
   monitored_lambdas = {
     for k, v in {
-      Extraction         = var.extraction_lambda_name
-      Transformation     = var.transformation_lambda_name
-      EntityResolution   = var.entity_resolution_lambda_name
-      AnalyticsPublisher = var.analytics_publisher_lambda_name
+      "extraction"          = var.extraction_lambda_name
+      "transformation"      = var.transformation_lambda_name
+      "entity-resolution"   = var.entity_resolution_lambda_name
+      "analytics-publisher" = var.analytics_publisher_lambda_name
     } : k => v if v != ""
   }
 
-  # 85% of 900s Lambda max timeout in milliseconds
   lambda_timeout_alert_ms = 900 * 1000 * 0.85
 }
 
 resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   for_each = local.monitored_lambdas
 
-  alarm_name          = "Edl${each.key}Errors"
+  alarm_name          = "${var.name_prefix}-${each.key}-errors-${var.environment}"
   alarm_description   = "Lambda ${each.value} reported execution errors. Check CloudWatch Logs."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
@@ -483,7 +444,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
 resource "aws_cloudwatch_metric_alarm" "lambda_duration" {
   for_each = local.monitored_lambdas
 
-  alarm_name          = "Edl${each.key}DurationHigh"
+  alarm_name          = "${var.name_prefix}-${each.key}-duration-high-${var.environment}"
   alarm_description   = "Lambda ${each.value} approaching timeout (>85% of 900s). Risk of incomplete pipeline run."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
@@ -506,7 +467,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_duration" {
 resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
   for_each = local.monitored_lambdas
 
-  alarm_name          = "Edl${each.key}Throttles"
+  alarm_name          = "${var.name_prefix}-${each.key}-throttles-${var.environment}"
   alarm_description   = "Lambda ${each.value} is being throttled. Increase reserved concurrency or check limits."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
@@ -526,14 +487,11 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
   tags          = local.common_tags
 }
 
-# ---------------------------------------------------------------------------
-# CloudWatch Metric Filter — Circuit Breaker DDB Fallback (§4.2)
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_metric_filter" "cb_ddb_fallback" {
-  name           = "EdlCbDdbFallback"
+  name           = "${var.name_prefix}-cb-ddb-fallback-${var.environment}"
   pattern        = "{ $.event = \"circuit_breaker_ddb_init_failed\" }"
-  log_group_name = "/edl/connector-runtime"
+  log_group_name = "/${var.name_prefix}/connector-runtime-${var.environment}"
 
   metric_transformation {
     name      = "CircuitBreakerDDBFallback"
@@ -545,7 +503,7 @@ resource "aws_cloudwatch_log_metric_filter" "cb_ddb_fallback" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "cb_ddb_fallback" {
-  alarm_name          = "EdlCircuitBreakerDdbFallback"
+  alarm_name          = "${var.name_prefix}-circuit-breaker-ddb-fallback-${var.environment}"
   alarm_description   = "Circuit breaker fell back to in-process state. Distributed protection disabled — check VPC routing."
   namespace           = "EnterpriseDatalake"
   metric_name         = "CircuitBreakerDDBFallback"
@@ -559,14 +517,11 @@ resource "aws_cloudwatch_metric_alarm" "cb_ddb_fallback" {
   tags                = local.common_tags
 }
 
-# ---------------------------------------------------------------------------
-# Security Event Metric Filters + Alarms (§4.5)
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_metric_filter" "input_validation_failures" {
-  name           = "EdlInputValidationFailures"
+  name           = "${var.name_prefix}-input-validation-failures-${var.environment}"
   pattern        = "{ $.level = \"error\" && $.event = \"input_validation_failed\" }"
-  log_group_name = "/edl/connector-runtime"
+  log_group_name = "/${var.name_prefix}/connector-runtime-${var.environment}"
 
   metric_transformation {
     name      = "InputValidationFailures"
@@ -578,7 +533,7 @@ resource "aws_cloudwatch_log_metric_filter" "input_validation_failures" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "input_validation_failures" {
-  alarm_name          = "EdlInputValidationFailures"
+  alarm_name          = "${var.name_prefix}-input-validation-failures-${var.environment}"
   alarm_description   = "Repeated input validation failures. Possible injection probing or misconfigured client."
   namespace           = "EnterpriseDatalake"
   metric_name         = "InputValidationFailures"
@@ -593,9 +548,9 @@ resource "aws_cloudwatch_metric_alarm" "input_validation_failures" {
 }
 
 resource "aws_cloudwatch_log_metric_filter" "credential_retrieval_failures" {
-  name           = "EdlCredentialRetrievalFailures"
+  name           = "${var.name_prefix}-credential-retrieval-failures-${var.environment}"
   pattern        = "{ $.event = \"credential_retrieval_failed\" }"
-  log_group_name = "/edl/connector-runtime"
+  log_group_name = "/${var.name_prefix}/connector-runtime-${var.environment}"
 
   metric_transformation {
     name      = "CredentialRetrievalFailures"
@@ -607,7 +562,7 @@ resource "aws_cloudwatch_log_metric_filter" "credential_retrieval_failures" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "credential_retrieval_failures" {
-  alarm_name          = "EdlCredentialRetrievalFailures"
+  alarm_name          = "${var.name_prefix}-credential-retrieval-failures-${var.environment}"
   alarm_description   = "Credential retrieval from Secrets Manager failed. Check rotation or access policies."
   namespace           = "EnterpriseDatalake"
   metric_name         = "CredentialRetrievalFailures"
@@ -622,9 +577,9 @@ resource "aws_cloudwatch_metric_alarm" "credential_retrieval_failures" {
 }
 
 resource "aws_cloudwatch_log_metric_filter" "circuit_breaker_opened" {
-  name           = "EdlCircuitBreakerOpened"
+  name           = "${var.name_prefix}-circuit-breaker-opened-${var.environment}"
   pattern        = "{ $.event = \"circuit_breaker_opened\" }"
-  log_group_name = "/edl/connector-runtime"
+  log_group_name = "/${var.name_prefix}/connector-runtime-${var.environment}"
 
   metric_transformation {
     name      = "CircuitBreakerOpened"
@@ -636,7 +591,7 @@ resource "aws_cloudwatch_log_metric_filter" "circuit_breaker_opened" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "circuit_breaker_opened" {
-  alarm_name          = "EdlCircuitBreakerOpened"
+  alarm_name          = "${var.name_prefix}-circuit-breaker-opened-${var.environment}"
   alarm_description   = "Extraction circuit breaker opened. Source is unavailable or returning persistent errors."
   namespace           = "EnterpriseDatalake"
   metric_name         = "CircuitBreakerOpened"
@@ -650,17 +605,14 @@ resource "aws_cloudwatch_metric_alarm" "circuit_breaker_opened" {
   tags                = local.common_tags
 }
 
-# ---------------------------------------------------------------------------
-# CloudWatch Logs Insights Saved Queries (§5.6)
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_query_definition" "failed_runs_last_24h" {
-  name = "edl/failed-runs-last-24h"
+  name = "${var.name_prefix}/failed-runs-last-24h-${var.environment}"
   log_group_names = [
-    "/edl/connector-runtime",
-    "/edl/transformation",
-    "/edl/entity-resolution",
-    "/edl/analytics-publisher",
+    "/${var.name_prefix}/connector-runtime-${var.environment}",
+    "/${var.name_prefix}/transformation-${var.environment}",
+    "/${var.name_prefix}/entity-resolution-${var.environment}",
+    "/${var.name_prefix}/analytics-publisher-${var.environment}",
   ]
   query_string = <<-EOT
     fields run_id, source_id, entity_id, @timestamp
@@ -671,8 +623,8 @@ resource "aws_cloudwatch_query_definition" "failed_runs_last_24h" {
 }
 
 resource "aws_cloudwatch_query_definition" "mapping_failures_by_entity" {
-  name            = "edl/mapping-failures-by-entity"
-  log_group_names = ["/edl/transformation"]
+  name            = "${var.name_prefix}/mapping-failures-by-entity-${var.environment}"
+  log_group_names = ["/${var.name_prefix}/transformation-${var.environment}"]
   query_string    = <<-EOT
     fields entity_id, @timestamp
     | filter event = "mapping_failure"
@@ -683,8 +635,8 @@ resource "aws_cloudwatch_query_definition" "mapping_failures_by_entity" {
 }
 
 resource "aws_cloudwatch_query_definition" "schema_drift_events" {
-  name            = "edl/schema-drift-events"
-  log_group_names = ["/edl/connector-runtime"]
+  name            = "${var.name_prefix}/schema-drift-events-${var.environment}"
+  log_group_names = ["/${var.name_prefix}/connector-runtime-${var.environment}"]
   query_string    = <<-EOT
     fields source_id, entity_id, drift_classification, @timestamp
     | filter event = "schema_drift_detected"
@@ -694,8 +646,8 @@ resource "aws_cloudwatch_query_definition" "schema_drift_events" {
 }
 
 resource "aws_cloudwatch_query_definition" "watermark_lag_by_source" {
-  name            = "edl/watermark-lag-by-source"
-  log_group_names = ["/edl/connector-runtime"]
+  name            = "${var.name_prefix}/watermark-lag-by-source-${var.environment}"
+  log_group_names = ["/${var.name_prefix}/connector-runtime-${var.environment}"]
   query_string    = <<-EOT
     fields source_id, entity_id, watermark_lag_seconds, @timestamp
     | filter event = "watermark_updated"
@@ -705,8 +657,8 @@ resource "aws_cloudwatch_query_definition" "watermark_lag_by_source" {
 }
 
 resource "aws_cloudwatch_query_definition" "circuit_breaker_history" {
-  name            = "edl/circuit-breaker-events"
-  log_group_names = ["/edl/connector-runtime"]
+  name            = "${var.name_prefix}/circuit-breaker-events-${var.environment}"
+  log_group_names = ["/${var.name_prefix}/connector-runtime-${var.environment}"]
   query_string    = <<-EOT
     fields source_id, entity_id, event, @timestamp
     | filter event in ["circuit_breaker_opened", "circuit_breaker_reset", "circuit_breaker_ddb_init_failed"]
@@ -716,10 +668,10 @@ resource "aws_cloudwatch_query_definition" "circuit_breaker_history" {
 }
 
 resource "aws_cloudwatch_query_definition" "dlq_enqueue_history" {
-  name = "edl/dlq-enqueue-history"
+  name = "${var.name_prefix}/dlq-enqueue-history-${var.environment}"
   log_group_names = [
-    "/edl/connector-runtime",
-    "/edl/orchestration",
+    "/${var.name_prefix}/connector-runtime-${var.environment}",
+    "/${var.name_prefix}/orchestration-${var.environment}",
   ]
   query_string = <<-EOT
     fields run_id, source_id, entity_id, failure_reason, @timestamp
@@ -730,12 +682,12 @@ resource "aws_cloudwatch_query_definition" "dlq_enqueue_history" {
 }
 
 resource "aws_cloudwatch_query_definition" "cold_start_duration" {
-  name = "edl/cold-start-duration"
+  name = "${var.name_prefix}/cold-start-duration-${var.environment}"
   log_group_names = [
-    "/aws/lambda/EdlExtractionPipeline",
-    "/aws/lambda/EdlTransformationPipeline",
-    "/aws/lambda/EdlEntityResolutionPipeline",
-    "/aws/lambda/EdlAnalyticsLayerPublisher",
+    "/aws/lambda/${var.name_prefix}-extraction-${var.environment}",
+    "/aws/lambda/${var.name_prefix}-transformation-${var.environment}",
+    "/aws/lambda/${var.name_prefix}-entity-resolution-${var.environment}",
+    "/aws/lambda/${var.name_prefix}-analytics-publisher-${var.environment}",
   ]
   query_string = <<-EOT
     filter @type = "REPORT"
@@ -745,9 +697,6 @@ resource "aws_cloudwatch_query_definition" "cold_start_duration" {
   EOT
 }
 
-# ---------------------------------------------------------------------------
-# PagerDuty / OpsGenie Integration (§5.8) — conditional on URL being set
-# ---------------------------------------------------------------------------
 
 resource "aws_sns_topic_subscription" "pagerduty" {
   count                  = var.pagerduty_integration_url != "" ? 1 : 0

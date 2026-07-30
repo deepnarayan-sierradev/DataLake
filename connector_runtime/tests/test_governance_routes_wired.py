@@ -35,7 +35,6 @@ def _event(method: str, path: str, body: str | None = None) -> dict[str, Any]:
     }
 
 
-# Every governance path the requirement documents, with the method it is documented under.
 DOCUMENTED_GOVERNANCE_PATHS: Final[tuple[tuple[str, str], ...]] = (
     ("GET", f"/tenants/{_TENANT}/config/effective"),
     ("GET", f"/tenants/{_TENANT}/config/effective/field_mapping/ar_invoice"),
@@ -68,14 +67,11 @@ class TestEveryDocumentedGovernancePathIsRouted:
             pass
 
     def test_the_route_table_is_built_from_the_shared_definition(self) -> None:
-        # Built from `build_config_routes` rather than hand-rolled, so the paths cannot drift
-        # from the ones the requirement documents and the params module validates.
         assert control_plane_handler._GOVERNANCE_ROUTES
         resources = {route.resource for route in control_plane_handler._GOVERNANCE_ROUTES}
         assert resources == {"config", "semantic"}
 
     def test_there_is_still_no_tenant_provisioning_route(self) -> None:
-        # Adding governance routes must not smuggle identity management back in.
         with pytest.raises(NotFoundError, match="No route matches"):
             control_plane_handler._route(_event("POST", "/tenants", body="{}"))
 
@@ -83,8 +79,6 @@ class TestEveryDocumentedGovernancePathIsRouted:
 class TestGovernanceRoutesEnforceTheTenantClaim:
     @pytest.mark.parametrize(("method", "path"), DOCUMENTED_GOVERNANCE_PATHS)
     def test_a_foreign_tenant_in_the_path_is_refused(self, method: str, path: str) -> None:
-        # The claim says `demo`; the path says `acme`. Every governance route is tenant-scoped, so
-        # none may serve a path tenant the caller's claim does not match (OWASP A01).
         foreign = path.replace(f"/tenants/{_TENANT}/", "/tenants/acme/")
         with pytest.raises(Exception) as caught:
             control_plane_handler._route(_event(method, foreign, body="{}"))

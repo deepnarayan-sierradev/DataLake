@@ -156,7 +156,6 @@ class TestParquetOutput:
         parquet_bytes = s3.get_object(Bucket=_BUCKET, Key=data_key)["Body"].read()
         table = pq.read_table(BytesIO(parquet_bytes))
         assert table.num_rows == 2
-        # Row 1: 'name' should be null
         assert table.column("name")[1].is_valid is False
 
 

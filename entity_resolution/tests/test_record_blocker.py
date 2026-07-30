@@ -27,11 +27,6 @@ def _strategy(
     )
 
 
-# ---------------------------------------------------------------------------
-# _normalise helper
-# ---------------------------------------------------------------------------
-
-
 class TestNormalise:
     def test_strips_whitespace(self) -> None:
         assert _normalise("  hello  ") == "hello"
@@ -40,17 +35,11 @@ class TestNormalise:
         assert _normalise("Alice") == "alice"
 
     def test_unicode_nfkd(self) -> None:
-        # NFKD normalisation decomposes accented chars
         result = _normalise("Ãlicé")
         assert "a" in result  # accents stripped
 
     def test_empty_string(self) -> None:
         assert _normalise("") == ""
-
-
-# ---------------------------------------------------------------------------
-# EMAIL_DOMAIN blocking
-# ---------------------------------------------------------------------------
 
 
 class TestEmailDomainBlocking:
@@ -63,7 +52,6 @@ class TestEmailDomainBlocking:
             {"id": "3", "email": "carol@other.org"},
         ]
         blocks = blocker.partition(records)
-        # example.com records should be in one block, other.org in another
         all_ids_in_blocks = {r["id"] for block in blocks for r in block}
         assert all_ids_in_blocks == {"1", "2", "3"}
         example_block = next(
@@ -85,11 +73,6 @@ class TestEmailDomainBlocking:
         records = [{"id": "1"}]
         blocks = blocker.partition(records)
         assert len(blocks) == 1
-
-
-# ---------------------------------------------------------------------------
-# PHONE_NORMALIZED blocking
-# ---------------------------------------------------------------------------
 
 
 class TestPhoneNormalizedBlocking:
@@ -117,11 +100,6 @@ class TestPhoneNormalizedBlocking:
         records = [{"id": "1", "phone": "N/A"}]
         blocks = blocker.partition(records)
         assert len(blocks) == 1
-
-
-# ---------------------------------------------------------------------------
-# NAME_FIRST3 blocking
-# ---------------------------------------------------------------------------
 
 
 class TestNameFirst3Blocking:
@@ -152,11 +130,6 @@ class TestNameFirst3Blocking:
         assert len(blocks) == 1
 
 
-# ---------------------------------------------------------------------------
-# RECORD_ID_PREFIX blocking
-# ---------------------------------------------------------------------------
-
-
 class TestRecordIdPrefixBlocking:
     def test_same_prefix_grouped(self) -> None:
         strat = _strategy(BlockingKeyType.RECORD_ID_PREFIX, "record_id")
@@ -178,16 +151,10 @@ class TestRecordIdPrefixBlocking:
         assert len(blocks) == 1
 
 
-# ---------------------------------------------------------------------------
-# Oversized block subdivision
-# ---------------------------------------------------------------------------
-
-
 class TestOversizedBlockSubdivision:
     def test_oversized_block_split_into_chunks(self) -> None:
         strat = _strategy(BlockingKeyType.EMAIL_DOMAIN, "email", max_block_size=3)
         blocker = RecordBlocker(strat)
-        # 7 records with same domain → should be split into [3, 3, 1]
         records = [{"id": str(i), "email": f"user{i}@same.com"} for i in range(7)]
         blocks = blocker.partition(records)
         assert all(len(b) <= 3 for b in blocks)
@@ -202,22 +169,12 @@ class TestOversizedBlockSubdivision:
         assert ids == {str(i) for i in range(10)}
 
 
-# ---------------------------------------------------------------------------
-# Empty input
-# ---------------------------------------------------------------------------
-
-
 class TestEmptyInput:
     def test_empty_records_returns_empty_blocks(self) -> None:
         strat = _strategy(BlockingKeyType.EMAIL_DOMAIN, "email")
         blocker = RecordBlocker(strat)
         blocks = blocker.partition([])
         assert blocks == []
-
-
-# ---------------------------------------------------------------------------
-# BlockingStrategy dataclass
-# ---------------------------------------------------------------------------
 
 
 class TestBlockingStrategy:

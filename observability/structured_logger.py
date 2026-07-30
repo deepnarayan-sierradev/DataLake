@@ -31,10 +31,6 @@ from structlog.types import EventDict
 
 from contracts.observability_contract import scrub_sensitive_values
 
-# ---------------------------------------------------------------------------
-# structlog processors
-# ---------------------------------------------------------------------------
-
 
 def _scrub_value(value: Any) -> Any:
     """
@@ -81,11 +77,6 @@ def _drop_internal_structlog_keys(
     event_dict.pop("_record", None)
     event_dict.pop("_from_structlog", None)
     return event_dict
-
-
-# ---------------------------------------------------------------------------
-# Public configuration API
-# ---------------------------------------------------------------------------
 
 
 def configure_platform_logging(
@@ -140,9 +131,6 @@ def configure_platform_logging(
     handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()
-    # Remove only StreamHandlers already writing to stdout.  Preserving all
-    # other handlers (e.g. FileHandler, SysLogHandler) avoids silently
-    # discarding in-progress work configured by third-party libraries (F-19).
     for existing in list(root_logger.handlers):
         is_stdout_stream = (
             isinstance(existing, logging.StreamHandler)

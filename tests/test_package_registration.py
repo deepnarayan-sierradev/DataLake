@@ -36,7 +36,6 @@ PYPROJECT: Final[dict] = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(
 MAKEFILE: Final[str] = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 CI: Final[str] = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
-# Packages excluded by deliberate decision, each with the reason.
 EXCLUDED: Final[dict[str, str]] = {
     "agent": "DL-04 deferred; ships in the Lambda package but is not type-checked",
     "scripts": "operational scripts, checked by `make typecheck-scripts` with relaxed settings",
@@ -88,7 +87,6 @@ def _ci_mypy_scope() -> set[str]:
 
 class TestEveryPackageIsRegisteredEverywhere:
     def test_the_discovery_finds_the_packages(self) -> None:
-        # Guards the parser: an empty set would make every test below pass vacuously.
         packages = _first_party_packages()
         assert len(packages) >= 15, f"only discovered {sorted(packages)}"
         assert "persistence" in packages
@@ -126,10 +124,8 @@ class TestEveryPackageIsRegisteredEverywhere:
 class TestExclusionsAreDeliberate:
     @pytest.mark.parametrize("name", sorted(EXCLUDED))
     def test_the_excluded_package_still_exists(self, name: str) -> None:
-        # A stale exclusion is a comment describing something that is no longer true.
         assert (REPO_ROOT / name).is_dir(), f"{name} is excluded but no longer exists"
 
     def test_agent_still_ships_even_though_it_is_not_type_checked(self) -> None:
-        # DL-04 is deferred, not deleted: the interface must still be importable in the artefact.
         assert "agent" in _lambda_copy_list()
         assert "agent" in _hatch_packages()

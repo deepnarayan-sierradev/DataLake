@@ -11,17 +11,17 @@ production data.
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Final
+from typing import Any
 
 import boto3
 
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from workflow_automation.action_registry import (
@@ -41,8 +41,6 @@ from workflow_automation.definition import (
 )
 
 _logger = get_platform_logger(__name__)
-
-_EXECUTION_TABLE_NAME: Final[str] = "EdlWorkflowExecution"
 
 
 class ExecutionStatus(StrEnum):
@@ -112,11 +110,6 @@ class WorkflowEngine:
         environment: str,
         region_name: str,
         metric_resolver: MetricResolver,
-        # Non-nullable: optional at-most-once is no at-most-once (DL-WF-07). The previous comment
-        # justified `None` for "a dry-run engine that performs no external effect" — but
-        # `_execute_action` already returns SKIPPED_DRY_RUN *before* reaching the claim, so a dry
-        # run never consulted the guard and the exemption bought nothing. What it did buy was a
-        # live engine, constructed with `None`, retrying every external action on every retry.
         idempotency_guard: IdempotencyGuard,
         circuit_breaker: DestinationCircuitBreaker | None = None,
     ) -> None:
@@ -126,10 +119,8 @@ class WorkflowEngine:
         self._metric_resolver = metric_resolver
         self._idempotency = idempotency_guard
         self._breaker = circuit_breaker or DestinationCircuitBreaker()
-        table_name = os.environ.get("WORKFLOW_EXECUTION_TABLE") or _EXECUTION_TABLE_NAME
+        table_name = require_env("WORKFLOW_EXECUTION_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
-
-    # ── Execution ─────────────────────────────────────────────────────────────
 
     def execute(
         self,
@@ -219,8 +210,6 @@ class WorkflowEngine:
             dry_run=True,
         )
 
-    # ── Conditions ────────────────────────────────────────────────────────────
-
     def _evaluate_conditions(
         self, definition: WorkflowDefinition, execution: WorkflowExecution
     ) -> bool:
@@ -239,7 +228,6 @@ class WorkflowEngine:
         try:
             observed, previous = self._metric_resolver(tenant_code, condition)
         except Exception as exc:
-            # A condition that cannot be measured must not fire an action — fail closed.
             return ConditionEvaluation(
                 metric=condition.metric,
                 operator=condition.operator.value,
@@ -265,8 +253,6 @@ class WorkflowEngine:
             observed=float(observed),
             passed=passed,
         )
-
-    # ── Actions ───────────────────────────────────────────────────────────────
 
     def _run_action(self, action: WorkflowAction, context: ActionContext) -> ActionResult:
         try:
@@ -358,8 +344,6 @@ class WorkflowEngine:
         if len(blocking) == len(definition.actions):
             return ExecutionStatus.FAILED
         return ExecutionStatus.PARTIALLY_FAILED
-
-    # ── History ───────────────────────────────────────────────────────────────
 
     def _finish(self, execution: WorkflowExecution, started: datetime) -> None:
         execution.completed_at = datetime.now(UTC).isoformat()

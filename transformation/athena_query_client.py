@@ -117,7 +117,6 @@ class AthenaQueryClient:
 
         execution_id: str = response["QueryExecutionId"]
 
-        # Poll until terminal state or timeout
         deadline = time.monotonic() + self._timeout_seconds
         while True:
             if time.monotonic() > deadline:
@@ -202,8 +201,6 @@ class AthenaQueryClient:
             }
             for row in rows[1:]
         ]
-
-    # ── Internals ─────────────────────────────────────────────────────────────
 
     def _get_execution_status(self, execution_id: str) -> dict[str, Any]:
         try:

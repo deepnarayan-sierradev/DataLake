@@ -28,34 +28,18 @@ from __future__ import annotations
 import re
 from typing import Final
 
-# ---------------------------------------------------------------------------
-# Compiled patterns (compiled once at module load — never inside functions)
-# ---------------------------------------------------------------------------
-
 STABLE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}$")
 
-# Like STABLE_ID_PATTERN but also permits underscores (e.g. "ar_invoice", "ap_bill").
 ENTITY_TYPE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_\-]{1,63}$")
 
-# Tenant code format: lowercase letters, digits, hyphens; 2-48 characters; starts with a letter.
-# Examples: "acme-corp", "globex-eu", "demo".
 TENANT_CODE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,47}$")
 
-# Sentinel tenant code for the pre-multi-tenancy single-tenant deployment.
-# `tenant_scoped_key()` special-cases this value so existing DynamoDB items
-# and S3 objects written before tenant scoping existed continue to resolve
-# without a data migration (§1.1 backward-compatibility guarantee).
 DEFAULT_TENANT_CODE: Final[str] = "demo"
 
-# Run-ids include a timestamp+UUID component and are up to 100 chars.
-# The generated format "run-YYYYMMDD-HHMMSSffffff-xxxxxxxx" is ~37 chars,
-# but 100 chars is allowed to accommodate future extensions.
 RUN_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,99}$")
 
-# Rejects bare sequential integers as run_ids (enumeration attack prevention).
 SEQUENTIAL_INTEGER_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\d+$")
 
-# Generic names that must never be used as source or entity identifiers.
 PROHIBITED_IDENTIFIERS: Final[frozenset[str]] = frozenset(
     {
         "helper",
@@ -66,11 +50,6 @@ PROHIBITED_IDENTIFIERS: Final[frozenset[str]] = frozenset(
         "phase2",
     }
 )
-
-
-# ---------------------------------------------------------------------------
-# Reusable validation helpers
-# ---------------------------------------------------------------------------
 
 
 def validate_stable_id(value: str, field_name: str = "identifier") -> str:
@@ -184,12 +163,10 @@ def validate_run_id(value: str) -> str:
 
 SAFE_S3_PREFIX_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-_/=]{0,511}$")
 
-# Physical column / SQL identifier — allowlisted before any query build (OWASP A03).
 SAFE_COLUMN_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def validate_s3_prefix(value: str, field_name: str = "s3_prefix") -> str:
-    # OWASP A03: reject path traversal / injection in S3 key prefixes.
     clean = value.rstrip("/")
     if not SAFE_S3_PREFIX_PATTERN.match(clean):
         raise ValueError(f"{field_name} {value!r} is not a safe S3 prefix.")

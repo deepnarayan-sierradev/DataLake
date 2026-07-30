@@ -50,7 +50,7 @@ from tenancy.scope_unit_repository import ScopeStoreUnavailableError, ScopeUnitR
 
 _logger = get_platform_logger(__name__)
 
-PAGE_TOKEN_PREFIX: Final[str] = "edl-page:"  # noqa: S105 — a page marker, not a secret
+PAGE_TOKEN_PREFIX: Final[str] = "datalake-page:"  # noqa: S105 — a page marker, not a secret
 
 
 def region() -> str:
@@ -109,15 +109,11 @@ def authorize_path_tenant(event: dict[str, Any], path_tenant_code: str) -> str:
     tenant_code = validate_tenant_code(path_tenant_code)
     authenticated = authenticated_tenant_code(event)
     if authenticated != tenant_code:
-        # A caller reaching for another tenant's path is a cross-tenant attempt whether the
-        # cause is a bug or an attack, so it pages either way.
         record_platform_metric(PlatformMetric.CROSS_TENANT_ACCESS_ATTEMPTS)
         record_platform_metric(PlatformMetric.AUTHORIZATION_DENIALS, 1.0, Capability="tenant_path")
         raise AuthorizationError(
             "Authenticated tenant is not permitted to access this tenant_code path."
         )
-    # Bound only after the claim is verified, so a rejected request never stamps its logs with a
-    # tenant it was not entitled to name.
     structlog.contextvars.bind_contextvars(tenant_code=tenant_code)
     return tenant_code
 
@@ -166,7 +162,6 @@ def authenticated_user(event: dict[str, Any]) -> str:
 
 
 def granted_access_tags(event: dict[str, Any]) -> frozenset[str]:
-    # OWASP A01: data-level access tags come from verified authorizer claims, never the body.
     claims = extract_claims(event) or {}
     raw = str(claims.get("custom:access_tags") or claims.get("access_tags") or "")
     return frozenset(tag.strip() for tag in raw.split(",") if tag.strip())
@@ -208,8 +203,6 @@ def scope_predicate_for(
         profile = repository.get_partition_profile(tenant_code)
         units = repository.list_scope_units(tenant_code)
     except ScopeStoreUnavailableError as exc:
-        # Failing closed on an unreadable scope store: the alternative default is `single`, which
-        # is a match-all predicate for a partitioned tenant.
         raise ScopeStoreUnavailableApiError(
             "Scope configuration is temporarily unavailable, so no rows can be authorised."
         ) from exc
@@ -227,9 +220,6 @@ def scope_predicate_for(
             "Your access grant names no scope units, so no rows are visible."
         ) from exc
     except UnknownScopeUnitError as exc:
-        # A grant naming a unit the tenant does not own is a denial, not a server fault. It was
-        # reaching the generic handler as a 500, which both mis-signalled it and buried the
-        # CrossScopeAccessAttempts event it had already recorded.
         raise AuthorizationError(
             "Your access grant names scope units that do not exist for this tenant."
         ) from exc
@@ -244,8 +234,9 @@ def decode_page_token(event: dict[str, Any], tenant_code: str) -> dict[str, Any]
     caused on 2026-07-29.
 
     The previous version required `tenant_code` to be a member of the *key itself* — which is true
-    for `EdlTwinIndex` and `EdlDataQualityException` but false for `EdlEntityExtractionConfig`
-    (keyed `source_id`/`entity_id`) and for `EdlRunAuditLog` on its Scan fallback (keyed
+    for `datalake-twin-index-dev` and `datalake-data-quality-exceptions-dev` but false for
+    `datalake-entity-extraction-config-dev`
+    (keyed `source_id`/`entity_id`) and for `datalake-run-audit-log-dev` on its Scan fallback (keyed
     `run_id`/`stage`). So `/entities` handed clients a `next_token` that this function then rejected
     as malformed, and `/runs` built an `ExclusiveStartKey` carrying an attribute outside the table's
     key schema. A rule about "every token" was applied without checking every table it lands on.
@@ -262,8 +253,6 @@ def decode_page_token(event: dict[str, Any], tenant_code: str) -> dict[str, Any]
         return None
     try:
         decoded = base64.urlsafe_b64decode(raw.encode("ascii")).decode("ascii")
-        # The prefix must be present: `removeprefix` is a no-op when it is absent, which would
-        # accept a hand-written payload and defeat the point of an opaque cursor.
         if not decoded.startswith(PAGE_TOKEN_PREFIX):
             raise ValueError("token is missing its marker")
         envelope = json.loads(decoded[len(PAGE_TOKEN_PREFIX) :])

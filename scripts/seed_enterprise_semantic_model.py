@@ -96,8 +96,6 @@ def main() -> None:
     )
     print(f"SOW §4 KPIs covered: {len(SOW_KPI_MAP)}")
 
-    # Structural validation only — it compiles every KPI definition and never reads a row, so
-    # there are no access tags to grant. Passed explicitly because the parameter is required.
     report = KpiValidationHarness(model, structural_expectations(model)).run(
         granted_access_tags=frozenset()
     )
@@ -112,7 +110,6 @@ def main() -> None:
     governance = SemanticModelGovernance(
         environment=args.environment, region_name=args.region, s3_bucket=args.bucket
     )
-    # allow_draft mirrors DL-SEM-04: an unsigned definition publishes to draft, never active.
     record = governance.publish(model, published_by=args.published_by, allow_draft=bool(unsigned))
     print(f"\nPublished {record.model_version} as {record.status.value}.")
 

@@ -33,8 +33,6 @@ _logger = get_platform_logger(__name__)
 
 _DESCRIBE_PATH_TEMPLATE: Final[str] = "/services/data/v59.0/sobjects/{object_name}/describe"
 
-# Salesforce compound fields (e.g. BillingAddress) are not directly queryable
-# in SOQL — their sub-fields are.  We filter them to prevent invalid queries.
 _NON_QUERYABLE_COMPOUND_TYPES: Final[frozenset[str]] = frozenset({"address", "location"})
 
 
@@ -178,8 +176,6 @@ class SalesforceMetadataDiscoveryClient:
             schema_fingerprint=fingerprint,
         )
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _fetch_describe(self) -> list[SalesforceFieldMetadata]:
         """
         Fetch and parse the Describe response, caching for the lifetime of this instance.
@@ -265,7 +261,6 @@ class SalesforceMetadataDiscoveryClient:
             return [f for f in fields if not f.is_custom]
         if field_mode == FieldMode.CUSTOM:
             return [f for f in fields if f.is_custom]
-        # INCLUDE_ONLY — preserve ordering from include_fields list
         index = {f.name: f for f in fields}
         return [
             index[name] for name in include_fields if name in index and index[name].is_queryable

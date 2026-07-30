@@ -28,7 +28,8 @@ import pyarrow.parquet as pq
 import pytest
 from moto import mock_aws
 
-from persistence.tenant_tables import TENANT_SCOPED_TABLES
+from conftest import RESOURCE_NAME_ENVIRONMENT
+from persistence.tenant_tables import tenant_scoped_tables
 from portability.export_service import EXPORT_CAPABILITY, ExportFormat, ExportLayer
 from portability.portability_handler import lambda_handler
 from tenancy.scope_contract import PartitionKind, PartitionModel, ScopeUnit, TenantPartitionProfile
@@ -40,12 +41,12 @@ _UNIT_A = "franchisee-0001"
 _UNIT_B = "franchisee-0002"
 
 _BUCKETS = {
-    "ANALYTICS_S3_BUCKET": "edl-analytics-test",
-    "EXPORT_ARTEFACT_BUCKET": "edl-exports-test",
-    "RAW_S3_BUCKET": "edl-raw-test",
-    "CURATED_S3_BUCKET": "edl-curated-test",
-    "GOVERNANCE_S3_BUCKET": "edl-governance-test",
-    "SCHEMA_SNAPSHOTS_S3_BUCKET": "edl-schemas-test",
+    "ANALYTICS_S3_BUCKET": "datalake-analytics-test",
+    "EXPORT_ARTEFACT_BUCKET": "datalake-exports-test",
+    "RAW_S3_BUCKET": "datalake-raw-test",
+    "CURATED_S3_BUCKET": "datalake-curated-test",
+    "GOVERNANCE_S3_BUCKET": "datalake-governance-test",
+    "SCHEMA_SNAPSHOTS_S3_BUCKET": "datalake-schemas-test",
 }
 
 
@@ -65,7 +66,7 @@ def _dynamo_table(name: str, pk: str, sk: str | None = None) -> None:
 
 def _audit_table_with_tenant_index() -> None:
     boto3.client("dynamodb", region_name=_REGION).create_table(
-        TableName="EdlRunAuditLog",
+        TableName=RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"],
         KeySchema=[
             {"AttributeName": "run_id", "KeyType": "HASH"},
             {"AttributeName": "stage", "KeyType": "RANGE"},
@@ -104,8 +105,8 @@ def _provision(*, partitioned: bool) -> None:
     for bucket in _BUCKETS.values():
         s3.create_bucket(Bucket=bucket)
 
-    _dynamo_table("EdlExportJob", "tenant_code", "job_id")
-    _dynamo_table("EdlScopeUnit", "tenant_code", "scope_unit_id")
+    _dynamo_table(RESOURCE_NAME_ENVIRONMENT["EXPORT_JOB_TABLE"], "tenant_code", "job_id")
+    _dynamo_table(RESOURCE_NAME_ENVIRONMENT["SCOPE_UNIT_TABLE"], "tenant_code", "scope_unit_id")
 
     repository = ScopeUnitRepository(environment="dev", region_name=_REGION)
     if partitioned:
@@ -126,7 +127,6 @@ def _provision(*, partitioned: bool) -> None:
                 )
             )
 
-    # Two franchisees' rows in one analytics partition — the situation an export must separate.
     table = pa.table(
         {
             "golden_id": ["c-1", "c-2"],
@@ -171,7 +171,6 @@ def _artefact_rows(job_id: str) -> list[dict[str, str]]:
 @mock_aws
 class TestExportProducesAnArtefact:
     def test_the_artefact_is_written_not_merely_requested(self) -> None:
-        # The F6 assertion: `execute` had no production caller, so nothing was ever rendered.
         _provision(partitioned=False)
         result = lambda_handler(_export_event(), None)
         assert result["status"] == "completed"
@@ -211,13 +210,11 @@ class TestExportScopeIsolation:
         )
 
     def test_a_grant_naming_a_unit_the_tenant_does_not_own_is_rejected(self) -> None:
-        # Only reachable because claims now go through build_scope_claims.
         _provision(partitioned=True)
         with pytest.raises(PermissionError, match="do not exist"):
             lambda_handler(_export_event(granted_scope_units=["franchisee-9999"]), None)
 
     def test_an_affirmative_tenant_wide_grant_exports_both(self) -> None:
-        # Positive control: the denials above must not be a filter that refuses everything.
         _provision(partitioned=True)
         result = lambda_handler(_export_event(granted_scope_tenant_wide=True), None)
         assert len(_artefact_rows(result["job_id"])) == 2
@@ -240,16 +237,21 @@ class TestDeletionCoversEveryStore:
         missing deleters were the defect.
         """
         _provision(partitioned=False)
-        _dynamo_table("EdlDeletionCertificate", "tenant_code", "certificate_id")
-        for table_name in TENANT_SCOPED_TABLES:
-            if table_name in {"EdlExportJob", "EdlScopeUnit"}:
+        _dynamo_table(
+            RESOURCE_NAME_ENVIRONMENT["DELETION_CERTIFICATE_TABLE"], "tenant_code", "certificate_id"
+        )
+        for table_name in tenant_scoped_tables():
+            if table_name in {
+                RESOURCE_NAME_ENVIRONMENT["EXPORT_JOB_TABLE"],
+                RESOURCE_NAME_ENVIRONMENT["SCOPE_UNIT_TABLE"],
+            }:
                 continue
-            if table_name == "EdlRunAuditLog":
-                # With its tenant GSI: the sweep reads that index because the table is keyed on
-                # `run_id`, and without the index it now fails loudly rather than reporting a
-                # successful deletion of rows it never found.
+            if table_name == RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"]:
                 _audit_table_with_tenant_index()
-            elif table_name in {"EdlEntityExtractionConfig", "EdlWatermarkRepository"}:
+            elif table_name in {
+                RESOURCE_NAME_ENVIRONMENT["ENTITY_CONFIG_TABLE"],
+                RESOURCE_NAME_ENVIRONMENT["WATERMARK_TABLE"],
+            }:
                 _dynamo_table(table_name, "source_id", "entity_id")
             else:
                 _dynamo_table(table_name, "tenant_code", "sk")

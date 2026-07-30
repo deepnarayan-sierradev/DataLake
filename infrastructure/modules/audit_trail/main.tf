@@ -1,40 +1,16 @@
-# ---------------------------------------------------------------------------
-# CloudTrail (SOW §23.4 security monitoring and logging, DL-SEC-13, DL-SEC-17).
-#
-# There was no `aws_cloudtrail` resource anywhere in this repository, which had two consequences
-# beyond the obvious compliance one:
-#
-#   1. The IAM tenant boundary ships in `audit` mode whose entire purpose is to answer "what would
-#      have been denied". That answer comes from a CloudTrail metric filter, and the filter was
-#      created only when `cloudtrail_log_group_name` was non-empty — which no environment set,
-#      because there was no trail to name. So the observation window that gates the flip to
-#      `enforce` measured nothing, and `CrossTenantAccessAttempts` sitting at zero proved only that
-#      nothing was producing it.
-#   2. `CrossTenantAccessAttempts` *did* have a producer — the control plane's own claim check — so
-#      the alarm/emitter reconciliation was satisfied and the metric read as wired. Two different
-#      events sharing one metric name is how a sustained zero came to look like evidence.
-#
-# The IAM-denial metric is therefore deliberately named separately (see the metric filter in
-# `iam/tenant_boundary.tf`), and this module exists so it has something to read.
-#
-# Object-level data events are enabled for the data-plane buckets specifically: without them
-# CloudTrail records that `GetObject` happened but not on which key, and a tenant-prefix boundary is
-# a statement about keys. They are the expensive part of a trail, which is why the selector is
-# scoped to these buckets rather than left at "all S3".
-# ---------------------------------------------------------------------------
 
 locals {
-  trail_name = "${var.environment}-edl-audit-trail"
+  trail_name = "${var.name_prefix}-audit-trail-${var.environment}"
 }
 
 data "aws_partition" "current" {}
 
 resource "aws_s3_bucket" "trail" {
-  bucket        = "edl-audit-trail-${var.environment}-${var.account_id}"
+  bucket        = "${var.name_prefix}-audit-trail-${var.environment}-${var.region_short}"
   force_destroy = false
 
   tags = merge(var.tags, {
-    Name    = "edl-audit-trail-${var.environment}"
+    Name    = "${var.name_prefix}-audit-trail-${var.environment}"
     Purpose = "cloudtrail-log-archive"
   })
 }
@@ -66,9 +42,6 @@ resource "aws_s3_bucket_versioning" "trail" {
   }
 }
 
-# An audit trail that can be silently truncated is not an audit trail. Object Lock is deliberately
-# not used (it cannot be enabled on an existing bucket and complicates lifecycle), but the retention
-# floor is enforced and deletion is blocked by the bucket policy below.
 resource "aws_s3_bucket_lifecycle_configuration" "trail" {
   bucket = aws_s3_bucket.trail.id
 
@@ -91,7 +64,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "trail" {
   }
 }
 
-# Who read the audit archive is itself audit evidence (CKV_AWS_18).
 resource "aws_s3_bucket_logging" "trail" {
   count = var.access_log_bucket_id == null ? 0 : 1
 
@@ -100,7 +72,6 @@ resource "aws_s3_bucket_logging" "trail" {
   target_prefix = "audit-trail/"
 }
 
-# Object events to EventBridge rather than a hardwired consumer (CKV2_AWS_62).
 resource "aws_s3_bucket_notification" "trail" {
   bucket      = aws_s3_bucket.trail.id
   eventbridge = true
@@ -135,8 +106,6 @@ data "aws_iam_policy_document" "trail_bucket" {
     }
   }
 
-  # Nobody deletes audit evidence, including this account's own administrators. The lifecycle rule
-  # above is the only expiry path, and it is visible in code.
   statement {
     sid    = "DenyAuditEvidenceDeletion"
     effect = "Deny"
@@ -174,7 +143,7 @@ data "aws_iam_policy_document" "trail_to_logs_assume" {
 }
 
 resource "aws_iam_role" "trail_to_logs" {
-  name               = "${var.environment}-edl-cloudtrail-to-logs"
+  name               = "${var.name_prefix}-cloudtrail-to-logs-${var.environment}-exec"
   assume_role_policy = data.aws_iam_policy_document.trail_to_logs_assume.json
   tags               = var.tags
 }
@@ -188,13 +157,11 @@ data "aws_iam_policy_document" "trail_to_logs" {
 }
 
 resource "aws_iam_role_policy" "trail_to_logs" {
-  name   = "${var.environment}-edl-cloudtrail-to-logs"
+  name   = "${var.name_prefix}-cloudtrail-to-logs-${var.environment}-exec-policy"
   role   = aws_iam_role.trail_to_logs.id
   policy = data.aws_iam_policy_document.trail_to_logs.json
 }
 
-# CloudTrail publishes here on every new log file, so a consumer can react to trail delivery
-# instead of polling the bucket (CKV_AWS_252).
 resource "aws_sns_topic" "trail_delivery" {
   name              = "${local.trail_name}-delivery"
   kms_master_key_id = var.kms_key_arn
@@ -239,8 +206,6 @@ resource "aws_cloudtrail" "platform" {
   cloud_watch_logs_group_arn = "${aws_cloudwatch_log_group.trail.arn}:*"
   cloud_watch_logs_role_arn  = aws_iam_role.trail_to_logs.arn
 
-  # Object-level events on the data-plane buckets only. A tenant-prefix boundary is a claim about
-  # keys, and management events do not carry the key.
   dynamic "event_selector" {
     for_each = length(var.data_bucket_arns) > 0 ? [1] : []
 
@@ -260,19 +225,12 @@ resource "aws_cloudtrail" "platform" {
   tags = merge(var.tags, { Purpose = "platform-audit-trail" })
 }
 
-# ---------------------------------------------------------------------------
-# Cross-region replication of the audit archive (CKV_AWS_144). This bucket is the SOC 2
-# evidence, so a single-region loss is the one that matters most — the events it holds cannot
-# be regenerated. Versioning is enabled here because replication requires it.
-# ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "trail_replica" {
   provider = aws.replica
 
   bucket = "${aws_s3_bucket.trail.id}-replica"
 
-  # The replication target does not replicate onward, and access logging and notifications
-  # belong on the primary that receives the traffic.
   #checkov:skip=CKV_AWS_144:This is the replication target.
   #checkov:skip=CKV_AWS_18:Access logging is on the primary.
   #checkov:skip=CKV2_AWS_62:Event notifications are on the primary.
@@ -298,7 +256,6 @@ resource "aws_kms_key" "trail_replica" {
 }
 
 data "aws_iam_policy_document" "trail_replica_key" {
-  # A key policy's resource is the key itself; scoping is by principal.
   #checkov:skip=CKV_AWS_109:Key policy resource is the key itself.
   #checkov:skip=CKV_AWS_111:Key policy resource is the key itself; principals are enumerated.
   #checkov:skip=CKV_AWS_356:A key policy cannot name its own ARN as a resource.

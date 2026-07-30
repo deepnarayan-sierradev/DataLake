@@ -21,11 +21,11 @@ from serving_store.loaders.redshift_loader import (
 
 _REGION = "us-east-1"
 _SECRET_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:redshift-conn"
-_ANALYTICS_BUCKET = "edl-analytics-dev"
+_ANALYTICS_BUCKET = "datalake-analytics-dev-use1"
 _ANALYTICS_PREFIX = "acme-corp/company/analytics_date=2026-07-22"
 _TABLE_NAME = "salesforce_account"
 _TENANT_CODE = "acme-corp"
-_COPY_ROLE = "arn:aws:iam::123456789012:role/edl-serving-store-redshift-dev-copy-role"
+_COPY_ROLE = "arn:aws:iam::123456789012:role/datalake-serving-store-redshift-dev-copy-exec"
 
 
 def _connection_secret() -> str:
@@ -33,8 +33,8 @@ def _connection_secret() -> str:
         {
             "host": "redshift-dev.123.us-east-1.redshift-serverless.amazonaws.com",
             "port": "5439",
-            "workgroup": "edl-serving-store-redshift-dev",
-            "database": "edl_serving",
+            "workgroup": "datalake-serving-store-redshift-dev",
+            "database": "datalake_serving",
             "region": _REGION,
             "copy_iam_role": _COPY_ROLE,
         }
@@ -114,7 +114,6 @@ class TestRedshiftLoaderS3Path:
         sql = self._executed(cursor)
         assert 'CREATE SCHEMA IF NOT EXISTS "acme_corp"' in sql
         assert 'SET search_path TO "acme_corp"' in sql
-        # Reader is granted only on this tenant's schema, never a cluster-wide role.
         assert 'GRANT SELECT ON ALL TABLES IN SCHEMA "acme_corp"' in sql
         assert "db_datareader" not in sql
 

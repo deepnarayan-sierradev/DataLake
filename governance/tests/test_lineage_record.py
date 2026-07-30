@@ -54,7 +54,6 @@ class TestLineageEmitter:
     def test_emit_writes_to_s3(self):
         record = _sample_record()
         key = self.emitter.emit(record)
-        # DL-SEC-04: lineage keys are tenant-prefixed like every other layer.
         assert key.startswith("demo/lineage/")
         assert _ENTITY_ID in key
         assert _RUN_ID in key
@@ -75,7 +74,6 @@ class TestLineageEmitter:
         s3 = boto3.client("s3", region_name=_REGION)
         obj = s3.get_object(Bucket=_BUCKET, Key=key)
         raw_json = obj["Body"].read().decode()
-        # Confirm no data values (only structural metadata)
         assert "alice@" not in raw_json
         assert "password" not in raw_json.lower()
 
@@ -143,11 +141,6 @@ class TestLineageFactories:
         assert "curated-bucket" in record.target_node.s3_path
 
 
-# ---------------------------------------------------------------------------
-# Error-path coverage: emit raises, load non-404 re-raises, compact JSON
-# ---------------------------------------------------------------------------
-
-
 @mock_aws
 class TestLineageEmitterErrorPaths:
     def setup_method(self, method: object = None) -> None:
@@ -183,5 +176,4 @@ class TestLineageEmitterErrorPaths:
         key = self.emitter.emit(record)
         s3 = boto3.client("s3", region_name=_REGION)
         body = s3.get_object(Bucket=_BUCKET, Key=key)["Body"].read().decode()
-        # Compact JSON has no spaces after separators
         assert " " not in body, f"Expected compact JSON but found spaces: {body[:100]}"

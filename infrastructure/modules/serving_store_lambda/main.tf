@@ -17,7 +17,7 @@ locals {
     ManagedBy   = "terraform"
     Module      = "serving_store_lambda"
   })
-  function_name = "EdlServingStoreLoader"
+  function_name = "${var.name_prefix}-serving-store-loader-${var.environment}"
 }
 
 resource "aws_cloudwatch_log_group" "lambda_execution" {
@@ -31,15 +31,6 @@ resource "aws_cloudwatch_log_group" "lambda_execution" {
   })
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Security Group
-#
-# Reads analytics Parquet from S3 (HTTPS via VPC endpoint). MySQL egress
-# (3306) to the serving store RDS instance is wired by the caller as a
-# standalone aws_security_group_rule once the database module's SG also
-# exists — see infrastructure/modules/serving_store_database/main.tf's note
-# on why that cross-reference can't live inside either module.
-# ---------------------------------------------------------------------------
 
 data "aws_vpc" "selected" {
   filter {
@@ -49,7 +40,7 @@ data "aws_vpc" "selected" {
 }
 
 resource "aws_security_group" "serving_store_lambda" {
-  name        = "${local.function_name}Sg"
+  name        = "${local.function_name}-sg"
   description = "Security group for the serving store loader Lambda. HTTPS to AWS VPC endpoints; 3306 egress wired by the caller."
   vpc_id      = data.aws_vpc.selected.id
 
@@ -62,28 +53,27 @@ resource "aws_security_group" "serving_store_lambda" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${local.function_name}Sg"
+    Name = "${local.function_name}-sg"
   })
 
   lifecycle {
     create_before_destroy = true
-    # 3306 egress is wired by the caller as a standalone rule; don't reconcile it away.
-    ignore_changes = [egress]
+    ignore_changes        = [egress]
   }
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Function — Serving Store Loader
-#
-# Handler: serving_store.serving_store_loader_handler.lambda_handler
-# Runtime: python3.13
-#
-# Environment variables:
-#   PLATFORM_ENVIRONMENT  — "dev" | "staging" | "prod"
-#   ANALYTICS_S3_BUCKET   — analytics layer bucket (read-only)
-#   GOVERNANCE_S3_BUCKET  — lineage bucket (optional; empty = disabled)
-#   AWS_REGION            — injected automatically by Lambda runtime
-# ---------------------------------------------------------------------------
+
+locals {
+  required_resource_names = [
+    "RESOURCE_NAME_PREFIX",
+    "SECRET_PATH_PREFIX",
+    "SERVING_CLAIM_TABLE",
+    "SERVING_STORE_CONFIG_TABLE",
+  ]
+  resource_name_variables = {
+    for key in local.required_resource_names : key => var.resource_names[key]
+  }
+}
 
 resource "aws_lambda_function" "serving_store_loader" {
   function_name = local.function_name
@@ -113,11 +103,11 @@ resource "aws_lambda_function" "serving_store_loader" {
   kms_key_arn = var.kms_key_arn
 
   environment {
-    variables = {
+    variables = merge({
       PLATFORM_ENVIRONMENT = var.environment
       ANALYTICS_S3_BUCKET  = var.analytics_s3_bucket_name
       GOVERNANCE_S3_BUCKET = var.governance_s3_bucket_name
-    }
+    }, local.resource_name_variables)
   }
 
   vpc_config {
@@ -141,21 +131,14 @@ resource "aws_lambda_permission" "allow_step_functions" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.serving_store_loader.function_name
   principal     = "states.amazonaws.com"
-  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:EdlExtractionPipeline"
+  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.name_prefix}-extraction-workflow-${var.environment}"
 }
 
-# ---------------------------------------------------------------------------
-# Async-invocation dead letter queue (CKV_AWS_116). An asynchronous Lambda failure with no
-# DLQ is discarded after the retries with nothing left to inspect. Named `EdlStageDlq-*` so
-# the existing `sqs:SendMessage` grant on that prefix covers it rather than adding a new one.
-# SSE-SQS rather than a CMK: no per-module KMS input exists, and the payload here is a failed
-# event envelope, not tenant data.
-# ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "async_dlq" {
-  name                      = "EdlStageDlq-ServingStoreLoaderAsync"
+  name                      = "${var.name_prefix}-serving-store-loader-async-dlq-${var.environment}"
   message_retention_seconds = 1209600 # 14 days, the maximum — a DLQ that expires loses the evidence
   sqs_managed_sse_enabled   = true
 
-  tags = merge(local.common_tags, { Name = "EdlStageDlq-ServingStoreLoaderAsync" })
+  tags = merge(local.common_tags, { Name = "${var.name_prefix}-serving-store-loader-async-dlq-${var.environment}" })
 }

@@ -49,7 +49,6 @@ def _source(path: Path) -> str:
 
 class TestEveryHandlerCarriesCorrelationContext:
     def test_the_sweep_finds_the_handlers(self) -> None:
-        # A parse that silently found nothing would make every assertion below vacuous.
         assert len(HANDLERS) >= 12, [str(p) for p in HANDLERS]
 
     @pytest.mark.parametrize("path", HANDLERS, ids=lambda p: p.stem)

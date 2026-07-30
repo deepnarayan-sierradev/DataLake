@@ -81,11 +81,6 @@ def _address_field(name: str) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Field mode filtering
-# ---------------------------------------------------------------------------
-
-
 class TestFieldModeFiltering:
     def test_all_mode_returns_all_queryable_fields(self, requests_mock) -> None:  # type: ignore[no-untyped-def]
         auth = _make_auth()
@@ -150,11 +145,6 @@ class TestFieldModeFiltering:
         assert names == ["Id", "Phone"]  # preserves order of include_fields
 
 
-# ---------------------------------------------------------------------------
-# Automatic exclusions
-# ---------------------------------------------------------------------------
-
-
 class TestAutomaticExclusions:
     def test_non_queryable_field_excluded(self, requests_mock) -> None:  # type: ignore[no-untyped-def]
         auth = _make_auth()
@@ -181,7 +171,6 @@ class TestAutomaticExclusions:
                     {
                         "name": "Id",
                         "type": "id",
-                        # queryable intentionally omitted (seen in real org payloads)
                         "custom": False,
                         "nillable": False,
                         "label": "Account ID",
@@ -189,7 +178,6 @@ class TestAutomaticExclusions:
                     {
                         "name": "Name",
                         "type": "string",
-                        # queryable intentionally omitted
                         "custom": False,
                         "nillable": True,
                         "label": "Account Name",
@@ -238,11 +226,6 @@ class TestAutomaticExclusions:
         assert "Id" in names
 
 
-# ---------------------------------------------------------------------------
-# Caching
-# ---------------------------------------------------------------------------
-
-
 class TestDescribeCaching:
     def test_describe_called_once_per_instance(self, requests_mock) -> None:  # type: ignore[no-untyped-def]
         auth = _make_auth()
@@ -254,11 +237,6 @@ class TestDescribeCaching:
         client.discover_fields(_SOURCE_ID, _ENTITY_ID, FieldMode.ALL, [], [])
         client.discover_fields(_SOURCE_ID, _ENTITY_ID, FieldMode.ALL, [], [])
         assert requests_mock.call_count == 1  # HTTP called exactly once
-
-
-# ---------------------------------------------------------------------------
-# FieldContract properties
-# ---------------------------------------------------------------------------
 
 
 class TestFieldContractProperties:
@@ -287,7 +265,6 @@ class TestFieldContractProperties:
         c1 = SalesforceMetadataDiscoveryClient(auth_client=auth1, object_name="Account")
         fp1 = c1.discover_fields(_SOURCE_ID, _ENTITY_ID, FieldMode.ALL, [], []).schema_fingerprint
 
-        # Simulate a new field added to Salesforce
         auth2 = _make_auth()
         requests_mock.get(
             f"{_INSTANCE_URL}/services/data/v59.0/sobjects/Account/describe",

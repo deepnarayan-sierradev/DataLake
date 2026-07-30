@@ -48,9 +48,6 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Exceptions persisted per run. A batch that produces more than this has a systemic problem, and
-# writing tens of thousands of rows would cost more than the signal is worth — the *count* is
-# recorded either way, so the cap never hides the scale of the problem.
 MAX_PERSISTED_EXCEPTIONS: Final[int] = 500
 
 
@@ -117,11 +114,6 @@ def run_batch_quality_gate(
             tenant_code, entity_id
         )
     except QualityPolicyNotAttachedError as exc:
-        # The repository fails closed on any lookup failure, which is correct for a *permission*
-        # or throttling error — someone removing the gate's read access must not silently disable
-        # it. A table that does not exist is a different fact: quality gating is not deployed in
-        # this environment, and blocking every transformation run for that would take the whole
-        # pipeline down on first deploy. Tolerated, loudly.
         if _is_table_absent(exc):
             _logger.warning(
                 "batch_quality_gate_not_deployed",

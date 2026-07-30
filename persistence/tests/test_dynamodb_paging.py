@@ -25,7 +25,7 @@ from persistence.dynamodb_paging import (
 class _FakeTable:
     """Returns a scripted sequence of pages and records the kwargs it was called with."""
 
-    name = "EdlFake"
+    name = "DatalakeFake"
 
     def __init__(self, pages: list[dict[str, Any]]) -> None:
         self._pages = pages
@@ -48,7 +48,6 @@ def _page(keys: list[str], next_key: str | None = None) -> dict[str, Any]:
 
 class TestIterItemsDrainsEveryPage:
     def test_follows_the_cursor_to_exhaustion(self) -> None:
-        # The assertion a single-page implementation fails.
         table = _FakeTable([_page(["a"], "a"), _page(["b"], "b"), _page(["c"])])
         assert [item["k"] for item in iter_items(table)] == ["a", "b", "c"]
         assert len(table.calls) == 3
@@ -68,7 +67,6 @@ class TestIterItemsDrainsEveryPage:
         assert list(iter_items(_FakeTable([_page([])]))) == []
 
     def test_it_is_lazy(self) -> None:
-        # A generator, not a list: a caller streaming a large table must not pay for the whole set.
         table = _FakeTable([_page(["a"], "a"), _page(["b"])])
         iterator = iter_items(table)
         assert table.calls == []
@@ -89,7 +87,6 @@ class TestFetchPageIsBounded:
         assert page.has_more is False
 
     def test_reads_exactly_one_page(self) -> None:
-        # Bounded means bounded: it must not helpfully drain the rest.
         table = _FakeTable([_page(["a"], "a"), _page(["b"])])
         fetch_page(table, limit=1)
         assert len(table.calls) == 1
@@ -104,8 +101,6 @@ class TestFetchPageIsBounded:
             fetch_page(_FakeTable([_page([])]), limit=0)
 
     def test_empty_page_with_a_cursor_still_reports_more(self) -> None:
-        # A FilterExpression can discard an entire page. A caller that treats an empty page as the
-        # end silently truncates — so has_more must follow the cursor, never the item count.
         page = fetch_page(_FakeTable([_page([], "next")]), limit=10)
         assert page.items == []
         assert page.has_more is True
@@ -114,7 +109,7 @@ class TestFetchPageIsBounded:
 class TestFailuresAreTyped:
     def test_client_error_becomes_paging_error(self) -> None:
         class _Failing:
-            name = "EdlFake"
+            name = "DatalakeFake"
 
             def query(self, **kwargs: Any) -> dict[str, Any]:
                 raise ClientError(
@@ -127,7 +122,7 @@ class TestFailuresAreTyped:
 
 class TestIndexAvailability:
     class _Table:
-        name = "EdlFake"
+        name = "DatalakeFake"
 
         def __init__(self, indexes: list[str], fail: bool = False) -> None:
             self._indexes = indexes
@@ -157,7 +152,6 @@ class TestIndexAvailability:
         assert not index_available(self._Table([]), "tenant-started-index")
 
     def test_describe_failure_degrades_rather_than_raising(self) -> None:
-        # A missing permission must degrade a Query to a Scan, not take the endpoint down.
         assert not index_available(self._Table([], fail=True), "any-index")
 
     def test_result_is_cached_when_a_cache_is_supplied(self) -> None:

@@ -26,7 +26,6 @@ def _write(root: Path, relative: str, body: str) -> None:
 
 class TestGateRejectsWhatTheOldGrepMissed:
     def test_bare_helper_function(self, tmp_path: Path) -> None:
-        # The exact input the old Makefile pattern let through.
         _write(tmp_path, "widget.py", "def helper():\n    pass\n")
         assert analyse(tmp_path).failed
 
@@ -35,7 +34,6 @@ class TestGateRejectsWhatTheOldGrepMissed:
         assert analyse(tmp_path).failed
 
     def test_suffixed_class_name(self, tmp_path: Path) -> None:
-        # The old grep matched `class Manager` but not a suffix like `WidgetCredentialManager`.
         _write(tmp_path, "widget.py", "class WidgetCredentialManager:\n    pass\n")
         report = analyse(tmp_path)
         assert report.failed
@@ -60,7 +58,6 @@ class TestGateRejectsWhatTheOldGrepMissed:
 
 class TestGateAcceptsLegitimateNames:
     def test_domain_named_code_passes(self, tmp_path: Path) -> None:
-        # Positive control: a gate that always failed would pass every test above and be useless.
         _write(
             tmp_path,
             "curated_layer_reader.py",
@@ -83,7 +80,6 @@ class TestGateAcceptsLegitimateNames:
         assert not report.failed, report.violations
 
     def test_the_proper_noun_exception_is_narrow(self, tmp_path: Path) -> None:
-        # Excusing `SecretsManager` must not excuse `Manager` generally.
         _write(tmp_path, "widget.py", "class CredentialManager:\n    pass\n")
         assert analyse(tmp_path).failed
 
@@ -97,5 +93,4 @@ class TestVocabularyCannotBeQuietlyEmptied:
         assert {"helper", "util", "common", "manager"} <= PROHIBITED_WORDS
 
     def test_plural_forms_are_covered(self) -> None:
-        # `utils` is the form that actually appears in filenames; singular-only would miss it.
         assert {"utils", "helpers"} <= PROHIBITED_WORDS

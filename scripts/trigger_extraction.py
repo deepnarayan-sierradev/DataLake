@@ -9,7 +9,7 @@ Usage:
         --environment dev \\
         --region us-east-1 \\
         --state-machine-arn \
-            arn:aws:states:us-east-1:123456789012:stateMachine:EdlExtractionPipeline
+            arn:aws:states:us-east-1:123456789012:stateMachine:datalake-extraction-dev
 
 If --state-machine-arn is omitted the script reads it from Terraform output:
     cd infrastructure/environments/dev && terraform output -raw state_machine_arn
@@ -33,7 +33,6 @@ def _get_state_machine_arn(environment: str, region: str) -> str:
     """Read state machine ARN from Terraform output."""
     try:
         # nosec B603,B607: literal argv, no shell, and `terraform` is resolved from the
-        # developer's own PATH by design — this script is not deployed.
         result = subprocess.run(  # nosec B603 B607
             ["terraform", "output", "-raw", "state_machine_arn"],
             capture_output=True,
@@ -74,7 +73,6 @@ def trigger(
     if is_replay and replay_of_run_id:
         execution_input["replay_of_run_id"] = replay_of_run_id
 
-    # Generate a deterministic execution name to prevent accidental duplicates.
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     prefix = "replay" if is_replay else "manual"
     execution_name = f"{prefix}-{source_id}-{entity_id}-{ts}"[:80]
@@ -109,7 +107,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Trigger an extraction pipeline run.")
     parser.add_argument("--source-id", required=True)
     parser.add_argument("--entity-id", required=True)
-    parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"])
+    parser.add_argument("--environment", required=True, choices=["dev", "uat", "prod"])
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument("--state-machine-arn", default=None)
     parser.add_argument("--tenant-code", default="demo", help="Tenant code slug (default: demo).")

@@ -50,8 +50,8 @@ def _rule_set():
 @pytest.fixture(autouse=True)
 def _env(monkeypatch):
     monkeypatch.setenv("AWS_REGION", "us-east-1")
-    monkeypatch.setenv("ANALYTICS_S3_BUCKET", "edl-analytics-1")
-    monkeypatch.setenv("RELATIONSHIP_RULES_S3_BUCKET", "edl-curated-1")
+    monkeypatch.setenv("ANALYTICS_S3_BUCKET", "datalake-analytics-1")
+    monkeypatch.setenv("RELATIONSHIP_RULES_S3_BUCKET", "datalake-curated-1")
 
 
 def _patch_common(monkeypatch, *, entity_type="contract", rules=None, partitions=None):
@@ -147,10 +147,9 @@ class TestTwinBuildHandler:
             "edge_count": 5,
         }
         assert captured["golden_uri"] == (
-            "s3://edl-analytics-1/demo/analytics/contract/analytics_date=2026-07-22"
+            "s3://datalake-analytics-1/demo/analytics/contract/analytics_date=2026-07-22"
         )
-        # Only the rule whose from_entity_type == the primary type is used.
         assert len(captured["relationships"]) == 1
         assert captured["relationships"][0].to_uri == (
-            "s3://edl-analytics-1/demo/analytics/company/analytics_date=2026-07-21"
+            "s3://datalake-analytics-1/demo/analytics/company/analytics_date=2026-07-21"
         )

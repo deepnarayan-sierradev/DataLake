@@ -30,8 +30,6 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Milliseconds before the Lambda runtime kills the process at which the watchdog
-# writes the guaranteed failure record (DL-OPS-05).
 DEFAULT_HARD_KILL_MARGIN_MS: Final[int] = 5_000
 
 
@@ -62,7 +60,7 @@ def enqueue_stage_failure(
 
     from contracts.observability_contract import scrub_sensitive_values
 
-    queue_name = dlq_queue_name(identity.dlq_stage)
+    queue_name = dlq_queue_name(identity.dlq_stage, identity.environment)
     sqs = boto3.client("sqs", region_name=region_name)
     try:
         queue_url = str(sqs.get_queue_url(QueueName=queue_name)["QueueUrl"])
@@ -112,9 +110,6 @@ class StageIdentity:
     run_id: str
     environment: str
     stage: str
-    # Which replay queue this stage's failures belong to. Required, and `NOT_REPLAYABLE` is an
-    # explicit value rather than an omission: five of six stages enqueued to no queue at all
-    # because the routing was a hardcoded name rather than a declared property of the stage.
     dlq_stage: DlqStage
     correlation_id: str = ""
     connection_id: str | None = None
@@ -171,8 +166,6 @@ class StageExecution:
             self.metrics = CloudWatchMetricsEmitter(region_name=self.region_name)
         self.metrics.set_tenant_context(self.identity.tenant_code)
 
-    # ── Context manager ───────────────────────────────────────────────────────
-
     def __enter__(self) -> StageExecution:
         self._start_ms = time.monotonic() * 1000
         structlog.contextvars.bind_contextvars(**self.identity.bound_context())
@@ -203,8 +196,6 @@ class StageExecution:
             self.flush()
             structlog.contextvars.clear_contextvars()
         return False
-
-    # ── Metric surface ────────────────────────────────────────────────────────
 
     @property
     def _emitter(self) -> CloudWatchMetricsEmitter:
@@ -253,8 +244,6 @@ class StageExecution:
                     **point.dimension_map(),
                 },
             )
-
-    # ── Failure recording ─────────────────────────────────────────────────────
 
     def _record_failure(self, error_code: str, error_message: str) -> None:
         if self._failure_recorded:
@@ -317,8 +306,6 @@ class StageExecution:
             self._watchdog = None
 
     def _on_hard_kill_imminent(self) -> None:
-        # Runs on the watchdog thread with only milliseconds left — write the
-        # failure record and flush, then let the runtime kill the process.
         self._record_failure(
             "lambda_hard_timeout",
             f"Stage {self.identity.stage} did not complete before the Lambda timeout.",

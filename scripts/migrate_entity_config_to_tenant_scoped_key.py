@@ -1,5 +1,6 @@
 """
-One-time migration: re-key EdlEntityExtractionConfig onto the tenant-scoped PK (FR-F0.8b).
+One-time migration: re-key the entity-extraction-config table onto the tenant-scoped PK
+(FR-F0.8b).
 
 The entity-extraction-config PK changed from a plain source_id to
 tenant_scoped_key(tenant_code, source_id) = "{tenant_code}#{source_id}". Items
@@ -13,6 +14,7 @@ deploying the new configuration_repository code, or existing configs go dark.
 from __future__ import annotations
 
 import argparse
+import os
 from typing import Any
 
 import boto3
@@ -51,7 +53,7 @@ def main() -> None:
         description="Re-key entity extraction config onto the tenant-scoped PK (FR-F0.8b)."
     )
     parser.add_argument("--region", default="us-east-1")
-    parser.add_argument("--table", default="EdlEntityExtractionConfig")
+    parser.add_argument("--table", default=os.environ.get("ENTITY_CONFIG_TABLE"), required=False)
     parser.add_argument("--apply", action="store_true", help="Perform writes (default: dry-run).")
     args = parser.parse_args()
 

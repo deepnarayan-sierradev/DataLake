@@ -21,20 +21,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-# ---------------------------------------------------------------------------
-# Whitelist of accepted sage_product values in connector_params.
-# Adding a new product requires adding its name here AND registering below.
-# ---------------------------------------------------------------------------
-
 SUPPORTED_SAGE_PRODUCTS: Final[frozenset[str]] = frozenset(
     {
         "intacct",
         "x3",
-        # Future products added here:
-        # "accounting",
-        # "100",
-        # "200",
-        # "300",
     }
 )
 
@@ -97,22 +87,11 @@ def _register_product(name: str, strategies: SageProductStrategies) -> None:
     _REGISTRY[name] = strategies
 
 
-# ---------------------------------------------------------------------------
-# Internal registry dict — populated below at module load time.
-# ---------------------------------------------------------------------------
-
 _REGISTRY: dict[str, SageProductStrategies] = {}
-
-# ---------------------------------------------------------------------------
-# Registrations — one block per product.
-# Import product modules here ONLY (not at the top of the file) to avoid
-# making every product a hard dependency when only one product is in use.
-# ---------------------------------------------------------------------------
 
 
 def _register_all() -> None:
     """Register all supported Sage product strategies. Called once at module load."""
-    # ── Sage Intacct ──────────────────────────────────────────────────────────
     from connector_runtime.adapters.sage.products.intacct.intacct_auth import IntacctAuthClient
     from connector_runtime.adapters.sage.products.intacct.intacct_metadata_client import (
         IntacctMetadataClient,
@@ -130,7 +109,6 @@ def _register_all() -> None:
         ),
     )
 
-    # ── Sage X3 ───────────────────────────────────────────────────────────────
     from connector_runtime.adapters.sage.products.x3.x3_auth import X3AuthClient
     from connector_runtime.adapters.sage.products.x3.x3_metadata_client import X3MetadataClient
     from connector_runtime.adapters.sage.products.x3.x3_query_engine import X3QueryEngine
@@ -143,14 +121,6 @@ def _register_all() -> None:
             metadata_client_class=X3MetadataClient,
         ),
     )
-
-    # ── Future products ───────────────────────────────────────────────────────
-    # Example (when ready):
-    # from connector_runtime.adapters.sage.products.accounting.accounting_auth import (
-    #     AccountingAuthClient,
-    # )
-    # ...
-    # _register_product("accounting", SageProductStrategies(...))
 
 
 _register_all()

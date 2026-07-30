@@ -17,6 +17,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime.adapters.netsuite.netsuite_auth_client import (
     NetSuiteAuthClient,
     NetSuiteCredentialError,
@@ -24,7 +25,7 @@ from connector_runtime.adapters.netsuite.netsuite_auth_client import (
 
 _ENVIRONMENT = "dev"
 _REGION = "us-east-1"
-_SECRET_NAME = "edl/sources/netsuite/credentials"
+_SECRET_NAME = f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/sources/netsuite/credentials"
 
 _VALID_SECRET: dict[str, str] = {
     "account_id": "1234567",
@@ -57,16 +58,12 @@ class TestCredentialLoading:
     def test_credentials_cached_single_secrets_manager_call(self) -> None:
         _create_secret(_VALID_SECRET)
         auth = NetSuiteAuthClient(environment=_ENVIRONMENT, region_name=_REGION)
-        # Call twice — second should use cached creds (no second Secrets Manager call).
         auth.get_auth_headers("GET", "https://1234567.suitetalk.api.netsuite.com/test")
         auth.get_auth_headers("POST", "https://1234567.suitetalk.api.netsuite.com/q")
-        # If caching works, the shared credential client's internal cache is
-        # populated once and account_id resolves without a second fetch.
         assert auth.account_id == "1234567"
 
     @mock_aws
     def test_secret_not_found_raises_credential_error(self) -> None:
-        # No secret created.
         auth = NetSuiteAuthClient(environment=_ENVIRONMENT, region_name=_REGION)
         with pytest.raises(NetSuiteCredentialError, match="Secrets Manager"):
             auth.get_auth_headers("GET", "https://1234567.suitetalk.api.netsuite.com/test")
@@ -126,8 +123,6 @@ class TestOAuthHeaderStructure:
         url = "https://1234567.suitetalk.api.netsuite.com/t"
         h1 = auth.get_auth_headers("GET", url)["Authorization"]
         h2 = auth.get_auth_headers("GET", url)["Authorization"]
-        # Nonces differ because uuid4().hex is called each time.
-        # Find oauth_nonce values and compare.
         nonce1 = next(p for p in h1.split(", ") if "oauth_nonce" in p)
         nonce2 = next(p for p in h2.split(", ") if "oauth_nonce" in p)
         assert nonce1 != nonce2

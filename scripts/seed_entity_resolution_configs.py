@@ -38,8 +38,8 @@ import boto3
 import botocore.exceptions
 
 from contracts.identifier_policy import validate_tenant_code
+from observability.lambda_runtime import require_env
 
-# Root of the repo — two levels up from scripts/
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _CONFIGS_DIR = _REPO_ROOT / "config" / "entity_resolution"
 
@@ -47,16 +47,14 @@ _CONFIGS_DIR = _REPO_ROOT / "config" / "entity_resolution"
 def _account_id(region: str) -> str:
     """Resolve the AWS account ID of the caller's credentials.
 
-    Bucket names are suffixed with the account ID rather than the
-    environment name — S3 bucket names are unique across all of AWS, and
-    each environment is already a separate AWS account, so the account ID
-    is what actually guarantees no collision with dev/staging/prod.
+    Retained for callers that still need the account id; bucket names no longer use it.
     """
     return boto3.client("sts", region_name=region).get_caller_identity()["Account"]
 
 
 def _bucket_name(region: str) -> str:
-    return f"edl-curated-{_account_id(region)}"
+    """The curated bucket, supplied by the environment rather than derived from the account."""
+    return require_env("CURATED_S3_BUCKET")
 
 
 def _collect_config_files(
@@ -137,7 +135,6 @@ def seed(
     bucket = _bucket_name(region)
     s3 = boto3.client("s3", region_name=region)
 
-    # Verify bucket is reachable before uploading (fail-fast).
     if not dry_run:
         try:
             s3.head_bucket(Bucket=bucket)
@@ -167,10 +164,8 @@ def seed(
         mr_versions: list[str] = []
         sv_versions: list[str] = []
 
-        # Upload match_rules files
         for version, _kind, path in groups["match_rules"]:
             body = path.read_bytes()
-            # Validate JSON before uploading
             try:
                 json.loads(body)
             except json.JSONDecodeError as exc:
@@ -181,7 +176,6 @@ def seed(
             mr_versions.append(version)
             total_uploads += 1
 
-        # Upload survivorship files
         for version, _kind, path in groups["survivorship"]:
             body = path.read_bytes()
             try:
@@ -194,7 +188,6 @@ def seed(
             sv_versions.append(version)
             total_uploads += 1
 
-        # Write (or update) the latest.json pointer
         latest_mr = _resolve_latest_version(mr_versions) if mr_versions else "v1"
         latest_sv = _resolve_latest_version(sv_versions) if sv_versions else "v1"
         latest_doc = {
@@ -223,7 +216,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Seed entity resolution configs from config/entity_resolution/ to S3."
     )
-    parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"])
+    parser.add_argument("--environment", required=True, choices=["dev", "uat", "prod"])
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument(
         "--tenant-code",

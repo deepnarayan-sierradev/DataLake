@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import abc
 import hashlib
-import os
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -25,18 +24,15 @@ import boto3
 from botocore.exceptions import ClientError
 
 from contracts.identifier_policy import validate_tenant_code
+from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
 from workflow_automation.definition import ActionKind
 
 _logger = get_platform_logger(__name__)
 
-_IDEMPOTENCY_TABLE_NAME: Final[str] = "EdlWorkflowIdempotency"
-_BREAKER_TABLE_NAME: Final[str] = "EdlWorkflowCircuitBreaker"
 
-# Idempotency records outlive any plausible retry window without growing unbounded.
 IDEMPOTENCY_TTL_SECONDS: Final[int] = 7 * 24 * 3_600
 
-# Circuit breaker: N consecutive failures opens it for the cool-down period.
 CIRCUIT_FAILURE_THRESHOLD: Final[int] = 5
 CIRCUIT_COOLDOWN_SECONDS: Final[float] = 300.0
 
@@ -84,8 +80,6 @@ class ActionContext:
     trigger_context: dict[str, Any] = field(default_factory=dict)
     condition_values: dict[str, float] = field(default_factory=dict)
     dry_run: bool = False
-    # Actions execute under the workflow owner's effective permissions, never an elevated
-    # service identity (DL-WF-04, OWASP A01).
     acting_as: str = ""
 
 
@@ -143,9 +137,7 @@ class IdempotencyGuard:
     """Conditional-write guard that makes an action at-most-once per execution."""
 
     def __init__(self, region_name: str, table_name: str | None = None) -> None:
-        resolved = (
-            table_name or os.environ.get("WORKFLOW_IDEMPOTENCY_TABLE") or (_IDEMPOTENCY_TABLE_NAME)
-        )
+        resolved = table_name or require_env("WORKFLOW_IDEMPOTENCY_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(resolved)
 
     def claim(self, tenant_code: str, key: str) -> bool:
@@ -183,7 +175,6 @@ class CircuitBreakerState:
         if self.opened_at is None:
             return False
         if now - self.opened_at >= cooldown_seconds:
-            # Half-open: allow one probe rather than staying open forever.
             self.opened_at = None
             self.consecutive_failures = 0
             return False
@@ -268,7 +259,7 @@ class DurableDestinationCircuitBreaker(DestinationCircuitBreaker):
     ) -> None:
         super().__init__(failure_threshold=failure_threshold, cooldown_seconds=cooldown_seconds)
         self._tenant_code = validate_tenant_code(tenant_code)
-        resolved = table_name or os.environ.get("WORKFLOW_BREAKER_TABLE") or _BREAKER_TABLE_NAME
+        resolved = table_name or require_env("WORKFLOW_BREAKER_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(resolved)
 
     def is_open(self, destination: str) -> bool:
@@ -284,7 +275,6 @@ class DurableDestinationCircuitBreaker(DestinationCircuitBreaker):
         item = response.get("Item")
         if not item:
             return False
-        # DynamoDB returns a broad union; narrow before arithmetic.
         raw_opened = item.get("opened_at")
         opened_at = float(str(raw_opened)) if raw_opened is not None else 0.0
         if not opened_at:
@@ -324,8 +314,6 @@ class DurableDestinationCircuitBreaker(DestinationCircuitBreaker):
             self._table.update_item(
                 Key={"tenant_code": self._tenant_code, "destination": destination},
                 UpdateExpression="SET opened_at = :now",
-                # Only the failure that crosses the threshold opens it; a later one must not
-                # extend the cooldown indefinitely and strand a recovered destination.
                 ConditionExpression="attribute_not_exists(opened_at)",
                 ExpressionAttributeValues={":now": int(time.time())},
             )

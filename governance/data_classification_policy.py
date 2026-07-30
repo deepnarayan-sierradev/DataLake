@@ -87,10 +87,6 @@ class EntityClassificationPolicy:
         )
 
 
-# ---------------------------------------------------------------------------
-# Built-in classification heuristics (pattern-based auto-detection)
-# ---------------------------------------------------------------------------
-
 _PII_FIELD_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
     re.compile(p, re.IGNORECASE)
     for p in [
@@ -160,7 +156,6 @@ def build_auto_classification_policy(
     for field_name in field_names:
         level = auto_classify_field(field_name)
         if level == DataClassificationLevel.SENSITIVE_PII:
-            # OWASP A02: irreversible FULL_MASK (unsalted HASH is dictionary-reversible for SSN/CC).
             classifications.append(
                 FieldClassification(
                     field_name=field_name,
@@ -186,11 +181,6 @@ def build_auto_classification_policy(
         policy_version="auto-v1",
         field_classifications=tuple(classifications),
     )
-
-
-# ---------------------------------------------------------------------------
-# Masking applier
-# ---------------------------------------------------------------------------
 
 
 class TokenisationKeyMissingError(Exception):
@@ -272,9 +262,6 @@ class FieldMaskingApplier:
         if fc.masking_strategy == MaskingStrategy.HASH:
             return hashlib.sha256(value.encode("utf-8")).hexdigest()
         if fc.masking_strategy == MaskingStrategy.TOKENISE:
-            # HMAC-SHA256 pseudonymisation: re-identification requires the secret key.
-            # An unsalted hash (SHA-256 without key) is reversible by dictionary attack
-            # for low-entropy inputs like email addresses or phone numbers (OWASP A02).
             if secret is None:
                 raise TokenisationKeyMissingError(
                     "TOKENISE masking requires a tokenisation_secret. "

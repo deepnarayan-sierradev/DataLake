@@ -19,8 +19,6 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator
 
-# PipelineStage and RunStatus are the canonical enums; import from observability_contract
-# to ensure a single definition — never duplicate them here.
 from contracts.observability_contract import (
     PipelineStage,
     RunStatus,
@@ -53,13 +51,12 @@ class PipelineStageContract(BaseModel):
 
     model_config = {"frozen": True}
 
-    # ── Identity ──────────────────────────────────────────────────────────────
     run_id: str = Field(..., description="Immutable run identifier.")
     source_id: str = Field(..., description="Stable source system identifier.")
     entity_id: str = Field(..., description="Stable entity identifier.")
     stage: PipelineStage = Field(..., description="Pipeline stage name.")
     status: RunStatus = Field(..., description="Stage status.")
-    environment: str = Field(..., description="Deployment environment (dev, staging, prod).")
+    environment: str = Field(..., description="Deployment environment (dev, uat, prod).")
     tenant_code: str = Field(
         default="demo",
         description=(
@@ -69,7 +66,6 @@ class PipelineStageContract(BaseModel):
         ),
     )
 
-    # ── Extraction window ─────────────────────────────────────────────────────
     extraction_window_start: datetime | None = Field(
         default=None,
         description="Lower bound of extraction window (inclusive). UTC.",
@@ -79,7 +75,6 @@ class PipelineStageContract(BaseModel):
         description="Upper bound of extraction window (exclusive). UTC.",
     )
 
-    # ── Schema ────────────────────────────────────────────────────────────────
     schema_version: str | None = Field(
         default=None,
         description="Schema snapshot version applied during this run.",
@@ -89,7 +84,6 @@ class PipelineStageContract(BaseModel):
         description="Schema drift severity detected during this run.",
     )
 
-    # ── Output locations ──────────────────────────────────────────────────────
     raw_s3_prefix: str | None = Field(
         default=None,
         description="S3 prefix where raw files were written for this run.",
@@ -99,7 +93,6 @@ class PipelineStageContract(BaseModel):
         description="S3 key of the schema snapshot written for this run.",
     )
 
-    # ── Counts ────────────────────────────────────────────────────────────────
     record_count: int | None = Field(
         default=None,
         ge=0,
@@ -111,7 +104,6 @@ class PipelineStageContract(BaseModel):
         description="Number of records that failed extraction or validation.",
     )
 
-    # ── Error ─────────────────────────────────────────────────────────────────
     error_code: str | None = Field(
         default=None,
         description="Machine-readable error code for orchestration routing decisions.",
@@ -120,7 +112,6 @@ class PipelineStageContract(BaseModel):
         default=None,
         description="Human-readable error summary. Must not contain credentials or PII.",
     )
-    # ── Validators ────────────────────────────────────────────────────────────
 
     @field_validator("error_message", "error_code", mode="before")
     @classmethod
@@ -139,7 +130,7 @@ class PipelineStageContract(BaseModel):
     @field_validator("environment", mode="before")
     @classmethod
     def validate_environment(cls, value: str) -> str:
-        allowed = {"dev", "staging", "prod"}
+        allowed = {"dev", "uat", "prod"}
         if value not in allowed:
             raise ValueError(f"environment must be one of {sorted(allowed)}, got '{value}'.")
         return value
@@ -151,7 +142,6 @@ class PipelineStageContract(BaseModel):
 
         return validate_tenant_code(value)
 
-    # ── Timing ────────────────────────────────────────────────────────────────
     completed_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="UTC timestamp when the stage completed (success or failure).",

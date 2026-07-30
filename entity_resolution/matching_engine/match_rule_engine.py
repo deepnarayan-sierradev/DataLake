@@ -35,11 +35,6 @@ from tenancy.scope_predicate import SCOPE_UNIT_COLUMN
 _logger = get_platform_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Rule definitions
-# ---------------------------------------------------------------------------
-
-
 class MatchStrategy(StrEnum):
     DETERMINISTIC = "deterministic"
     PROBABILISTIC = "probabilistic"
@@ -99,14 +94,6 @@ class MatchRuleSet:
     rule_set_version: str
     rules: tuple[MatchRule, ...]
     blocking_strategy: BlockingStrategy | None = None
-    # None means no blocking (correct for small datasets < ~5 k records).
-    # Set a BlockingStrategy for datasets above ~5 k records to prevent O(n²)
-    # pairwise comparisons that would exceed Lambda time/memory limits.
-
-
-# ---------------------------------------------------------------------------
-# Match decision (explainability record)
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -128,11 +115,6 @@ class MatchDecision:
     rule_set_version: str
 
 
-# ---------------------------------------------------------------------------
-# Engine
-# ---------------------------------------------------------------------------
-
-
 class MatchRuleEngine:
     """
     Applies a MatchRuleSet to pairs of candidate records.
@@ -147,8 +129,6 @@ class MatchRuleEngine:
         self, rule_set: MatchRuleSet, *, resolution_scope: ResolutionScope | None = None
     ) -> None:
         self._rule_set = rule_set
-        # DL-SCOPE-08: threaded to the blocker so scope-unit-grained resolution cannot compare
-        # records across units, and enforced again below for the no-blocking-strategy path.
         self._resolution_scope = resolution_scope or ResolutionScope.TENANT
 
     def _build_blocks(self, records: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
@@ -228,17 +208,12 @@ class MatchRuleEngine:
         def union(x: str, y: str) -> None:
             parent[find(x)] = find(y)
 
-        # Blocking: partition records before pairwise comparison.
-        # Without a strategy, all records go into one block (brute-force).
-        # With a strategy, only records sharing a blocking key are compared.
         blocks = self._build_blocks(records)
 
         for block in blocks:
             for rec_idx, rec_a in enumerate(block):
                 for rec_b in block[rec_idx + 1 :]:
                     if self._crosses_scope_units(rec_a, rec_b):
-                        # Defence in depth: blocking already separated them, so reaching here
-                        # means a blocking defect. Count it and refuse rather than merge.
                         record_platform_metric(
                             PlatformMetric.RESOLUTION_SCOPE_VIOLATIONS,
                             1.0,
@@ -250,7 +225,6 @@ class MatchRuleEngine:
                     if any(d.is_match for d in decisions):
                         union(str(rec_a[id_field]), str(rec_b[id_field]))
 
-        # Collect clusters from union-find structure
         cluster_map: dict[str, set[str]] = {}
         for r in records:
             rid = str(r[id_field])
@@ -355,11 +329,6 @@ class MatchRuleEngine:
         )
 
 
-# ---------------------------------------------------------------------------
-# Normalisation & similarity helpers
-# ---------------------------------------------------------------------------
-
-
 def _normalise(value: str) -> str:
     """Unicode-normalise, lower-case, and collapse whitespace."""
     nfkd = unicodedata.normalize("NFKD", value)
@@ -381,7 +350,6 @@ def _field_similarity(a: str, b: str, kind: str) -> float:
     if kind == "token_set":
         return _token_set_ratio(a_norm, b_norm)
 
-    # fallback: exact
     return 1.0 if a_norm == b_norm else 0.0
 
 

@@ -10,11 +10,10 @@ The gate fails closed — an evaluator error blocks promotion rather than passin
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Final
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -22,12 +21,11 @@ from botocore.exceptions import ClientError
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
 from data_quality.exception_repository import ExceptionSeverity
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
-
-_TABLE_NAME: Final[str] = "EdlQualityPolicyAttachment"
 
 
 def _as_str_tuple(value: Any) -> tuple[str, ...]:
@@ -86,7 +84,7 @@ class QualityPolicyRepository:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("QUALITY_POLICY_TABLE") or _TABLE_NAME
+        table_name = require_env("QUALITY_POLICY_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def attach(self, attachment: QualityPolicyAttachment) -> None:
@@ -122,7 +120,6 @@ class QualityPolicyRepository:
                 Key={"tenant_code": tenant_code, "entity_id": entity_id}, ConsistentRead=True
             )
         except ClientError as exc:
-            # A lookup failure must not silently mean "no policy" — that would pass the gate.
             raise QualityPolicyNotAttachedError(
                 f"Quality policy lookup failed for {tenant_code!r}/{entity_id!r}: "
                 f"{exc.response['Error']['Code']}. The gate fails closed."

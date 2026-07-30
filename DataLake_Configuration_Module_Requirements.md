@@ -31,8 +31,8 @@ selection, source credentials, extraction schedules) is set up manually — via 
 (`scripts/seed_entity_config.py`, `scripts/seed_schedules.py`, `scripts/seed_field_mappings.py`,
 `scripts/seed_entity_resolution_configs.py`) and direct `aws secretsmanager put-secret-value` calls.
 There is a code-complete but **unused** SaaS control-plane API in this repo
-(`connector_runtime/api/control_plane_handler.py`, Lambda `EdlControlPlane`, API Gateway
-`EdlControlPlaneApi`) that was built toward self-service tenant/entity onboarding — confirmed via
+(`connector_runtime/api/control_plane_handler.py`, Lambda `datalake-control-plane-dev`, API Gateway
+`datalake-control-plane-api-dev`) that was built toward self-service tenant/entity onboarding — confirmed via
 direct AWS CloudWatch/API Gateway inspection (2026-07-10) to have **zero invocations and zero log
 streams** since deployment on 2026-07-09. Nothing depends on it today.
 
@@ -128,7 +128,7 @@ Supersedes `POST/GET /tenants/{tenant_code}/entities` in the dormant control-pla
 
 ### 6d. Source Credentials
 Set up credentials for Salesforce, MySQL RDS, NetSuite, Sage, and future connectors. Writes to
-Secrets Manager under the existing `edl/sources/*` credential path convention.
+Secrets Manager under the existing `datalake/<env>/sources/*` credential path convention.
 
 ### 6e. Extraction Schedule
 Configure a cron/interval schedule per entity, driving the same EventBridge Scheduler mechanism

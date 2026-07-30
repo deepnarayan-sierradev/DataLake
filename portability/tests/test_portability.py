@@ -8,6 +8,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from portability.deletion_workflow import (
     DeletionNotAuthorisedError,
     DeletionRequest,
@@ -31,7 +32,6 @@ from portability.export_service import (
 )
 from portability.phi_gate import (
     KNOWN_PHI_SOURCES,
-    PLATFORM_PURPOSE_TAGS,
     PLATFORM_SUBPROCESSORS,
     PhiClassification,
     PhiGateBlockedError,
@@ -40,6 +40,7 @@ from portability.phi_gate import (
     SubprocessorRegister,
     enforce_phi_gate,
     evaluate_phi_gate,
+    platform_purpose_tags,
 )
 from portability.transition_package import (
     REPRODUCTION_CRITICAL_COMPONENTS,
@@ -102,7 +103,6 @@ class TestFormatStrategies:
         assert key == "evive/exports/exp-1/company.csv"
 
 
-# A single-tenant EXPORT-surface predicate: the shape every production export must carry.
 _EXPORT_PREDICATE = scope_predicate(
     build_scope_claims("evive", TenantPartitionProfile(tenant_code="evive")),
     surface=ConsumptionSurface.EXPORT,
@@ -113,7 +113,7 @@ _EXPORT_PREDICATE = scope_predicate(
 class TestExportService:
     def _service(self) -> ExportService:
         boto3.client("s3", region_name=_REGION).create_bucket(Bucket="export-bucket")
-        _table("EdlExportJob", "tenant_code", "job_id")
+        _table(RESOURCE_NAME_ENVIRONMENT["EXPORT_JOB_TABLE"], "tenant_code", "job_id")
         return ExportService(
             environment="dev",
             region_name=_REGION,
@@ -129,8 +129,6 @@ class TestExportService:
             "entity_id": "company",
             "requested_by": "ops@example.test",
             "granted_capabilities": _CAPABILITIES,
-            # A real predicate, not None: an export is the least recoverable place to omit the
-            # row filter, so the parameter is non-nullable (DL-SCOPE-14).
             "scope_predicate": _EXPORT_PREDICATE,
         }
         return service.request_export(**{**base, **overrides})
@@ -275,7 +273,9 @@ class TestDeletionAuthorisation:
 @mock_aws
 class TestDeletionSaga:
     def _saga(self, **overrides) -> DeletionSaga:
-        _table("EdlDeletionCertificate", "tenant_code", "certificate_id")
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["DELETION_CERTIFICATE_TABLE"], "tenant_code", "certificate_id"
+        )
         deleters = {
             store: (lambda tenant_code, store=store: (1, f"{store.value} verified"))
             for store in DeletionStore
@@ -303,7 +303,9 @@ class TestDeletionSaga:
         assert "# Data deletion certificate" in certificate.render_markdown()
 
     def test_a_store_with_no_deleter_blocks_the_certificate(self):
-        _table("EdlDeletionCertificate", "tenant_code", "certificate_id")
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["DELETION_CERTIFICATE_TABLE"], "tenant_code", "certificate_id"
+        )
         saga = DeletionSaga(
             environment="dev",
             region_name=_REGION,
@@ -338,13 +340,17 @@ class TestDeletionSaga:
 
         deleters = {store: (lambda t: (1, "ok")) for store in DeletionStore}
         deleters[DeletionStore.S3_CURATED] = boom
-        _table("EdlDeletionCertificate", "tenant_code", "certificate_id")
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["DELETION_CERTIFICATE_TABLE"], "tenant_code", "certificate_id"
+        )
         saga = DeletionSaga(environment="dev", region_name=_REGION, deleters=deleters)
         with pytest.raises(IncompleteDeletionError):
             saga.execute(self._request())
 
     def test_certificates_are_listable_including_the_failed_attempt(self):
-        _table("EdlDeletionCertificate", "tenant_code", "certificate_id")
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["DELETION_CERTIFICATE_TABLE"], "tenant_code", "certificate_id"
+        )
         saga = DeletionSaga(
             environment="dev",
             region_name=_REGION,
@@ -363,7 +369,6 @@ class TestDeletionSaga:
         deleted, verification = deleter("evive")
         assert deleted == 1
         assert "verified empty" in verification
-        # Another tenant's data is untouched.
         assert s3.list_objects_v2(Bucket="raw-bucket", Prefix="other/")["KeyCount"] == 1
 
 
@@ -427,7 +432,7 @@ class TestPhiGate:
 @mock_aws
 class TestPhiOnboardingGate:
     def _gate(self, hipaa_capable: bool = False) -> PhiOnboardingGate:
-        _table("EdlSourceOnboardingRegistry", "source_id")
+        _table(RESOURCE_NAME_ENVIRONMENT["SOURCE_ONBOARDING_TABLE"], "source_id")
         return PhiOnboardingGate(
             environment="dev", region_name=_REGION, hipaa_capable=hipaa_capable
         )
@@ -478,27 +483,31 @@ class TestPhiOnboardingGate:
 @mock_aws
 class TestSubprocessorRegister:
     def test_register_publishes_and_lists(self):
-        _table("EdlSubprocessorRegister", "register_scope", "subprocessor_name")
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["SUBPROCESSOR_TABLE"], "register_scope", "subprocessor_name"
+        )
         register = SubprocessorRegister(environment="dev", region_name=_REGION)
         assert register.publish() == len(PLATFORM_SUBPROCESSORS)
         assert len(register.list_register()) == len(PLATFORM_SUBPROCESSORS)
 
     def test_markdown_names_every_subprocessor(self):
-        _table("EdlSubprocessorRegister", "register_scope", "subprocessor_name")
+        _table(
+            RESOURCE_NAME_ENVIRONMENT["SUBPROCESSOR_TABLE"], "register_scope", "subprocessor_name"
+        )
         rendered = SubprocessorRegister(environment="dev", region_name=_REGION).render_markdown()
         for subprocessor in PLATFORM_SUBPROCESSORS:
             assert subprocessor.name in rendered
 
     def test_no_llm_provider_is_listed_while_dl04_is_deferred(self):
-        # Listing one would misrepresent the register: no concrete adapter exists.
         assert not any(s.category.value == "llm_provider" for s in PLATFORM_SUBPROCESSORS)
 
     def test_every_subprocessor_states_a_purpose(self):
         assert all(s.purpose for s in PLATFORM_SUBPROCESSORS)
 
     def test_purpose_tags_cover_the_runtime_roles(self):
-        assert len(PLATFORM_PURPOSE_TAGS) >= 5
-        extraction = next(t for t in PLATFORM_PURPOSE_TAGS if "Extraction" in t.role_name)
+        tags = platform_purpose_tags("dev")
+        assert len(tags) >= 5
+        extraction = next(t for t in tags if "extraction" in t.role_name)
         assert extraction.permits("raw") is True
         assert extraction.permits("analytics") is False
 
@@ -565,10 +574,10 @@ class TestInfrastructureHandover:
             "evive",
             account_id="087972550871",
             region="us-east-1",
-            terraform_state_bucket="edl-terraform-state-087972550871",
-            terraform_lock_table="edl-terraform-locks",
+            terraform_state_bucket="datalake-terraform-state-dev-use1",
+            terraform_lock_table="datalake-terraform-state-lock-dev",
         )
-        assert "EdlEntityExtractionConfig" in rendered
+        assert RESOURCE_NAME_ENVIRONMENT["ENTITY_CONFIG_TABLE"] in rendered
         assert "zero-diff" in rendered
         assert "Rotate every credential" in rendered
 
@@ -596,7 +605,8 @@ class TestDynamoDbSweepActuallyDeletes:
     """
     The sweep reported success while the tenant's audit rows survived (2026-07-29).
 
-    `EdlRunAuditLog` is keyed on `run_id`, so the deleter's `begins_with(run_id, "tenant#")` filter
+    `datalake-run-audit-log-<env>` is keyed on `run_id`, so the deleter's
+    `begins_with(run_id, "tenant#")` filter
     matched nothing — and returning 0 with no error meant the saga counted the step complete and
     issued the certificate. A certificate is a compliance artefact given to a customer; that one
     would have asserted deletion of rows still present.
@@ -607,7 +617,7 @@ class TestDynamoDbSweepActuallyDeletes:
     def _audit_table(self) -> object:
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         dynamodb.create_table(
-            TableName="EdlRunAuditLog",
+            TableName=RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"],
             KeySchema=[
                 {"AttributeName": "run_id", "KeyType": "HASH"},
                 {"AttributeName": "stage", "KeyType": "RANGE"},
@@ -630,7 +640,7 @@ class TestDynamoDbSweepActuallyDeletes:
             ],
             BillingMode="PAY_PER_REQUEST",
         )
-        table = dynamodb.Table("EdlRunAuditLog")
+        table = dynamodb.Table(RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"])
         for index in range(4):
             table.put_item(
                 Item={
@@ -655,7 +665,9 @@ class TestDynamoDbSweepActuallyDeletes:
 
         table = self._audit_table()
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
-        deleted, detail = dynamodb_tenant_item_deleter(dynamodb, ("EdlRunAuditLog",))("evive")
+        deleted, detail = dynamodb_tenant_item_deleter(
+            dynamodb, (RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"],)
+        )("evive")
 
         assert deleted == 4
         assert "verified" in detail
@@ -666,7 +678,9 @@ class TestDynamoDbSweepActuallyDeletes:
 
         table = self._audit_table()
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
-        dynamodb_tenant_item_deleter(dynamodb, ("EdlRunAuditLog",))("evive")
+        dynamodb_tenant_item_deleter(dynamodb, (RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"],))(
+            "evive"
+        )
         survivors = {item["tenant_code"] for item in table.scan()["Items"]}
         assert survivors == {"acme-corp"}
 
@@ -679,10 +693,10 @@ class TestDynamoDbSweepActuallyDeletes:
 
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         dynamodb.create_table(
-            TableName="EdlMysteryTable",
+            TableName="DatalakeMysteryTable",
             KeySchema=[{"AttributeName": "widget_id", "KeyType": "HASH"}],
             AttributeDefinitions=[{"AttributeName": "widget_id", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
         with pytest.raises(IncompleteDeletionError, match="not a recognised tenant shape"):
-            dynamodb_tenant_item_deleter(dynamodb, ("EdlMysteryTable",))("evive")
+            dynamodb_tenant_item_deleter(dynamodb, ("DatalakeMysteryTable",))("evive")

@@ -35,8 +35,6 @@ _logger = get_platform_logger(__name__)
 
 _STABLE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}$")
 
-# Minimum character length for waiver justification notes (OWASP A01).
-# A short note like "ok" is not a meaningful audit record; require a real rationale.
 _WAIVER_MIN_NOTES_LEN: Final[int] = 20
 
 
@@ -49,8 +47,6 @@ class OnboardingGate(StrEnum):
     ACCEPTANCE_VALIDATION = "acceptance_validation"
 
 
-# Gate ordering — a source cannot advance past gate N without passing gates 1..N.
-# Canonical, immutable sequence; all gate-order logic references this constant.
 _GATE_ORDER: Final[tuple[OnboardingGate, ...]] = (
     OnboardingGate.SOURCE_REGISTRATION,
     OnboardingGate.CREDENTIAL_REGISTRATION,
@@ -146,7 +142,6 @@ class SourceOnboardingRegistryClient:
             "registered_at": registered_at,
             "last_updated_at": registered_at,
         }
-        # Initialise all gates to PENDING
         for gate in _GATE_ORDER:
             item[f"gate_{gate.value}"] = OnboardingGateStatus.PENDING.value
 
@@ -201,8 +196,6 @@ class SourceOnboardingRegistryClient:
                 f"a meaningful audit record; received {len(notes.strip())} characters."
             )
 
-        # Emit a warning-level log for every waiver so operations teams can
-        # detect suspicious waiver activity via CloudWatch Logs Insights (OWASP A01).
         if status == OnboardingGateStatus.WAIVED:
             _logger.warning(
                 "onboarding_gate_waived",

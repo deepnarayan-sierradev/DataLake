@@ -52,11 +52,6 @@ _DRIFT_REPORT_KEY_TEMPLATE: Final[str] = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Value objects
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class FieldSnapshot:
     """
@@ -95,11 +90,6 @@ class SchemaSnapshot:
     record_count: int | None = None
 
 
-# ---------------------------------------------------------------------------
-# Repository
-# ---------------------------------------------------------------------------
-
-
 class SchemaSnapshotRepository:
     """
     Writes and reads immutable SchemaSnapshot records to/from S3.
@@ -113,8 +103,6 @@ class SchemaSnapshotRepository:
             raise ValueError("bucket_name must not be empty.")
         self._bucket = bucket_name
         self._s3 = boto3.client("s3", region_name=region_name)
-
-    # ── Write ──────────────────────────────────────────────────────────────────
 
     def write_snapshot(
         self, snapshot: SchemaSnapshot, tenant_code: str = DEFAULT_TENANT_CODE
@@ -164,8 +152,6 @@ class SchemaSnapshotRepository:
                 entity_id=snapshot.entity_id,
                 snapshot_key=key,
             )
-            # The snapshot is durably written and recoverable via the returned key.
-            # The next successful run will re-establish the latest-pointer.
         return key
 
     def write_drift_report(
@@ -202,8 +188,6 @@ class SchemaSnapshotRepository:
         )
         return key
 
-    # ── Read ───────────────────────────────────────────────────────────────────
-
     def load_latest_snapshot(
         self, source_id: str, entity_id: str, tenant_code: str = DEFAULT_TENANT_CODE
     ) -> SchemaSnapshot | None:
@@ -232,8 +216,6 @@ class SchemaSnapshotRepository:
         raw: dict[str, Any] = json.loads(response["Body"].read().decode("utf-8"))
         return _deserialise_snapshot(raw)
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _write_latest_pointer(
         self, source_id: str, entity_id: str, snapshot_key: str, tenant_code: str
     ) -> None:
@@ -247,11 +229,6 @@ class SchemaSnapshotRepository:
             Body=body,
             ContentType="application/json",
         )
-
-
-# ---------------------------------------------------------------------------
-# Serialisation helpers
-# ---------------------------------------------------------------------------
 
 
 def _serialise_snapshot(snapshot: SchemaSnapshot) -> dict[str, Any]:

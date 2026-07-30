@@ -50,7 +50,6 @@ class CacheContract:
             )
 
 
-# The declared contracts. Adding a cache without adding an entry fails the contract test.
 CACHE_CONTRACTS: Final[tuple[CacheContract, ...]] = (
     CacheContract(
         capability=ConfigCapability.ENTITY_SELECTION,

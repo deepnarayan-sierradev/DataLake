@@ -19,6 +19,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime.adapters.mysql_rds.mysql_rds_credentials_client import (
     MySqlConnectionParameters,
     MySqlRdsCredentialError,
@@ -27,7 +28,7 @@ from connector_runtime.adapters.mysql_rds.mysql_rds_credentials_client import (
 
 _ENV = "dev"
 _REGION = "us-east-1"
-_SECRET_NAME = "edl/sources/mysql-rds/credentials"
+_SECRET_NAME = f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/sources/mysql-rds/credentials"
 
 _VALID_SECRET = {
     "host": "mydb.cluster.us-east-1.rds.amazonaws.com",
@@ -66,7 +67,6 @@ class TestCredentialLoading:
 
     @mock_aws
     def test_secret_not_found_raises_credential_error(self) -> None:
-        # No secret created.
         client = MySqlRdsCredentialsClient(environment=_ENV, region_name=_REGION)
         with pytest.raises(MySqlRdsCredentialError, match="Secrets Manager"):
             client.get_connection_parameters()
@@ -114,7 +114,6 @@ class TestSecurityRequirements:
         with caplog.at_level(logging.DEBUG):
             client = MySqlRdsCredentialsClient(environment=_ENV, region_name=_REGION)
             client.get_connection_parameters()
-        # Only check records emitted by our own application loggers.
         app_records = [r for r in caplog.records if r.name.startswith("connector_runtime")]
         for record in app_records:
             assert _VALID_SECRET["password"] not in record.getMessage(), (

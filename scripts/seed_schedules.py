@@ -1,13 +1,13 @@
 """
 Sync EventBridge Scheduler schedules from the DynamoDB entity config table.
 
-Reads every active entity from EdlEntityExtractionConfig that has
+Reads every active entity from datalake-entity-extraction-config-<env> that has
 schedule_cron set and schedule_enabled=True, then creates or updates the
 corresponding EventBridge schedule.  Entities with schedule_cron=None or
 schedule_enabled=False have their schedule deleted if one exists.
 
 Usage:
-  python scripts/seed_schedules.py [--environment dev|staging|prod] [--dry-run]
+  python scripts/seed_schedules.py [--environment dev|uat|prod] [--dry-run]
 
 TO ADD A NEW ENTITY with a schedule:
   1. Add a record to seed_entity_config.py with schedule_cron and
@@ -37,40 +37,18 @@ from orchestration.event_bridge.extraction_schedule_client import (
 
 _logger = get_platform_logger(__name__)
 
-# ---------------------------------------------------------------------------
-# Per-environment wiring — schedule group name, state machine ARN, IAM role.
-# These are infrastructure values set once at deploy time; they never change
-# for a given environment.  Add staging/prod entries after those environments
-# are deployed.
-# ---------------------------------------------------------------------------
 
 _ENV_CONFIG: dict[str, dict[str, str]] = {
     "dev": {
-        "schedule_group_name": "EdlExtractionSchedules",
+        "schedule_group_name": "datalake-extraction-schedules-dev",
         "state_machine_arn": (
-            "arn:aws:states:us-east-1:087972550871:stateMachine:EdlExtractionPipeline"
+            "arn:aws:states:us-east-1:ACCOUNT_ID:stateMachine:datalake-extraction-workflow-dev"
         ),
-        "execution_role_arn": "arn:aws:iam::087972550871:role/EdlExtractionScheduleTriggerRole",
+        "execution_role_arn": (
+            "arn:aws:iam::ACCOUNT_ID:role/datalake-extraction-scheduler-dev-exec"
+        ),
         "region": "us-east-1",
     },
-    # Populate after staging/prod are deployed — resource names are the same
-    # across environments (each environment is a separate AWS account), only
-    # the account ID in the ARNs below differs. Replace ACCOUNT_ID with the
-    # real 12-digit staging/prod account IDs once those accounts exist.
-    # "staging": {
-    #     "schedule_group_name":  "EdlExtractionSchedules",
-    #     "state_machine_arn":    "arn:aws:states:us-east-1:ACCOUNT_ID:stateMachine:"
-    #                             "EdlExtractionPipeline",
-    #     "execution_role_arn":   "arn:aws:iam::ACCOUNT_ID:role/EdlExtractionScheduleTriggerRole",
-    #     "region":               "us-east-1",
-    # },
-    # "prod": {
-    #     "schedule_group_name":  "EdlExtractionSchedules",
-    #     "state_machine_arn":    "arn:aws:states:us-east-1:ACCOUNT_ID:stateMachine:"
-    #                             "EdlExtractionPipeline",
-    #     "execution_role_arn":   "arn:aws:iam::ACCOUNT_ID:role/EdlExtractionScheduleTriggerRole",
-    #     "region":               "us-east-1",
-    # },
 }
 
 
@@ -89,9 +67,7 @@ def _load_schedulable_entities(table_name: str, region: str) -> list[dict]:
     while True:
         response = table.scan(**scan_kwargs)
         for item in response.get("Items", []):
-            # DynamoDB returns Decimal for numbers — normalise to plain Python types.
             record = {k: int(v) if isinstance(v, Decimal) else v for k, v in item.items()}
-            # PK is the tenant-scoped composite ("demo#salesforce"); restore the plain source_id.
             tenant_code = str(record.get("tenant_code", DEFAULT_TENANT_CODE))
             record["source_id"] = strip_tenant_prefix(tenant_code, str(record.get("source_id", "")))
             items.append(record)
@@ -193,11 +169,10 @@ def main() -> None:
         sys.exit(1)
 
     cfg = _ENV_CONFIG[env]
-    table_name = "EdlEntityExtractionConfig"
+    table_name = f"datalake-entity-extraction-config-{env}"
 
     entities = _load_schedulable_entities(table_name, cfg["region"])
 
-    # Split into: should have a schedule vs. should not.
     to_upsert = [e for e in entities if e.get("schedule_enabled", True) and e.get("schedule_cron")]
     to_disable = [
         e for e in entities if not e.get("schedule_enabled", True) and e.get("schedule_cron")

@@ -34,8 +34,6 @@ _logger = get_platform_logger(__name__)
 
 _STAGE: Final[str] = "workflow_automation"
 
-# A tenant with more published workflows than this is almost certainly a configuration error, and
-# evaluating them all would exhaust the invocation rather than fail visibly.
 MAX_WORKFLOWS_PER_INVOCATION: Final[int] = 200
 
 
@@ -74,7 +72,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             environment=environment,
             region_name=region_name,
             metric_resolver=_metric_resolver(event),
-            # Required by construction — see the module docstring.
             idempotency_guard=IdempotencyGuard(region_name=region_name),
             circuit_breaker=DestinationCircuitBreaker(),
         )

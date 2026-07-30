@@ -76,8 +76,6 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Default chunk size for write_partition_streaming — matches the convention
-# every raw layer writer used prior to consolidation.
 DEFAULT_STREAMING_CHUNK_SIZE: Final[int] = 50_000
 
 
@@ -173,11 +171,8 @@ class RawLayerWriter:
     transformation or field filtering is applied.
     """
 
-    #: Exception type raised on write failure — override per adapter to keep
-    #: each connector's existing, publicly-imported error type.
     error_cls: type[Exception] = RawLayerWriterError
 
-    #: Structured-log event name / metadata-warning prefix (e.g. "salesforce").
     log_prefix: str = "raw_layer"
 
     def __init__(
@@ -193,8 +188,6 @@ class RawLayerWriter:
         if not path_segments:
             raise ValueError("path_segments must not be empty.")
         self._bucket = s3_bucket
-        # DL-SCOPE-04: a non-default connection gets its own prefix under the source
-        # segment so two franchisees on one connector type never interleave rows.
         self._path_segments = list(path_segments)
         if connection_id and connection_id not in self._path_segments:
             self._path_segments.append(connection_id)
@@ -202,8 +195,6 @@ class RawLayerWriter:
         self._tenant_code = validate_tenant_code(tenant_code)
         self._s3 = boto3.client("s3", region_name=region_name)
         self._parquet_writer = S3ParquetWriter(self._s3)
-
-    # ── Public API (RawLayerWriterProtocol) ──────────────────────────────────
 
     def write_partition(
         self,
@@ -258,9 +249,6 @@ class RawLayerWriter:
                 ContentType="application/json",
             )
         except Exception as exc:
-            # Metadata write failure is logged but not fatal — the Parquet
-            # data is already persisted. Metadata can be reconstructed from
-            # the run audit log table.
             _logger.warning(
                 f"{self.log_prefix}_raw_metadata_write_failed",
                 data_key=data_key,
@@ -325,7 +313,6 @@ class RawLayerWriter:
                 part_index += 1
                 chunk = []
 
-        # Flush remaining records (the last partial chunk).
         if chunk:
             part_key = f"{partition_prefix}/part-{part_index:05d}.parquet"
             self._write_parquet_part(chunk, part_key)
@@ -339,7 +326,6 @@ class RawLayerWriter:
             )
             return partition_prefix, 0
 
-        # Write metadata sidecar once all parts are written.
         metadata_key = f"{partition_prefix}/metadata.json"
         metadata: dict[str, Any] = {
             "run_id": run_id,
@@ -379,8 +365,6 @@ class RawLayerWriter:
         )
         return partition_prefix, total_count
 
-    # ── Extension hooks ───────────────────────────────────────────────────────
-
     def _extra_metadata_fields(self) -> dict[str, Any]:
         """
         Additional fields merged into every metadata.json sidecar.
@@ -394,8 +378,6 @@ class RawLayerWriter:
         Override for source-specific fields.
         """
         return {}
-
-    # ── Shared helpers ────────────────────────────────────────────────────────
 
     def _partition_path(self, entity_id: str, extraction_date: str, run_id: str) -> str:
         """

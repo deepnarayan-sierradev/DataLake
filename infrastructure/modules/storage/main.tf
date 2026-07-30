@@ -2,9 +2,8 @@ terraform {
   required_version = ">= 1.8, < 2.0"
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-      # The replica provider is a different region; the caller supplies it.
+      source                = "hashicorp/aws"
+      version               = "~> 5.0"
       configuration_aliases = [aws.replica]
     }
   }
@@ -20,16 +19,12 @@ locals {
   })
 }
 
-# ---------------------------------------------------------------------------
-# Access logs bucket — receives access logs from all other buckets.
-# This bucket does NOT log to itself (would cause recursion).
-# ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "access_logs" {
-  bucket = "${var.project_name}-access-logs-${data.aws_caller_identity.current.account_id}"
+  bucket = "${var.name_prefix}-access-logs-${var.environment}-${var.region_short}"
 
   tags = merge(local.common_tags, {
-    Name      = "${var.project_name}-access-logs-${data.aws_caller_identity.current.account_id}"
+    Name      = "${var.name_prefix}-access-logs-${var.environment}-${var.region_short}"
     DataLayer = "access-logs"
   })
 }
@@ -65,7 +60,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
     status = "Enabled"
     filter { prefix = "" }
     expiration { days = var.access_logs_retention_days }
-    # A failed multipart upload leaves parts that are billed but invisible in the object list.
     abort_incomplete_multipart_upload { days_after_initiation = 7 }
   }
 }
@@ -75,30 +69,22 @@ resource "aws_s3_bucket_policy" "access_logs" {
   policy = data.aws_iam_policy_document.enforce_tls["access_logs"].json
 }
 
-# ---------------------------------------------------------------------------
-# Raw layer bucket — immutable source-aligned records
-# Object Lock in GOVERNANCE mode: prevents overwrite/delete by default.
-# Object Lock must be enabled at bucket creation time.
-# ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "raw_layer" {
-  bucket              = "${var.project_name}-raw-${data.aws_caller_identity.current.account_id}"
+  bucket              = "${var.name_prefix}-raw-${var.environment}-${var.region_short}"
   object_lock_enabled = true # Must be set at creation time — cannot be added later
 
   tags = merge(local.common_tags, {
-    Name      = "${var.project_name}-raw-${data.aws_caller_identity.current.account_id}"
+    Name      = "${var.name_prefix}-raw-${var.environment}-${var.region_short}"
     DataLayer = "raw"
   })
 
-  # object_lock_enabled cannot be changed after bucket creation.
-  # Buckets imported from outside Terraform may have it as false.
   lifecycle {
     ignore_changes = [object_lock_enabled]
   }
 }
 
 resource "aws_s3_bucket_object_lock_configuration" "raw_layer" {
-  # Skip if the bucket was not created with object lock enabled (e.g. imported bucket).
   count  = aws_s3_bucket.raw_layer.object_lock_enabled ? 1 : 0
   bucket = aws_s3_bucket.raw_layer.id
   rule {
@@ -163,14 +149,11 @@ resource "aws_s3_bucket_policy" "raw_layer" {
   policy = data.aws_iam_policy_document.raw_layer_policy.json
 }
 
-# ---------------------------------------------------------------------------
-# Curated layer bucket
-# ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "curated_layer" {
-  bucket = "${var.project_name}-curated-${data.aws_caller_identity.current.account_id}"
+  bucket = "${var.name_prefix}-curated-${var.environment}-${var.region_short}"
   tags = merge(local.common_tags, {
-    Name      = "${var.project_name}-curated-${data.aws_caller_identity.current.account_id}"
+    Name      = "${var.name_prefix}-curated-${var.environment}-${var.region_short}"
     DataLayer = "curated"
   })
 }
@@ -229,14 +212,11 @@ resource "aws_s3_bucket_policy" "curated_layer" {
   policy = data.aws_iam_policy_document.enforce_tls["curated_layer"].json
 }
 
-# ---------------------------------------------------------------------------
-# Analytics layer bucket
-# ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "analytics_layer" {
-  bucket = "${var.project_name}-analytics-${data.aws_caller_identity.current.account_id}"
+  bucket = "${var.name_prefix}-analytics-${var.environment}-${var.region_short}"
   tags = merge(local.common_tags, {
-    Name      = "${var.project_name}-analytics-${data.aws_caller_identity.current.account_id}"
+    Name      = "${var.name_prefix}-analytics-${var.environment}-${var.region_short}"
     DataLayer = "analytics"
   })
 }
@@ -276,14 +256,11 @@ resource "aws_s3_bucket_policy" "analytics_layer" {
   policy = data.aws_iam_policy_document.enforce_tls["analytics_layer"].json
 }
 
-# ---------------------------------------------------------------------------
-# Schema snapshots bucket
-# ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "schema_snapshots" {
-  bucket = "${var.project_name}-schema-snapshots-${data.aws_caller_identity.current.account_id}"
+  bucket = "${var.name_prefix}-schema-snapshots-${var.environment}-${var.region_short}"
   tags = merge(local.common_tags, {
-    Name      = "${var.project_name}-schema-snapshots-${data.aws_caller_identity.current.account_id}"
+    Name      = "${var.name_prefix}-schema-snapshots-${var.environment}-${var.region_short}"
     DataLayer = "schema-metadata"
   })
 }
@@ -323,11 +300,6 @@ resource "aws_s3_bucket_policy" "schema_snapshots" {
   policy = data.aws_iam_policy_document.enforce_tls["schema_snapshots"].json
 }
 
-# ---------------------------------------------------------------------------
-# Lifecycle for the two buckets that had none (CKV2_AWS_61, CKV_AWS_300).
-# Analytics output is republished from the curated layer, and a schema snapshot
-# is superseded by the next one — neither needs unbounded version history.
-# ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket_lifecycle_configuration" "analytics_layer" {
   bucket = aws_s3_bucket.analytics_layer.id
@@ -355,11 +327,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "schema_snapshots" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# EventBridge notifications (CKV2_AWS_62). Routing object events to EventBridge
-# rather than a hardwired Lambda/SQS target keeps the bucket free of a consumer
-# it does not own, and makes object-level activity observable at all.
-# ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket_notification" "buckets" {
   for_each = {
@@ -374,12 +341,7 @@ resource "aws_s3_bucket_notification" "buckets" {
   eventbridge = true
 }
 
-# ---------------------------------------------------------------------------
-# Shared IAM policy documents
-# ---------------------------------------------------------------------------
 
-# Per-bucket TLS enforcement policies.
-# S3 bucket policies require an explicit ARN — "Resource": "*" is invalid.
 locals {
   _tls_buckets = {
     access_logs      = aws_s3_bucket.access_logs.arn
@@ -426,7 +388,6 @@ data "aws_iam_policy_document" "enforce_tls" {
   }
 }
 
-# Raw layer policy: enforce TLS + restrict PutObject to extraction runtime role only
 data "aws_iam_policy_document" "raw_layer_policy" {
   source_policy_documents = [data.aws_iam_policy_document.enforce_tls["raw_layer"].json]
 
@@ -452,16 +413,16 @@ data "aws_iam_policy_document" "raw_layer_policy" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Cross-region replication (CKV_AWS_144). A single-region bucket is a single point of loss
-# for the raw layer, which is the only copy of what a source actually returned — everything
-# downstream is derived and rebuildable, but raw is not.
-#
-# Replicas live in `var.replica_region` under the caller-supplied `aws.replica` provider.
-# This costs replica storage plus cross-region transfer on every object.
-# ---------------------------------------------------------------------------
 
 locals {
+  replica_purpose = {
+    raw_layer        = "raw"
+    curated_layer    = "curated"
+    analytics_layer  = "analytics"
+    schema_snapshots = "schema-snapshots"
+    access_logs      = "access-logs"
+  }
+
   replicated_buckets = {
     raw_layer        = aws_s3_bucket.raw_layer.id
     curated_layer    = aws_s3_bucket.curated_layer.id
@@ -482,17 +443,14 @@ resource "aws_s3_bucket" "replica" {
   provider = aws.replica
   for_each = local.replicated_buckets
 
-  # This bucket *is* the replica. Replicating it again is infinite regress, and access logging
-  # and event notifications belong on the primary that receives the traffic — the replica only
-  # ever receives writes from S3 replication itself.
   #checkov:skip=CKV_AWS_144:This is the replication target; it does not replicate onward.
   #checkov:skip=CKV_AWS_18:Access logging is on the primary; the replica takes no direct traffic.
   #checkov:skip=CKV2_AWS_62:Event notifications are on the primary.
 
-  bucket = "${each.value}-replica"
+  bucket = "${var.name_prefix}-${local.replica_purpose[each.key]}-${var.environment}-${var.replica_region_short}"
 
   tags = merge(local.common_tags, {
-    Name    = "${each.value}-replica"
+    Name    = "${var.name_prefix}-${local.replica_purpose[each.key]}-${var.environment}-${var.replica_region_short}"
     Purpose = "cross-region-replica"
   })
 }
@@ -505,11 +463,7 @@ resource "aws_s3_bucket_versioning" "replica" {
   versioning_configuration { status = "Enabled" }
 }
 
-# Source objects are SSE-KMS, and S3 refuses to replicate them without a destination key it can
-# encrypt with. A KMS key is regional, so the source CMK cannot be reused — the replica region
-# needs its own.
 data "aws_iam_policy_document" "replica_key" {
-  # A key policy's resource is the key itself; scoping is by principal.
   #checkov:skip=CKV_AWS_109:Key policy resource is the key itself.
   #checkov:skip=CKV_AWS_111:Key policy resource is the key itself; principals are enumerated.
   #checkov:skip=CKV_AWS_356:A key policy cannot name its own ARN as a resource.
@@ -553,7 +507,7 @@ resource "aws_kms_key" "replica" {
 resource "aws_kms_alias" "replica" {
   provider = aws.replica
 
-  name          = "alias/${var.project_name}-storage-replica-${var.environment}"
+  name          = "alias/${var.name_prefix}-storage-replica-${var.environment}"
   target_key_id = aws_kms_key.replica.key_id
 }
 
@@ -656,7 +610,7 @@ data "aws_iam_policy_document" "replication" {
 }
 
 resource "aws_iam_role" "replication" {
-  name               = "${var.project_name}-s3-replication-${var.environment}"
+  name               = "${var.name_prefix}-s3-replication-${var.environment}-exec"
   assume_role_policy = data.aws_iam_policy_document.replication_assume.json
   tags               = local.common_tags
 }
@@ -690,14 +644,11 @@ resource "aws_s3_bucket_replication_configuration" "buckets" {
       }
     }
 
-    # Objects written before replication was enabled are not replicated retroactively; this
-    # makes that explicit rather than leaving it to be discovered during a recovery.
     source_selection_criteria {
       sse_kms_encrypted_objects { status = "Enabled" }
     }
   }
 
-  # Replication is rejected unless versioning is already active on the source.
   depends_on = [
     aws_s3_bucket_versioning.raw_layer,
     aws_s3_bucket_versioning.curated_layer,

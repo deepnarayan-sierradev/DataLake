@@ -3,7 +3,8 @@ Bidirectional reconciliation of DLQ queues against their producers (gap items 20
 
 The alarm/emitter reconciliation exists because a catalogued metric with no producer looks exactly
 like a healthy one. A dead-letter queue has the same property, and it went unnoticed for longer: on
-2026-07-29 nine `EdlStageDlq-*` queues were created, alarmed with thresholds derived from the
+2026-07-29 nine `datalake-<stage>-dlq-dev-*` queues were created, alarmed with thresholds derived
+from the
 2-4h freshness commitment, and given a `maxReceiveCount` — while **five of six pipeline stages
 enqueued to no queue at all**, because `enqueue_dlq_entry` accepted `failed_stage` and hardcoded
 the extraction queue name. Empty queues and quiet alarms read as "nothing is failing".
@@ -26,6 +27,7 @@ from typing import Final
 
 import pytest
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from contracts.dlq_routing import (
     DLQ_STAGE_BY_PIPELINE_STAGE,
     REPLAYABLE_STAGES,
@@ -35,12 +37,13 @@ from contracts.dlq_routing import (
 )
 from contracts.observability_contract import PipelineStage
 
+NAME_PREFIX: Final[str] = RESOURCE_NAME_ENVIRONMENT["RESOURCE_NAME_PREFIX"]
+
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent.parent
 PER_STAGE_DLQ_TF: Final[Path] = (
     REPO_ROOT / "infrastructure" / "modules" / "orchestration" / "per_stage_dlq.tf"
 )
 
-# Handlers that construct a StageIdentity, and therefore declare a DLQ route.
 PRODUCER_MODULES: Final[tuple[str, ...]] = (
     "connector_runtime/extraction_pipeline_handler.py",
     "transformation/transformation_pipeline_handler.py",
@@ -85,7 +88,6 @@ def _declared_dlq_stages() -> set[str]:
 
 class TestEveryQueueHasAProducer:
     def test_each_terraform_stage_is_a_declared_dlq_stage(self) -> None:
-        # The assertion that was false for five of six stages.
         terraform_keys = _terraform_stage_keys()
         assert terraform_keys, "parsed no stages out of per_stage_dlq.tf — the parser has drifted"
         routed = {stage.value for stage in REPLAYABLE_STAGES}
@@ -99,28 +101,60 @@ class TestEveryQueueHasAProducer:
     def test_each_replayable_stage_is_declared_by_a_handler(self, stage: DlqStage) -> None:
         declared = _declared_dlq_stages()
         assert stage.name in declared, (
-            f"No handler declares dlq_stage=DlqStage.{stage.name}, so {dlq_queue_name(stage)} has "
+            f"No handler declares dlq_stage=DlqStage.{stage.name}, so "
+            f"{dlq_queue_name(stage, 'dev')} has "
             "no producer. A queue with no producer is indistinguishable from a healthy one."
         )
 
 
+_STAGE_QUEUE_NAME_EXPR = re.compile(
+    r'resource "aws_sqs_queue" "stage_dlq" \{.*?^  name\s*=\s*"([^\n]*)"[ \t]*$',
+    re.S | re.M,
+)
+
+
+def _render_terraform_queue_name(stage_key: str, environment: str) -> str:
+    """Evaluate per_stage_dlq.tf's name template for one stage, the way Terraform would."""
+    text = PER_STAGE_DLQ_TF.read_text(encoding="utf-8")
+    match = _STAGE_QUEUE_NAME_EXPR.search(text)
+    assert match, "could not find the stage_dlq name expression — the parser has drifted"
+    return (
+        match.group(1)
+        .replace("${var.name_prefix}", NAME_PREFIX)
+        .replace('${replace(each.key, "_", "-")}', stage_key.replace("_", "-"))
+        .replace("${var.environment}", environment)
+    )
+
+
 class TestQueueNamesMatchTerraform:
     @pytest.mark.parametrize("stage", sorted(REPLAYABLE_STAGES, key=lambda s: s.value))
-    def test_the_generated_name_appears_in_terraform(self, stage: DlqStage) -> None:
-        # Terraform builds the name with title()/replace(); this reproduces it. If either side
-        # changes, the code addresses a queue that does not exist.
-        text = PER_STAGE_DLQ_TF.read_text(encoding="utf-8")
-        camel = dlq_queue_name(stage).removeprefix("EdlStageDlq-")
-        assert 'title(replace(each.key, "_", " "))' in text or camel in text
+    @pytest.mark.parametrize("environment", ["dev", "uat", "prod"])
+    def test_the_generated_name_matches_terraform(self, stage: DlqStage, environment: str) -> None:
+        assert dlq_queue_name(stage, environment) == _render_terraform_queue_name(
+            stage.value, environment
+        ), "the code addresses a queue name Terraform does not create"
 
-    def test_entity_resolution_camel_cases_correctly(self) -> None:
-        # The one name where the transform is non-trivial.
-        assert dlq_queue_name(DlqStage.ENTITY_RESOLUTION) == "EdlStageDlq-EntityResolution"
-        assert dlq_queue_name(DlqStage.SERVING_STORE_LOAD) == "EdlStageDlq-ServingStoreLoad"
+    def test_the_environment_token_is_present_and_distinguishing(self) -> None:
+        dev = dlq_queue_name(DlqStage.EXTRACTION, "dev")
+        uat = dlq_queue_name(DlqStage.EXTRACTION, "uat")
+        assert dev != uat
+        assert dev.endswith("-dev") and uat.endswith("-uat")
+
+    def test_multi_word_stages_are_kebab_cased(self) -> None:
+        assert dlq_queue_name(DlqStage.ENTITY_RESOLUTION, "dev") == (
+            f"{NAME_PREFIX}-entity-resolution-dlq-dev"
+        )
+        assert dlq_queue_name(DlqStage.SERVING_STORE_LOAD, "dev") == (
+            f"{NAME_PREFIX}-serving-store-load-dlq-dev"
+        )
+
+    def test_an_unknown_environment_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="environment must be one of"):
+            dlq_queue_name(DlqStage.EXTRACTION, "staging")
 
     def test_not_replayable_has_no_queue_name(self) -> None:
         with pytest.raises(ValueError, match="no queue by design"):
-            dlq_queue_name(DlqStage.NOT_REPLAYABLE)
+            dlq_queue_name(DlqStage.NOT_REPLAYABLE, "dev")
 
 
 class TestEveryPipelineStageIsRouted:
@@ -128,7 +162,6 @@ class TestEveryPipelineStageIsRouted:
     def test_no_pipeline_stage_falls_through_to_no_queue(
         self, pipeline_stage: PipelineStage
     ) -> None:
-        # A stage with no entry would silently enqueue nowhere, which is the original defect.
         assert dlq_stage_for(pipeline_stage) in set(DlqStage)
 
     def test_the_mapping_covers_the_enum_exactly(self) -> None:

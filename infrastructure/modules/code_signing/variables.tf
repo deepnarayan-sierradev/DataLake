@@ -19,3 +19,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
+}

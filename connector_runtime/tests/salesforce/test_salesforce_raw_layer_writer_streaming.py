@@ -105,7 +105,6 @@ class TestWritePartitionStreaming:
         s3 = boto3.client("s3", region_name=_REGION)
         objects = s3.list_objects_v2(Bucket=_BUCKET, Prefix=prefix)["Contents"]
         part_files = [o for o in objects if "part-" in o["Key"]]
-        # 7 records with chunk_size=3 → parts 0, 1, 2 = 3 parts
         assert len(part_files) == 3
 
     @mock_aws
@@ -121,7 +120,6 @@ class TestWritePartitionStreaming:
             extraction_date=_DATE,
         )
         assert count == 0
-        # No part files should exist
         s3 = boto3.client("s3", region_name=_REGION)
         result = s3.list_objects_v2(Bucket=_BUCKET, Prefix=prefix)
         assert result.get("KeyCount", 0) == 0
@@ -185,14 +183,12 @@ class TestWritePartitionStreaming:
         def failing_metadata_put(**kwargs):  # type: ignore[no-untyped-def]
             nonlocal call_count
             call_count += 1
-            # Fail only the metadata.json put
             if kwargs.get("Key", "").endswith("metadata.json"):
                 raise OSError("simulated metadata failure")
             return original_put(**kwargs)
 
         writer._s3.put_object = failing_metadata_put  # type: ignore[method-assign]
 
-        # Should not raise
         _prefix, count = writer.write_partition_streaming(
             record_iter=iter(_records(2)),
             source_id=_SOURCE_ID,

@@ -100,23 +100,23 @@
 ## Data Configuration
 
 ### Source Credentials (Secrets Manager)
-- [ ] Salesforce credentials stored: `edl/sources/salesforce/credentials`
+- [ ] Salesforce credentials stored: `datalake/<env>/sources/salesforce/credentials`
   - [ ] `instance_url` verified (correct org)
   - [ ] `client_id` and `client_secret` valid
   - [ ] OAuth token scope includes Bulk API 2.0
-- [ ] NetSuite credentials stored: `edl/sources/netsuite/credentials`
+- [ ] NetSuite credentials stored: `datalake/<env>/sources/netsuite/credentials`
   - [ ] `account_id` correct (not sandbox)
   - [ ] OAuth tokens valid
   - [ ] Timestamp format validated (ISO-8601)
-- [ ] MySQL RDS credentials stored: `edl/sources/mysql-rds/credentials`
+- [ ] MySQL RDS credentials stored: `datalake/<env>/sources/mysql-rds/credentials`
   - [ ] `host` is prod database endpoint
   - [ ] `username` is read-only user
   - [ ] Network connectivity verified (MySQL from Lambda in VPC)
-- [ ] Sage Intacct credentials stored: `edl/sources/sage/intacct/credentials`
+- [ ] Sage Intacct credentials stored: `datalake/<env>/sources/sage/intacct/credentials`
   - [ ] `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` all set
   - [ ] OAuth token endpoint reachable from Lambda VPC (outbound HTTPS)
   - [ ] Intacct API user has read-only query access to configured modules
-- [ ] Sage X3 credentials stored: `edl/sources/sage/x3/credentials`
+- [ ] Sage X3 credentials stored: `datalake/<env>/sources/sage/x3/credentials`
   - [ ] `token_url`, `client_id`, `client_secret`, `base_url`, `folder` all set
   - [ ] X3 `folder` is the correct company folder name (e.g. `SEED` or `PROD`)
   - [ ] OData v4 endpoint reachable from Lambda VPC
@@ -167,7 +167,7 @@
   - [ ] NetSuite Customer mapping: source fields → canonical names
   - [ ] MySQL RDS Contracts mapping: source fields → canonical names
   - [ ] Sage Intacct / Sage X3 mappings (customer, supplier, and any other onboarded entities)
-- [ ] All mapping files stored in S3: `s3://edl-schema-snapshots-<ACCOUNT_ID>/field_mappings/`
+- [ ] All mapping files stored in S3: `s3://datalake-schema-snapshots-<ACCOUNT_ID>/field_mappings/`
 - [ ] Each mapping file versioned (v1.json)
 - [ ] All transformation Lambda has read permission to mapping bucket
 
@@ -178,7 +178,7 @@
 ---
 
 ### Data Classification & PII Policy (S3)
-- [ ] PII classification policy file created: `s3://edl-schema-snapshots-<ACCOUNT_ID>/data_classification/classification_policy.json`
+- [ ] PII classification policy file created: `s3://datalake-schema-snapshots-<ACCOUNT_ID>/data_classification/classification_policy.json`
 - [ ] Every field in every entity classified as: `PII`, `SENSITIVE`, `PUBLIC`, or `INTERNAL`
 - [ ] Masking strategy defined per field:
   - [ ] Email fields: MASK_EMAIL (mask domain, keep first char)
@@ -218,7 +218,7 @@
 ## Quality & Governance
 
 ### Quality Policy (S3)
-- [ ] Quality policy file created for each entity: `s3://edl-schema-snapshots-<ACCOUNT_ID>/quality_policies/`
+- [ ] Quality policy file created for each entity: `s3://datalake-schema-snapshots-<ACCOUNT_ID>/quality_policies/`
 - [ ] Salesforce Account: enforce not-null on `account_id`, name regex, account_type enum
 - [ ] Salesforce Contact: enforce not-null on `contact_id`, email regex, valid phone
 - [ ] Salesforce Opportunity: enforce not-null on `opp_id`, positive amount range
@@ -504,8 +504,8 @@ Verify that all required technologies are correctly configured before go-live.
 - [ ] **Salesforce** — OAuth 2.0 client credentials tested; NAT Gateway IP added to Salesforce trusted IP allowlist; Bulk API 2.0 quota confirmed (API edition supports high-volume jobs)
 - [ ] **NetSuite** — OAuth 1.0a credentials tested; SuiteQL endpoint reachable from Lambda VPC; query timeout verified
 - [ ] **MySQL RDS** — Read-only credentials tested; VPC peering or PrivateLink to RDS established; `INFORMATION_SCHEMA` queries succeed
-- [ ] **Sage Intacct** — OAuth 2.0 client credentials tested (`edl/sources/sage/intacct/credentials`); Intacct REST API reachable from Lambda VPC; dry-run with `run_sage_connector_local.py --entity-id sage-intacct-customer --dry-run` passes
-- [ ] **Sage X3** — OAuth 2.0 client credentials tested (`edl/sources/sage/x3/credentials`); X3 OData v4 endpoint reachable from Lambda VPC; `folder` value confirmed; dry-run passes
+- [ ] **Sage Intacct** — OAuth 2.0 client credentials tested (`datalake/<env>/sources/sage/intacct/credentials`); Intacct REST API reachable from Lambda VPC; dry-run with `run_sage_connector_local.py --entity-id sage-intacct-customer --dry-run` passes
+- [ ] **Sage X3** — OAuth 2.0 client credentials tested (`datalake/<env>/sources/sage/x3/credentials`); X3 OData v4 endpoint reachable from Lambda VPC; `folder` value confirmed; dry-run passes
 
 ---
 

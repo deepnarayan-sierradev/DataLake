@@ -17,14 +17,9 @@ locals {
     ManagedBy   = "terraform"
     Module      = "entity_resolution_lambda"
   })
-  function_name = "EdlEntityResolutionPipeline"
+  function_name = "${var.name_prefix}-entity-resolution-${var.environment}"
 }
 
-# ---------------------------------------------------------------------------
-# CloudWatch Log Group for Lambda execution logs
-#
-# Created before the Lambda so Terraform manages retention and encryption.
-# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "lambda_execution" {
   name              = "/aws/lambda/${local.function_name}"
@@ -37,13 +32,6 @@ resource "aws_cloudwatch_log_group" "lambda_execution" {
   })
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Security Group
-#
-# Entity resolution reads curated Parquet from S3 and writes golden records
-# to the analytics S3 layer — all via VPC endpoints.
-# Only HTTPS (443) egress required. No ingress — invoked by Step Functions only.
-# ---------------------------------------------------------------------------
 
 data "aws_vpc" "selected" {
   filter {
@@ -53,7 +41,7 @@ data "aws_vpc" "selected" {
 }
 
 resource "aws_security_group" "entity_resolution_lambda" {
-  name        = "${local.function_name}Sg"
+  name        = "${local.function_name}-sg"
   description = "Security group for the entity resolution pipeline Lambda. HTTPS egress to AWS VPC endpoints only."
   vpc_id      = data.aws_vpc.selected.id
 
@@ -66,7 +54,7 @@ resource "aws_security_group" "entity_resolution_lambda" {
   }
 
   tags = merge(local.common_tags, {
-    Name = "${local.function_name}Sg"
+    Name = "${local.function_name}-sg"
   })
 
   lifecycle {
@@ -74,23 +62,19 @@ resource "aws_security_group" "entity_resolution_lambda" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Function — Entity Resolution Pipeline
-#
-# Handler: entity_resolution.entity_resolution_pipeline_handler.lambda_handler
-#
-# Runtime: python3.13
-#
-# VPC: deployed into private subnets so S3 traffic routes through the VPC
-# S3 gateway endpoint rather than the public internet.
-#
-# Environment variables:
-#   PLATFORM_ENVIRONMENT  — "dev" | "staging" | "prod"
-#   CURATED_S3_BUCKET     — curated layer bucket (read: canonical Parquet + configs)
-#   ANALYTICS_S3_BUCKET   — analytics layer bucket (write: golden records)
-#   GOVERNANCE_S3_BUCKET  — lineage bucket (optional; empty = disabled)
-#   AWS_REGION            — injected automatically by Lambda runtime
-# ---------------------------------------------------------------------------
+
+locals {
+  required_resource_names = [
+    "EFFECTIVE_CONFIG_TABLE",
+    "ENTITY_TYPE_REGISTRY_TABLE",
+    "RESOURCE_NAME_PREFIX",
+    "SCOPE_UNIT_TABLE",
+    "SECRET_PATH_PREFIX",
+  ]
+  resource_name_variables = {
+    for key in local.required_resource_names : key => var.resource_names[key]
+  }
+}
 
 resource "aws_lambda_function" "entity_resolution_pipeline" {
   function_name = local.function_name
@@ -120,12 +104,12 @@ resource "aws_lambda_function" "entity_resolution_pipeline" {
   kms_key_arn = var.kms_key_arn
 
   environment {
-    variables = {
+    variables = merge({
       PLATFORM_ENVIRONMENT = var.environment
       CURATED_S3_BUCKET    = var.curated_s3_bucket_name
       ANALYTICS_S3_BUCKET  = var.analytics_s3_bucket_name
       GOVERNANCE_S3_BUCKET = var.governance_s3_bucket_name
-    }
+    }, local.resource_name_variables)
   }
 
   vpc_config {
@@ -144,33 +128,20 @@ resource "aws_lambda_function" "entity_resolution_pipeline" {
   })
 }
 
-# ---------------------------------------------------------------------------
-# Lambda Permission — allow Step Functions to invoke the Lambda
-#
-# Rejects invocations from principals other than Step Functions in this
-# account (defence-in-depth — OWASP A01).
-# ---------------------------------------------------------------------------
 
 resource "aws_lambda_permission" "allow_step_functions" {
   statement_id  = "AllowStepFunctionsInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.entity_resolution_pipeline.function_name
   principal     = "states.amazonaws.com"
-  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:EdlExtractionPipeline"
+  source_arn    = "arn:aws:states:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:stateMachine:${var.name_prefix}-extraction-workflow-${var.environment}"
 }
 
-# ---------------------------------------------------------------------------
-# Async-invocation dead letter queue (CKV_AWS_116). An asynchronous Lambda failure with no
-# DLQ is discarded after the retries with nothing left to inspect. Named `EdlStageDlq-*` so
-# the existing `sqs:SendMessage` grant on that prefix covers it rather than adding a new one.
-# SSE-SQS rather than a CMK: no per-module KMS input exists, and the payload here is a failed
-# event envelope, not tenant data.
-# ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "async_dlq" {
-  name                      = "EdlStageDlq-EntityResolutionAsync"
+  name                      = "${var.name_prefix}-entity-resolution-async-dlq-${var.environment}"
   message_retention_seconds = 1209600 # 14 days, the maximum — a DLQ that expires loses the evidence
   sqs_managed_sse_enabled   = true
 
-  tags = merge(local.common_tags, { Name = "EdlStageDlq-EntityResolutionAsync" })
+  tags = merge(local.common_tags, { Name = "${var.name_prefix}-entity-resolution-async-dlq-${var.environment}" })
 }

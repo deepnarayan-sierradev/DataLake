@@ -6,7 +6,7 @@ grant for REST API authentication.  The 'folder' credential scopes the
 token to a specific X3 company folder (e.g. "SEED", "PROD").  All API paths
 are prefixed with the folder: {base_url}/api/{folder}/{endpoint}.
 
-Required secret keys (stored at edl/sources/sage/x3/credentials):
+Required secret keys (stored at datalake/<env>/sources/sage/x3/credentials):
     base_url      — X3 REST API base URL, excluding the /api/{folder} suffix
                     (e.g. "https://x3.company.com")
     token_url     — OAuth 2.0 token endpoint
@@ -53,13 +53,10 @@ _logger = get_platform_logger(__name__)
 
 _PRODUCT_NAME: Final[str] = "x3"
 
-# Refresh the token this many seconds before expiry to avoid mid-extraction expiry.
 _PROACTIVE_REFRESH_SECONDS: Final[int] = 300
 
-# Fallback TTL when the token endpoint does not return expires_in.
 _DEFAULT_TOKEN_TTL_SECONDS: Final[int] = 3_600
 
-# Required keys that must be present in the X3 credentials secret.
 _REQUIRED_CREDENTIAL_KEYS: Final[frozenset[str]] = frozenset(
     {"base_url", "token_url", "client_id", "client_secret", "folder"}
 )
@@ -105,13 +102,10 @@ class X3AuthClient:
         self._credentials = credential_manager
         self._http = http_client
 
-        # Token state — populated lazily on first get_access_token() call.
         self._access_token: str | None = None
         self._token_expires_at: float = 0.0  # UNIX epoch seconds
         self._base_url: str | None = None  # "{server_base}/api/{folder}"
         self._folder: str | None = None
-
-    # ── SageAuthProtocol interface ─────────────────────────────────────────────
 
     @property
     def base_url(self) -> str:
@@ -172,8 +166,6 @@ class X3AuthClient:
             "Accept": "application/json",
         }
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _is_token_valid(self) -> bool:
         return (self._token_expires_at - time.time()) > _PROACTIVE_REFRESH_SECONDS
 
@@ -203,7 +195,6 @@ class X3AuthClient:
         server_base_url: str = creds["base_url"].rstrip("/")
         folder: str = creds["folder"]
 
-        # client_secret is form body — never a query parameter (OWASP A07).
         try:
             response_body = self._http.post_form(
                 url=token_url,
@@ -235,5 +226,4 @@ class X3AuthClient:
             "sage_x3_token_acquired",
             expires_in_seconds=expires_in,
             folder=folder,
-            # Token value intentionally NOT logged (OWASP A09).
         )

@@ -100,9 +100,6 @@ def build_incremental_select(
         triple every call site assembles into its own QueryContract.
     """
     select_clause = ", ".join(quote(name) for name in field_names)
-    # OWASP A03: identifiers are pre-validated by the caller against a strict
-    # allowlist pattern before reaching this function — no user-controlled
-    # input can reach this f-string unvalidated.
     query_text = f"SELECT {select_clause} FROM {quote(table)}"  # noqa: S608  # nosec B608 — identifiers validated above
     query_parameters: dict[str, str | None] = {}
     effective_watermark_field: str | None = None

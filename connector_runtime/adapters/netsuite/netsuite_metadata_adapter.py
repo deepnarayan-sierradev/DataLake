@@ -35,15 +35,11 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Base URL template for the NetSuite REST Metadata Catalog endpoint.
-# account_id is the NetSuite account identifier (numeric or TSTDRV prefix).
 _METADATA_URL_TEMPLATE: Final[str] = (
     "https://{account_id}.suitetalk.api.netsuite.com"
     "/services/rest/record/v1/metadata-catalog/{record_type}"
 )
 
-# Field types that are not directly extractable in SuiteQL (compound/internal types).
-# SuiteQL does not support querying these column types directly.
 _NON_QUERYABLE_FIELD_TYPES: Final[frozenset[str]] = frozenset(
     {
         "SELECT",  # multi-select enum (not directly queryable)
@@ -53,7 +49,6 @@ _NON_QUERYABLE_FIELD_TYPES: Final[frozenset[str]] = frozenset(
     }
 )
 
-# NetSuite internal/system fields that should not appear in extraction payloads.
 _SYSTEM_FIELD_PREFIXES: Final[tuple[str, ...]] = ("system_",)
 
 
@@ -185,8 +180,6 @@ class NetSuiteMetadataAdapter:
         """Force the next discover_fields() call to re-fetch from the Metadata Catalog API."""
         self._cached_fields = None
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _fetch_fields(self) -> list[NetSuiteFieldMetadata]:
         """
         Fetch field metadata from the Metadata Catalog endpoint.
@@ -258,7 +251,6 @@ class NetSuiteMetadataAdapter:
 
         fields: list[NetSuiteFieldMetadata] = []
         for field_name, field_def in properties.items():
-            # Skip internal system fields.
             if any(field_name.startswith(prefix) for prefix in _SYSTEM_FIELD_PREFIXES):
                 continue
 
@@ -308,7 +300,6 @@ class NetSuiteMetadataAdapter:
         elif field_mode == FieldMode.CUSTOM:
             result = [f for f in fields if f.is_custom]
         else:
-            # FieldMode.ALL
             result = list(fields)
 
         return [f for f in result if f.name not in exclude_set]

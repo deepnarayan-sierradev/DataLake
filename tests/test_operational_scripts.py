@@ -36,7 +36,6 @@ import pytest
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 MAKEFILE: Final[Path] = REPO_ROOT / "Makefile"
 
-# Presentation generators: excluded from ruff and mypy already, and they import optional deps.
 EXCLUDED: Final[frozenset[str]] = frozenset(
     {"scripts/generate_presentation.py", "scripts/_gen_html.py"}
 )
@@ -49,7 +48,6 @@ def _makefile_scripts() -> list[str]:
 
 
 def test_the_makefile_references_scripts_at_all() -> None:
-    # Guards the parser: if this returns nothing, every test below passes vacuously.
     assert len(_makefile_scripts()) >= 10
 
 
@@ -64,8 +62,6 @@ def test_the_script_imports_without_touching_aws(script: str) -> None:
         timeout=90,
         env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(REPO_ROOT), "AWS_REGION": "us-east-1"},
     )
-    # A script that parses args and exits is fine; an ImportError, NameError or AttributeError at
-    # module scope is not — those are the shapes the two real defects took.
     for fatal in ("ImportError", "ModuleNotFoundError", "NameError", "AttributeError"):
         assert fatal not in result.stderr, f"{script} fails at import:\n{result.stderr[-1500:]}"
 

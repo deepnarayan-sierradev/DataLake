@@ -69,7 +69,6 @@ class TestDegenerateSingleTenant:
         assert predicate.matches("anything-at-all") is True
 
     def test_single_tenant_ignores_stray_unit_grants(self):
-        # A single tenant has exactly one implicit unit; a crafted grant cannot add units.
         claims = build_scope_claims(
             "demo", _SINGLE, granted_scope_unit_ids=frozenset({"franchisee-0042"})
         )
@@ -100,7 +99,6 @@ class TestPartitionedTenant:
         assert predicate.matches("franchisee-0002") is False
 
     def test_unattributable_row_is_not_visible_to_a_unit_scoped_caller(self):
-        # DL-12 D2: null resolves to tenant-level, never "visible to everyone".
         claims = build_scope_claims(
             "evive",
             _PARTITIONED,
@@ -159,7 +157,6 @@ class TestUnseededPartitionedTenantCannotBecomeMatchAll:
             )
 
     def test_implicit_unit_is_rejected_even_with_no_units_registered(self):
-        # The exact bypass: unseeded tenant + crafted `__tenant__` claim.
         with pytest.raises(UnknownScopeUnitError):
             build_scope_claims(
                 "evive",
@@ -169,7 +166,6 @@ class TestUnseededPartitionedTenantCannotBecomeMatchAll:
             )
 
     def test_hand_built_implicit_claim_cannot_reach_the_match_all_branch(self):
-        # Defence in depth: the predicate builder does not trust the caller to have validated.
         claims = ScopeClaims(
             tenant_code="evive", scope_unit_ids=frozenset({IMPLICIT_SCOPE_UNIT_ID})
         )
@@ -177,7 +173,6 @@ class TestUnseededPartitionedTenantCannotBecomeMatchAll:
             scope_predicate(claims)
 
     def test_positive_control_a_declared_single_tenant_still_matches_all(self):
-        # Without this, a builder that always raised would pass every test above.
         claims = build_scope_claims("demo", _SINGLE)
         assert scope_predicate(claims).matches_all_rows is True
 
@@ -194,7 +189,6 @@ class TestHierarchyExpansion:
         assert expanded == frozenset({"region-north", "franchisee-0001", "franchisee-0002"})
 
     def test_expansion_terminates_on_a_cycle(self):
-        # A cycle is a data defect; expansion must still terminate rather than hang.
         units = [
             _unit("unit-a", parent="unit-b"),
             _unit("unit-b", parent="unit-a"),

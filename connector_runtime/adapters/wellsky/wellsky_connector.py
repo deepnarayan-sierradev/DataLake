@@ -81,15 +81,12 @@ from connector_runtime.source_capabilities import SourceCapability
 
 SOURCE_ID: Final[str] = "wellsky"
 
-# Documented: `_count` default 20, minimum 1, maximum 100.
 MAX_COUNT: Final[int] = 100
 
-# `_page` is zero-based and counts pages, not rows.
 _PAGINATION: Final[PaginationParameters] = PaginationParameters(
     page="_page", limit="_count", first_page_index=0
 )
 
-# FHIR search prefix for "greater than or equal to" on a date field.
 _GE_PREFIX: Final[str] = "ge"
 
 
@@ -97,9 +94,6 @@ def _searchable(path: str, suffix: str, *, watermarked: bool = False) -> RestEnt
     """A `POST .../_search/` read returning a paginated FHIR Bundle."""
     return RestEntitySpec(
         entity_id=f"{SOURCE_ID}-{suffix}",
-        # The path is taken verbatim from the specification, trailing slash included or
-        # excluded exactly as published — `/v1/locations/_search` genuinely has none, and
-        # the vendor's own implementation rules make the slash load-bearing.
         path=path,
         read_method="POST",
         records_json_path=("entry",),
@@ -144,23 +138,16 @@ WELLSKY_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     token_endpoint_path="/oauth/accesstoken",  # noqa: S106  # nosec B106 — a path, not a secret
     token_grant_kind=TokenGrantKind.CLIENT_CREDENTIALS,
     entities=(
-        # The only three resources whose `_search` documents `created` / `updated` as
-        # searchable date fields. Claiming a watermark anywhere else would send a filter
-        # the endpoint ignores, load everything, and still advance the watermark — a
-        # completeness illusion rather than an error.
         _searchable("/v1/patients/_search/", "patient", watermarked=True),
         _searchable("/v1/practitioners/_search/", "practitioner", watermarked=True),
         _searchable("/v1/relatedperson/_search/", "related-person", watermarked=True),
-        # Paginated searches with no documented date filter — full load every run.
         _searchable("/v1/encounter/_search/", "encounter"),
         _searchable("/v1/appointment/_search/", "appointment"),
         _searchable("/v1/chargeitem/_search/", "charge-item"),
         _searchable("/v1/medication/_search/", "medication"),
         _searchable("/v1/subscriptions/_search/", "subscription"),
         _searchable("/v1/admins/_search/", "agency-admin"),
-        # Published without a trailing slash, unlike every other `_search`.
         _searchable("/v1/locations/_search", "location"),
-        # Declared without `_page` / `_count`, so read in one request.
         _unpaginated("/v1/organizations/", "organization"),
         _unpaginated("/v1/allergyintolerance/all-allergy/", "allergy-intolerance"),
     ),
@@ -174,14 +161,10 @@ WELLSKY_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     default_pagination_strategy="page_number",
     default_rate_limit_policy="wellsky-conservative",
     pagination_parameters=_PAGINATION,
-    # The vendor designed this for object-by-object CRUD and advises against batch use,
-    # so a 100-row search bundle is at the slow end of what it expects to serve.
     request_timeout_seconds=90.0,
     default_records_json_path=("entry",),
     default_page_size=MAX_COUNT,
     required_credential_keys=frozenset({"client_id", "client_secret"}),
-    # Retained for the GET-collection entities; the searchable ones bind the lower bound
-    # into the request body instead (see `watermark_body_field`).
     watermark_lower_parameter="updated",
     watermark_upper_parameter="updated_before",
     notes=(
@@ -196,5 +179,4 @@ WELLSKY_SPEC: Final[RestSourceSpec] = RestSourceSpec(
 
 register_rest_source(WELLSKY_SPEC)
 
-# Consumed by the PHI onboarding gate; declared here so the fact lives with the adapter.
 IS_PHI_BEARING: Final[bool] = True

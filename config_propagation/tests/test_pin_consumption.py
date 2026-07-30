@@ -20,6 +20,7 @@ from config_propagation.pinned_versions import (
     ConfigVersionMismatchError,
     PinnedConfigVersions,
 )
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from observability.metric_recorder import platform_metric_recorder
 
 _REGION = "us-east-1"
@@ -34,7 +35,7 @@ def _pin(version: str) -> PinnedConfigVersions:
 
 def _create_effective_config_table() -> None:
     boto3.client("dynamodb", region_name=_REGION).create_table(
-        TableName="EdlEffectiveConfig",
+        TableName=RESOURCE_NAME_ENVIRONMENT["EFFECTIVE_CONFIG_TABLE"],
         KeySchema=[
             {"AttributeName": "tenant_code", "KeyType": "HASH"},
             {"AttributeName": "capability_key", "KeyType": "RANGE"},
@@ -77,7 +78,9 @@ class TestPinConsumption:
         _create_effective_config_table()
         _consume(run_id="run-1")
         _consume(run_id="run-2")
-        table = boto3.resource("dynamodb", region_name=_REGION).Table("EdlEffectiveConfig")
+        table = boto3.resource("dynamodb", region_name=_REGION).Table(
+            RESOURCE_NAME_ENVIRONMENT["EFFECTIVE_CONFIG_TABLE"]
+        )
         items = table.query(
             KeyConditionExpression="tenant_code = :tc",
             ExpressionAttributeValues={":tc": "demo"},
@@ -86,19 +89,17 @@ class TestPinConsumption:
         assert items[0]["first_consuming_run_id"] == "run-1"
 
     def test_a_mid_run_publish_is_detected_as_a_mismatch(self) -> None:
-        # The pin says v3; the stage read v4 because a publish landed mid-run. That is exactly
-        # the condition DL-CFG-01 exists to surface.
         _create_effective_config_table()
         assert _consume(observed_version="v4") is False
         recorded = {point.metric.value for point in platform_metric_recorder.snapshot()}
         assert "ConfigVersionMismatchWithinRun" in recorded
 
     def test_a_mismatch_still_records_what_was_actually_consumed(self) -> None:
-        # Recording the observed version is what makes the run explainable afterwards; recording
-        # the pin would describe a run that did not happen.
         _create_effective_config_table()
         _consume(observed_version="v4")
-        table = boto3.resource("dynamodb", region_name=_REGION).Table("EdlEffectiveConfig")
+        table = boto3.resource("dynamodb", region_name=_REGION).Table(
+            RESOURCE_NAME_ENVIRONMENT["EFFECTIVE_CONFIG_TABLE"]
+        )
         items = table.query(
             KeyConditionExpression="tenant_code = :tc",
             ExpressionAttributeValues={":tc": "demo"},
@@ -111,13 +112,10 @@ class TestPinConsumption:
             _consume(observed_version="v4", fail_on_mismatch=True)
 
     def test_an_absent_pin_is_tolerated(self) -> None:
-        # A pre-pinning payload (or a trigger that could not pin) must still record consumption
-        # rather than failing the stage.
         _create_effective_config_table()
         assert _consume(pinned=None) is True
 
     def test_a_missing_audit_table_does_not_fail_the_stage(self) -> None:
-        # Telemetry must never decide whether a pipeline run succeeds.
         assert _consume() is True
 
     def test_a_capability_absent_from_the_pin_is_not_a_mismatch(self) -> None:
@@ -127,8 +125,6 @@ class TestPinConsumption:
 
 class TestPinPayloadRoundTrip:
     def test_the_pin_survives_the_step_functions_payload(self) -> None:
-        # The pin travels as JSON through the state machine; a round-trip that lost a version
-        # would silently disable the check for that capability.
         original = _pin("v7")
         restored = PinnedConfigVersions.from_payload(original.to_payload())
         assert restored is not None

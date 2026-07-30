@@ -31,14 +31,7 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Default timeout for all Sage REST API calls.
-# Intacct documentation recommends 30-60 seconds; 45 s is a conservative middle ground.
 _DEFAULT_TIMEOUT_SECONDS: Final[int] = 45
-
-
-# ---------------------------------------------------------------------------
-# Typed exception hierarchy
-# ---------------------------------------------------------------------------
 
 
 class SageHttpError(Exception):
@@ -77,11 +70,6 @@ class SageNetworkError(SageHttpError):
     """Network-level connectivity error (DNS failure, connection refused, etc.)."""
 
 
-# ---------------------------------------------------------------------------
-# HTTP client
-# ---------------------------------------------------------------------------
-
-
 class SageHttpClient:
     """
     Thin HTTP client that wraps requests.Session for all Sage REST API calls.
@@ -104,7 +92,6 @@ class SageHttpClient:
     def __init__(self, timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS) -> None:
         self._timeout = timeout_seconds
         self._session = requests.Session()
-        # TLS verification always on — no way to disable it (OWASP A05).
         self._session.verify = True
 
     def get(
@@ -223,8 +210,6 @@ class SageHttpClient:
 
         return self._parse_response(response)
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     @staticmethod
     def _parse_response(response: Response) -> dict[str, Any]:
         """
@@ -258,9 +243,6 @@ class SageHttpClient:
                 status_code=status,
             )
         if status == 429:
-            # Surface the Retry-After value so operators can tune Step Functions
-            # retry intervals.  The value is only logged — never used to sleep
-            # (retry timing is the orchestration layer's responsibility).
             retry_after = response.headers.get("Retry-After")
             _logger.info(
                 "sage_rate_limit_exceeded",

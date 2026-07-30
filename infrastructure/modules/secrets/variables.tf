@@ -1,9 +1,9 @@
 variable "environment" {
   type        = string
-  description = "Deployment environment: dev, staging, or prod."
+  description = "Deployment environment: dev, uat, or prod."
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment must be one of: dev, staging, prod."
+    condition     = contains(["dev", "uat", "prod"], var.environment)
+    error_message = "environment must be one of: dev, uat, prod."
   }
 }
 
@@ -55,8 +55,6 @@ variable "secret_rotation_days" {
   default     = 60
   description = "Days between automatic rotations when a rotation Lambda is configured."
   validation {
-    # Ceiling is 90, not 365: CKV_AWS_304 requires rotation within 90 days, and a variable whose
-    # allowed range exceeds the control lets the control be switched off by configuration.
     condition     = var.secret_rotation_days >= 30 && var.secret_rotation_days <= 90
     error_message = "secret_rotation_days must be between 30 and 90."
   }
@@ -68,9 +66,6 @@ variable "tags" {
   description = "Additional resource tags merged with module-managed tags."
 }
 
-# ---------------------------------------------------------------------------
-# Credential expiry notifier Lambda (SEC-6)
-# ---------------------------------------------------------------------------
 
 variable "credential_expiry_notifier_role_arn" {
   type        = string
@@ -148,4 +143,14 @@ variable "security_group_ids" {
   description = "Additional security groups, alongside the one this module creates."
   type        = list(string)
   default     = []
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
+}
+
+variable "resource_names" {
+  type        = map(string)
+  description = "Every physical resource name this Lambda reads from its environment, built once in the environment root from the resources Terraform actually created."
 }

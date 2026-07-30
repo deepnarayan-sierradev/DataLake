@@ -120,11 +120,9 @@ class MatchEvaluator:
         Returns:
             MatchEvaluationReport.
         """
-        # Build lookup: canonical pair key → predicted match result
         predicted: dict[tuple[str, str], bool] = {}
         for d in decisions:
             pair_key = _canonical_pair(d.record_a_id, d.record_b_id)
-            # Multiple rules may evaluate same pair; use OR logic (any match = predicted match)
             predicted[pair_key] = predicted.get(pair_key, False) or d.is_match
 
         pair_details: list[PairEvaluationDetail] = []

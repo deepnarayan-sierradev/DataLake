@@ -21,18 +21,14 @@ from unittest.mock import patch
 import boto3
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime.api.control_plane_handler import lambda_handler
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_ENTITY_CONFIG_TABLE = "EdlEntityExtractionConfig"
-_ENTITY_TYPE_REGISTRY_TABLE = "EdlEntityTypeRegistry"
-_AUDIT_LOG_TABLE = "EdlRunAuditLog"
-
-
-# ---------------------------------------------------------------------------
-# Fixtures / helpers
-# ---------------------------------------------------------------------------
+_ENTITY_CONFIG_TABLE = RESOURCE_NAME_ENVIRONMENT["ENTITY_CONFIG_TABLE"]
+_ENTITY_TYPE_REGISTRY_TABLE = RESOURCE_NAME_ENVIRONMENT["ENTITY_TYPE_REGISTRY_TABLE"]
+_AUDIT_LOG_TABLE = RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"]
 
 
 def _event(
@@ -118,11 +114,6 @@ _VALID_ENTITY_BODY: dict[str, Any] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Tenant provisioning
-# ---------------------------------------------------------------------------
-
-
 class TestTenantProvisioningIsNotThisSystemsConcern:
     """
     Tenants, users, roles, and permissions are owned by the Identity API.
@@ -144,11 +135,6 @@ class TestTenantProvisioningIsNotThisSystemsConcern:
         with patch.dict(os.environ, _BASE_ENV_VARS):
             response = lambda_handler(_event("GET", "/tenants/demo/entities", no_claims=True), None)
         assert response["statusCode"] == 401
-
-
-# ---------------------------------------------------------------------------
-# Entity registration / listing
-# ---------------------------------------------------------------------------
 
 
 class TestEntityRegistration:
@@ -287,17 +273,12 @@ class TestEntityRegistration:
         assert body["entities"][0]["entity_id"] == "salesforce-account"
 
 
-# ---------------------------------------------------------------------------
-# Pipeline trigger
-# ---------------------------------------------------------------------------
-
-
 class TestTriggerPipeline:
     @mock_aws
     def test_trigger_enqueues_correct_message_shape(self) -> None:
         sqs = boto3.client("sqs", region_name=_REGION)
         queue = sqs.create_queue(
-            QueueName="EdlPipelineTrigger.fifo",
+            QueueName="datalake-pipeline-trigger-dev.fifo",
             Attributes={"FifoQueue": "true", "ContentBasedDeduplication": "true"},
         )
         queue_url = queue["QueueUrl"]
@@ -335,7 +316,7 @@ class TestTriggerPipeline:
     def test_trigger_invalid_source_id_returns_400(self) -> None:
         sqs = boto3.client("sqs", region_name=_REGION)
         queue = sqs.create_queue(
-            QueueName="EdlPipelineTrigger.fifo",
+            QueueName="datalake-pipeline-trigger-dev.fifo",
             Attributes={"FifoQueue": "true", "ContentBasedDeduplication": "true"},
         )
         env_vars = {**_BASE_ENV_VARS, "PIPELINE_TRIGGER_QUEUE_URL": queue["QueueUrl"]}
@@ -357,7 +338,7 @@ class TestTriggerPipeline:
     def test_trigger_tenant_mismatch_returns_403(self) -> None:
         sqs = boto3.client("sqs", region_name=_REGION)
         queue = sqs.create_queue(
-            QueueName="EdlPipelineTrigger.fifo",
+            QueueName="datalake-pipeline-trigger-dev.fifo",
             Attributes={"FifoQueue": "true", "ContentBasedDeduplication": "true"},
         )
         env_vars = {**_BASE_ENV_VARS, "PIPELINE_TRIGGER_QUEUE_URL": queue["QueueUrl"]}
@@ -374,11 +355,6 @@ class TestTriggerPipeline:
             )
 
         assert response["statusCode"] == 403
-
-
-# ---------------------------------------------------------------------------
-# Run status — tenant isolation is security-critical
-# ---------------------------------------------------------------------------
 
 
 class TestGetRunStatus:
@@ -430,7 +406,6 @@ class TestGetRunStatus:
 
         with patch.dict(os.environ, _BASE_ENV_VARS):
             response = lambda_handler(
-                # Authenticated as "demo", requesting a run that belongs to "acme-corp".
                 _event("GET", f"/tenants/demo/runs/{run_id}", tenant_claim="demo"),
                 None,
             )
@@ -461,7 +436,6 @@ class TestGetRunStatus:
 
         with patch.dict(os.environ, _BASE_ENV_VARS):
             response = lambda_handler(
-                # Bare sequential integer run_id is rejected by validate_run_id.
                 _event("GET", "/tenants/demo/runs/12345", tenant_claim="demo"),
                 None,
             )
@@ -523,11 +497,6 @@ class TestListRuns:
         body = json.loads(response["body"])
         assert body["count"] == 1
         assert body["runs"][0]["run_id"] == "run-a"
-
-
-# ---------------------------------------------------------------------------
-# Routing / misc
-# ---------------------------------------------------------------------------
 
 
 class TestRoutingAndErrors:

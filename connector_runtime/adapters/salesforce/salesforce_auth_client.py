@@ -13,7 +13,7 @@ Security requirements enforced here (OWASP A07, A09):
   - Proactive refresh window (default 5 min) prevents mid-run token expiry.
 
 AWS resource used:
-  - Secrets Manager secret: edl/sources/salesforce/credentials
+  - Secrets Manager secret: datalake/<env>/sources/salesforce/credentials
     Expected JSON keys: instance_url, client_id, client_secret
 
 Token endpoint:
@@ -42,19 +42,15 @@ from connector_runtime.interfaces.connector_interface import (
     DeterministicConnectorError,
     ExtractionErrorClassification,
 )
+from contracts.resource_naming import secret_path
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# OWASP A03: these are URL/Secrets-Manager paths, not credential values.
 _TOKEN_URL_PATH: Final[str] = "/services/oauth2/token"  # noqa: S105
-_SECRET_PATH: Final[str] = "edl/sources/salesforce/credentials"  # noqa: S105
 
-# Refresh the token this many seconds before it actually expires to avoid
-# mid-extraction expiry on long-running Bulk API jobs.
 _PROACTIVE_REFRESH_SECONDS: Final[int] = 300
 
-# Required secret keys — enforced by the shared SecretsManagerCredentialClient.
 _REQUIRED_CREDENTIAL_KEYS: Final[frozenset[str]] = frozenset(
     {"instance_url", "client_id", "client_secret"}
 )
@@ -92,14 +88,13 @@ class SalesforceAuthClient:
         self._environment = environment
         self._region = region_name
         self._credentials_client = SecretsManagerCredentialClient(
-            secret_id=_SECRET_PATH,
+            secret_id=secret_path("sources", "salesforce", "credentials"),
             region_name=region_name,
             required_keys=_REQUIRED_CREDENTIAL_KEYS,
             source_label="Salesforce",
             error_cls=SalesforceCredentialError,
         )
 
-        # Token state — populated lazily on first get_access_token() call.
         self._access_token: str | None = None
         self._token_expires_at: float = 0.0  # UNIX epoch seconds
         self._instance_url: str | None = None
@@ -145,8 +140,6 @@ class SalesforceAuthClient:
         self._access_token = None
         self._token_expires_at = 0.0
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _is_token_valid(self) -> bool:
         """True when the cached token has more than the proactive refresh window remaining.
 
@@ -165,8 +158,6 @@ class SalesforceAuthClient:
 
         token_url = f"{instance_url.rstrip('/')}{_TOKEN_URL_PATH}"
         try:
-            # Use a form-encoded body — Salesforce OAuth 2.0 client_credentials flow.
-            # client_secret is passed as form data, never as a query parameter.
             response = requests.post(
                 token_url,
                 data={
@@ -178,37 +169,28 @@ class SalesforceAuthClient:
                 timeout=30,
             )
         except requests.RequestException as exc:
-            # Scrub before re-raise — the URL may contain instance domain; the
-            # exception str must not expose any credential fragments.
             raise SalesforceAuthError(
                 f"Token request to Salesforce failed: {type(exc).__name__}"
             ) from None
 
         if not response.ok:
-            # Never include response body — it may contain error_description
-            # with credential hints.
             raise SalesforceAuthError(
                 f"Salesforce token endpoint returned HTTP {response.status_code}."
             )
 
         body: dict[str, Any] = response.json()
 
-        # Salesforce client_credentials returns access_token and instance_url.
-        # expires_in is not always present; default to 7200 s (Salesforce default).
         access_token: str = body["access_token"]
         expires_in: int = int(body.get("expires_in", 7200))
 
         self._instance_url = body.get("instance_url", instance_url)
         self._access_token = access_token
-        # Use wall clock (time.time) not monotonic — token expiry is a real-time
-        # concept and must survive Lambda idle periods correctly.
         self._token_expires_at = time.time() + expires_in
 
         _logger.info(
             "salesforce_token_refreshed",
             environment=self._environment,
             expires_in_seconds=expires_in,
-            # token value intentionally omitted
         )
 
     def _load_credentials(self) -> dict[str, str]:

@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# PreToolUse hook (matcher: Bash) — hard-blocks two operations regardless of session context:
-#   1. terraform apply/destroy against infrastructure/environments/prod
-#   2. git push --force (or -f)
-# See CLAUDE.md "Safety guardrails". Exit 2 blocks the tool call; the stderr text is shown
-# as the block reason. Exit 0 allows it through unchanged.
 set -euo pipefail
 
 input="$(cat)"

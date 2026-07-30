@@ -54,10 +54,6 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Salesforce object name is derived from the entity_id by convention:
-# entity_id "salesforce-account" → object "Account"
-# The mapping is one-directional: entity_id is the platform identifier,
-# object_name is the Salesforce API name stored in entity configuration.
 _SOURCE_ID: Final[str] = "salesforce"
 
 
@@ -197,8 +193,6 @@ class SalesforceConnector(ConnectorInterface):
             query_parameters=query_contract.query_parameters,
         ):
             record_count += 1
-            # Populate source_timestamp from the watermark field in the record payload.
-            # query_contract.watermark_field is set by the SOQL builder for INCREMENTAL runs.
             if query_contract.watermark_field and query_contract.watermark_field in record.payload:
                 record.source_timestamp = record.payload[query_contract.watermark_field]
             yield record
@@ -237,13 +231,6 @@ class SalesforceConnector(ConnectorInterface):
         if isinstance(exc, OSError):
             return ExtractionErrorClassification.TRANSIENT_NETWORK
         return ExtractionErrorClassification.UNKNOWN
-
-
-# ---------------------------------------------------------------------------
-# Connector builder — registered with the platform ConnectorRegistry so the
-# extraction pipeline Lambda can fully wire this connector + raw-layer writer
-# from the Step Functions execution input without hardcoded source dispatch.
-# ---------------------------------------------------------------------------
 
 
 def _build_salesforce(

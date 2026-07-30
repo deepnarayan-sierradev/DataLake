@@ -12,7 +12,6 @@ potentially PHI-bearing until classified, rather than assumed safe.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from enum import StrEnum
@@ -21,13 +20,12 @@ from typing import Any, Final
 import boto3
 
 from contracts.platform_metrics import PlatformMetric
+from contracts.resource_naming import resource_name_prefix
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
-
-_TABLE_NAME: Final[str] = "EdlSourceOnboardingRegistry"
-_SUBPROCESSOR_TABLE_NAME: Final[str] = "EdlSubprocessorRegister"
 
 
 class PhiClassification(StrEnum):
@@ -42,7 +40,6 @@ class PhiGateBlockedError(Exception):
     """Raised when onboarding is refused because the PHI preconditions are unmet."""
 
 
-# Sources known to be PHI-bearing from the customer's own source list.
 KNOWN_PHI_SOURCES: Final[frozenset[str]] = frozenset({"wellsky", "seniorplace"})
 
 
@@ -124,7 +121,7 @@ class PhiOnboardingGate:
             raise ValueError("environment must not be empty.")
         self._environment = environment
         self._hipaa_capable = hipaa_capable
-        table_name = os.environ.get("SOURCE_ONBOARDING_TABLE") or _TABLE_NAME
+        table_name = require_env("SOURCE_ONBOARDING_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def classify(
@@ -184,8 +181,6 @@ class PhiOnboardingGate:
         if raw_classification:
             classification = PhiClassification(raw_classification)
         elif source_id in KNOWN_PHI_SOURCES:
-            # The adapter already declares these PHI-bearing; a missing registry row must not
-            # downgrade that to unknown.
             classification = PhiClassification.PHI_BEARING
         else:
             classification = PhiClassification.UNCLASSIFIED
@@ -202,11 +197,6 @@ class PhiOnboardingGate:
     def guard_onboarding(self, source_id: str) -> PhiGateVerdict:
         """The hard gate; called before a source's first extraction is scheduled."""
         return enforce_phi_gate(self.state_for(source_id))
-
-
-# ---------------------------------------------------------------------------
-# Subprocessor register (DL-PORT-07) and processing-purpose controls (DL-PORT-06)
-# ---------------------------------------------------------------------------
 
 
 class SubprocessorCategory(StrEnum):
@@ -237,8 +227,6 @@ class Subprocessor:
             )
 
 
-# The AWS services actually in use. The LLM provider is deliberately absent: DL-04 is deferred
-# and no concrete adapter exists, so listing one would misrepresent the register.
 PLATFORM_SUBPROCESSORS: Final[tuple[Subprocessor, ...]] = (
     Subprocessor(
         "AWS S3",
@@ -304,7 +292,7 @@ class SubprocessorRegister:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("SUBPROCESSOR_TABLE") or _SUBPROCESSOR_TABLE_NAME
+        table_name = require_env("SUBPROCESSOR_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def publish(self, subprocessors: tuple[Subprocessor, ...] = PLATFORM_SUBPROCESSORS) -> int:
@@ -367,30 +355,23 @@ class ProcessingPurposeTag:
         return data_class in self.permitted_data_classes
 
 
-PLATFORM_PURPOSE_TAGS: Final[tuple[ProcessingPurposeTag, ...]] = (
-    ProcessingPurposeTag(
-        "EdlExtractionRuntimeRole",
-        "service_delivery:ingestion",
-        ("raw", "credentials", "metadata"),
-    ),
-    ProcessingPurposeTag(
-        "EdlTransformationRuntimeRole",
-        "service_delivery:normalisation",
-        ("raw", "curated", "metadata"),
-    ),
-    ProcessingPurposeTag(
-        "EdlEntityResolutionRuntimeRole",
-        "service_delivery:resolution",
-        ("curated", "golden", "metadata"),
-    ),
-    ProcessingPurposeTag(
-        "EdlAnalyticsPublisherRuntimeRole",
-        "service_delivery:publication",
-        ("golden", "analytics", "metadata"),
-    ),
-    ProcessingPurposeTag(
-        "EdlExportRuntimeRole",
+_PURPOSES: Final[tuple[tuple[str, str, tuple[str, ...]], ...]] = (
+    ("extraction", "service_delivery:ingestion", ("raw", "credentials", "metadata")),
+    ("transformation", "service_delivery:normalisation", ("raw", "curated", "metadata")),
+    ("entity-resolution", "service_delivery:resolution", ("curated", "golden", "metadata")),
+    ("analytics-publisher", "service_delivery:publication", ("golden", "analytics", "metadata")),
+    (
+        "portability",
         "service_delivery:portability",
         ("raw", "curated", "golden", "analytics", "exports"),
     ),
 )
+
+
+def platform_purpose_tags(environment: str) -> tuple[ProcessingPurposeTag, ...]:
+    """Each runtime role and the processing purpose it is permitted to serve."""
+    prefix = resource_name_prefix()
+    return tuple(
+        ProcessingPurposeTag(f"{prefix}-{component}-{environment}-exec", purpose, classes)
+        for component, purpose, classes in _PURPOSES
+    )

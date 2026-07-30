@@ -37,7 +37,7 @@ help:
 	@echo "                      REQUIRED after every terraform apply — without it no cron triggers exist"
 	@echo ""
 	@echo "Required env vars for lambda-upload / seed-entity-config / seed-schedules:"
-	@echo "  ARTIFACTS_BUCKET    S3 bucket for Lambda zip (e.g. edl-terraform-state-087972550871)"
+	@echo "  ARTIFACTS_BUCKET    S3 bucket for Lambda zip (e.g. datalake-lambda-artefacts-dev-use1)"
 	@echo "  AWS_PROFILE         AWS CLI profile to use (or leave unset for default)"
 	@echo "  AWS_REGION          Default: us-east-1"
 	@echo ""
@@ -137,7 +137,7 @@ audit:
 
 # ─── Infrastructure ──────────────────────────────────────────────────────────
 iac-validate:
-	@for env in dev staging prod; do \
+	@for env in dev uat prod; do \
 		echo "Validating $$env..."; \
 		cd infrastructure/environments/$$env && terraform init -backend=false && terraform validate; \
 		cd ../../..; \
@@ -169,7 +169,8 @@ iac-fmt:
 # different artifact before uploading it. Hit live during dev's first real
 # deployment (2026-07-09) — see infrastructure/CLAUDE.md for the incident.
 
-ARTIFACTS_BUCKET ?= edl-terraform-state-087972550871
+# Artefacts now live in their own bucket rather than sharing the Terraform state bucket.
+ARTIFACTS_BUCKET ?= datalake-lambda-artefacts-dev-use1
 AWS_REGION       ?= us-east-1
 LAMBDA_S3_KEY    ?= lambda/extraction-pipeline.zip
 LAMBDA_ZIP       := dist/extraction-pipeline.zip
@@ -243,7 +244,7 @@ seed-entity-config:
 		--region $(AWS_REGION)
 	@echo "Entity config seed complete. Run 'make seed-schedules' to sync EventBridge schedules."
 
-# Onboard tenant/entity pairs to the serving store (populates EdlServingStoreConfig).
+# Onboard tenant/entity pairs to the serving store (populates datalake-serving-store-config-<env>).
 # Without this, the LoadServingStore stage skips every run and the serving RDS stays empty.
 seed-serving-store-config:
 	@echo "Writing serving store config records to DynamoDB (dev)..."
@@ -269,7 +270,7 @@ seed-schedules:
 # first: credential paths are derived from the connection model it creates.
 
 TENANT_CODE  ?= demo
-CURATED_BUCKET ?= edl-curated-087972550871
+CURATED_BUCKET ?= datalake-curated-dev-use1
 PUBLISHED_BY ?= platform-team
 APPLY        ?=
 

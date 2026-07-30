@@ -55,8 +55,6 @@ def _make_pipeline(mapping_registry_client, quality_policy=None):
     )
 
 
-# DL-SCOPE-07: the pipeline refuses to write curated rows it cannot attribute, so every context
-# declares a partition profile. `single` is the demo/dev shape — one implicit unit.
 _SINGLE_TENANT_PROFILE = TenantPartitionProfile(
     tenant_code="demo", partition_model=PartitionModel.SINGLE
 )
@@ -93,7 +91,6 @@ class TestTransformationPipelineHappyPath:
         records = [{"Id": "001", "Name": "Acme Corp"}]
         _write_raw_parquet(self.s3, _RAW_BUCKET, "raw/prefix/", records)
 
-        # No rule set published → MappingRuleSetNotFoundError → identity pass
         pipeline = _make_pipeline(self.registry_client)
         ctx = _make_ctx("raw/prefix/")
         result = pipeline.execute(ctx)
@@ -192,11 +189,6 @@ class TestTransformationPipelineHappyPath:
         assert result.curated_s3_prefix is None
 
 
-# ---------------------------------------------------------------------------
-# TransformationContext validation
-# ---------------------------------------------------------------------------
-
-
 class TestTransformationContextValidation:
     def test_invalid_domain_raises(self) -> None:
         import pytest
@@ -263,18 +255,12 @@ class TestTransformationContextValidation:
             )
 
 
-# ---------------------------------------------------------------------------
-# Optional path coverage: masking, metrics, lineage, catalog
-# ---------------------------------------------------------------------------
-
-
 @mock_aws
 class TestTransformationOptionalPaths:
     def setup_method(self, method: object = None) -> None:
         s3 = boto3.client("s3", region_name=_REGION)
         for bucket in (_RAW_BUCKET, _CURATED_BUCKET, _MAPPING_BUCKET, "gov-bucket", "glue-test"):
             s3.create_bucket(Bucket=bucket)
-        # Glue catalog
         glue = boto3.client("glue", region_name=_REGION)
         glue.create_database(DatabaseInput={"Name": "test_catalog_db"})
         self.s3 = s3
@@ -320,7 +306,6 @@ class TestTransformationOptionalPaths:
             glue_catalog_database="test_catalog_db",
         )
         result = pipeline.execute(ctx)
-        # Curated write succeeded with catalog registration (no exception raised)
         assert result.curated_s3_prefix is not None
 
     def test_lineage_emission_called_when_governance_bucket_set(self) -> None:
@@ -343,7 +328,6 @@ class TestTransformationOptionalPaths:
             governance_s3_bucket="gov-bucket",
         )
         result = pipeline.execute(ctx)
-        # No exception — lineage emission either succeeded or was swallowed
         assert result.canonical_record_count == 1
 
     def test_masking_applied_when_classification_policy_set(self) -> None:
@@ -380,11 +364,6 @@ class TestTransformationOptionalPaths:
         ctx = _make_ctx("raw/mask/")
         result = pipeline.execute(ctx)
         assert result.canonical_record_count == 1
-
-
-# ---------------------------------------------------------------------------
-# Module-level helper coverage
-# ---------------------------------------------------------------------------
 
 
 @mock_aws
@@ -443,7 +422,6 @@ class TestModuleLevelHelpers:
             curated_date=date(2024, 1, 15),
             glue_catalog_database="some_db",
         )
-        # Patch out DataCatalogRegistrationClient to raise
         with patch(
             "transformation.transformation_pipeline.DataCatalogRegistrationClient"
         ) as mock_cat:
@@ -504,16 +482,13 @@ class TestModuleLevelHelpers:
         )
         ctx = _make_ctx("raw/q-blocked-met/")
         pipeline.execute(ctx)
-        # emit_records_failed is called at least once for the quality blocks
         assert mock_emitter.emit_records_failed.call_count >= 1
 
     def test_non_parquet_files_skipped_by_iter(self) -> None:
         """Files not ending in .parquet are skipped (covers the `continue` branch)."""
         from transformation.transformation_pipeline import _iter_raw_records
 
-        # Write a non-parquet file that should be skipped
         self.s3.put_object(Bucket=_RAW_BUCKET, Key="raw/mixed/readme.txt", Body=b"ignore me")
-        # Write a parquet file that should be read
         table = pa.table({"Id": ["001"], "Name": ["Acme"]})
         buf = io.BytesIO()
         pq.write_table(table, buf)
@@ -559,7 +534,6 @@ class TestModuleLevelHelpers:
         from transformation.transformation_pipeline import _register_curated_catalog
 
         ctx = _make_ctx("raw/nodb/")
-        # glue_catalog_database is None — should return without raising
         _register_curated_catalog(
             ctx=ctx, s3_prefix="curated/test/", record_count=0, raw_s3_prefix="raw/nodb/"
         )
@@ -569,7 +543,6 @@ class TestModuleLevelHelpers:
         from transformation.transformation_pipeline import _emit_transformation_lineage
 
         ctx = _make_ctx("raw/nolin/")
-        # governance_s3_bucket is None — should return without raising
         _emit_transformation_lineage(ctx=ctx, curated_prefix="curated/test/")
 
 
@@ -595,9 +568,7 @@ class TestStreamingFastPath:
         result = pipeline.execute(ctx)
 
         assert result.canonical_record_count == 20
-        # Streaming path should set curated_prefix
         assert result.curated_s3_prefix is not None
-        # Curated prefix should include tenant_code (default "demo")
         assert "demo" in result.curated_s3_prefix
 
     def test_tenant_code_in_curated_path(self, streaming_s3) -> None:
@@ -803,11 +774,6 @@ class TestAutoClassification:
         assert curated[0]["email"] == "REDACTED"
 
 
-# ---------------------------------------------------------------------------
-# Pre-go-live fix 1 (BLOCKER): tenant-scoped curated Glue table names
-# ---------------------------------------------------------------------------
-
-
 @mock_aws
 class TestTenantScopedCuratedCatalogTableName:
     """
@@ -816,7 +782,7 @@ class TestTenantScopedCuratedCatalogTableName:
 
     Without the tenant_code prefix on the table name, the second tenant's
     register_dataset() call would silently overwrite the first tenant's
-    table Location in the shared edl_curated database, causing cross-tenant
+    table Location in the shared datalake_curated_dev database, causing cross-tenant
     Athena reads.
     """
 
@@ -876,11 +842,6 @@ class TestTenantScopedCuratedCatalogTableName:
 
         assert table_a["StorageDescriptor"]["Location"] == f"s3://{_CURATED_BUCKET}/{prefix_a}"
         assert table_b["StorageDescriptor"]["Location"] == f"s3://{_CURATED_BUCKET}/{prefix_b}"
-
-
-# ---------------------------------------------------------------------------
-# Pre-go-live fix 2: curated_date partition registration
-# ---------------------------------------------------------------------------
 
 
 @mock_aws
@@ -943,8 +904,6 @@ class TestCuratedPartitionRegistration:
         result1 = pipeline.execute(self._ctx("run-part-2a", "raw/part-run2a/"))
         assert result1.curated_s3_prefix is not None
 
-        # Second run, same curated_date, different run_id — must not raise
-        # even though a partition value for 2024-03-01 already exists.
         _write_raw_parquet(self.s3, _RAW_BUCKET, "raw/part-run2b/", records)
         result2 = pipeline.execute(self._ctx("run-part-2b", "raw/part-run2b/"))
         assert result2.curated_s3_prefix is not None
@@ -952,15 +911,9 @@ class TestCuratedPartitionRegistration:
         partitions = self.glue.get_partitions(DatabaseName=self._DATABASE, TableName=self._TABLE)[
             "Partitions"
         ]
-        # Updated in place, not duplicated.
         assert len(partitions) == 1
         assert partitions[0]["Values"] == ["2024-03-01"]
         assert result2.curated_s3_prefix in partitions[0]["StorageDescriptor"]["Location"]
-
-
-# ---------------------------------------------------------------------------
-# Pre-go-live fix 3 (HIGH): auto-classification for pass-through entities
-# ---------------------------------------------------------------------------
 
 
 class TestPassThroughAutoClassification:

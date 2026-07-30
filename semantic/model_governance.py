@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -29,16 +28,14 @@ from botocore.exceptions import ClientError
 
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from semantic.semantic_model import SemanticModel
 
 _logger = get_platform_logger(__name__)
 
-_TABLE_NAME: Final[str] = "EdlSemanticModel"
-_APPROVAL_TABLE_NAME: Final[str] = "EdlSemanticApproval"
 
-# Sort key of the pointer row naming the active version.
 ACTIVE_POINTER_SORT_KEY: Final[str] = "$latest"
 
 
@@ -168,12 +165,8 @@ class SemanticModelGovernance:
         self._bucket = s3_bucket
         self._s3 = s3_client or boto3.client("s3", region_name=region_name)
         resource = boto3.resource("dynamodb", region_name=region_name)
-        self._table = resource.Table(os.environ.get("SEMANTIC_MODEL_TABLE") or _TABLE_NAME)
-        self._approvals = resource.Table(
-            os.environ.get("SEMANTIC_APPROVAL_TABLE") or _APPROVAL_TABLE_NAME
-        )
-
-    # ── Publish (maker) ───────────────────────────────────────────────────────
+        self._table = resource.Table(require_env("SEMANTIC_MODEL_TABLE"))
+        self._approvals = resource.Table(require_env("SEMANTIC_APPROVAL_TABLE"))
 
     def publish(
         self, model: SemanticModel, *, published_by: str, allow_draft: bool = False
@@ -221,8 +214,6 @@ class SemanticModelGovernance:
             status=record.status.value,
         )
         return record
-
-    # ── Approve (checker) ─────────────────────────────────────────────────────
 
     def approve(
         self, tenant_code: str, model_version: str, *, approved_by: str
@@ -289,8 +280,6 @@ class SemanticModelGovernance:
         self._write_pointer(tenant_code, model_version, record.content_hash)
         return active
 
-    # ── Rollback ──────────────────────────────────────────────────────────────
-
     def rollback(
         self, tenant_code: str, target_version: str, *, requested_by: str, approved_by: str
     ) -> ModelVersionRecord:
@@ -332,8 +321,6 @@ class SemanticModelGovernance:
         )
         self._save_record(active)
         return active
-
-    # ── Reads ─────────────────────────────────────────────────────────────────
 
     def get_version(self, tenant_code: str, model_version: str) -> ModelVersionRecord:
         tenant_code = validate_tenant_code(tenant_code)
@@ -401,8 +388,6 @@ class SemanticModelGovernance:
                 "Refusing to load a possibly-tampered model (OWASP A08)."
             )
         return SemanticModel(**body)
-
-    # ── Private ───────────────────────────────────────────────────────────────
 
     def _save_record(self, record: ModelVersionRecord) -> None:
         self._table.put_item(

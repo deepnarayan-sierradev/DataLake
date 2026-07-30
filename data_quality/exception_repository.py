@@ -1,5 +1,5 @@
 """
-`EdlDataQualityException` — the structured exception store (DL-DQ-14).
+`datalake-data-quality-exceptions-dev` — the structured exception store (DL-DQ-14).
 
 PK `tenant_code`, SK `{run_id}#{rule_id}#{seq}`, GSI on `entity_id` + `detected_at`.
 
@@ -13,7 +13,6 @@ SENSITIVE_PII never appears, even masked.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -26,14 +25,13 @@ from governance.data_classification_policy import (
     DataClassificationLevel,
     EntityClassificationPolicy,
 )
+from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
 from persistence.dynamodb_paging import DEFAULT_PAGE_SIZE, Page, fetch_page, iter_items
 
 _logger = get_platform_logger(__name__)
 
-_TABLE_NAME: Final[str] = "EdlDataQualityException"
 
-# Offending-key samples are capped so one bad batch cannot write an unbounded item.
 MAX_SAMPLE_KEYS: Final[int] = 20
 
 DEFAULT_EXCEPTION_TTL_DAYS: Final[int] = 180
@@ -129,10 +127,8 @@ class DataQualityExceptionRepository:
         self._environment = environment
         self._classification_policy = classification_policy
         self._ttl_days = ttl_days
-        table_name = os.environ.get("DATA_QUALITY_EXCEPTION_TABLE") or _TABLE_NAME
+        table_name = require_env("DATA_QUALITY_EXCEPTION_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
-
-    # ── Writes ────────────────────────────────────────────────────────────────
 
     def record(self, exception: QualityException) -> str:
         """Persist one exception, masking its samples first."""
@@ -192,8 +188,6 @@ class DataQualityExceptionRepository:
             ExpressionAttributeValues=values,
         )
 
-    # ── Reads ─────────────────────────────────────────────────────────────────
-
     def list_for_run(self, tenant_code: str, run_id: str) -> list[dict[str, Any]]:
         """
         Every exception recorded for one run.
@@ -245,16 +239,6 @@ class DataQualityExceptionRepository:
             FilterExpression=f"resolution_state IN ({', '.join(placeholders)})",
             ExpressionAttributeValues={":tc": tenant_code, **placeholders},
         )
-
-    # `blocking_exceptions()` was removed on 2026-07-29. Its docstring called it "the input to
-    # the promotion gate" and it had no production caller — only a unit test, which made dead
-    # code read as wired. Promotion is already blocked in-run: `run_batch_quality_gate` raises
-    # `QualityGateBlockedError` after persisting the evidence, so a second mechanism reading the
-    # same rows back would be the duplication the `build_merge_plan` decision already rejected.
-    # If an out-of-run promotion check is ever needed, it should query by severity through a
-    # sparse index rather than re-filter a full-run read in Python.
-
-    # ── Private ───────────────────────────────────────────────────────────────
 
     def _serialise(self, exception: QualityException) -> dict[str, Any]:
         expires_at = int((datetime.now(UTC) + timedelta(days=self._ttl_days)).timestamp())

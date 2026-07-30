@@ -79,8 +79,6 @@ class TestContextvarsAndErrorHandling:
         with pytest.raises(RuntimeError, match="simulated pipeline failure"):
             lambda_handler(dict(_BASE_EVENT), context=None)
 
-        # OBS-1: a failure must not leave stale context bound for the next
-        # invocation on a reused (warm) Lambda container.
         assert structlog.contextvars.get_contextvars() == {}
 
     def test_failure_is_logged_before_reraise(self, monkeypatch, caplog) -> None:
@@ -93,9 +91,6 @@ class TestContextvarsAndErrorHandling:
 
         with pytest.raises(RuntimeError):
             lambda_handler(dict(_BASE_EVENT), context=None)
-        # The structured logger call itself is exercised above without
-        # raising — OBS-2's requirement is that the handler does not let the
-        # exception propagate through an unstructured code path silently.
 
     def test_second_invocation_does_not_see_prior_run_id(self, monkeypatch) -> None:
         monkeypatch.setenv("AWS_REGION", "us-east-1")

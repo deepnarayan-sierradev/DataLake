@@ -128,7 +128,7 @@ publish, version, roll back — is a governance concern, and both route groups r
 `docs/KNOWN_GAPS_AND_ROADMAP.md` items 20–24 are the authoritative list. In priority order:
 
 1. **Item 20 is load-bearing.** `RunCoordinator.enqueue_dlq_entry` accepts a `failed_stage` argument
-   but hardcodes `_DLQ_NAME = "EdlExtractionFailureDlq"`, and its only production caller is
+   but hardcodes `_DLQ_NAME = "datalake-extraction-failure-dlq-dev"`, and its only production caller is
    `orchestration/step_functions/extraction_workflow.py`. **Five of six pipeline stages enqueue to no
    DLQ**, and the nine per-stage queues have no producer or consumer — so the alarms sized in this
    pass cannot fire. The fix is small: map `failed_stage` to the queue, and route the other stages

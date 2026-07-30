@@ -8,21 +8,14 @@ terraform {
   }
 }
 
-# Bucket name embeds the prod account ID rather than the literal word "prod":
-# S3 bucket names are unique across all of AWS, not just this account, so
-# environment-as-account-ID is what actually guarantees no collision with
-# dev/staging — the word "prod" would not.
-# PROD_ACCOUNT_ID is a placeholder — replace with the real 12-digit AWS
-# account ID once the prod account exists and this bucket is bootstrapped
-# (prod is not provisioned yet — see docs/PLATFORM_STATUS.md).
 terraform {
   backend "s3" {
-    bucket         = "edl-terraform-state-PROD_ACCOUNT_ID"
+    bucket         = "datalake-terraform-state-prod-use1"
     key            = "environments/prod/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    kms_key_id     = "alias/EdlTerraformState"
-    dynamodb_table = "EdlTerraformStateLock"
+    kms_key_id     = "alias/datalake-terraform-state-prod"
+    dynamodb_table = "datalake-terraform-state-lock-prod"
   }
 }
 
@@ -31,7 +24,8 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project     = "enterprise-data-lake"
+      Application = "datalake"
+      Project     = "datalake"
       Environment = "prod"
       ManagedBy   = "terraform"
       CostCenter  = var.cost_center
@@ -39,15 +33,14 @@ provider "aws" {
   }
 }
 
-# Cross-region S3 replica provider (CKV_AWS_144). The replicas and their CMK are created here;
-# every other resource stays in `var.aws_region`.
 provider "aws" {
   alias  = "replica"
   region = var.replica_region
 
   default_tags {
     tags = {
-      Project     = "enterprise-data-lake"
+      Application = "datalake"
+      Project     = "datalake"
       Environment = "prod"
       ManagedBy   = "terraform"
       CostCenter  = var.cost_center

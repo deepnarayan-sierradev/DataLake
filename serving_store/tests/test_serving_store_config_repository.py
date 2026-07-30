@@ -9,6 +9,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from contracts.serving_store_config_contract import ServingStoreLoadConfig
 from serving_store.serving_store_config_repository import (
     ConfigurationBackend,
@@ -20,8 +21,8 @@ from serving_store.serving_store_config_repository import (
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_TABLE = "EdlServingStoreConfig"
-_BUCKET = "edl-serving-store-config-s3"
+_TABLE = RESOURCE_NAME_ENVIRONMENT["SERVING_STORE_CONFIG_TABLE"]
+_BUCKET = "datalake-serving-store-config-s3"
 
 _VALID_RECORD: dict[str, Any] = {
     "tenant_code": "acme-corp",

@@ -10,12 +10,12 @@ variable "enabled" {
 }
 
 variable "environment" {
-  description = "Deployment environment (dev, staging, prod)."
+  description = "Deployment environment (dev, uat, prod)."
   type        = string
 
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment must be one of dev, staging, prod."
+    condition     = contains(["dev", "uat", "prod"], var.environment)
+    error_message = "environment must be one of dev, uat, prod."
   }
 }
 
@@ -127,4 +127,9 @@ variable "tags" {
   description = "Common resource tags."
   type        = map(string)
   default     = {}
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
 }

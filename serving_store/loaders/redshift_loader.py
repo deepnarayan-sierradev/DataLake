@@ -9,7 +9,7 @@ then MERGEs a per-tenant staging table into the target.
 
 Security (OWASP A01):
   - One Redshift *schema* per tenant, inside a fixed connection database
-    (`edl_serving` by default) — the isolation boundary a tenant's BI tool
+    (`datalake_serving` by default) — the isolation boundary a tenant's BI tool
     credential is scoped to, since BI tools connect directly and bypass any
     application-level tenant filter.
   - A read-only Redshift user, GRANTed SELECT on only that tenant's schema
@@ -38,6 +38,7 @@ import boto3
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from contracts.resource_naming import secret_path
 from serving_store.interfaces.loader_interface import (
     RESERVED_COLUMNS,
     SAFE_COLUMN_PATTERN,
@@ -56,8 +57,6 @@ __all__ = [
     "TransientServingError",
 ]
 
-# Column concat delimiter and null sentinel for the in-SQL row hash — control
-# characters that cannot occur in a business value, so distinct rows never collide.
 _HASH_DELIMITER: Final[str] = "CHR(1)"
 _HASH_NULL_SENTINEL: Final[str] = "CHR(2)"
 
@@ -68,10 +67,8 @@ class RedshiftLoader(ServingStoreLoaderInterface):
 
     max_identifier_length = 127  # Redshift identifier length limit
     default_port = 5439
-    default_connection_database = "edl_serving"
+    default_connection_database = "datalake_serving"
     supports_s3_bulk_load = True
-
-    # ── Bulk S3 load path (production) ────────────────────────────────────────
 
     def load_from_s3(
         self,
@@ -168,7 +165,6 @@ class RedshiftLoader(ServingStoreLoaderInterface):
         select_cols = ", ".join(f's."{c}"' for c in columns)
 
         with connection.cursor() as cur:
-            # Staging holds only business columns, in Parquet order, for a positional COPY.
             cur.execute(f'CREATE TEMP TABLE "_stg_{table_name}" ({col_defs})')
             cur.execute(
                 f'COPY "_stg_{table_name}" FROM %s IAM_ROLE %s FORMAT AS PARQUET',
@@ -177,7 +173,6 @@ class RedshiftLoader(ServingStoreLoaderInterface):
             cur.execute(f'SELECT COUNT(*) FROM "_stg_{table_name}"')  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
             total = int(cur.fetchone()[0])
 
-            # New-or-changed = staging rows with no target row sharing pk AND the same hash.
             changed_filter = (
                 f'FROM "_stg_{table_name}" s WHERE NOT EXISTS ('  # noqa: S608  # nosec B608 — identifiers allowlisted; values bound
                 f"SELECT 1 FROM {target} t WHERE {pk_match} "
@@ -228,8 +223,6 @@ class RedshiftLoader(ServingStoreLoaderInterface):
             col_types[col] = _arrow_to_redshift_type(field.type)
         return col_types
 
-    # ── Shared DDL / connection (used by the S3 path) ─────────────────────────
-
     def _connect(self, credentials: dict[str, str], connection_database: str) -> Any:
         """Open a redshift_connector connection with IAM auth and TLS (OWASP A02, A07)."""
         import redshift_connector
@@ -258,14 +251,12 @@ class RedshiftLoader(ServingStoreLoaderInterface):
         self, connection: Any, tenant_code: str, container_name: str, writer_creds: dict[str, str]
     ) -> None:
         """Create/refresh a per-tenant read-only user, scoped to container_name only."""
-        secret_name = f"edl/serving-store/{tenant_code}/redshift/reader-credentials"
+        secret_name = secret_path("serving-store", tenant_code, "redshift", "reader-credentials")
         username = reader_username(tenant_code, self.max_identifier_length)
         connection_database = writer_creds.get("database", self.default_connection_database)
         password = self._get_or_create_reader_password(
             secret_name, username, container_name, writer_creds, connection_database
         )
-        # md5 verifier (hex only, safe to inline) — Redshift never sees the raw token,
-        # and this bypasses the default password-complexity rules token_urlsafe may fail.
         md5_pw = (
             "md5"
             + hashlib.md5((password + username).encode("utf-8"), usedforsecurity=False).hexdigest()
@@ -321,8 +312,6 @@ class RedshiftLoader(ServingStoreLoaderInterface):
         self._ensure_table_with_types(
             connection, container_name, table_name, col_types, primary_keys
         )
-
-    # ── Row-batch path: unsupported on Redshift (columnar MPP; use load_from_s3) ─
 
     def _read_existing_hashes(
         self,

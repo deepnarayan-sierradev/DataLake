@@ -1,9 +1,9 @@
 variable "environment" {
-  description = "Deployment environment: dev, staging, or prod."
+  description = "Deployment environment: dev, uat, or prod."
   type        = string
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment must be one of: dev, staging, prod."
+    condition     = contains(["dev", "uat", "prod"], var.environment)
+    error_message = "environment must be one of: dev, uat, prod."
   }
 }
 
@@ -40,7 +40,7 @@ variable "analytics_kms_key_arn" {
 variable "database_name" {
   description = "Top-level Redshift database created in the namespace (schema-per-tenant lives here)."
   type        = string
-  default     = "edl_serving"
+  default     = "datalake_serving"
 }
 
 variable "base_capacity_rpu" {
@@ -53,4 +53,9 @@ variable "tags" {
   description = "Additional resource tags."
   type        = map(string)
   default     = {}
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
 }

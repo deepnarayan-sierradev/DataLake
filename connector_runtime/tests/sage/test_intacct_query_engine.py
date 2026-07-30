@@ -72,19 +72,9 @@ def _make_engine(object_path: str = _OBJECT_PATH) -> IntacctQueryEngine:
     return IntacctQueryEngine(object_path=object_path)
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-
 class TestConstants:
     def test_page_size_is_4000(self) -> None:
         assert PAGE_SIZE == 4_000
-
-
-# ---------------------------------------------------------------------------
-# Constructor validation
-# ---------------------------------------------------------------------------
 
 
 class TestConstructorValidation:
@@ -104,11 +94,6 @@ class TestConstructorValidation:
         """object_path with :: suffix (e.g. order-entry/document::Contract Invoice)."""
         engine = IntacctQueryEngine(object_path="order-entry/document::Contract Invoice")
         assert engine is not None
-
-
-# ---------------------------------------------------------------------------
-# FULL load query building
-# ---------------------------------------------------------------------------
 
 
 class TestFullLoad:
@@ -181,11 +166,6 @@ class TestFullLoad:
         assert contract.watermark_field is None
 
 
-# ---------------------------------------------------------------------------
-# INCREMENTAL load query building
-# ---------------------------------------------------------------------------
-
-
 class TestIncrementalLoad:
     def test_incremental_load_has_filters(self) -> None:
         engine = _make_engine()
@@ -214,7 +194,6 @@ class TestIncrementalLoad:
             extraction_window_days=30,
         )
         json.loads(contract.query_text)  # must be well-formed JSON
-        # Actual watermark values must NOT be in the query_text — only placeholders.
         assert _LOWER not in contract.query_text
         assert _UPPER not in contract.query_text
         assert _LOWER_BOUND_PLACEHOLDER in contract.query_text
@@ -261,11 +240,6 @@ class TestIncrementalLoad:
             )
 
 
-# ---------------------------------------------------------------------------
-# Field name validation
-# ---------------------------------------------------------------------------
-
-
 class TestFieldNameValidation:
     def test_simple_field_names_accepted(self) -> None:
         engine = _make_engine()
@@ -284,7 +258,6 @@ class TestFieldNameValidation:
     def test_dot_notation_field_names_accepted(self) -> None:
         engine = _make_engine()
         fc = _make_field_contract(["key", "auditInfo.modifiedAt", "primaryContact.name"])
-        # Should not raise
         contract = engine.build(
             field_contract=fc,
             load_type=LoadType.FULL,
@@ -298,8 +271,6 @@ class TestFieldNameValidation:
 
     def test_custom_nsp_field_names_accepted(self) -> None:
         engine = _make_engine()
-        # Custom field names with double-colon prefix (IntacctQueryEngine
-        # validates uppercase after ::).
         descriptors = tuple(
             FieldDescriptor(name=n, data_type="string", is_nullable=True, is_queryable=True)
             for n in ["key", "id", "nsp::CUSTOM_FIELD"]
@@ -370,7 +341,6 @@ class TestFieldNameValidation:
 
     def test_key_field_added_when_not_present(self) -> None:
         engine = _make_engine()
-        # "key" not in the supplied field list.
         fc = _make_field_contract(["id", "name"])
         contract = engine.build(
             field_contract=fc,
@@ -385,7 +355,6 @@ class TestFieldNameValidation:
 
     def test_key_field_not_duplicated(self) -> None:
         engine = _make_engine()
-        # "key" already in the field list.
         fc = _make_field_contract(["key", "id", "name"])
         contract = engine.build(
             field_contract=fc,
@@ -397,11 +366,6 @@ class TestFieldNameValidation:
         )
         body = json.loads(contract.query_text)
         assert body["fields"].count("key") == 1
-
-
-# ---------------------------------------------------------------------------
-# bind_parameters
-# ---------------------------------------------------------------------------
 
 
 class TestBindParameters:
@@ -433,7 +397,6 @@ class TestBindParameters:
     def test_bind_does_not_mutate_original(self) -> None:
         body = self._make_body_with_placeholders()
         IntacctQueryEngine.bind_parameters(body, {"lower_bound": _LOWER, "upper_bound": _UPPER})
-        # Original must remain unchanged (deep copy)
         assert body["filters"][0]["$gte"]["auditInfo.modifiedAt"] == _LOWER_BOUND_PLACEHOLDER
 
     def test_bind_no_parameters_returns_body_unchanged(self) -> None:

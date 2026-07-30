@@ -82,8 +82,8 @@ executable prompt. For a REST/report source, write a spec instead; the substrate
 ## Credentials and tenancy
 
 Credentials are **per connection**, not per source:
-`edl/tenants/{tenant_code}/connections/{connection_id}/credentials`, resolved through
-`ConnectionCredentialPathResolver`. The legacy shared path `edl/sources/{source_id}/credentials`
+`datalake/<env>/tenants/{tenant_code}/connections/{connection_id}/credentials`, resolved through
+`ConnectionCredentialPathResolver`. The legacy shared path `datalake/<env>/sources/{source_id}/credentials`
 is still read as a **fallback with a warning** while environments migrate — run
 `make migrate-credentials` (dry-run by default) to populate the per-connection paths, and only
 then `--delete-legacy`.

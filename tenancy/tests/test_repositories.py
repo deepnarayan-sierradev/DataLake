@@ -7,6 +7,7 @@ import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from tenancy.scope_contract import (
     IMPLICIT_SCOPE_UNIT_ID,
     PartitionKind,
@@ -59,7 +60,7 @@ def _connection(**overrides) -> SourceConnection:
 @mock_aws
 class TestSourceConnectionRepository:
     def _repo(self) -> SourceConnectionRepository:
-        _create_table("EdlSourceConnection", "connection_id")
+        _create_table(RESOURCE_NAME_ENVIRONMENT["SOURCE_CONNECTION_TABLE"], "connection_id")
         return SourceConnectionRepository(environment="dev", region_name=_REGION)
 
     def test_register_and_get_round_trip(self):
@@ -134,7 +135,7 @@ class TestSourceConnectionRepository:
 @mock_aws
 class TestScopeUnitRepository:
     def _repo(self) -> ScopeUnitRepository:
-        _create_table("EdlScopeUnit", "scope_unit_id")
+        _create_table(RESOURCE_NAME_ENVIRONMENT["SCOPE_UNIT_TABLE"], "scope_unit_id")
         return ScopeUnitRepository(environment="dev", region_name=_REGION)
 
     def _partition(self, repo: ScopeUnitRepository) -> None:
@@ -172,7 +173,6 @@ class TestScopeUnitRepository:
             repo.get_partition_profile("evive")
 
     def test_positive_control_the_read_still_succeeds_when_dynamodb_is_healthy(self):
-        # Without this, a repository that always raised would pass the test above.
         repo = self._repo()
         self._partition(repo)
         assert repo.get_partition_profile("evive").partition_model is PartitionModel.PARTITIONED

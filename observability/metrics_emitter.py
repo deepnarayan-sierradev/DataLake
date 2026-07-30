@@ -43,7 +43,6 @@ _logger = get_platform_logger(__name__)
 
 PLATFORM_METRIC_NAMESPACE: Final[str] = "EnterpriseDatalake"
 
-# Dimension names permitted on catalogued metrics (OWASP A09: bounded cardinality).
 _ALLOWED_DIMENSION_NAMES: Final[frozenset[str]] = frozenset(
     {
         "TenantCode",
@@ -90,11 +89,8 @@ class CloudWatchMetricsEmitter:
         tenant_code: str | None = None,
     ) -> None:
         self._namespace = namespace
-        # Explicit region_name — never rely on ambient environment variables
         self._client = boto3.client("cloudwatch", region_name=region_name)
         self._pending: list[dict[str, object]] = []
-        # Tenant code added to every metric dimension when set (§1.1 SaaS).
-        # None = single-tenant mode (backward compatible; TenantCode dim omitted).
         self._tenant_code: str | None = tenant_code
 
     def set_tenant_context(self, tenant_code: str) -> None:
@@ -109,8 +105,6 @@ class CloudWatchMetricsEmitter:
             tenant_code: Validated tenant slug (e.g. 'demo', 'acme-corp').
         """
         self._tenant_code = tenant_code
-
-    # ── Public metric methods ─────────────────────────────────────────────────
 
     def emit_extraction_duration(
         self,
@@ -373,8 +367,6 @@ class CloudWatchMetricsEmitter:
             }
         )
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
-
     def _put_metric(
         self,
         metric_name: str,
@@ -428,8 +420,6 @@ class CloudWatchMetricsEmitter:
         stage: str | None = None,
         tenant_code: str | None = None,
     ) -> list[dict[str, str]]:
-        # TenantCode is first so CloudWatch console shows it most prominently.
-        # Enables per-tenant dashboards and alarms in multi-tenant deployments.
         dims: list[dict[str, str]] = []
         if tenant_code:
             dims.append({"Name": "TenantCode", "Value": tenant_code})

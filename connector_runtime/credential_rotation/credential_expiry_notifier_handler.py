@@ -18,7 +18,7 @@ a visible, actionable alert instead of a silent, indefinite risk.
 
 Required Lambda environment variables:
   AWS_REGION                — injected automatically by the Lambda runtime
-  PLATFORM_ENVIRONMENT      — deployment environment (dev/staging/prod)
+  PLATFORM_ENVIRONMENT      — deployment environment (dev/uat/prod)
   SOURCE_CREDENTIAL_SECRET_ARNS — comma-separated list of secret ARNs to check
   ALERT_SNS_TOPIC_ARN       — ARN of the platform alerts SNS topic
   ROTATION_WARNING_DAYS     — days before secret_rotation_days to start warning
@@ -74,8 +74,6 @@ def _notify_expiring_credentials(event: dict[str, Any], environment: str) -> dic
     secret_arns_raw = require_env("SOURCE_CREDENTIAL_SECRET_ARNS")
     sns_topic_arn = require_env("ALERT_SNS_TOPIC_ARN")
 
-    # `or` would silently replace an explicit 0 with the default (0 is falsy)
-    # — use `is None` so a caller can legitimately request a 0-day threshold.
     _raw_warning_days = event.get("rotation_warning_days")
     rotation_warning_days = (
         int(_raw_warning_days) if _raw_warning_days is not None else _DEFAULT_ROTATION_WARNING_DAYS
@@ -136,8 +134,6 @@ def _check_secret_age(secretsmanager: Any, secret_arn: str) -> tuple[int, str]:
     """
     response = secretsmanager.describe_secret(SecretId=secret_arn)
     reference_date = response.get("LastRotatedDate") or response["CreatedDate"]
-    # Clamp to zero: a secret created moments ago must never appear "negative
-    # days old" due to clock skew between this Lambda and Secrets Manager.
     age_days = max(0, (datetime.now(tz=UTC) - reference_date.astimezone(UTC)).days)
     return age_days, response["Name"]
 

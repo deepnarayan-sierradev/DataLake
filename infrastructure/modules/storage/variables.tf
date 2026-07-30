@@ -1,15 +1,10 @@
 variable "environment" {
   type        = string
-  description = "Deployment environment: dev, staging, or prod."
+  description = "Deployment environment: dev, uat, or prod."
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment must be one of: dev, staging, prod."
+    condition     = contains(["dev", "uat", "prod"], var.environment)
+    error_message = "environment must be one of: dev, uat, prod."
   }
-}
-
-variable "project_name" {
-  type        = string
-  description = "Short project identifier used in bucket names (e.g. 'edl')."
 }
 
 variable "storage_kms_key_arn" {
@@ -54,4 +49,19 @@ variable "replica_region" {
   description = "Region holding the cross-region replicas. Informational; the aws.replica provider sets it."
   type        = string
   default     = ""
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
+}
+
+variable "region_short" {
+  type        = string
+  description = "Short region token for globally-unique S3 bucket names (e.g. 'use1')."
+}
+
+variable "replica_region_short" {
+  type        = string
+  description = "Short region token for the cross-region replica bucket names (e.g. 'usw2')."
 }

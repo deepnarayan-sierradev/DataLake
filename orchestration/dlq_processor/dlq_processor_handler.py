@@ -1,7 +1,7 @@
 """
 DLQ Processor Lambda — consumes extraction failure DLQ messages.
 
-Reads messages from the EdlExtractionFailureDlq, validates them,
+Reads messages from the datalake-extraction-failure-dlq-dev, validates them,
 writes an audit record to the run audit log DynamoDB table, emits an SNS
 notification, and optionally replays the failed run through Step Functions.
 
@@ -43,17 +43,11 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Module-level singleton boto3 clients (warm invocation cache)
 _dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 _sns = boto3.client("sns", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 _sfn = boto3.client("stepfunctions", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 
 _STAGE_DLQ_RECEIVED: Final[str] = "dlq_received"
-
-
-# ---------------------------------------------------------------------------
-# Pydantic model for DLQ message validation (OWASP A03)
-# ---------------------------------------------------------------------------
 
 
 class DLQMessage(BaseModel):
@@ -64,19 +58,11 @@ class DLQMessage(BaseModel):
     run_id: str = Field(..., min_length=2, max_length=100)
     source_id: str = Field(..., min_length=2, max_length=64)
     entity_id: str = Field(..., min_length=2, max_length=64)
-    environment: str = Field(..., pattern=r"^(dev|staging|prod)$")
+    environment: str = Field(..., pattern=r"^(dev|uat|prod)$")
     failure_reason: str = Field(default="unknown")
     failure_stage: str = Field(default="unknown")
     connector_params: dict[str, str] = Field(default_factory=dict)
     is_replay: bool = Field(default=False)
-    # No default (ARCH-17, pre-go-live fix): a DLQ message missing tenant_code
-    # must fail validation and be logged as a structured error, not be
-    # replayed under the "demo" tenant. The prior "messages predating the fix"
-    # back-compat rationale for a default is void — dev DLQ contents are
-    # demo-only — so there is no live traffic this default was protecting
-    # (OWASP A01 — broken access control via an implicit, attacker-reachable
-    # default identity; a mis-tagged DLQ entry must not silently replay
-    # against, or write an audit record scoped to, the wrong tenant).
     tenant_code: str = Field(..., min_length=2, max_length=48)
 
     @field_validator("source_id", "entity_id")
@@ -94,11 +80,6 @@ class DLQMessage(BaseModel):
         return v
 
 
-# ---------------------------------------------------------------------------
-# Lambda handler
-# ---------------------------------------------------------------------------
-
-
 def lambda_handler(event: dict[str, Any], context: Any) -> None:
     """
     AWS Lambda entry point — processes one DLQ message per invocation.
@@ -106,8 +87,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> None:
     SQS ESM is configured with batch_size=1.
     """
     check_lambda_timeout(context, min_remaining_ms=30_000)
-    # Bound and cleared here so every line carries the request id and nothing leaks into the next
-    # invocation on a warm container.
     structlog.contextvars.bind_contextvars(aws_request_id=getattr(context, "aws_request_id", ""))
     try:
         _dispatch_dlq_records(event)
@@ -151,7 +130,6 @@ def _process_dlq_record(
     message_id: str = record.get("messageId", "unknown")
     body_str: str = record.get("body", "{}")
 
-    # --- Parse and validate ---
     try:
         body_dict = json.loads(body_str)
     except json.JSONDecodeError as exc:
@@ -187,21 +165,18 @@ def _process_dlq_record(
         failure_stage=msg.failure_stage,
     )
 
-    # --- Write audit record ---
     _write_audit_record(
         audit_table_name=audit_table_name,
         msg=msg,
         received_at=received_at,
     )
 
-    # --- SNS notification ---
     _send_sns_notification(
         topic_arn=alert_sns_topic_arn,
         msg=msg,
         environment=environment,
     )
 
-    # --- Optional auto replay ---
     if auto_replay and state_machine_arn:
         _replay_failed_run(
             state_machine_arn=state_machine_arn,
@@ -227,13 +202,6 @@ def _write_audit_record(
                 "failure_reason": msg.failure_reason,
                 "failure_stage": msg.failure_stage,
                 "received_at": received_at,
-                # Tenant-scoped GSI hash key (ARCH-18, pre-go-live fix): without the
-                # tenant_code prefix, two tenants' runs against the same source/entity
-                # collapse onto one source-entity-time-index partition, letting either
-                # tenant's audit query see the other's run history (OWASP A01 — broken
-                # access control via a shared, un-scoped index key). "#" is outside the
-                # STABLE_ID_PATTERN/TENANT_CODE_PATTERN charset, so it cannot collide
-                # with a value one of the three components could itself contain.
                 "source_entity_key": f"{msg.tenant_code}#{msg.source_id}#{msg.entity_id}",
                 "started_at": received_at,  # Required for GSI sort key
                 "tenant_code": msg.tenant_code,
@@ -246,7 +214,6 @@ def _write_audit_record(
             entity_id=msg.entity_id,
         )
     except ClientError as exc:
-        # Audit write failure must not prevent SNS notification or replay.
         _logger.warning(
             "dlq_audit_record_write_failed",
             run_id=msg.run_id,

@@ -31,9 +31,6 @@ from tenancy.scope_contract import IMPLICIT_SCOPE_UNIT_ID
 
 _logger = get_platform_logger(__name__)
 
-# A mismatch is not fatal by default: the stage has already read the configuration, and failing
-# the run would turn a consistency observation into an outage. It is recorded, alarmed, and the
-# run continues on what it read — which is the pinned-consistency exit-gate metric.
 DEFAULT_FAIL_ON_MISMATCH: Final[bool] = False
 
 

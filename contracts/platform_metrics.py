@@ -26,7 +26,6 @@ class MetricUnit(StrEnum):
 class PlatformMetric(StrEnum):
     """Every metric name emitted into `PLATFORM_METRIC_NAMESPACE`."""
 
-    # ── Extraction / pipeline core (pre-existing) ─────────────────────────────
     EXTRACTION_DURATION_MS = "ExtractionDurationMs"
     RECORDS_EXTRACTED = "RecordsExtracted"
     RECORDS_FAILED = "RecordsFailed"
@@ -42,7 +41,6 @@ class PlatformMetric(StrEnum):
     INPUT_VALIDATION_FAILURES = "InputValidationFailures"
     CREDENTIAL_RETRIEVAL_FAILURES = "CredentialRetrievalFailures"
 
-    # ── DL-01 connectors ──────────────────────────────────────────────────────
     RATE_LIMIT_HITS = "RateLimitHits"
     RATE_LIMIT_BACKOFF_MS = "RateLimitBackoffMs"
     PAGES_FETCHED = "PagesFetched"
@@ -53,7 +51,6 @@ class PlatformMetric(StrEnum):
     SOURCE_API_ERRORS = "SourceApiErrors"
     CHECKPOINTED_RUNS = "CheckpointedRuns"
 
-    # ── DL-02 quality and reconciliation ──────────────────────────────────────
     QUALITY_VIOLATIONS = "QualityViolations"
     QUALITY_GATE_BLOCKS = "QualityGateBlocks"
     COMPLETENESS_RATE = "CompletenessRate"
@@ -65,7 +62,6 @@ class PlatformMetric(StrEnum):
     BACKFILL_CHUNKS_FAILED = "BackfillChunksFailed"
     BACKFILL_ROWS_PER_SECOND = "BackfillRowsPerSecond"
 
-    # ── DL-03 semantic ────────────────────────────────────────────────────────
     SEMANTIC_QUERIES_COMPILED = "SemanticQueriesCompiled"
     SEMANTIC_QUERY_LATENCY_MS = "SemanticQueryLatencyMs"
     SEMANTIC_ACCESS_DENIED = "SemanticAccessDenied"
@@ -74,7 +70,6 @@ class PlatformMetric(StrEnum):
     MODEL_VALIDATION_FAILURES = "ModelValidationFailures"
     KPI_VALIDATION_FAILURES = "KpiValidationFailures"
 
-    # ── DL-06 workflow ────────────────────────────────────────────────────────
     WORKFLOW_EXECUTIONS = "WorkflowExecutions"
     WORKFLOW_CONDITION_EVALUATIONS = "WorkflowConditionEvaluations"
     WORKFLOW_ACTIONS_EXECUTED = "WorkflowActionsExecuted"
@@ -85,7 +80,6 @@ class PlatformMetric(StrEnum):
     WORKFLOW_CIRCUIT_BREAKER_OPEN = "WorkflowCircuitBreakerOpen"
     WORKFLOW_DLQ_DEPTH = "WorkflowDlqDepth"
 
-    # ── DL-07 serving ─────────────────────────────────────────────────────────
     SERVING_STORE_LOAD_ROWS = "ServingStoreLoadRows"
     SERVING_STORE_LOAD_DURATION_MS = "ServingStoreLoadDurationMs"
     SERVING_STORE_LOAD_FAILURES = "ServingStoreLoadFailures"
@@ -96,27 +90,19 @@ class PlatformMetric(StrEnum):
     SERVING_QUERY_LATENCY_MS = "ServingQueryLatencyMs"
     SERVING_CONCURRENT_CONNECTIONS = "ServingConcurrentConnections"
 
-    # ── DL-08 security ────────────────────────────────────────────────────────
     AUTHENTICATION_FAILURES = "AuthenticationFailures"
     AUTHORIZATION_DENIALS = "AuthorizationDenials"
     ADMIN_ACTIONS = "AdminActions"
     CROSS_TENANT_ACCESS_ATTEMPTS = "CrossTenantAccessAttempts"
-    # IAM's own verdict, from the CloudTrail metric filter — distinct from the line above, which
-    # counts application-level claim mismatches. They were one metric, so the `enforce` gate's
-    # "sustained zero" could be satisfied by an unused API and prove nothing about the boundary.
     IAM_BOUNDARY_ACCESS_DENIED = "IamBoundaryAccessDenied"
     WAF_BLOCKED_REQUESTS = "WafBlockedRequests"
     CREDENTIAL_ROTATION_AGE = "CredentialRotationAge"
     ROW_LEVEL_PREDICATE_APPLIED = "RowLevelPredicateApplied"
     SECRET_RETRIEVAL_FAILURES = "SecretRetrievalFailures"  # noqa: S105 — metric name  # nosec B105, not a secret
 
-    # ── DL-09 operations ──────────────────────────────────────────────────────
     PIPELINE_FRESHNESS_SECONDS = "PipelineFreshnessSeconds"
     STAGE_RETRIES = "StageRetries"
     DLQ_DEPTH = "DlqDepth"
-    # Counts messages this platform *enqueues*, dimensioned by stage — distinct from DlqDepth,
-    # which is SQS's own gauge. Absence-alarmable: a stage that never enqueues is either
-    # perfectly healthy or has no producer at all, and for five of six stages it was the latter.
     DLQ_MESSAGES_ENQUEUED = "DlqMessagesEnqueued"
     REPLAY_SUCCESS_RATE = "ReplaySuccessRate"
     COST_PER_TENANT_USD = "CostPerTenantUsd"
@@ -124,7 +110,6 @@ class PlatformMetric(StrEnum):
     DEPLOYMENT_DURATION_MS = "DeploymentDurationMs"
     POST_DEPLOY_SMOKE_FAILURES = "PostDeploySmokeFailures"
 
-    # ── DL-10 portability and compliance ──────────────────────────────────────
     EXPORT_JOBS_REQUESTED = "ExportJobsRequested"
     EXPORT_JOBS_COMPLETED = "ExportJobsCompleted"
     EXPORT_JOBS_FAILED = "ExportJobsFailed"
@@ -135,7 +120,6 @@ class PlatformMetric(StrEnum):
     DELETION_STEPS_COMPLETED = "DeletionStepsCompleted"
     PHI_GATE_BLOCKS = "PhiGateBlocks"
 
-    # ── DL-11 configuration propagation ───────────────────────────────────────
     CONFIG_PROPAGATION_LAG_SECONDS = "ConfigPropagationLagSeconds"
     CONFIG_VERSION_PIN_FAILURES = "ConfigVersionPinFailures"
     CONFIG_VERSION_MISMATCH_WITHIN_RUN = "ConfigVersionMismatchWithinRun"
@@ -151,24 +135,14 @@ class PlatformMetric(StrEnum):
     CREDENTIAL_CACHE_PROPAGATION_LAG_SECONDS = "CredentialCachePropagationLagSeconds"
     PUBLISHES_NOT_YET_EFFECTIVE = "PublishesNotYetEffective"
 
-    # ── DL-12 connections and scope isolation ─────────────────────────────────
     CROSS_SCOPE_ACCESS_ATTEMPTS = "CrossScopeAccessAttempts"
     SCOPE_PREDICATE_APPLIED = "ScopePredicateApplied"
     UNATTRIBUTED_ROW_RATE = "UnattributedRowRate"
-    # Counts attribution passes so absence can be alarmed on: a rate of 0 is healthy, no rate
-    # at all means the control never ran (G6).
     SCOPE_ATTRIBUTION_APPLIED = "ScopeAttributionApplied"
-    # L17: billable throughput per tenant per period, derived from the audit log.
     TENANT_RECORDS_PROCESSED = "TenantRecordsProcessed"
     SCOPE_GRANT_EXPANSIONS = "ScopeGrantExpansions"
     EMPTY_SCOPE_DENIALS = "EmptyScopeDenials"
-    # An unscoped read is now an affirmative, named choice rather than a `None` predicate, so it
-    # is countable. A rise here without a matching rise in definition-validation runs means a
-    # request path has started reading unfiltered (DL-SCOPE-14).
     UNRESTRICTED_SCOPE_READS = "UnrestrictedScopeReads"
-    # Registered scope units with no Lake Formation row filter. Athena filters are static IaC
-    # over a runtime registry, so a franchisee can be onboarded and left unenforced; this is how
-    # that becomes visible rather than waiting to be noticed (DL-SEC-11).
     SCOPE_FILTER_DRIFT = "ScopeFilterDrift"
     CONNECTION_HEALTH = "ConnectionHealth"
     CONNECTION_CREDENTIAL_FAILURES = "ConnectionCredentialFailures"

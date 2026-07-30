@@ -61,8 +61,6 @@ def iter_parquet_batches(
                     {name: columns[name][index] for name in names}
                     for index in range(record_batch.num_rows)
                 ]
-            # Released per object rather than per prefix: peak memory is one row group, not the
-            # sum of every file under the prefix.
             del table
 
 

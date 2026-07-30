@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from tenancy.connection_keys import (
     connection_scoped_key,
     curated_glue_table_name,
@@ -100,7 +101,8 @@ class TestCredentialPaths:
     def test_read_path_is_per_connection(self):
         assert (
             connection_credential_path("evive", "hubspot-grasons")
-            == "edl/tenants/evive/connections/hubspot-grasons/credentials"
+            == f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}"
+            "/tenants/evive/connections/hubspot-grasons/credentials"
         )
 
     def test_writeback_path_is_a_separate_secret(self):

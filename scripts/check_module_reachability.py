@@ -27,11 +27,6 @@ from typing import Final
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 
-# Packages whose modules must be reachable. Adding a package here is how a new domain module
-# gets held to the same bar (L18 widens this to the whole repo).
-# L18: every first-party package, not just the programme's. A new domain module must be reachable
-# from the day it is written — the alternative is what happened on 2026-07-28, where eighteen
-# modules accumulated with no consumer and every gate stayed green.
 GUARDED_PACKAGES: Final[tuple[str, ...]] = (
     "agent",
     "analytics_publisher",
@@ -56,11 +51,6 @@ GUARDED_PACKAGES: Final[tuple[str, ...]] = (
     "workflow_automation",
 )
 
-# Deployed entry points beyond the Lambda handlers Terraform declares. Empty on purpose:
-# `_terraform_handlers()` already discovers every platform Lambda, and hardcoding them here as
-# well made the gate unfalsifiable — deleting the `platform_lambdas` module from Terraform would
-# have left G1 green while four handlers became undeployed, contradicting the comment below.
-# `tests/test_terraform_entry_points.py` asserts the parse still finds them.
 EXTRA_ENTRY_POINTS: Final[tuple[str, ...]] = ()
 
 WAIVER_FILE: Final[Path] = REPO_ROOT / "requirements" / "WAIVERS.md"
@@ -122,7 +112,6 @@ def imports_of(path: Path) -> set[str]:
             if node.level or node.module is None:
                 continue
             found.add(node.module)
-            # `from package.module import Thing` may name a submodule rather than an attribute.
             for alias in node.names:
                 found.add(f"{node.module}.{alias.name}")
     return {name for name in found if name.split(".")[0] in GUARDED_PACKAGES}

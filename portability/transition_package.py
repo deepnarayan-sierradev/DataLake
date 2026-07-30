@@ -24,6 +24,7 @@ from enum import StrEnum
 from typing import Any, Final
 
 from contracts.identifier_policy import validate_tenant_code
+from contracts.resource_naming import name_list_from_env
 from observability.structured_logger import get_platform_logger
 from portability.export_service import ExportFormat
 
@@ -50,7 +51,6 @@ class PackageComponent(StrEnum):
 
 REQUIRED_COMPONENTS: Final[frozenset[PackageComponent]] = frozenset(PackageComponent)
 
-# Components a successor provider needs to reproduce one entity's transformations end to end.
 REPRODUCTION_CRITICAL_COMPONENTS: Final[frozenset[PackageComponent]] = frozenset(
     {
         PackageComponent.DATASETS,
@@ -234,19 +234,12 @@ def enforce_reproducibility(package: TransitionPackage, entity_id: str) -> Repro
     return result
 
 
-# ---------------------------------------------------------------------------
-# Infrastructure hand-over (DL-PORT-09)
-# ---------------------------------------------------------------------------
+PREVENT_DESTROY_TABLES_VAR: Final[str] = "PREVENT_DESTROY_TABLES"
 
-# Resources whose lifecycle is protected by `prevent_destroy`; a hand-over must name them
-# because the customer cannot delete or move them without first removing the protection.
-PREVENT_DESTROY_RESOURCES: Final[tuple[str, ...]] = (
-    "EdlEntityExtractionConfig",
-    "EdlWatermarkRepository",
-    "EdlRunAuditLog",
-    "EdlEntityTypeRegistry",
-    "EdlSchemaSnapshot",
-)
+
+def prevent_destroy_resources() -> tuple[str, ...]:
+    """The protected tables, as Terraform reports them."""
+    return name_list_from_env(PREVENT_DESTROY_TABLES_VAR)
 
 
 def render_infrastructure_handover(
@@ -297,7 +290,7 @@ def render_infrastructure_handover(
         "replaced until the protection is removed in code and applied:",
         "",
     ]
-    lines.extend(f"- `{resource}`" for resource in PREVENT_DESTROY_RESOURCES)
+    lines.extend(f"- `{resource}`" for resource in prevent_destroy_resources())
     lines.extend(
         [
             "",

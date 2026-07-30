@@ -35,7 +35,6 @@ class TestCohortFloor:
         assert "below the minimum" in verdict.reason
 
     def test_peers_are_counted_not_cohort_members(self):
-        # Cohort of six where the viewer owns five leaves one identifiable peer.
         assert evaluate_benchmark(_cohort(6, viewer_owns=5)).permitted is False
 
     def test_suppression_message_discloses_no_existence_detail(self):

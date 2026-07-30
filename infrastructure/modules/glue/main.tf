@@ -1,11 +1,8 @@
 locals {
-  curated_db_name   = "edl_curated"
-  analytics_db_name = "edl_analytics"
+  curated_db_name   = "${replace(var.name_prefix, "-", "_")}_curated_${var.environment}"
+  analytics_db_name = "${replace(var.name_prefix, "-", "_")}_analytics_${var.environment}"
 }
 
-# ---------------------------------------------------------------------------
-# Glue Data Catalog — curated layer database
-# ---------------------------------------------------------------------------
 
 resource "aws_glue_catalog_database" "curated" {
   name        = local.curated_db_name
@@ -21,9 +18,6 @@ resource "aws_glue_catalog_database" "curated" {
   tags = var.tags
 }
 
-# ---------------------------------------------------------------------------
-# Glue Data Catalog — analytics layer database
-# ---------------------------------------------------------------------------
 
 resource "aws_glue_catalog_database" "analytics" {
   name        = local.analytics_db_name
@@ -39,11 +33,6 @@ resource "aws_glue_catalog_database" "analytics" {
   tags = var.tags
 }
 
-# ---------------------------------------------------------------------------
-# Lake Formation — explicit reader grants (see analytics_reader_principals)
-# IAM_ALLOWED_PRINCIPALS above doesn't satisfy Athena's GetUnfilteredTableMetadata
-# path, so human/analyst principals need an explicit grant to query anything.
-# ---------------------------------------------------------------------------
 
 resource "aws_lakeformation_permissions" "curated_readers" {
   for_each = toset(var.analytics_reader_principals)
@@ -69,9 +58,6 @@ resource "aws_lakeformation_permissions" "analytics_readers" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Glue resource policy — deny catalog access from outside the account
-# ---------------------------------------------------------------------------
 
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
@@ -96,12 +82,9 @@ resource "aws_glue_resource_policy" "catalog_account_isolation" {
   })
 }
 
-# ---------------------------------------------------------------------------
-# Athena Workgroup — per-environment, query results encrypted with KMS
-# ---------------------------------------------------------------------------
 
 resource "aws_athena_workgroup" "analytics" {
-  name        = "EdlAnalytics"
+  name        = "${var.name_prefix}-analytics-${var.environment}"
   description = "Athena workgroup for analytics layer queries."
   state       = "ENABLED"
 

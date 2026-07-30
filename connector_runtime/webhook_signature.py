@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-# Reject a signed payload whose timestamp is outside this window (replay defence).
 DEFAULT_TIMESTAMP_TOLERANCE_SECONDS: Final[int] = 300
 
 
@@ -92,7 +91,6 @@ def verify_webhook_signature(
 
     signed_payload = spec.signed_payload_template.format(body=body, timestamp=timestamp)
     expected = compute_signature(spec.algorithm, secret, signed_payload)
-    # Constant-time comparison — a timing side channel would leak the expected signature.
     if not hmac.compare_digest(expected, provided.strip()):
         raise WebhookSignatureError("Webhook payload signature does not match the expected value.")
 
@@ -106,7 +104,6 @@ def _guard_timestamp_freshness(
         raise WebhookSignatureError(
             f"Webhook timestamp header {timestamp!r} is not a numeric epoch value."
         ) from exc
-    # Providers send milliseconds (HubSpot) or seconds; normalise on magnitude.
     if sent_at > 1e11:
         sent_at /= 1000.0
     if now_epoch_seconds is None:
@@ -120,8 +117,6 @@ def _guard_timestamp_freshness(
         )
 
 
-# Provider specs. HubSpot v2 signs method+uri+body+timestamp; the receiver supplies the
-# rendered prefix in `signed_payload_template`.
 WEBHOOK_SIGNATURE_SPECS: Final[dict[str, SignatureSpec]] = {
     "hubspot": SignatureSpec(
         algorithm=SignatureAlgorithm.HMAC_SHA256_BASE64,

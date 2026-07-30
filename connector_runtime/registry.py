@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
     from connector_runtime.interfaces.connector_interface import ConnectorInterface
 
-# Type alias for a connector builder callable.
 ConnectorBuilder = Callable[
     [str, str, dict[str, str], str, str],
     "tuple[ConnectorInterface, Any]",
@@ -108,8 +107,6 @@ class ConnectorRegistry:
         """Return the sorted list of registered source IDs."""
         return sorted(self._registry.keys())
 
-    # ── Builder registry ───────────────────────────────────────────────────────
-
     def register_builder(self, source_id: str, builder: ConnectorBuilder) -> None:
         """
         Register a factory function that fully wires a connector + raw-layer writer.
@@ -183,5 +180,4 @@ class ConnectorRegistry:
         return self._params_models.get(source_id)
 
 
-# Module-level singleton — imported by all adapters and the runtime
 connector_registry = ConnectorRegistry()

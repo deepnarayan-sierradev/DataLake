@@ -45,10 +45,10 @@ class TestServingStoreLoadConfigValidConstruction:
     )
     def test_non_mysql_engines_accept_connection_database(self, engine) -> None:
         config = ServingStoreLoadConfig(
-            **{**_base(), "target_engine": engine, "connection_database": "edl_serving"}
+            **{**_base(), "target_engine": engine, "connection_database": "datalake_serving"}
         )
         assert config.target_engine == engine
-        assert config.connection_database == "edl_serving"
+        assert config.connection_database == "datalake_serving"
 
     def test_extra_field_forbidden(self) -> None:
         with pytest.raises(ValidationError):

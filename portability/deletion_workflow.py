@@ -12,7 +12,6 @@ trail survives deletion of the data it describes.
 
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,23 +23,22 @@ from boto3.dynamodb.conditions import Key
 
 from contracts.identifier_policy import validate_tenant_code
 from contracts.platform_metrics import PlatformMetric
+from contracts.resource_naming import secret_path
+from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.structured_logger import get_platform_logger
 from persistence.dynamodb_paging import iter_items
 from persistence.tenant_tables import (
     TENANT_ATTRIBUTED_INDEX,
-    TENANT_ATTRIBUTED_TABLES,
-    TENANT_SCOPED_KEY_TABLES,
+    tenant_attributed_tables,
+    tenant_scoped_key_tables,
 )
 
 _logger = get_platform_logger(__name__)
 
-_TABLE_NAME: Final[str] = "EdlDeletionCertificate"
 
-# The operator must type this exactly; a yes/no prompt is too easy to click through.
 TYPED_CONFIRMATION_TEMPLATE: Final[str] = "DELETE ALL DATA FOR {tenant_code}"
 
-# The §24.7 transition window before deletion becomes contractually operative.
 TRANSITION_WINDOW_DAYS: Final[int] = 180
 
 
@@ -60,7 +58,6 @@ class DeletionStore(StrEnum):
     ML_ARTEFACTS = "ml_artefacts"
 
 
-# The six S3 buckets plus every other store; a certificate naming fewer is incomplete.
 REQUIRED_DELETION_STORES: Final[frozenset[DeletionStore]] = frozenset(DeletionStore)
 
 
@@ -217,7 +214,7 @@ class DeletionSaga:
         self._deleters = deleters
         self._held = held_stores or {}
         self._legally_retained = legally_retained or {}
-        table_name = os.environ.get("DELETION_CERTIFICATE_TABLE") or _TABLE_NAME
+        table_name = require_env("DELETION_CERTIFICATE_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def execute(self, request: DeletionRequest) -> DeletionCertificate:
@@ -251,7 +248,6 @@ class DeletionSaga:
         )
         if not certificate.is_complete:
             incomplete = [s.store.value for s in steps if not s.is_complete]
-            # Persisted before raising: the failed attempt is itself compliance evidence.
             self._persist(certificate, complete=False)
             raise IncompleteDeletionError(
                 f"Deletion did not complete for {incomplete}. A partial certificate is worse "
@@ -402,7 +398,8 @@ def _tenant_items(table: Any, table_name: str, tenant_code: str, key_names: list
 
     The first version of this branched on `hash_key == "tenant_code"` and swept everything else with
     `begins_with(hash_key, "tenant#")`. That covers tables keyed `tenant_code` and tables keyed
-    `tenant_scoped_key(...)` — but `EdlRunAuditLog` is keyed on `run_id`, which is neither, so the
+    `tenant_scoped_key(...)` — but `datalake-run-audit-log-<env>` is keyed on `run_id`, which is
+    neither, so the
     filter matched nothing while the caller reported success. An unrecognised shape now raises: the
     sweep must never be able to report zero because it looked in the wrong place.
     """
@@ -413,8 +410,7 @@ def _tenant_items(table: Any, table_name: str, tenant_code: str, key_names: list
             KeyConditionExpression=Key("tenant_code").eq(tenant_code),
             **_key_projection(key_names),
         )
-    if table_name in TENANT_SCOPED_KEY_TABLES:
-        # `tenant_scoped_key(...)` stores `tenant#...`, which cannot be queried by equality.
+    if table_name in tenant_scoped_key_tables():
         return iter_items(
             table,
             use_query=False,
@@ -422,9 +418,7 @@ def _tenant_items(table: Any, table_name: str, tenant_code: str, key_names: list
             ExpressionAttributeValues={":prefix": f"{tenant_code}#"},
             **_key_projection(key_names),
         )
-    if table_name in TENANT_ATTRIBUTED_TABLES:
-        # Keyed on something else entirely, with `tenant_code` as an ordinary attribute. Read
-        # through the tenant GSI, which exists for exactly this.
+    if table_name in tenant_attributed_tables():
         return iter_items(
             table,
             IndexName=TENANT_ATTRIBUTED_INDEX,
@@ -447,7 +441,7 @@ def dynamodb_tenant_item_deleter(
     One deleter for all of them, because `DeletionStore` treats DynamoDB as a single store and a
     certificate must not claim completeness for a subset.
 
-    **Verified, not trusted.** The first version returned 0 for `EdlRunAuditLog` — see
+    **Verified, not trusted.** The first version returned 0 for `datalake-run-audit-log-dev` — see
     `_tenant_items` — and returning 0 with no error meant the saga counted the step complete and
     issued the certificate. A deletion certificate is a compliance artefact handed to a customer
     (SOW §24.7); that one asserted deletion of rows still present. Failing loudly, as this did
@@ -478,14 +472,14 @@ def dynamodb_tenant_item_deleter(
 
 def secrets_manager_tenant_deleter(secrets_client: Any) -> StoreDeleter:
     """
-    Delete every secret under `edl/tenants/{tenant_code}/`, with no recovery window.
+    Delete every secret under `datalake/<env>/tenants/{tenant_code}/`, with no recovery window.
 
     `ForceDeleteWithoutRecovery` is deliberate: a 7-30 day recovery window means the credential
     still exists after the certificate says it does not, which would make the certificate false.
     """
 
     def delete(tenant_code: str) -> tuple[int, str]:
-        prefix = f"edl/tenants/{tenant_code}/"
+        prefix = secret_path("tenants", tenant_code) + "/"
         deleted = 0
         paginator = secrets_client.get_paginator("list_secrets")
         for page in paginator.paginate(
@@ -527,9 +521,6 @@ def cloudwatch_logs_tenant_deleter(
                         )
                         deleted += 1
             except logs_client.exceptions.ResourceNotFoundException:
-                # A function that never ran in this environment has no log group, so it holds none
-                # of the tenant's data. Counted and reported rather than swallowed: the certificate
-                # must say what it covered, and this is a real zero rather than a failed step.
                 absent += 1
         covered = len(log_group_names) - absent
         return deleted, (

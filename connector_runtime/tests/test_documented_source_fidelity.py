@@ -78,9 +78,6 @@ class TestServiceBridge:
         assert DOCUMENTED_REQUESTS_PER_HOUR == 60_000
 
     def test_the_quota_is_shared_because_it_is_per_ip_not_per_token(self) -> None:
-        # The single most important property of this connector: every Lambda egresses
-        # through one NAT address, so N connections spend one budget. A per-connection
-        # policy would let N extractions each believe they own 50 rps.
         assert _policy_spec(SERVICEBRIDGE_POLICY).shared_across_connections is True
 
     def test_the_sustained_rate_stays_under_the_hourly_ceiling(self) -> None:
@@ -99,7 +96,6 @@ class TestServiceBridge:
         assert SERVICEBRIDGE_SPEC.session_key_parameter == "sessionKey"
 
     def test_the_session_is_re_acquired_through_the_login_endpoint(self) -> None:
-        # A 30-minute sliding expiry outlives no realistic sweep on its own.
         assert SERVICEBRIDGE_SPEC.token_endpoint_path == "/api/v1/login"
         assert SERVICEBRIDGE_SPEC.token_grant_kind is TokenGrantKind.SESSION_LOGIN
 
@@ -122,7 +118,6 @@ class TestServiceBridge:
         assert set(SERVICEBRIDGE_SPEC.entity_ids()) == expected
 
     def test_customers_locations_and_contacts_use_the_v2_shape(self) -> None:
-        # The 2.0 upgrade note is explicit that these three changed shape in v2.
         for suffix in ("customer", "location", "contact"):
             assert SERVICEBRIDGE_SPEC.entity(f"servicebridge-{suffix}").path.startswith("/api/v2/")
 
@@ -149,7 +144,6 @@ class TestBePro:
         assert spec.refill_per_second <= DOCUMENTED_REQUESTS_PER_MINUTE / 60
 
     def test_the_quota_is_per_token_so_the_policy_is_not_shared(self) -> None:
-        # Negative control against the ServiceBridge case above: not every source shares.
         assert _policy_spec("bepro-standard").shared_across_connections is False
 
     def test_incremental_is_not_claimed_because_no_endpoint_exposes_a_timestamp(self) -> None:
@@ -229,7 +223,6 @@ class TestMaidCentral:
         assert all(entity.page_size == MAX_RESULT_COUNT for entity in MAID_CENTRAL_SPEC.entities)
 
     def test_no_entity_uses_a_generic_id_as_its_natural_key(self) -> None:
-        # Not one reporting DTO calls its identifier `id`; assuming one would null every key.
         assert all(entity.natural_key_field != "id" for entity in MAID_CENTRAL_SPEC.entities)
 
     def test_the_hourly_budget_is_the_binding_constraint(self) -> None:
@@ -239,7 +232,6 @@ class TestMaidCentral:
         assert spec.capacity <= 100
 
     def test_the_previous_policy_name_still_resolves(self) -> None:
-        # A connection configured before the rewrite must not fail at build time.
         assert rate_limit_policy_registry.resolve("maid-central-standard", "c") is not None
 
 
@@ -253,9 +245,6 @@ class TestWellSky:
         assert all(e.read_method == "POST" for e in searchable)
 
     def test_every_path_is_published_verbatim_including_its_slash(self) -> None:
-        # The vendor's implementation rules make the trailing slash load-bearing — and
-        # `/v1/locations/_search` is published without one, unlike every other `_search`.
-        # A blanket "everything ends in /" rule is what hid that.
         published = {
             "wellsky-patient": "/v1/patients/_search/",
             "wellsky-practitioner": "/v1/practitioners/_search/",
@@ -273,9 +262,6 @@ class TestWellSky:
         assert {e.entity_id: e.path for e in WELLSKY_SPEC.entities} == published
 
     def test_only_the_three_resources_that_document_it_claim_a_watermark(self) -> None:
-        # Only patients, practitioners and relatedperson document `created`/`updated` as
-        # searchable. Sending the filter elsewhere loads everything while still advancing
-        # the watermark — a completeness illusion, not an error.
         watermarked = sorted(e.entity_id for e in WELLSKY_SPEC.entities if e.watermark_field)
         assert watermarked == [
             "wellsky-patient",
@@ -284,14 +270,10 @@ class TestWellSky:
         ]
 
     def test_an_endpoint_without_documented_paging_is_never_page_driven(self) -> None:
-        # organizations and all-allergy declare no `_page`/`_count`; page_number would
-        # re-request page 0 until the 10,000-page ceiling, duplicating every row.
         for entity_id in ("wellsky-organization", "wellsky-allergy-intolerance"):
             assert WELLSKY_SPEC.entity(entity_id).pagination_strategy == "single_request"
 
     def test_no_entity_targets_a_create_only_or_absent_endpoint(self) -> None:
-        # adminTasks/activities/documentReferences publish no `_search`; referralsource and
-        # profileTags are POST-create only. All five were declared and are now gone.
         absent = {
             "wellsky-admin-task",
             "wellsky-activity",
@@ -323,7 +305,6 @@ class TestWellSky:
         assert WELLSKY_SPEC.required_credential_keys == frozenset({"client_id", "client_secret"})
 
     def test_the_policy_sits_far_below_the_requested_ceiling(self) -> None:
-        # The vendor asks for <=100 req/s and advises against batch use.
         spec = _policy_spec("wellsky-conservative")
         assert spec.strategy is RateLimitStrategy.TOKEN_BUCKET
         assert spec.refill_per_second <= 10.0
@@ -334,7 +315,6 @@ class TestSeniorPlace:
         assert SENIORPLACE_SPEC.base_url == "https://app.seniorplace.com"
 
     def test_no_entity_is_modelled_as_odata(self) -> None:
-        # The OData contract belongs to ALL IN, the downstream system — not to SeniorPlace.
         assert all("/odata/" not in entity.path for entity in SENIORPLACE_SPEC.entities)
 
     def test_authentication_uses_the_api_key_scheme_word(self) -> None:
@@ -358,8 +338,6 @@ class TestSeniorPlace:
 
 class TestDialpad:
     def test_the_bucket_cannot_exceed_the_documented_per_company_limit(self) -> None:
-        # Was `capacity == 20` with a 16/s refill, which permits 36 in the documented
-        # 1-second window. Capacity is an instantaneous burst *on top of* the refill.
         spec = _policy_spec("dialpad-standard")
         assert DocumentedRateLimit(20, 1).permits(spec.capacity, spec.refill_per_second)
 
@@ -374,7 +352,6 @@ class TestNoBucketCanBreachItsDocumentedWindow:
     because `capacity` had been set to the vendor's headline number.
     """
 
-    # Each vendor's published limits, in the vendor's own units.
     DOCUMENTED: Final[dict[str, tuple[DocumentedRateLimit, ...]]] = {
         "maid-central-hourly": (DocumentedRateLimit(1_000, 3_600), DocumentedRateLimit(100, 60)),
         "maid-central-standard": (
@@ -405,7 +382,6 @@ class TestNoBucketCanBreachItsDocumentedWindow:
             )
 
     def test_the_derivation_refuses_to_produce_a_breaching_bucket(self) -> None:
-        # Positive control on the helper itself.
         derived = token_bucket_within([DocumentedRateLimit(20, 1)])
         assert DocumentedRateLimit(20, 1).permits(derived.capacity, derived.refill_per_second)
         assert not DocumentedRateLimit(20, 1).permits(20, 16.0)
@@ -434,8 +410,6 @@ class TestEverySpecIsInternallyConsistent:
     def test_incremental_is_claimed_only_when_an_entity_can_filter(
         self, spec: RestSourceSpec
     ) -> None:
-        # Claiming INCREMENTAL without a watermark field advances the watermark against
-        # data that was never filtered — a silent, permanent gap.
         if SourceCapability.INCREMENTAL in spec.capabilities:
             assert any(entity.watermark_field for entity in spec.entities)
 
@@ -452,9 +426,6 @@ class TestEverySpecIsInternallyConsistent:
 
     @pytest.mark.parametrize("spec", _SPECS, ids=lambda s: s.source_id)
     def test_no_undocumented_field_projection_parameter_is_sent(self, spec: RestSourceSpec) -> None:
-        # None of these five documents a projection parameter. The substrate used to send
-        # HubSpot's `properties` to every source; an API that validates its query string
-        # answers 400 rather than ignoring it.
         assert spec.field_projection_parameter is None
 
     @pytest.mark.parametrize("spec", _SPECS, ids=lambda s: s.source_id)

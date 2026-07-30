@@ -19,7 +19,7 @@ Usage:
     python scripts/seed_serving_store_config.py --environment dev --dry-run
 
 The writer credential ARN defaults to the AWS-managed master secret of the
-deployed serving store RDS instance (edl-serving-store-{engine}-{environment});
+deployed serving store RDS instance (datalake-serving-store-{engine}-{environment});
 pass --writer-secret-arn to override (e.g. for a BYO database).
 
 Records are written via ServingStoreConfigRepositoryClient.save_config, so every
@@ -35,19 +35,13 @@ import sys
 import boto3
 
 from contracts.serving_store_config_contract import ServingStoreEngine, ServingStoreLoadConfig
+from observability.lambda_runtime import require_env
 from serving_store.serving_store_config_repository import ServingStoreConfigRepositoryClient
 
-# Entity types with analytics-layer output that are live in dev today (see
-# docs/PLATFORM_STATUS.md). Others (person's supplier/ar_invoice/… variants) are
-# config-complete but not yet producing analytics data, so they are not seeded by
-# default — pass --entity-type to onboard one explicitly once it is producing data.
 _DEFAULT_ENTITY_TYPES: tuple[str, ...] = ("company", "person", "contract")
 
-# golden_id is kept in the analytics layer as the stable cross-entity join key
-# (analytics_publisher_handler.py) — the natural upsert/primary key here.
 _PRIMARY_KEYS: tuple[str, ...] = ("golden_id",)
 
-# Registry engine_id → RDS instance engine segment in the Terraform identifier.
 _ENGINE_TO_RDS_SEGMENT: dict[ServingStoreEngine, str] = {
     ServingStoreEngine.MYSQL_RDS: "mysql",
     ServingStoreEngine.POSTGRESQL: "postgres",
@@ -70,7 +64,7 @@ def _resolve_instance(
             f"Cannot auto-resolve an instance for engine {engine.value!r}; "
             "pass --writer-secret-arn and --db-host explicitly."
         )
-    identifier = f"edl-serving-store-{segment}-{environment}"
+    identifier = f"datalake-serving-store-{segment}-{environment}"
     rds = boto3.client("rds", region_name=region)
     instance = rds.describe_db_instances(DBInstanceIdentifier=identifier)["DBInstances"][0]
     secret = instance.get("MasterUserSecret") or {}
@@ -141,7 +135,8 @@ def seed(
         entity_types, tenant_code, engine, writer_secret_arn, region, db_host, db_port
     )
     print(
-        f"Target table: EdlServingStoreConfig  (region: {region}, tenant_code: {tenant_code}, "
+        f"Target table: {require_env('SERVING_STORE_CONFIG_TABLE')}  (region: {region}, "
+        f"tenant_code: {tenant_code}, "
         f"engine: {engine.value})\nWriter secret: {writer_secret_arn}\n"
         f"DB endpoint: {db_host}:{db_port}"
     )
@@ -163,12 +158,12 @@ def seed(
     print(f"\n{len(records)} record(s) seeded successfully.")
     print("\nNext: the next pipeline run for these entity types will create the tenant")
     print("database/schema, tables, and the per-tenant read-only reader credential")
-    print(f"(edl/serving-store/{tenant_code}/{engine.value}/reader-credentials).")
+    print(f"(datalake/<env>/serving-store/{tenant_code}/{engine.value}/reader-credentials).")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed serving store load config records.")
-    parser.add_argument("--environment", required=True, choices=["dev", "staging", "prod"])
+    parser.add_argument("--environment", required=True, choices=["dev", "uat", "prod"])
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument("--tenant-code", default="demo", help="Tenant code slug (default: demo).")
     parser.add_argument(

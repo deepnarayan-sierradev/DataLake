@@ -43,7 +43,6 @@ def get_terraform_outputs(environment: str = "dev") -> dict[str, str]:
     if not tf_dir.exists():
         raise FileNotFoundError(f"Terraform directory not found: {tf_dir}")
 
-    # Change to terraform directory and get outputs as JSON
     original_cwd = os.getcwd()
     try:
         os.chdir(tf_dir)
@@ -53,13 +52,11 @@ def get_terraform_outputs(environment: str = "dev") -> dict[str, str]:
         os.chdir(original_cwd)
         raise RuntimeError(f"Failed to get Terraform outputs: {exc}") from exc
 
-    # Parse JSON and flatten to simple key-value pairs
     outputs = json.loads(output_json)
     flattened = {}
     for key, value in outputs.items():
         if isinstance(value, dict) and "value" in value:
             val = value["value"]
-            # Convert lists to comma-separated strings (env vars can't be JSON arrays)
             if isinstance(val, list):
                 flattened[key] = ",".join(str(v) for v in val)
             else:
@@ -113,7 +110,6 @@ def validate_secrets(profile: str, region: str) -> dict[str, bool]:
 def create_env_file(outputs: dict[str, str], profile: str, region: str, env_file: Path) -> None:
     """Create .env.local file with environment variables."""
 
-    # Validate critical outputs exist
     critical_outputs = [
         "raw_layer_bucket_id",
         "watermark_repository_table_name",
@@ -125,7 +121,6 @@ def create_env_file(outputs: dict[str, str], profile: str, region: str, env_file
         print("   Terraform may not be initialized or applied. Check:")
         print("   cd infrastructure/environments/dev && terraform validate && terraform plan")
 
-    # Map Terraform outputs to environment variable names
     env_vars = {
         "AWS_PROFILE": profile,
         "AWS_REGION": region,
@@ -148,10 +143,8 @@ def create_env_file(outputs: dict[str, str], profile: str, region: str, env_file
 
         for key, value in env_vars.items():
             if key == "PYTHONPATH":
-                # PYTHONPATH uses shell parameter expansion
                 f.write(f"export {key}='${{PYTHONPATH:-.}}'\n")
             elif value:
-                # Escape single quotes in values
                 escaped_value = str(value).replace("'", "'\\''")
                 f.write(f"export {key}='{escaped_value}'\n")
     env_file.chmod(0o600)
@@ -193,7 +186,6 @@ def main() -> None:
     print(f"AWS Profile: {profile}")
     print(f"AWS Region: {region}\n")
 
-    # Validate AWS profile
     print("Validating AWS profile...")
     if not validate_aws_profile(profile):
         print(f"❌ AWS profile '{profile}' not found or invalid")
@@ -201,7 +193,6 @@ def main() -> None:
         sys.exit(1)
     print(f"✅ AWS profile '{profile}' is valid\n")
 
-    # Get Terraform outputs
     print("Reading Terraform outputs...")
     try:
         outputs = get_terraform_outputs(environment)
@@ -222,7 +213,6 @@ def main() -> None:
         )
         print("   3. Terraform is applied: cd infrastructure/environments/dev && terraform apply")
         sys.exit(1)
-    # Check secrets
     print("Checking Secrets Manager...")
     secrets = validate_secrets(profile, region)
     missing = [name for name, exists in secrets.items() if not exists]
@@ -232,10 +222,8 @@ def main() -> None:
     else:
         print("✅ All required secrets exist\n")
 
-    # Create .env.local
     create_env_file(outputs, profile, region, env_file)
 
-    # Print summary
     print_checklist(outputs, secrets)
 
 

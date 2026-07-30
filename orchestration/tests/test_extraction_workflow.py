@@ -54,20 +54,12 @@ from orchestration.step_functions.extraction_workflow import (
 from schema_management.drift_evaluation.drift_evaluator import DriftReport
 from schema_management.snapshot_repository.snapshot_repository import SchemaSnapshot
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 _ENV = "dev"
 _REGION = "us-east-1"
 _SOURCE = "salesforce"
 _ENTITY = "salesforce-account"
 _RUN_ID = generate_run_id()
 _FINGERPRINT = "abc123def456" * 4  # 48-char stub
-
-
-# ---------------------------------------------------------------------------
-# Fixtures / builders
-# ---------------------------------------------------------------------------
 
 
 def _make_entity_config(**overrides: object) -> EntityExtractionConfig:
@@ -166,7 +158,6 @@ def _make_workflow(
         ExtractionRecord(payload={"Id": "2", "Name": "Globex"}),
     ]
 
-    # Mock RunCoordinator
     coordinator = MagicMock()
     coordinator.run_id = _RUN_ID
     coordinator.started_at = datetime.now(UTC)
@@ -175,35 +166,29 @@ def _make_workflow(
     coordinator.tenant_code = "demo"
     coordinator.emit_checkpoint_stage.return_value = MagicMock(run_id=f"{_RUN_ID}-part1")
 
-    # Mock ConfigurationRepositoryClient
     config_client = MagicMock()
     config_client.load_config.return_value = entity_config or _make_entity_config()
 
-    # Mock WatermarkRepository
     watermark_repo = MagicMock()
     watermark_repo.get_watermark.return_value = watermark_record
     watermark_repo.compute_extraction_window = MagicMock(
         return_value=(datetime(2026, 6, 11, tzinfo=UTC), datetime(2026, 6, 12, tzinfo=UTC))
     )
 
-    # Mock SchemaSnapshotRepository
     snapshot_repo = MagicMock()
     snapshot_repo.write_snapshot.return_value = "salesforce/salesforce-account/snap.json"
     snapshot_repo.load_latest_snapshot.return_value = None  # first run
     snapshot_repo.write_drift_report.return_value = "salesforce/salesforce-account/drift.json"
 
-    # Mock SchemaDriftEvaluator
     drift_evaluator = MagicMock()
     drift_evaluator.evaluate.return_value = _make_drift_report(drift_classification)
 
-    # Mock ConnectorInterface
     connector = MagicMock()
     connector.discover_queryable_fields.return_value = _make_field_contract()
     connector.build_extraction_query.return_value = _make_query_contract()
     connector.execute_extraction.return_value = iter(records)
     connector.classify_extraction_error.return_value = ExtractionErrorClassification.UNKNOWN
 
-    # Mock RawLayerWriter
     raw_writer = MagicMock()
     raw_writer.write_partition.return_value = "s3://raw/salesforce/account/2026-06-12/"
     if consume_record_iter_fully:
@@ -241,11 +226,6 @@ def _make_workflow(
         lambda_context=lambda_context,
     )
     return workflow, mocks
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 class TestHappyPath:
@@ -482,11 +462,6 @@ class TestFailurePropagation:
 class TestCircuitBreakerIntegration:
     def test_open_circuit_raises_before_any_aws_calls(self) -> None:
         policy = ExtractionRetryPolicy(circuit_open_threshold=2)
-        # Regression for the entity_id-omission bug: the guard check in
-        # execute() must key on the same (source_id, entity_id) pair that
-        # record_failure()/record_success() write under, or the circuit can
-        # never open. Seed failures under the real _ENTITY, matching what
-        # workflow.execute()'s guard now checks.
         policy.record_failure(_SOURCE, _ENTITY)
         policy.record_failure(_SOURCE, _ENTITY)
 
@@ -503,7 +478,6 @@ class TestCircuitBreakerIntegration:
             ):
                 workflow.execute()
 
-        # No AWS calls should have been made
         mocks["config_client"].load_config.assert_not_called()
         mocks["watermark_repo"].get_watermark.assert_not_called()
 
@@ -527,7 +501,6 @@ class TestCircuitBreakerIntegration:
             ".compute_extraction_window",
             return_value=(datetime(2026, 6, 11, tzinfo=UTC), datetime(2026, 6, 12, tzinfo=UTC)),
         ):
-            # Must complete normally — _ENTITY's own circuit is still closed.
             workflow.execute()
 
     def test_success_calls_record_success_on_policy(self) -> None:
@@ -560,10 +533,6 @@ class TestCircuitBreakerIntegration:
 
         policy.record_failure.assert_called_once_with(_SOURCE, _ENTITY, tenant_code="demo")
 
-
-# ---------------------------------------------------------------------------
-# PERF-5: checkpoint / partial-run tests
-# ---------------------------------------------------------------------------
 
 _CHECKPOINT_WINDOW = (datetime(2026, 6, 11, tzinfo=UTC), datetime(2026, 6, 12, tzinfo=UTC))
 
@@ -614,8 +583,6 @@ class TestPerf5Checkpoint:
         assert excinfo.value.records_written == 2
         assert "max_records_per_lambda_run" in excinfo.value.reason
 
-        # First run (no prior watermark) — initialised to the 2nd record's OWN
-        # timestamp, not the full window's upper_bound.
         mocks["watermark_repo"].initialise_watermark.assert_called_once()
         _, init_kwargs = mocks["watermark_repo"].initialise_watermark.call_args
         assert init_kwargs["upper_watermark"] == datetime(2026, 6, 11, 11, tzinfo=UTC)
@@ -643,7 +610,6 @@ class TestPerf5Checkpoint:
         assert isinstance(result, ExtractionWorkflowResult)
         assert result.record_count == 2
         mocks["coordinator"].emit_checkpoint_stage.assert_not_called()
-        # Normal completion advances to the full window's upper_bound.
         _, init_kwargs = mocks["watermark_repo"].initialise_watermark.call_args
         assert init_kwargs["upper_watermark"] == _CHECKPOINT_WINDOW[1]
 
@@ -713,8 +679,6 @@ class TestPerf5Checkpoint:
             watermark_field="LastModifiedDate",
             max_records_per_lambda_run=2,
         )
-        # Records' own timestamps (10:00, 11:00) fall BEFORE prior_watermark
-        # (15:00) — plausible when re-processing the overlap window.
         workflow, mocks = _make_workflow(
             entity_config=config,
             extraction_records=_checkpoint_records(3),

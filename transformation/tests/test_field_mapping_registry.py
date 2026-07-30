@@ -48,11 +48,6 @@ def _make_rule_set(version="1.0.0", rules=None):
     )
 
 
-# ---------------------------------------------------------------------------
-# FieldMappingRule validation
-# ---------------------------------------------------------------------------
-
-
 class TestFieldMappingRuleValidation:
     def test_invalid_source_field_name_raises(self):
         with pytest.raises(ValueError, match="Invalid source field name"):
@@ -74,11 +69,6 @@ class TestFieldMappingRuleValidation:
     def test_valid_rule_with_dotted_source_field(self):
         rule = _make_rule(["Owner.Name"], "owner_name")
         assert rule.source_fields == ("Owner.Name",)
-
-
-# ---------------------------------------------------------------------------
-# FieldMappingApplicator — transformation types
-# ---------------------------------------------------------------------------
 
 
 class TestFieldMappingApplicatorTransformations:
@@ -176,11 +166,6 @@ class TestFieldMappingApplicatorTransformations:
         assert result["code_masked"] == "**"
 
 
-# ---------------------------------------------------------------------------
-# Missing field behaviours
-# ---------------------------------------------------------------------------
-
-
 class TestMissingFieldBehavior:
     def setup_method(self, method=None):
         self.applicator = FieldMappingApplicator()
@@ -217,11 +202,6 @@ class TestMissingFieldBehavior:
         rs = _make_rule_set(rules=[rule])
         result = self.applicator.apply({"Field": None}, rs)
         assert result == {}
-
-
-# ---------------------------------------------------------------------------
-# S3-backed registry client
-# ---------------------------------------------------------------------------
 
 
 @mock_aws

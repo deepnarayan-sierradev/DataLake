@@ -6,7 +6,7 @@ Implements OAuth 1.0a HMAC-SHA256 request signing for NetSuite's REST APIs
 
 Credential storage:
   - Credentials are retrieved exclusively from AWS Secrets Manager.
-  - Secret path: edl/sources/netsuite/credentials
+  - Secret path: datalake/<env>/sources/netsuite/credentials
   - Expected JSON keys: account_id, consumer_key, consumer_secret,
     token_id, token_secret
 
@@ -43,13 +43,11 @@ from connector_runtime.interfaces.connector_interface import (
     DeterministicConnectorError,
     ExtractionErrorClassification,
 )
+from contracts.resource_naming import secret_path
 
-# OWASP A03: this is a Secrets Manager path, not a credential value.
-_SECRET_PATH: Final[str] = "edl/sources/netsuite/credentials"  # noqa: S105
 _OAUTH_VERSION: Final[str] = "1.0"
 _SIGNATURE_METHOD: Final[str] = "HMAC-SHA256"
 
-# Required secret keys — enforced by the shared SecretsManagerCredentialClient.
 _REQUIRED_CREDENTIAL_KEYS: Final[frozenset[str]] = frozenset(
     {"account_id", "consumer_key", "consumer_secret", "token_id", "token_secret"}
 )
@@ -89,7 +87,7 @@ class NetSuiteAuthClient:
         self._environment = environment
         self._region = region_name
         self._credentials_client = SecretsManagerCredentialClient(
-            secret_id=_SECRET_PATH,
+            secret_id=secret_path("sources", "netsuite", "credentials"),
             region_name=region_name,
             required_keys=_REQUIRED_CREDENTIAL_KEYS,
             source_label="NetSuite",
@@ -151,7 +149,6 @@ class NetSuiteAuthClient:
             token_secret=token_secret,
         )
 
-        # Build the Authorization header value with realm first.
         auth_parts = [f'realm="{account_id}"']
         auth_parts.extend(
             f'{k}="{urllib.parse.quote(v, safe="")}"' for k, v in sorted(oauth_params.items())
@@ -159,8 +156,6 @@ class NetSuiteAuthClient:
         auth_parts.append(f'oauth_signature="{urllib.parse.quote(signature, safe="")}"')
 
         return {"Authorization": f"OAuth {', '.join(auth_parts)}"}
-
-    # ── Private ────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _compute_signature(
@@ -183,21 +178,18 @@ class NetSuiteAuthClient:
         Credential values (consumer_secret, token_secret) are never logged
         or included in any exception message.
         """
-        # 1. Collect all parameters (URL query + OAuth).
         parsed = urllib.parse.urlparse(url)
         base_url = urllib.parse.urlunparse(parsed._replace(query="", fragment=""))
         query_params: dict[str, str] = dict(urllib.parse.parse_qsl(parsed.query))
 
         all_params: dict[str, str] = {**query_params, **oauth_params}
 
-        # 2. Percent-encode each key/value and sort.
         encoded_pairs = sorted(
             (urllib.parse.quote(k, safe=""), urllib.parse.quote(v, safe=""))
             for k, v in all_params.items()
         )
         param_string = "&".join(f"{k}={v}" for k, v in encoded_pairs)
 
-        # 3. Signature base string.
         signature_base = "&".join(
             [
                 urllib.parse.quote(method, safe=""),
@@ -206,13 +198,11 @@ class NetSuiteAuthClient:
             ]
         )
 
-        # 4. Signing key.
         signing_key = (
             f"{urllib.parse.quote(consumer_secret, safe='')}"
             f"&{urllib.parse.quote(token_secret, safe='')}"
         )
 
-        # 5. HMAC-SHA256 and base64 encode.
         digest = hmac.new(
             signing_key.encode("utf-8"),
             signature_base.encode("utf-8"),

@@ -1,7 +1,8 @@
 """
 Saved query repository (FR-3.4, DL-SEM-07).
 
-Persists SavedQuery records in DynamoDB (table EdlSavedQuery): PK tenant_code, SK query_id.
+Persists SavedQuery records in DynamoDB (table `datalake-saved-query-<env>`):
+PK tenant_code, SK query_id.
 Tenant-partitioned from creation.
 
 Serialisation goes through the Pydantic model rather than a hand-listed field set. The hand-listed
@@ -12,19 +13,18 @@ loss as a filter that never applies, arriving by a different route.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
 
 from contracts.identifier_policy import validate_tenant_code
+from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
 from persistence.dynamodb_paging import iter_items
 from semantic.saved_query import SavedQuery
 
 _logger = get_platform_logger(__name__)
-_DYNAMODB_TABLE_NAME = "EdlSavedQuery"
 
 
 class SavedQueryNotFoundError(Exception):
@@ -34,13 +34,11 @@ class SavedQueryNotFoundError(Exception):
 class SavedQueryRepository:
     def __init__(self, region_name: str) -> None:
         self._dynamodb = boto3.resource("dynamodb", region_name=region_name)
-        self._table_name = os.environ.get("SAVED_QUERY_TABLE") or _DYNAMODB_TABLE_NAME
+        self._table_name = require_env("SAVED_QUERY_TABLE")
         self._table = self._dynamodb.Table(self._table_name)
 
     def save(self, tenant_code: str, saved_query: SavedQuery) -> None:
         validate_tenant_code(tenant_code)
-        # `mode="json"` so dates and enums land as DynamoDB-safe scalars; the model is the single
-        # definition of what a saved query contains, so a new field cannot be dropped here.
         self._table.put_item(
             Item={"tenant_code": tenant_code, **saved_query.model_dump(mode="json")}
         )

@@ -48,15 +48,12 @@ from connector_runtime.source_capabilities import SourceCapability
 
 SOURCE_ID: Final[str] = "maid-central"
 
-# Documented: default 50, maximum 1000.
 MAX_RESULT_COUNT: Final[int] = 1_000
 
-# `skipCount` skips rows and `maxResultCount` caps them — offset/limit under other names.
 _PAGINATION: Final[PaginationParameters] = PaginationParameters(
     offset="skipCount", limit="maxResultCount"
 )
 
-# Present on every reporting DTO; the incremental key.
 WATERMARK_FIELD: Final[str] = "DateLastModified"
 
 
@@ -66,23 +63,16 @@ def _entity(
     return RestEntitySpec(
         entity_id=f"{SOURCE_ID}-{suffix}",
         path=f"/api/v1/reporting/{path}",
-        # `{"IsSuccess": true, "Result": {"Items": [...], "TotalCount": n}}`
         records_json_path=("Result", "Items"),
         watermark_field=WATERMARK_FIELD if watermarked else None,
         natural_key_field=natural_key,
         pagination_strategy="offset_limit",
         page_size=MAX_RESULT_COUNT,
         pagination_parameters=_PAGINATION,
-        # Offset paging over a table that is being written to skips and repeats rows
-        # unless the server orders deterministically. The guide documents `sorting`, so
-        # every page is ordered by the entity's own key — the one column guaranteed
-        # unique and stable for the life of the sweep.
         static_query_parameters={"sorting": f"{natural_key} ASC"},
     )
 
 
-# The thirteen documented entities, with the identifier each DTO actually uses — not one of
-# them is called `id`, so assuming one would have made every natural key null.
 MAID_CENTRAL_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     source_id=SOURCE_ID,
     display_name="Maid Central",
@@ -103,7 +93,6 @@ MAID_CENTRAL_SPEC: Final[RestSourceSpec] = RestSourceSpec(
         _entity("payroll-detail", "payroll/detail", "EmployeeInformationId"),
         _entity("lead", "leads", "CustomerInformationId"),
         _entity("quote", "quotes", "CustomerQuoteId"),
-        # Zones are a small zip-code reference table with no modification stamp.
         _entity("zone", "zones", "ZonesId", watermarked=False),
     ),
     capabilities=frozenset(
@@ -116,13 +105,9 @@ MAID_CENTRAL_SPEC: Final[RestSourceSpec] = RestSourceSpec(
     default_pagination_strategy="offset_limit",
     default_rate_limit_policy="maid-central-hourly",
     pagination_parameters=_PAGINATION,
-    # 1000-row reporting pages over payroll and job history; the guide advises processing
-    # large datasets in chunks, which implies these are not fast responses.
     request_timeout_seconds=120.0,
     default_records_json_path=("Result", "Items"),
     default_page_size=MAX_RESULT_COUNT,
-    # Password grant on first exchange; the response's refresh_token is written back into
-    # the secret by the rotation runbook, after which the refresh grant is used.
     required_credential_keys=frozenset({"username", "password"}),
     watermark_lower_parameter="modifiedOnOrAfter",
     watermark_upper_parameter="modifiedBefore",

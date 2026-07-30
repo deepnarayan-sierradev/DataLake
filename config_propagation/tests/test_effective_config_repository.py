@@ -28,6 +28,7 @@ from config_propagation.restatement_repository import (
     RestatementEvent,
     RestatementRepository,
 )
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from observability.metric_recorder import platform_metric_recorder
 from tenancy.scope_contract import IMPLICIT_SCOPE_UNIT_ID
 
@@ -87,7 +88,7 @@ class TestEffectiveConfigRepository:
         platform_metric_recorder.clear()
 
     def _repository(self) -> EffectiveConfigRepository:
-        _create_table("EdlEffectiveConfig", "capability_key")
+        _create_table(RESOURCE_NAME_ENVIRONMENT["EFFECTIVE_CONFIG_TABLE"], "capability_key")
         return EffectiveConfigRepository(environment="dev", region_name=_REGION)
 
     def test_environment_must_not_be_empty(self) -> None:
@@ -104,8 +105,6 @@ class TestEffectiveConfigRepository:
         )
 
     def test_the_same_version_consumed_again_is_not_a_transition(self) -> None:
-        # Without the conditional write, every run would look like a version change and
-        # "first consuming run" would mean nothing.
         repository = self._repository()
         repository.record_consumption(
             "demo", ConfigCapability.FIELD_MAPPING, "ar_invoice", "v3", "run-1"
@@ -302,7 +301,7 @@ class TestRestatementRepository:
         platform_metric_recorder.clear()
 
     def _repository(self) -> RestatementRepository:
-        _create_table("EdlConfigRestatement", "restatement_key")
+        _create_table(RESOURCE_NAME_ENVIRONMENT["CONFIG_RESTATEMENT_TABLE"], "restatement_key")
         return RestatementRepository(environment="dev", region_name=_REGION)
 
     def _event(self, **overrides: object) -> RestatementEvent:
@@ -389,7 +388,6 @@ class TestRollbackRequestMakerChecker:
             self._request(approved_by="")
 
     def test_self_approval_is_refused(self) -> None:
-        # Reverting a governed definition has the same blast radius as changing it.
         with pytest.raises(MakerCheckerViolationError, match="own requester"):
             self._request(approved_by="alice")
 
@@ -406,7 +404,7 @@ class TestConfigGovernanceService:
     def _service(
         self, *, pointer: str = "v2", versions: set[str] | None = None
     ) -> tuple[ConfigGovernanceService, _InMemoryPointerStore]:
-        _create_table("EdlConfigGovernance", "record_key")
+        _create_table(RESOURCE_NAME_ENVIRONMENT["CONFIG_GOVERNANCE_TABLE"], "record_key")
         store = _InMemoryPointerStore(
             {("demo", "field_mapping", "ar_invoice"): pointer},
             versions if versions is not None else {"v1", "v2"},
@@ -451,8 +449,6 @@ class TestConfigGovernanceService:
         assert store.read_pointer("demo", ConfigCapability.FIELD_MAPPING, "ar_invoice") == "v2"
 
     def test_rollback_records_admin_actions_because_it_is_a_privileged_operation(self) -> None:
-        # AdminActions must be produced by privileged operations this system owns —
-        # config rollback is one; tenant administration is not ours to perform.
         service, _ = self._service()
         service.rollback(self._request())
         recorded = {point.metric.value for point in platform_metric_recorder.snapshot()}
@@ -461,7 +457,9 @@ class TestConfigGovernanceService:
     def test_rollback_writes_an_audit_record_naming_both_actors(self) -> None:
         service, _ = self._service()
         result = service.rollback(self._request())
-        table = boto3.resource("dynamodb", region_name=_REGION).Table("EdlConfigGovernance")
+        table = boto3.resource("dynamodb", region_name=_REGION).Table(
+            RESOURCE_NAME_ENVIRONMENT["CONFIG_GOVERNANCE_TABLE"]
+        )
         items = table.query(
             KeyConditionExpression="tenant_code = :tc AND begins_with(record_key, :p)",
             ExpressionAttributeValues={":tc": "demo", ":p": "rollback#"},

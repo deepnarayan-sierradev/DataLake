@@ -93,7 +93,6 @@ class TestFieldModeFiltering:
             exclude_fields=[],
         )
         field_names = {f.name for f in contract.fields}
-        # 'logo' has type DOCUMENT → non-queryable, excluded
         assert "logo" not in field_names
         assert "id" in field_names
         assert "companyname" in field_names
@@ -181,7 +180,6 @@ class TestCaching:
             include_fields=[],
             exclude_fields=[],
         )
-        # Only one HTTP request should have been made.
         assert requests_mock.call_count == 1
 
     def test_invalidate_cache_forces_refetch(self, requests_mock: requests_mock_lib.Mocker) -> None:

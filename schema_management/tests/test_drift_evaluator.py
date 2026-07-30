@@ -39,11 +39,6 @@ from schema_management.snapshot_repository.snapshot_repository import (
 _CAPTURED_AT = datetime(2026, 6, 11, 14, 0, 0, tzinfo=UTC).isoformat()
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _snap(
     fields: tuple[FieldSnapshot, ...],
     schema_version: str = "v1",
@@ -83,11 +78,6 @@ def _field(
 _EVALUATOR = SchemaDriftEvaluator()
 
 
-# ---------------------------------------------------------------------------
-# NO_DRIFT
-# ---------------------------------------------------------------------------
-
-
 class TestNoDrift:
     def test_no_drift_when_previous_is_none(self) -> None:
         current = _snap((_field("Id"),))
@@ -104,11 +94,6 @@ class TestNoDrift:
         report = _EVALUATOR.evaluate(current, previous)
         assert report.overall_classification == DriftClassification.NO_DRIFT
         assert len(report.field_changes) == 0
-
-
-# ---------------------------------------------------------------------------
-# NON_BREAKING
-# ---------------------------------------------------------------------------
 
 
 class TestNonBreaking:
@@ -136,11 +121,6 @@ class TestNonBreaking:
         assert report.overall_classification == DriftClassification.NON_BREAKING
 
 
-# ---------------------------------------------------------------------------
-# POTENTIALLY_BREAKING
-# ---------------------------------------------------------------------------
-
-
 class TestPotentiallyBreaking:
     def test_precision_change_is_potentially_breaking(self) -> None:
         prev = _snap((_field("Amount", precision=18),), schema_version="v1")
@@ -161,11 +141,6 @@ class TestPotentiallyBreaking:
         report = _EVALUATOR.evaluate(curr, prev)
         assert report.overall_classification == DriftClassification.POTENTIALLY_BREAKING
         assert any(c.change_kind == FieldChangeKind.LENGTH_CHANGED for c in report.field_changes)
-
-
-# ---------------------------------------------------------------------------
-# BREAKING
-# ---------------------------------------------------------------------------
 
 
 class TestBreaking:
@@ -205,22 +180,14 @@ class TestBreaking:
         assert report.overall_classification == DriftClassification.BREAKING
 
 
-# ---------------------------------------------------------------------------
-# Escalation: multiple changes escalate to highest severity
-# ---------------------------------------------------------------------------
-
-
 class TestClassificationEscalation:
     def test_breaking_change_overrides_non_breaking(self) -> None:
-        # One NON_BREAKING (new nullable field) + one BREAKING (field removed)
         prev = _snap((_field("Id"), _field("OldField")), schema_version="v1")
         curr = _snap((_field("Id"), _field("NewNullable", is_nullable=True)), schema_version="v2")
         report = _EVALUATOR.evaluate(curr, prev)
         assert report.overall_classification == DriftClassification.BREAKING
 
     def test_breaking_overrides_potentially_breaking(self) -> None:
-        # POTENTIALLY_BREAKING: precision change
-        # BREAKING: type change
         prev = _snap((_field("A", data_type="double", precision=18),), schema_version="v1")
         curr = _snap((_field("A", data_type="string", precision=10),), schema_version="v2")
         report = _EVALUATOR.evaluate(curr, prev)
@@ -228,11 +195,6 @@ class TestClassificationEscalation:
 
     def test_compute_overall_with_empty_changes_is_no_drift(self) -> None:
         assert _compute_overall_classification([]) == DriftClassification.NO_DRIFT
-
-
-# ---------------------------------------------------------------------------
-# DriftReport properties and serialisation
-# ---------------------------------------------------------------------------
 
 
 class TestDriftReport:
@@ -278,7 +240,6 @@ class TestDriftReport:
         report = _EVALUATOR.evaluate(curr, prev)
         parsed = json.loads(report.to_json())
         for change in parsed["field_changes"]:
-            # Only metadata keys present; no data values
             assert set(change.keys()) == {
                 "field_name",
                 "change_kind",
@@ -286,11 +247,6 @@ class TestDriftReport:
                 "previous_value",
                 "current_value",
             }
-
-
-# ---------------------------------------------------------------------------
-# Regression tests for fixed bugs
-# ---------------------------------------------------------------------------
 
 
 class TestFingerprintShortCircuitRegression:
@@ -308,7 +264,6 @@ class TestFingerprintShortCircuitRegression:
         prev = _snap((_field("Amount", is_nullable=True),), schema_version=same_fp)
         curr = _snap((_field("Amount", is_nullable=False),), schema_version=same_fp)
         report = _EVALUATOR.evaluate(curr, prev)
-        # nullable → non-nullable is BREAKING even when schema_version strings are equal.
         assert report.overall_classification == DriftClassification.BREAKING
         assert report.is_transformation_blocked
         assert any(
@@ -320,7 +275,6 @@ class TestFingerprintShortCircuitRegression:
         prev = _snap((_field("Amount", is_nullable=False),), schema_version=same_fp)
         curr = _snap((_field("Amount", is_nullable=True),), schema_version=same_fp)
         report = _EVALUATOR.evaluate(curr, prev)
-        # non-nullable → nullable is NON_BREAKING; still detected even with same fingerprint.
         assert report.overall_classification == DriftClassification.NON_BREAKING
         assert not report.is_transformation_blocked
 
@@ -330,6 +284,5 @@ class TestFingerprintShortCircuitRegression:
         prev = _snap(fields, schema_version=same_fp)
         curr = _snap(fields, schema_version=same_fp)
         report = _EVALUATOR.evaluate(curr, prev)
-        # Truly identical fields → NO_DRIFT even after full diff.
         assert report.overall_classification == DriftClassification.NO_DRIFT
         assert len(report.field_changes) == 0

@@ -13,7 +13,7 @@ from knowledge.relationship_rules_registry import (
 )
 
 _REGION = "us-east-1"
-_BUCKET = "edl-curated-test"
+_BUCKET = "datalake-curated-test"
 
 
 def _rule_set(version: str = "v1") -> RelationshipRuleSet:

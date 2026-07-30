@@ -6,7 +6,7 @@ Generate Lake Formation row filters from the scope-unit registry, and detect dri
 and both that map and `scope_unit_grants` default to `{}`. The mechanism is right — a data cells
 filter is the only Lake Formation construct that filters *rows*, and the tag-based attempt before
 it enforced nothing. The lifecycle is the
-problem: **scope units are runtime data** in `EdlScopeUnit`, published by the
+problem: **scope units are runtime data** in `datalake-scope-units-dev`, published by the
 enterprise-platform when a franchisee is onboarded, while the filters that enforce their boundary
 are static Terraform. So a unit can exist, own rows, and have no Athena filter — unenforced, and
 with nothing reporting it.
@@ -87,16 +87,17 @@ def detect_drift(registry_keys: set[str], committed_keys: set[str]) -> dict[str,
 
 
 def _load_units(environment: str, region_name: str) -> list[dict[str, str]]:
-    """Read every effective scope unit for every tenant from `EdlScopeUnit`."""
+    """Read every effective scope unit for every tenant from the scope-unit table."""
     import boto3
 
+    from observability.lambda_runtime import require_env
     from persistence.dynamodb_paging import iter_items
 
-    table = boto3.resource("dynamodb", region_name=region_name).Table("EdlScopeUnit")
+    dynamodb = boto3.resource("dynamodb", region_name=region_name)
+    table = dynamodb.Table(require_env("SCOPE_UNIT_TABLE"))
     units: list[dict[str, str]] = []
     for item in iter_items(table, use_query=False):
         scope_unit_id = str(item.get("scope_unit_id", ""))
-        # The profile sentinel shares the table; it is not a unit.
         if not scope_unit_id or scope_unit_id.startswith("__"):
             continue
         if item.get("active") is False:
@@ -154,7 +155,6 @@ def main() -> int:
         for stale in drift["stale_filters"]:
             print(f"  STALE       {stale}")
 
-        # Emitted even at zero so the alarm can distinguish "no drift" from "the check never ran".
         import boto3
 
         from contracts.platform_metrics import PlatformMetric, metric_unit

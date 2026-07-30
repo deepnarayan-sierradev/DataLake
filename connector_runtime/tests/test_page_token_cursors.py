@@ -45,8 +45,9 @@ class TestRoundTrip:
 
     def test_a_key_without_tenant_code_also_round_trips(self) -> None:
         """
-        The defect this pins. `EdlEntityExtractionConfig` is keyed (source_id, entity_id) and
-        `EdlRunAuditLog` on its Scan fallback is keyed (run_id, stage) — neither carries
+        The defect this pins. `datalake-entity-extraction-config-<env>` is keyed
+        (source_id, entity_id) and
+        `datalake-run-audit-log-dev` on its Scan fallback is keyed (run_id, stage) — neither carries
         `tenant_code`. Requiring it *inside the key* made `/entities` hand out a token its own
         validator rejected, and made `/runs` build an ExclusiveStartKey outside the table's key
         schema. The tenant now travels in the envelope, so the check is schema-independent.
@@ -57,15 +58,12 @@ class TestRoundTrip:
         assert cp.decode_page_token(_event(token), "demo") == key
 
     def test_the_decoded_key_contains_only_what_dynamodb_returned(self) -> None:
-        # DynamoDB validates ExclusiveStartKey against the key schema, so the decoded key must not
-        # gain a tenant attribute the table does not key on.
         key = {"run_id": "run-1", "stage": "extraction"}
         decoded = cp.decode_page_token(_event(cp.encode_page_token(key, "demo")), "demo")
         assert decoded == key
         assert "tenant_code" not in (decoded or {})
 
     def test_no_cursor_encodes_to_no_token(self) -> None:
-        # The last page must not advertise a next page.
         assert cp.encode_page_token(None, "demo") is None
         assert cp.encode_page_token({}, "demo") is None
 
@@ -81,7 +79,6 @@ class TestRoundTrip:
 
 class TestCrossTenantForgeryIsRejected:
     def test_a_key_naming_another_tenant_is_refused(self) -> None:
-        # The assertion that matters: the cursor cannot be used to reach across the boundary.
         forged = _envelope("other", {"sk": "company#c-1"})
         with pytest.raises(ValidationFailedError, match="does not belong to this tenant"):
             cp.decode_page_token(_event(forged), "demo")
@@ -106,7 +103,6 @@ class TestCrossTenantForgeryIsRejected:
             cp.decode_page_token(_event(token), "demo")
 
     def test_positive_control_a_well_formed_own_tenant_key_is_accepted(self) -> None:
-        # Without this, a decoder that rejected everything would pass every test in this class.
         token = cp.encode_page_token({"tenant_code": "demo", "sk": "company#c-1"}, "demo")
         assert token is not None
         assert cp.decode_page_token(_event(token), "demo") == {
@@ -121,20 +117,17 @@ class TestMalformedTokensAre400s:
         [
             "not-base64!!",
             _forge("no-marker-here"),
-            _forge("edl-page:not-json"),
-            _forge("edl-page:[]"),
-            _forge("edl-page:{}"),
-            _forge("edl-page:42"),
-            _forge('edl-page:"a string"'),
+            _forge("datalake-page:not-json"),
+            _forge("datalake-page:[]"),
+            _forge("datalake-page:{}"),
+            _forge("datalake-page:42"),
+            _forge('datalake-page:"a string"'),
         ],
     )
     def test_rejected_rather_than_restarting_from_zero(self, token: str) -> None:
-        # A silent restart would loop a paginating client forever.
         with pytest.raises(ValidationFailedError):
             cp.decode_page_token(_event(token), "demo")
 
     def test_a_bare_offset_is_no_longer_accepted(self) -> None:
-        # The previous implementation took an integer offset; an old client's token must fail
-        # loudly rather than be reinterpreted as a key.
         with pytest.raises(ValidationFailedError):
-            cp.decode_page_token(_event(_forge("edl-page:50")), "demo")
+            cp.decode_page_token(_event(_forge("datalake-page:50")), "demo")

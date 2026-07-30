@@ -84,8 +84,6 @@ def find_latest_curated_prefix(
     base_prefix = f"{tenant_code}/curated/{domain}/{entity_id}/"
     paginator = s3.get_paginator("list_objects_v2")
 
-    # Collect curated_date= partition prefixes using the delimiter trick
-    # (only returns "directory" entries, not individual files).
     date_prefixes: list[str] = []
     for page in paginator.paginate(Bucket=bucket, Prefix=base_prefix, Delimiter="/"):
         for cp in page.get("CommonPrefixes", []):
@@ -101,10 +99,8 @@ def find_latest_curated_prefix(
         )
         return None
 
-    # ISO date format sorts lexicographically — latest is always the last entry.
     latest_date_prefix = sorted(date_prefixes)[-1]
 
-    # Within the date partition, collect run_id= sub-prefixes.
     run_prefixes: list[str] = []
     for page in paginator.paginate(Bucket=bucket, Prefix=latest_date_prefix, Delimiter="/"):
         for cp in page.get("CommonPrefixes", []):
@@ -188,7 +184,6 @@ def load_curated_records(
             raw = s3.get_object(Bucket=bucket, Key=obj["Key"])
             buf = io.BytesIO(raw["Body"].read())
             table = pq.read_table(buf)
-            # RecordBatch iteration (§2.3): 10K rows materialised at a time.
             for batch in table.to_batches(max_chunksize=10_000):
                 batch_dict = batch.to_pydict()
                 n = batch.num_rows
@@ -264,9 +259,6 @@ def load_curated_records_duckdb(
     try:
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute(f"SET s3_region='{region_name}';")
-        # bucket is sourced exclusively from a Lambda env var and clean_prefix
-        # has already been validated against SAFE_S3_PREFIX_PATTERN plus a
-        # path-traversal check above — never raw event/user input (OWASP A03).
         result_table = con.execute(f"SELECT * FROM read_parquet('{glob}')").arrow()  # noqa: S608  # nosec B608 — path validated against SAFE_S3_PREFIX_PATTERN
 
         records: list[dict[str, Any]] = []
@@ -284,10 +276,6 @@ def load_curated_records_duckdb(
         )
         return records
     except Exception as _ddb_exc:
-        # DuckDB/httpfs read failure (e.g. no real S3 access in a test
-        # environment, or httpfs not fully configured) — fall back to the
-        # Python loader. This is graceful degradation: the load is still
-        # correct, just uses more RAM and Python-side S3 API calls.
         _logger.warning(
             "duckdb_curated_load_failed_falling_back_to_python_load",
             bucket=bucket,
@@ -341,16 +329,13 @@ def merge_with_duckdb(
         validated against a safe identifier pattern before interpolation.
     """
     if not delta_records:
-        # Empty delta — nothing to merge; load previous state as-is.
         if previous_prefix is None:
             return []
         return load_curated_records(s3, s3_bucket, previous_prefix)
 
     if previous_prefix is None:
-        # First run — no previous state; return delta directly.
         return list(delta_records)
 
-    # Validate field names before SQL interpolation (OWASP A03).
     field_name_pattern = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
     if not field_name_pattern.match(pk_field):
         raise ValueError(f"pk_field {pk_field!r} contains unsafe characters for SQL interpolation.")
@@ -361,8 +346,6 @@ def merge_with_duckdb(
         import duckdb
         import pyarrow as pa
     except ImportError:
-        # DuckDB not available (e.g. test environment without the package) —
-        # fall back to in-memory Python merge.
         _logger.warning(
             "duckdb_not_available_falling_back_to_python_merge",
             pk_field=pk_field,
@@ -380,19 +363,15 @@ def merge_with_duckdb(
 
     con = duckdb.connect(":memory:")
     try:
-        # Register delta as an in-memory Arrow table.
         delta_table = pa.Table.from_pylist(delta_records)
         con.register("delta", delta_table)
 
-        # Build the previous state glob for DuckDB S3 reader.
         clean_prev = previous_prefix.rstrip("/") + "/"
         previous_glob = f"s3://{s3_bucket}/{clean_prev}*.parquet"
 
-        # Configure DuckDB httpfs for S3 (uses instance credentials, not hardcoded).
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute(f"SET s3_region='{region_name}';")
 
-        # Build soft-delete WHERE clause.
         if soft_delete_field:
             soft_delete_filter = (
                 f"AND (delta.{soft_delete_field} IS NULL OR NOT delta.{soft_delete_field})"
@@ -400,12 +379,6 @@ def merge_with_duckdb(
         else:
             soft_delete_filter = ""
 
-        # SCD Type 1 MERGE:
-        #   - Rows from previous state NOT present in delta (unchanged records)
-        #   - UNION ALL new/updated delta records (excluding soft-deleted ones)
-        # OWASP A03: pk_field/soft_delete_field are validated above against
-        # field_name_pattern; previous_glob is built from internal S3
-        # bucket/prefix state, not raw user input.
         sql = (
             f"SELECT prev.* FROM read_parquet('{previous_glob}') AS prev "  # noqa: S608  # nosec B608 — path validated against SAFE_S3_PREFIX_PATTERN
             f"WHERE CAST(prev.{pk_field} AS VARCHAR) NOT IN ("
@@ -417,7 +390,6 @@ def merge_with_duckdb(
         )
         result_table = con.execute(sql).arrow()
 
-        # Return as Python list for compatibility with existing pipeline.
         merged: list[dict[str, Any]] = []
         for batch in result_table.to_batches(max_chunksize=50_000):
             batch_dict = batch.to_pydict()
@@ -434,9 +406,6 @@ def merge_with_duckdb(
         return merged
 
     except Exception as _ddb_exc:
-        # DuckDB execution failure (e.g., httpfs S3 access error in test environments,
-        # or DuckDB httpfs not fully configured) — fall back to in-memory Python merge.
-        # This is graceful degradation: the merge is still correct, just uses more RAM.
         _logger.warning(
             "duckdb_merge_failed_falling_back_to_python_merge",
             pk_field=pk_field,
@@ -459,8 +428,6 @@ def merge_with_duckdb(
         con.close()
 
 
-# Explicit re-export list: `no_implicit_reexport` is on, so a module importing
-# SAFE_S3_PREFIX_PATTERN from here needs it named rather than merely present.
 __all__ = [
     "SAFE_S3_PREFIX_PATTERN",
 ]

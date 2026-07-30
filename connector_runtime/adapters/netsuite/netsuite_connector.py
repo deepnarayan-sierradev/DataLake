@@ -72,25 +72,14 @@ _logger = get_platform_logger(__name__)
 
 _SOURCE_ID: Final[str] = "netsuite"
 
-# SuiteQL endpoint URL template.
 _SUITEQL_URL_TEMPLATE: Final[str] = (
     "https://{account_id}.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql"
 )
 
-# NetSuite SuiteQL maximum page size is 10,000 rows per request.
-# Default set to 10,000 (§3.6) — reduces API calls 10x vs the previous 1,000.
-# Individual entities can override via connector_params.page_size.
 _PAGE_SIZE: Final[int] = 10_000
 
-# NetSuite's REST SuiteQL endpoint rejects any request whose `offset` query
-# parameter exceeds this value (HTTP 400) — a hard platform ceiling, not a
-# per-account or configurable limit. See the module docstring's "Known
-# limitation" section for why this is handled as a fail-fast rather than a
-# retry, and for the deferred full fix (keyset pagination).
 _MAX_SUITEQL_OFFSET: Final[int] = 100_000
 
-# Keyset seek columns are interpolated into the SuiteQL text (the endpoint has no parameter
-# slots), so the identifier is allowlisted before it gets there (OWASP A03).
 _SAFE_SUITEQL_IDENTIFIER: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 
 
@@ -148,8 +137,6 @@ class NetSuiteConnector(ConnectorInterface):
             environment=environment,
             region_name=region_name,
         )
-        # Create the metadata adapter once — the per-instance cache on the adapter
-        # prevents redundant Metadata Catalog API calls within the same extraction run.
         self._metadata_adapter = NetSuiteMetadataAdapter(
             auth_client=self._auth,
             record_type=record_type,
@@ -247,18 +234,11 @@ class NetSuiteConnector(ConnectorInterface):
         suiteql_url = _SUITEQL_URL_TEMPLATE.format(account_id=self._auth.account_id)
         record_count = 0
         offset = 0
-        # L17: keyset pagination seeks by the watermark column instead of walking an offset, so
-        # the 100,000-row ceiling stops applying. It needs a monotonic column to seek on, which is
-        # exactly what a watermark field is — when the entity has none, offset/limit remains the
-        # only option and the ceiling below is still the honest answer.
         keyset_field = query_contract.watermark_field
         keyset_cursor: str | None = None
 
         while True:
             if keyset_field is None and offset > _MAX_SUITEQL_OFFSET:
-                # Stop BEFORE issuing a request NetSuite will reject outright —
-                # see module docstring "Known limitation" and
-                # NetSuiteSuiteQLOffsetLimitExceededError's docstring.
                 raise NetSuiteSuiteQLOffsetLimitExceededError(
                     f"NetSuite SuiteQL pagination for source_id={query_contract.source_id!r}, "
                     f"entity_id={query_contract.entity_id!r} (record_type={self._record_type!r}) "
@@ -280,8 +260,6 @@ class NetSuiteConnector(ConnectorInterface):
                 self._fetch_page(
                     suiteql_url=suiteql_url,
                     query=page_query,
-                    # Keyset pagination always asks for the first page of the *remaining* rows, so
-                    # the offset stays at zero and never approaches the ceiling.
                     offset=0 if keyset_field is not None else offset,
                     limit=_PAGE_SIZE,
                 )
@@ -297,15 +275,11 @@ class NetSuiteConnector(ConnectorInterface):
                 yield rec
 
             if len(page_rows) < _PAGE_SIZE:
-                # Last page — no more data.
                 break
 
             if keyset_field is not None:
                 advanced = _next_keyset_cursor(page_rows, keyset_field, keyset_cursor)
                 if advanced is None:
-                    # The cursor did not move: every row in this page shares one watermark value,
-                    # so seeking past it would skip rows and seeking to it would loop forever.
-                    # Fall back to offset for the remainder rather than risk either.
                     _logger.warning(
                         "netsuite_keyset_cursor_stalled_falling_back_to_offset",
                         entity_id=query_contract.entity_id,
@@ -353,8 +327,6 @@ class NetSuiteConnector(ConnectorInterface):
             return ExtractionErrorClassification.TRANSIENT_NETWORK
         return ExtractionErrorClassification.UNKNOWN
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _fetch_page(
         self,
         suiteql_url: str,
@@ -397,11 +369,6 @@ class NetSuiteConnector(ConnectorInterface):
         data: dict[str, Any] = response.json()
         items: list[dict[str, Any]] = data.get("items", [])
         yield from items
-
-
-# ---------------------------------------------------------------------------
-# Connector builder
-# ---------------------------------------------------------------------------
 
 
 def _build_netsuite(
@@ -468,7 +435,6 @@ def _with_keyset_predicate(query: str, keyset_field: str, cursor: str | None) ->
         return ordered
     escaped = str(cursor).replace("'", "''")
     connector = "AND" if " WHERE " in query.upper() else "WHERE"
-    # Insert the predicate before the ORDER BY that was just appended.
     return f"{query} {connector} {keyset_field} > '{escaped}' ORDER BY {keyset_field} ASC"
 
 

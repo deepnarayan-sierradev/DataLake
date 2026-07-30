@@ -23,9 +23,6 @@ def aws_env(monkeypatch):
 
 def _create_secret(sm_client, name: str, created_days_ago: int) -> str:
     response = sm_client.create_secret(Name=name, SecretString='{"placeholder": "x"}')
-    # moto stamps CreatedDate at call time; we can't easily backdate it, so
-    # tests assert relative behavior via the rotation_warning_days/secret_rotation_days
-    # knobs instead of trying to fake CreatedDate directly.
     return response["ARN"]
 
 
@@ -53,8 +50,6 @@ class TestCredentialExpiryNotifier:
         monkeypatch.setenv("SOURCE_CREDENTIAL_SECRET_ARNS", arn)
         monkeypatch.setenv("ALERT_SNS_TOPIC_ARN", topic_arn)
 
-        # A freshly-created secret (age 0) with a 0-day rotation window and
-        # 0-day warning threshold must be flagged immediately (0 >= 0).
         result = lambda_handler(
             {"secret_rotation_days": 0, "rotation_warning_days": 0}, context=None
         )
@@ -75,7 +70,6 @@ class TestCredentialExpiryNotifier:
 
         result = lambda_handler({}, context=None)
 
-        # Only the valid secret is counted; the bad ARN is skipped, not fatal.
         assert result["checked"] == 1
 
     def test_no_secrets_configured_returns_zero(self, aws_env, monkeypatch) -> None:

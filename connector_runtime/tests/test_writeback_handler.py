@@ -178,7 +178,6 @@ class TestOptInGate:
     def test_write_back_is_refused_when_the_entity_has_not_opted_in(
         self, _wired: dict[str, Any]
     ) -> None:
-        # `active` enabling reads must never imply write access (OWASP A04).
         _wired["config"] = _Config(writeback_enabled=False)
         with pytest.raises(WritebackNotEnabledError, match="opt-in"):
             lambda_handler(_event(), _NullContext())
@@ -242,8 +241,6 @@ class TestFailurePath:
 
 class TestCredentialSeparation:
     def test_the_write_path_asks_for_a_write_back_secret(self) -> None:
-        # A read-only deployment must not be able to mutate a source, which only holds if
-        # the write path resolves a different secret.
         source = inspect.getsource(writeback_handler._writeback_session)
         assert "write_back=True" in source
         assert "allow_legacy_fallback=False" in source

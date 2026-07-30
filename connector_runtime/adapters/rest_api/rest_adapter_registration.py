@@ -44,7 +44,6 @@ from tenancy.connection_keys import raw_layer_path_segments, resolve_connection_
 
 _logger = get_platform_logger(__name__)
 
-# Fallback policy for a source whose spec names none, so no adapter is ever unthrottled.
 _FALLBACK_POLICY_NAME = "rest-source-default"
 rate_limit_policy_registry.register(
     _FALLBACK_POLICY_NAME,
@@ -76,9 +75,6 @@ class RestSourceParams(BaseModel):
     page_size: int | None = Field(default=None, ge=1, le=1_000)
     rate_limit_policy: str | None = None
 
-    # ── Config-declared entity (DL-CONN-21) ──────────────────────────────────
-    # Supplied only when `entity_id` is not one the spec declares. `entity_path` is the
-    # trigger: without it an unknown entity is a configuration error, not a silent guess.
     entity_path: str | None = Field(
         default=None,
         description="Endpoint path for an entity the console declared, e.g. '/api/v2/quotes'.",
@@ -167,8 +163,6 @@ def register_rest_source(spec: RestSourceSpec) -> RestSourceSpec:
     rest_source_spec_registry.register(spec)
     source_capability_registry.register(spec.to_capability_declaration())
 
-    # The generated class is a RestApiConnector subclass, so the builder can construct it with
-    # the spec-driven signature rather than the bare ConnectorInterface one.
     connector_cls: type[RestApiConnector] = type(
         f"{_class_prefix(spec.source_id)}Connector",
         (RestApiConnector,),

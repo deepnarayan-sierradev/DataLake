@@ -35,10 +35,6 @@ from transformation.curated_layer_reader import (
     source_id_to_domain,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _parquet_bytes(records: list[dict[str, Any]]) -> bytes:
     buf = io.BytesIO()
@@ -85,11 +81,6 @@ def _mock_s3_with_prefix(
     return s3
 
 
-# ---------------------------------------------------------------------------
-# source_id_to_domain
-# ---------------------------------------------------------------------------
-
-
 class TestSourceIdToDomain:
     def test_hyphen_converted_to_underscore(self):
         assert source_id_to_domain("mysql-rds") == "mysql_rds"
@@ -99,11 +90,6 @@ class TestSourceIdToDomain:
 
     def test_multiple_hyphens(self):
         assert source_id_to_domain("some-multi-part") == "some_multi_part"
-
-
-# ---------------------------------------------------------------------------
-# SAFE_S3_PREFIX_PATTERN
-# ---------------------------------------------------------------------------
 
 
 class TestSafePrefixPattern:
@@ -120,11 +106,6 @@ class TestSafePrefixPattern:
 
     def test_leading_slash_rejected(self):
         assert not SAFE_S3_PREFIX_PATTERN.match("/etc/passwd")
-
-
-# ---------------------------------------------------------------------------
-# find_latest_curated_prefix
-# ---------------------------------------------------------------------------
 
 
 class TestFindLatestCuratedPrefix:
@@ -195,11 +176,6 @@ class TestFindLatestCuratedPrefix:
         assert result is None
 
 
-# ---------------------------------------------------------------------------
-# load_curated_records
-# ---------------------------------------------------------------------------
-
-
 class TestLoadCuratedRecords:
     def test_path_traversal_rejected(self):
         with pytest.raises(ValueError, match="Unsafe"):
@@ -231,11 +207,6 @@ class TestLoadCuratedRecords:
         )
         result = load_curated_records(s3, "bucket", "curated/sf/sf-c/curated_date=2026-07-02/")
         assert result == []
-
-
-# ---------------------------------------------------------------------------
-# load_curated_records_duckdb (PERF-3)
-# ---------------------------------------------------------------------------
 
 
 class TestLoadCuratedRecordsDuckdb:
@@ -303,7 +274,6 @@ class TestLoadCuratedRecordsDuckdb:
         mock_duckdb.connect.return_value = mock_con
         monkeypatch.setitem(sys.modules, "duckdb", mock_duckdb)
 
-        # s3 client would raise if load_curated_records() were reached.
         s3 = MagicMock()
         s3.get_paginator.side_effect = AssertionError(
             "Python S3 fallback must not run on the DuckDB success path"
@@ -361,7 +331,6 @@ class TestFindLatestCuratedPrefixSecurity:
             run_prefix="curated/sf/sf-account/curated_date=2026-07-07/run_id=../../evil/",
         )
         result = find_latest_curated_prefix(mock_s3, "bucket", "sf", "sf-account", "demo")
-        # Must return None — the unsafe prefix is rejected
         assert result is None
 
     def test_leading_slash_in_run_prefix_returns_none(self) -> None:

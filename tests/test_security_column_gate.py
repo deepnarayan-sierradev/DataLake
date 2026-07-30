@@ -98,8 +98,6 @@ class TestGateRejectsKnownBadInput:
 
 class TestGateAcceptsCorrectInput:
     def test_declared_and_written_passes(self, store_root: Path) -> None:
-        # The positive control: without this, a gate that always fails would also pass the
-        # negative tests above and would be just as useless.
         _write(store_root, _GOOD_RECORD, _GOOD_WRITER)
         report = analyse([_store()], root=store_root)
         assert not report.failed, report.violations
@@ -107,7 +105,6 @@ class TestGateAcceptsCorrectInput:
 
 class TestRegistryCannotBeQuietlyEmptied:
     def test_registry_covers_the_scope_filtered_stores(self) -> None:
-        # Deleting entries is the cheapest way to make this gate green; the count is the guard.
         assert len(FILTERED_STORES) >= 4
         names = " ".join(store.name for store in FILTERED_STORES)
         assert "twin node" in names

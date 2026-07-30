@@ -26,8 +26,8 @@ Built and deployed to dev on 2026-07-24:
 
 Blocking problems:
 
-1. **`EdlServingStoreConfig` is empty** — no tenant/entity onboarded, so the loader skips every run
-   and `edl-serving-store-mysql-dev` holds no databases or tables.
+1. **`datalake-serving-store-config-dev` is empty** — no tenant/entity onboarded, so the loader skips every run
+   and `datalake-serving-store-mysql-dev` holds no databases or tables.
 2. **No network path exists for any BI tool.** The RDS instance is `publicly_accessible = false`, in
    private subnets, with a security group whose only inbound rule is the loader Lambda's own SG.
    There is no VPN, PrivateLink, or bastion anywhere in `infrastructure/modules/networking/`.
@@ -58,7 +58,7 @@ Blocking problems:
 
 ### Data availability
 
-- **DL-SERV-03** **Onboard tenants and entities** into `EdlServingStoreConfig` so the loader
+- **DL-SERV-03** **Onboard tenants and entities** into `datalake-serving-store-config-dev` so the loader
   actually runs (`scripts/seed_serving_store_config.py` exists; this is execution plus an API for
   EP-04 to drive it).
 - **DL-SERV-04** **Serving-layer modelling**: publish denormalised, BI-friendly views — dimensional
@@ -91,7 +91,7 @@ Blocking problems:
 
 No new stores. Additions:
 
-- `EdlServingStoreConfig` gains `view_definitions_version`, `load_mode` (`full`/`incremental`), and
+- `datalake-serving-store-config-dev` gains `view_definitions_version`, `load_mode` (`full`/`incremental`), and
   `credential_rotation_at`.
 - Serving-layer view definitions generated from the semantic model, versioned in S3 at
   `{tenant_code}/serving-views/{version}.sql` per dialect.

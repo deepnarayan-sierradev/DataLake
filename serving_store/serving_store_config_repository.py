@@ -4,7 +4,7 @@ Serving store configuration repository for the Enterprise Data Lake platform.
 Loads ServingStoreLoadConfig records from DynamoDB (primary) or S3 (alternate).
 All records are Pydantic-validated before being returned.
 
-DynamoDB table: EdlServingStoreConfig
+DynamoDB table: datalake-serving-store-config-dev
   PK: tenant_code (str)
   SK: entity_type (str)
 
@@ -21,7 +21,6 @@ Security:
 from __future__ import annotations
 
 import json
-import os
 from enum import StrEnum
 from typing import Any
 
@@ -33,12 +32,11 @@ from pydantic import ValidationError
 from contracts.identifier_policy import ENTITY_TYPE_PATTERN as _ENTITY_TYPE_PATTERN
 from contracts.identifier_policy import validate_tenant_code
 from contracts.serving_store_config_contract import ServingStoreLoadConfig
+from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
 from persistence.dynamodb_paging import iter_items
 
 _logger = get_platform_logger(__name__)
-
-_DYNAMODB_TABLE_NAME: str = "EdlServingStoreConfig"
 
 
 class ConfigurationBackend(StrEnum):
@@ -77,15 +75,13 @@ class ServingStoreConfigRepositoryClient:
 
         if backend == ConfigurationBackend.DYNAMODB:
             self._dynamodb = boto3.resource("dynamodb", region_name=region_name)
-            self._table_name = os.environ.get("SERVING_STORE_CONFIG_TABLE") or _DYNAMODB_TABLE_NAME
+            self._table_name = require_env("SERVING_STORE_CONFIG_TABLE")
             self._table = self._dynamodb.Table(self._table_name)
         else:
             if not s3_bucket:
                 raise ValueError("s3_bucket is required when backend is ConfigurationBackend.S3")
             self._s3 = boto3.client("s3", region_name=region_name)
             self._s3_bucket = s3_bucket
-
-    # ── Public API ─────────────────────────────────────────────────────────────
 
     def load_config(self, tenant_code: str, entity_type: str) -> ServingStoreLoadConfig:
         """
@@ -161,8 +157,6 @@ class ServingStoreConfigRepositoryClient:
                 )
         return configs
 
-    # ── DynamoDB backend ───────────────────────────────────────────────────────
-
     def _load_from_dynamodb(self, tenant_code: str, entity_type: str) -> ServingStoreLoadConfig:
         try:
             response = self._table.get_item(
@@ -190,8 +184,6 @@ class ServingStoreConfigRepositoryClient:
             )
         return self._validate(tenant_code, entity_type, dict(item))
 
-    # ── S3 backend ─────────────────────────────────────────────────────────────
-
     def _load_from_s3(self, tenant_code: str, entity_type: str) -> ServingStoreLoadConfig:
         s3_key = f"{tenant_code}/serving-store/{entity_type}/config.json"
         try:
@@ -205,8 +197,6 @@ class ServingStoreConfigRepositoryClient:
                 ) from exc
             raise
         return self._validate(tenant_code, entity_type, raw)
-
-    # ── Validation ─────────────────────────────────────────────────────────────
 
     @staticmethod
     def _validate(

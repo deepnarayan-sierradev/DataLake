@@ -6,7 +6,7 @@ and presents them as a typed, frozen dataclass.  The password is never logged
 or included in any exception message (OWASP A07, A09).
 
 Credential storage:
-  - Secret path: edl/sources/mysql-rds/credentials
+  - Secret path: datalake/<env>/sources/mysql-rds/credentials
   - Expected JSON keys: host, port, username, password, database
 
 Private VPC connectivity:
@@ -42,18 +42,14 @@ from connector_runtime.interfaces.connector_interface import (
     DeterministicConnectorError,
     ExtractionErrorClassification,
 )
+from contracts.resource_naming import secret_path
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-_SECRET_PATH: Final[str] = "edl/sources/mysql-rds/credentials"  # noqa: S105
 _DEFAULT_PORT: Final[int] = 3306
-# Credentials are re-fetched from Secrets Manager after this many seconds so
-# that automatic rotation (FINDING-02) takes effect within one hour without
-# requiring a Lambda cold-start or manual restart (OWASP A07).
 _CREDENTIAL_CACHE_TTL_SECONDS: Final[int] = 3_600
 
-# Required secret keys — enforced by the shared SecretsManagerCredentialClient.
 _REQUIRED_CREDENTIAL_KEYS: Final[frozenset[str]] = frozenset(
     {"host", "port", "username", "password", "database"}
 )
@@ -109,7 +105,7 @@ class MySqlRdsCredentialsClient:
         self._environment = environment
         self._region = region_name
         self._credentials_client = SecretsManagerCredentialClient(
-            secret_id=_SECRET_PATH,
+            secret_id=secret_path("sources", "mysql-rds", "credentials"),
             region_name=region_name,
             required_keys=_REQUIRED_CREDENTIAL_KEYS,
             source_label="MySQL RDS",
@@ -139,8 +135,6 @@ class MySqlRdsCredentialsClient:
         self._cached_params = self._build_connection_parameters()
         self._cached_at = time.monotonic()
         return self._cached_params
-
-    # ── Private ────────────────────────────────────────────────────────────────
 
     def _build_connection_parameters(self) -> MySqlConnectionParameters:
         """
@@ -174,6 +168,5 @@ class MySqlRdsCredentialsClient:
             environment=self._environment,
             host=params.host,
             database=params.database,
-            # username and password intentionally omitted
         )
         return params

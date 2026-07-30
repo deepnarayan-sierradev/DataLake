@@ -138,8 +138,6 @@ def configure_xray(
         if run_id:
             xray_recorder.put_annotation("run_id", run_id)
     except ImportError:
-        # aws-xray-sdk not available in this environment — skip silently.
         pass
     except Exception as exc:
-        # X-Ray configuration failure must never interrupt a pipeline run.
         _logger.debug("xray_configuration_failed", error=str(exc))

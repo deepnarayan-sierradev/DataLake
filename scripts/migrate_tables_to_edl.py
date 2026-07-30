@@ -44,10 +44,6 @@ from dataclasses import dataclass
 import boto3
 from botocore.exceptions import ClientError
 
-# ---------------------------------------------------------------------------
-# Table pair definitions
-# ---------------------------------------------------------------------------
-
 _LABEL_ENTITY_CONFIG = "entity-extraction-config"
 _LABEL_WATERMARK = "watermark-repository"
 _LABEL_AUDIT_LOG = "run-audit-log"
@@ -80,11 +76,6 @@ def _build_migrations(environment: str) -> list[TableMigration]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# DynamoDB helpers
-# ---------------------------------------------------------------------------
-
-
 def _scan_all(table) -> Iterator[dict]:
     """
     Full table scan using pagination — yields one item at a time.
@@ -108,15 +99,9 @@ def _verify_table_exists(ddb, table_name: str) -> bool:
         code = exc.response["Error"]["Code"]
         if code == "ResourceNotFoundException":
             return False
-        # AccessDeniedException or other AWS errors — re-raise with context
         raise RuntimeError(
             f"Failed to verify table '{table_name}': {code} — {exc.response['Error']['Message']}"
         ) from exc
-
-
-# ---------------------------------------------------------------------------
-# Migration logic
-# ---------------------------------------------------------------------------
 
 
 def _migrate_table(
@@ -150,7 +135,6 @@ def _migrate_table(
     written = 0
 
     if not execute:
-        # Dry run: count only, write nothing.
         print("    Counting source items (dry run) …", end=" ", flush=True)
         for _ in _scan_all(src_table):
             src_count += 1
@@ -161,9 +145,6 @@ def _migrate_table(
             print(f"    DRY RUN — would write {src_count} item(s) to destination.")
         return src_count, 0
 
-    # Live migration: stream source → single batch_writer context.
-    # boto3's batch_writer buffers items and flushes every 25 items automatically,
-    # also retrying any UnprocessedItems returned by DynamoDB.
     print("    Migrating items …", end=" ", flush=True)
     with dest_table.batch_writer() as batch:
         for item in _scan_all(src_table):
@@ -175,15 +156,9 @@ def _migrate_table(
 
     print(f"done ({written} item(s) written).")
 
-    # Validation: compare what we read from source against what we wrote.
-    # We deliberately do NOT re-scan the destination immediately — DynamoDB
-    # reads are eventually consistent and a scan right after a batch write can
-    # return a lower count. The written count is the reliable figure.
     if written == src_count:
         print(f"    ✓  Validation passed: {written} item(s) written == {src_count} scanned.")
     else:
-        # This should never happen since we increment both counters in the same loop,
-        # but guard defensively.
         print(
             f"    ✗  COUNT MISMATCH: scanned={src_count}, written={written}. "
             "Re-run the migration to fill in any missing items."
@@ -191,10 +166,6 @@ def _migrate_table(
 
     return src_count, written
 
-
-# ---------------------------------------------------------------------------
-# Entrypoint
-# ---------------------------------------------------------------------------
 
 _TABLE_CLI_TO_LABEL: dict[str, str] = {
     "entity-config": _LABEL_ENTITY_CONFIG,
@@ -212,7 +183,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--environment",
         required=True,
-        choices=["dev", "staging", "prod"],
+        choices=["dev", "uat", "prod"],
         help="Target environment.",
     )
     parser.add_argument("--region", required=True, help="AWS region (e.g. us-east-1).")
@@ -282,7 +253,6 @@ def _run_migrations(
 def main() -> int:
     args = _build_arg_parser().parse_args()
 
-    # Guard: --table audit-log + --skip-audit-log is contradictory.
     if args.table == "audit-log" and args.skip_audit_log:
         print(
             "ERROR: --table audit-log and --skip-audit-log are mutually exclusive.", file=sys.stderr

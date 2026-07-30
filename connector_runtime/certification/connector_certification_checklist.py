@@ -37,7 +37,6 @@ _logger = get_platform_logger(__name__)
 
 _STABLE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9\-]{1,63}$")
 
-# Required method names from the ABC
 _REQUIRED_METHODS: Final[tuple[str, ...]] = (
     "get_capability_declaration",
     "discover_queryable_fields",
@@ -135,11 +134,6 @@ class ConnectorCertificationChecklist:
         return report
 
 
-# ---------------------------------------------------------------------------
-# Individual check functions
-# ---------------------------------------------------------------------------
-
-
 def _check_source_id_format(source_id: str) -> CertificationCheckResult:
     passed = bool(_STABLE_ID_PATTERN.match(source_id))
     return CertificationCheckResult(
@@ -180,7 +174,6 @@ def _check_required_methods_implemented(
             )
             continue
 
-        # Check the method is not the ABC stub (raises NotImplementedError body)
         source = ""
         try:
             source = inspect.getsource(method)

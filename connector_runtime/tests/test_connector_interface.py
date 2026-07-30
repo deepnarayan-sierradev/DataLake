@@ -18,13 +18,7 @@ from connector_runtime.interfaces.connector_interface import (
     QueryContract,
 )
 from connector_runtime.registry import ConnectorRegistry
-
-# Canonical enums are imported from contracts — same source used by the interface
 from contracts.entity_configuration_contract import FieldMode, LoadType
-
-# ---------------------------------------------------------------------------
-# FieldDescriptor
-# ---------------------------------------------------------------------------
 
 
 class TestFieldDescriptor:
@@ -59,11 +53,6 @@ class TestFieldDescriptor:
         assert descriptor.is_custom is False
         assert descriptor.length is None
         assert descriptor.precision is None
-
-
-# ---------------------------------------------------------------------------
-# FieldContract fingerprint
-# ---------------------------------------------------------------------------
 
 
 class TestFieldContractFingerprint:
@@ -114,14 +103,8 @@ class TestFieldContractFingerprint:
     def test_fingerprint_is_sha256_hex(self) -> None:
         fields = self._make_fields(["Id"])
         fingerprint = FieldContract.compute_fingerprint(fields)
-        # SHA-256 hex digest is always 64 chars
         assert len(fingerprint) == 64
         assert all(c in "0123456789abcdef" for c in fingerprint)
-
-
-# ---------------------------------------------------------------------------
-# QueryContract — parameterization requirement
-# ---------------------------------------------------------------------------
 
 
 class TestQueryContract:
@@ -144,11 +127,6 @@ class TestQueryContract:
         assert ":lower_bound" in contract.query_text
         assert ":upper_bound" in contract.query_text
         assert "2026-06-10T00:00:00Z" not in contract.query_text  # not interpolated
-
-
-# ---------------------------------------------------------------------------
-# ConnectorCapabilities
-# ---------------------------------------------------------------------------
 
 
 class TestConnectorCapabilities:
@@ -182,11 +160,6 @@ class TestConnectorCapabilities:
         assert caps.supports_bulk_extraction is False
 
 
-# ---------------------------------------------------------------------------
-# ExtractionErrorClassification — taxonomy integrity
-# ---------------------------------------------------------------------------
-
-
 class TestExtractionErrorClassification:
     def test_all_values_are_unique(self) -> None:
         values = [c.value for c in ExtractionErrorClassification]
@@ -212,11 +185,6 @@ class TestExtractionErrorClassification:
             assert err.value.startswith("deterministic_"), (
                 f"Expected {err} to start with 'deterministic_'"
             )
-
-
-# ---------------------------------------------------------------------------
-# ConnectorRegistry
-# ---------------------------------------------------------------------------
 
 
 class TestConnectorRegistry:

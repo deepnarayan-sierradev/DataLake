@@ -142,16 +142,10 @@ class TestSurvivorshipMetadata:
         assert result.conflict_log == ()
 
 
-# ---------------------------------------------------------------------------
-# Uncovered branches — targeted gap-fill tests
-# ---------------------------------------------------------------------------
-
-
 class TestMostRecentEdgeCases:
     """Cover _most_recent branches not hit by the happy-path test."""
 
     def test_most_recent_no_timestamp_field_returns_first_candidate(self):
-        # timestamp_field=None → falls back to first non-null candidate
         rule = _attr_rule("email", SurvivorshipStrategy.MOST_RECENT, ts_field=None)
         applier = GoldenRecordSurvivorshipPolicy(_policy(rule))
         records = [
@@ -162,7 +156,6 @@ class TestMostRecentEdgeCases:
         assert result.canonical_record["email"] == "first@example.com"
 
     def test_most_recent_unparseable_timestamp_returns_first(self):
-        # All timestamp values are garbage → best_ts stays None, first candidate wins
         rule = _attr_rule("email", SurvivorshipStrategy.MOST_RECENT, ts_field="updated_at")
         applier = GoldenRecordSurvivorshipPolicy(_policy(rule))
         records = [
@@ -170,11 +163,9 @@ class TestMostRecentEdgeCases:
             {"id": "b", "source_id": "ns", "email": "b@example.com", "updated_at": "also-bad"},
         ]
         result = applier.resolve(records, "id", "source_id")
-        # Just verify it returns without error and picks one of the values
         assert result.canonical_record["email"] in {"a@example.com", "b@example.com"}
 
     def test_most_recent_with_date_only_format(self):
-        # _parse_ts should handle "%Y-%m-%d" (third format in the loop)
         rule = _attr_rule("email", SurvivorshipStrategy.MOST_RECENT, ts_field="updated_at")
         applier = GoldenRecordSurvivorshipPolicy(_policy(rule))
         records = [
@@ -232,5 +223,4 @@ class TestConflictLogging:
         ]
         result = applier.resolve(records, "id", "source_id")
         assert result.canonical_record["phone"] == "555-0100"
-        # phone had only one candidate → no conflict entry for it
         assert not any(e.canonical_field == "phone" for e in result.conflict_log)

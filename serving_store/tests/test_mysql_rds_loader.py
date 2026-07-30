@@ -9,6 +9,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from serving_store.interfaces.loader_interface import compute_row_hash, reader_username
 from serving_store.loaders.mysql_rds_loader import ServingStoreError, ServingStoreLoader
 
@@ -53,7 +54,7 @@ _HOSTLESS_SECRET_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds
 
 def _make_hostless_creds():
     """An AWS-managed RDS master secret — only username/password, no host/port."""
-    return json.dumps({"username": "edl_serving_admin", "password": "dbpass"})
+    return json.dumps({"username": "datalake_serving_admin", "password": "dbpass"})
 
 
 @mock_aws
@@ -67,7 +68,7 @@ class TestServingStoreLoaderEndpointInjection:
         loader = ServingStoreLoader(
             _HOSTLESS_SECRET_ARN,
             _REGION,
-            db_host="edl-serving-store-mysql-dev.example.rds.amazonaws.com",
+            db_host="datalake-serving-store-mysql-dev.example.rds.amazonaws.com",
             db_port=3306,
         )
 
@@ -76,7 +77,7 @@ class TestServingStoreLoaderEndpointInjection:
 
         assert (
             connect_mock.call_args.kwargs["host"]
-            == "edl-serving-store-mysql-dev.example.rds.amazonaws.com"
+            == "datalake-serving-store-mysql-dev.example.rds.amazonaws.com"
         )
         assert connect_mock.call_args.kwargs["port"] == 3306
 
@@ -180,7 +181,7 @@ class TestServingStoreLoaderSecretRetrieval:
         sm = boto3.client("secretsmanager", region_name=_REGION)
         secret = json.loads(
             sm.get_secret_value(
-                SecretId="edl/serving-store/acme-corp/mysql_rds/reader-credentials"
+                SecretId=f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/serving-store/acme-corp/mysql_rds/reader-credentials"
             )["SecretString"]
         )
         assert secret["database"] == "acme_corp"
@@ -197,9 +198,8 @@ class TestServingStoreLoaderSecretRetrieval:
             loader.load(_make_records(), _TABLE_NAME, ("account_id",), _TENANT_CODE)
 
         sm = boto3.client("secretsmanager", region_name=_REGION)
-        secret_id = "edl/serving-store/acme-corp/mysql_rds/reader-credentials"
-        # create_secret would fail on a second call for the same name if the
-        # loader tried to regenerate it — reaching here proves reuse.
+        prefix = RESOURCE_NAME_ENVIRONMENT["SECRET_PATH_PREFIX"]
+        secret_id = f"{prefix}/serving-store/acme-corp/mysql_rds/reader-credentials"
         secret = json.loads(sm.get_secret_value(SecretId=secret_id)["SecretString"])
         assert secret["password"]
 
@@ -216,7 +216,6 @@ class TestServingStoreLoaderSecretRetrieval:
             first = loader.load(records, _TABLE_NAME, ("account_id",), _TENANT_CODE)
             assert first.records_loaded == 2
 
-            # Second run: DB already has record 001 unchanged; 002 is new/changed.
             mock_cursor.fetchall.return_value = [{"account_id": "001", "_row_hash": unchanged_hash}]
             mock_cursor.rowcount = 1
             second = loader.load(records, _TABLE_NAME, ("account_id",), _TENANT_CODE)

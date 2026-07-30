@@ -89,7 +89,6 @@ class TestShouldRetry:
 
     def test_at_max_attempts_no_more_retries(self) -> None:
         p = _policy(max_transient_attempts=3)
-        # attempt=3 means third attempt just failed; no fourth attempt allowed
         assert p.should_retry(ExtractionErrorClassification.TRANSIENT_NETWORK, attempt=3) is False
 
     def test_beyond_max_attempts_no_retry(self) -> None:
@@ -130,7 +129,6 @@ class TestBackoffDelay:
             max_delay_seconds=30.0,
             jitter_fraction=0.0,
         )
-        # 1 * 10^10 >> 30, but must be capped
         assert p.compute_delay_seconds(attempt=10) == pytest.approx(30.0)
 
     def test_delay_with_jitter_is_non_negative(self) -> None:

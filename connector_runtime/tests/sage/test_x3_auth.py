@@ -73,11 +73,6 @@ def _make_auth(creds: dict[str, str] | None = None) -> X3AuthClient:
     )
 
 
-# ---------------------------------------------------------------------------
-# Token acquisition
-# ---------------------------------------------------------------------------
-
-
 class TestTokenAcquisition:
     def test_get_access_token_returns_token(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
@@ -98,7 +93,6 @@ class TestTokenAcquisition:
         requests_mock.post(_TOKEN_URL, json={**_TOKEN_RESPONSE, "expires_in": 7200})
         auth = _make_auth()
         auth.get_access_token()
-        # Should expire in ~7200s minus proactive refresh buffer
         expected_min = time.time() + 7200 - _PROACTIVE_REFRESH_SECONDS - 2
         assert auth._token_expires_at > expected_min
 
@@ -118,7 +112,6 @@ class TestTokenAcquisition:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         auth.get_access_token()
-        # Simulate token expiring soon (within the proactive refresh window)
         auth._token_expires_at = time.time() + (_PROACTIVE_REFRESH_SECONDS - 10)
         auth.get_access_token()
         assert requests_mock.call_count == 2
@@ -140,11 +133,6 @@ class TestTokenAcquisition:
         request_body = _sent_request(requests_mock).text
         assert "x3-super-secret" in request_body
         assert "x3-super-secret" not in _sent_request(requests_mock).url
-
-
-# ---------------------------------------------------------------------------
-# base_url and folder properties
-# ---------------------------------------------------------------------------
 
 
 class TestBaseUrlAndFolder:
@@ -183,11 +171,6 @@ class TestBaseUrlAndFolder:
         assert auth.folder == _FOLDER
 
 
-# ---------------------------------------------------------------------------
-# build_auth_headers
-# ---------------------------------------------------------------------------
-
-
 class TestBuildAuthHeaders:
     def test_headers_contain_bearer_token(self, requests_mock: requests_mock_lib.Mocker) -> None:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
@@ -206,11 +189,6 @@ class TestBuildAuthHeaders:
         auth = _make_auth()
         headers = auth.build_auth_headers()
         assert headers["Accept"] == "application/json"
-
-
-# ---------------------------------------------------------------------------
-# Error handling
-# ---------------------------------------------------------------------------
 
 
 class TestErrorHandling:
@@ -257,11 +235,6 @@ class TestErrorHandling:
             auth.get_access_token()
 
 
-# ---------------------------------------------------------------------------
-# Security: token value not leaked in logs or exceptions (OWASP A09)
-# ---------------------------------------------------------------------------
-
-
 class TestSecurityTokenNotLeaked:
     def test_token_value_not_in_auth_error_message(
         self, requests_mock: requests_mock_lib.Mocker
@@ -269,7 +242,6 @@ class TestSecurityTokenNotLeaked:
         requests_mock.post(_TOKEN_URL, json=_TOKEN_RESPONSE)
         auth = _make_auth()
         auth.get_access_token()
-        # Simulate a subsequent auth failure and verify the token is not exposed
         requests_mock.post(_TOKEN_URL, status_code=401)
         auth.invalidate_token()
         try:

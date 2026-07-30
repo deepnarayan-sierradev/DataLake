@@ -78,8 +78,6 @@ class LineageRecord:
     record_count: int
     captured_at: str  # ISO-8601 UTC
     additional_context: dict[str, str]  # e.g., mapping_version, policy_version
-    # DL-SEC-04 (gap 10): lineage keys were the last layer with no tenant segment, so the
-    # prefix was not IAM-enforceable. Defaulted so existing callers stay valid.
     tenant_code: str = DEFAULT_TENANT_CODE
     connection_id: str | None = None
 
@@ -151,9 +149,6 @@ class LineageEmitter:
             raw: dict[str, Any] = json.loads(response["Body"].read().decode("utf-8"))
             return _deserialise_lineage_record(raw)
         except ClientError as exc:
-            # boto3 resource exceptions are not reliably catchable by attribute access
-            # on the client object.  Catch the canonical botocore ClientError and check
-            # the error code explicitly (OWASP A10: avoid swallowing unexpected errors).
             error_code = exc.response.get("Error", {}).get("Code", "")
             if error_code in ("NoSuchKey", "404"):
                 raise LineageRecordNotFoundError(run_id, entity_id, stage) from exc
@@ -364,11 +359,6 @@ def build_analytics_publication_lineage(
         captured_at=datetime.now(UTC).isoformat(),
         additional_context=_with_config_versions({}, config_versions),
     )
-
-
-# ---------------------------------------------------------------------------
-# Serialisation
-# ---------------------------------------------------------------------------
 
 
 def _serialise_lineage_record(record: LineageRecord) -> dict[str, Any]:

@@ -11,7 +11,7 @@ from processing_engine.engines.duckdb_engine import DuckDbSetBasedEngine
 from processing_engine.interfaces.set_based_engine_interface import SetBasedQueryError
 from processing_engine.registry import set_based_engine_registry
 
-_INPUTS = {"curated": "s3://edl-curated-1/demo/curated/crm/acct"}
+_INPUTS = {"curated": "s3://datalake-curated-1/demo/curated/crm/acct"}
 
 
 def _install_mock_duckdb(monkeypatch, con):
@@ -86,11 +86,11 @@ class TestMaterialize:
         result = engine.materialize(
             sql="SELECT * FROM curated",
             inputs=_INPUTS,
-            output_bucket="edl-analytics-1",
+            output_bucket="datalake-analytics-1",
             output_prefix="demo/analytics/company",
         )
         assert result.row_count == 3
-        assert result.output_uri == "s3://edl-analytics-1/demo/analytics/company/data.parquet"
+        assert result.output_uri == "s3://datalake-analytics-1/demo/analytics/company/data.parquet"
         assert any("COPY" in str(c) for c in con.execute.call_args_list)
 
     def test_unsafe_output_rejected_before_connect(self, monkeypatch):

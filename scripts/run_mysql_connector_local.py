@@ -34,19 +34,14 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-# ── Make project root importable when run directly ──────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# ── Force boto3 to use the dev profile when AWS_PROFILE is not already set ──
 if "AWS_PROFILE" not in os.environ:
     os.environ["AWS_PROFILE"] = "dev"
 if "AWS_DEFAULT_REGION" not in os.environ:
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
-# Register connector by importing its module (triggers @register decorator).
-# These imports must come after the sys.path manipulation above (this script
-# runs standalone, not as an installed package), hence noqa: E402 throughout.
 import connector_runtime.adapters.mysql_rds.mysql_rds_connector  # noqa: E402, F401
 from connector_runtime.adapters.mysql_rds.mysql_rds_connector import MySqlRdsConnector  # noqa: E402
 from connector_runtime.adapters.mysql_rds.mysql_rds_credentials_client import (  # noqa: E402
@@ -74,17 +69,11 @@ _logger = get_platform_logger(__name__)
 
 _ENVIRONMENT = "dev"
 _REGION = "us-east-1"
-_RAW_S3_BUCKET = "edl-raw-087972550871"
+_RAW_S3_BUCKET = os.environ.get("RAW_S3_BUCKET", "")
 
-# Map entity_id → MySQL table name (matches DynamoDB entity configs)
 _ENTITY_TABLE_MAP: dict[str, str] = {
     "mysql-rds-contracts": "Contracts",
 }
-
-
-# ---------------------------------------------------------------------------
-# Step 1 + 2: Connection test
-# ---------------------------------------------------------------------------
 
 
 def test_connection(region: str, environment: str) -> bool:
@@ -128,10 +117,6 @@ def test_connection(region: str, environment: str) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
-# Step 3: Schema discovery
-# ---------------------------------------------------------------------------
-
 _EXCLUDE_FIELDS: list[str] = ["ErrorMessage", "DSRequest"]
 
 
@@ -151,11 +136,6 @@ def discover_schema(connector: MySqlRdsConnector, entity_id: str) -> FieldContra
         print(f"        {fd.name:<30} {fd.data_type:<20} {nullable}")
     print(f"      Fingerprint: {field_contract.schema_fingerprint}\n")
     return field_contract
-
-
-# ---------------------------------------------------------------------------
-# Step 4: Extraction + S3 write
-# ---------------------------------------------------------------------------
 
 
 def run_extraction(
@@ -199,8 +179,6 @@ def run_extraction(
     extraction_date = datetime.now(UTC).strftime("%Y-%m-%d")
 
     if dry_run:
-        # Use a direct LIMIT 5 query — avoids triggering the 1000-row fetchmany batch
-        # that would transfer MBs of mediumtext data before yielding anything.
         import pymysql
         import pymysql.cursors
 
@@ -213,12 +191,7 @@ def run_extraction(
             environment=config.source_id.split("-")[0] if False else "dev",
             region_name=region,
         ).get_connection_parameters()
-        # Build column list excluding the heavy mediumtext column for display
         display_cols = [f"`{fd.name}`" for fd in field_contract.fields if fd.name != "DSRequest"]
-        # OWASP A03: display_cols come from field_contract.fields (schema
-        # introspection) and connector._table_name is internal connector
-        # state derived from validated entity config, not raw user/request
-        # input, so string-based construction here is not an injection risk.
         sample_sql = f"SELECT {', '.join(display_cols)} FROM `{connector._table_name}` LIMIT 5"  # noqa: S608  # nosec B608 — local dev script, config-derived names
         conn = pymysql.connect(
             host=creds.host,
@@ -240,7 +213,6 @@ def run_extraction(
         print("\n      [DRY RUN] Connection + schema + data fetch verified. No S3 write.")
         return
 
-    # Full run — stream directly to S3 in 50k-row chunks (O(chunk) memory, not O(table))
     print("      Streaming records to S3 in batches ...")
     writer = MySqlRdsRawLayerWriter(
         s3_bucket=raw_s3_bucket,
@@ -263,11 +235,6 @@ def run_extraction(
         f"      Browse          : https://s3.console.aws.amazon.com/s3/buckets/"
         f"{raw_s3_bucket}?prefix={partition_prefix}/"
     )
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 
 def main() -> None:
@@ -324,11 +291,9 @@ def main() -> None:
     print(f"  Row limit : {row_limit_label}")
     print("=" * 60)
 
-    # ── Steps 1 + 2: Connection test ─────────────────────────────────────────
     if not test_connection(region=region, environment=environment):
         sys.exit(1)
 
-    # ── Load entity config from DynamoDB ─────────────────────────────────────
     config_client = ConfigurationRepositoryClient(environment=environment, region_name=region)
     config = config_client.load_config(
         source_id="mysql-rds", entity_id=entity_id, tenant_code=tenant_code
@@ -342,17 +307,14 @@ def main() -> None:
         f"window={config.extraction_window_days}d\n"
     )
 
-    # ── Build connector ───────────────────────────────────────────────────────
     connector = MySqlRdsConnector(
         environment=environment,
         region_name=region,
         table_name=table_name,
     )
 
-    # ── Step 3: Schema discovery ──────────────────────────────────────────────
     field_contract = discover_schema(connector=connector, entity_id=entity_id)
 
-    # ── Resolve watermark bounds ──────────────────────────────────────────────
     watermark_lower: str | None = None
     watermark_upper: str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -369,7 +331,6 @@ def main() -> None:
 
     print(f"  Watermark upper : {watermark_upper}\n")
 
-    # ── Step 4: Extraction + optional S3 write ────────────────────────────────
     run_extraction(
         connector=connector,
         entity_id=entity_id,

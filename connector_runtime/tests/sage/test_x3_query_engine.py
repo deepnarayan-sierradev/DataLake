@@ -75,22 +75,12 @@ def _make_engine(object_path: str = _ENDPOINT) -> X3QueryEngine:
     return X3QueryEngine(object_path=object_path)
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-
 class TestConstants:
     def test_x3_page_size_is_1000(self) -> None:
         assert X3_PAGE_SIZE == 1_000
 
     def test_discriminant_key_value(self) -> None:
         assert X3_ODATA_DISCRIMINANT == "_x3_odata"
-
-
-# ---------------------------------------------------------------------------
-# Constructor validation
-# ---------------------------------------------------------------------------
 
 
 class TestConstructorValidation:
@@ -122,11 +112,6 @@ class TestConstructorValidation:
     def test_single_char_endpoint_rejected(self) -> None:
         with pytest.raises(X3QueryBuildError):
             X3QueryEngine(object_path="B")  # minimum is 2 chars
-
-
-# ---------------------------------------------------------------------------
-# Full load
-# ---------------------------------------------------------------------------
 
 
 class TestFullLoad:
@@ -209,11 +194,6 @@ class TestFullLoad:
         assert "orderby" in body
 
 
-# ---------------------------------------------------------------------------
-# Incremental load
-# ---------------------------------------------------------------------------
-
-
 class TestIncrementalLoad:
     def _build_incremental(self, watermark_field: str = _WATERMARK_FIELD) -> dict:
         engine = _make_engine()
@@ -282,11 +262,6 @@ class TestIncrementalLoad:
             )
 
 
-# ---------------------------------------------------------------------------
-# Field validation
-# ---------------------------------------------------------------------------
-
-
 class TestFieldValidation:
     def test_invalid_field_name_raises(self) -> None:
         engine = _make_engine()
@@ -335,11 +310,6 @@ class TestFieldValidation:
                 watermark_upper=None,
                 extraction_window_days=0,
             )
-
-
-# ---------------------------------------------------------------------------
-# bind_parameters
-# ---------------------------------------------------------------------------
 
 
 class TestBindParameters:

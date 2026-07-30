@@ -29,6 +29,7 @@ from config_propagation.capability import (
     policy_for,
     validate_retention_against_reprocessing,
 )
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime.configuration_repository.configuration_repository import (
     SUPPORTED_CONFIG_SCHEMA_VERSIONS,
     ConfigurationRepositoryClient,
@@ -41,7 +42,7 @@ from entity_resolution.resolution_config.resolution_config_registry import (
 )
 
 _REGION = "us-east-1"
-_BUCKET = "edl-curated-test"
+_BUCKET = "datalake-curated-test"
 
 
 class TestReprocessingPolicyMatrix:
@@ -62,7 +63,6 @@ class TestReprocessingPolicyMatrix:
             )
 
     def test_semantic_model_is_restatement_flagged(self):
-        # Read-time definitions restate history silently unless announced (DL-CFG-13).
         assert policy_for(ConfigCapability.SEMANTIC_MODEL).restatement_flagged is True
 
     def test_serving_store_change_forces_a_full_reload(self):
@@ -125,8 +125,6 @@ class TestDeclaredCacheInvalidation:
         assert declared.ttl_seconds == DEFAULT_CREDENTIAL_CACHE_TTL_SECONDS
 
     def test_declared_invalidation_methods_exist_and_are_wired(self):
-        # DL-CFG-04 acceptance: a declared invalidation API must exist AND be called by the
-        # named signal — a dead API implies a guarantee that does not exist.
         for contract in CACHE_CONTRACTS:
             if contract.basis is not InvalidationBasis.SIGNAL_DRIVEN:
                 continue
@@ -242,7 +240,7 @@ class TestConfigSchemaCompatibility:
 
     def _client(self) -> ConfigurationRepositoryClient:
         boto3.client("dynamodb", region_name=_REGION).create_table(
-            TableName="EdlEntityExtractionConfig",
+            TableName=RESOURCE_NAME_ENVIRONMENT["ENTITY_CONFIG_TABLE"],
             KeySchema=[
                 {"AttributeName": "source_id", "KeyType": "HASH"},
                 {"AttributeName": "entity_id", "KeyType": "RANGE"},

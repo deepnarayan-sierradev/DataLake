@@ -79,7 +79,7 @@ run cleanly so far):
 2. **Automatic retry** → Exponential-backoff retry logic in the Step Functions workflow
 3. **Previous data not deleted** → Raw data is written once per run and never overwritten, so a
    failed run doesn't destroy the prior day's clean data
-4. **Dead-Letter Queue** → Failed runs land in `EdlExtractionFailureDlq`; `EdlDlqProcessor` writes
+4. **Dead-Letter Queue** → Failed runs land in `datalake-extraction-failure-dlq-dev`; `datalake-dlq-processor-dev` writes
    an audit record and sends an SNS alert (auto-replay off by default)
 5. **SLO target** → 99.5% run-completion is a target we've set, not a measured historical rate
 
@@ -229,7 +229,7 @@ boundary until that's closed.
 (`connector_runtime/certification/connector_certification_checklist.py`) — registration,
 credential setup, entity mapping, a dry-run extraction profile, security/governance review, and
 acceptance validation. **This is a documented checklist, not yet an enforced automated workflow**
-— a separate `EdlSourceOnboardingRegistry` DynamoDB table is intended to track gate state, but it
+— a separate `datalake-source-onboarding-registry-dev` DynamoDB table is intended to track gate state, but it
 isn't currently called from the control-plane API, so no route today reads or writes it.
 
 In practice, bringing on a new source in dev today is a manual process: populate credentials in

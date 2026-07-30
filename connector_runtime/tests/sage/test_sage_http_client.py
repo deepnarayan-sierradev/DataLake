@@ -53,11 +53,6 @@ def _make_client(timeout: int = 45) -> SageHttpClient:
     return SageHttpClient(timeout_seconds=timeout)
 
 
-# ---------------------------------------------------------------------------
-# GET method
-# ---------------------------------------------------------------------------
-
-
 class TestGetMethod:
     def test_get_success_returns_parsed_json(self, requests_mock: requests_mock_lib.Mocker) -> None:
         payload = {"ia::result": {"object": "customer", "fields": []}}
@@ -163,11 +158,6 @@ class TestGetMethod:
             client.get(_GET_URL, headers=_AUTH_HEADERS)
 
 
-# ---------------------------------------------------------------------------
-# POST method
-# ---------------------------------------------------------------------------
-
-
 class TestPostMethod:
     def test_post_success_returns_parsed_json(
         self, requests_mock: requests_mock_lib.Mocker
@@ -215,11 +205,6 @@ class TestPostMethod:
 
         sent = json.loads(_sent_request(requests_mock).text)
         assert sent == body
-
-
-# ---------------------------------------------------------------------------
-# POST form method
-# ---------------------------------------------------------------------------
 
 
 class TestPostFormMethod:
@@ -277,11 +262,6 @@ class TestPostFormMethod:
             client.post_form(_TOKEN_URL, headers={}, form_data={})
 
 
-# ---------------------------------------------------------------------------
-# TLS & security
-# ---------------------------------------------------------------------------
-
-
 class TestTlsAndSecurity:
     def test_tls_verify_is_true(self) -> None:
         """TLS verification must always be enabled — no way to disable it."""
@@ -292,13 +272,7 @@ class TestTlsAndSecurity:
         requests_mock.get(_GET_URL, json={})
         client = SageHttpClient(timeout_seconds=10)
         client.get(_GET_URL, headers=_AUTH_HEADERS)
-        # Just verify the client was constructed and call completed without error.
         assert client._timeout == 10  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
-# Exception hierarchy
-# ---------------------------------------------------------------------------
 
 
 class TestExceptionHierarchy:

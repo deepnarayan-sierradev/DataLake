@@ -1,9 +1,9 @@
 variable "environment" {
-  description = "Deployment environment: dev, staging, or prod."
+  description = "Deployment environment: dev, uat, or prod."
   type        = string
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment must be one of: dev, staging, prod."
+    condition     = contains(["dev", "uat", "prod"], var.environment)
+    error_message = "environment must be one of: dev, uat, prod."
   }
 }
 
@@ -127,4 +127,14 @@ variable "code_signing_config_arn" {
   description = "Lambda code-signing configuration (CKV_AWS_272). Null leaves signing unattached."
   type        = string
   default     = null
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
+}
+
+variable "resource_names" {
+  type        = map(string)
+  description = "Every physical resource name this Lambda reads from its environment, built once in the environment root from the resources Terraform actually created."
 }

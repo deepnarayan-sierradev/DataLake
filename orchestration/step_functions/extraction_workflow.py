@@ -120,20 +120,9 @@ from watermark_management.watermark_repository.watermark_repository import (
 
 _logger = get_platform_logger(__name__)
 
-# ---------------------------------------------------------------------------
-# Checkpoint / partial-run tuning (PERF-5)
-# ---------------------------------------------------------------------------
 
-# How often (in records) the checkpoint-bounded iterator checks remaining
-# Lambda execution time. Checking every record would call
-# context.get_remaining_time_in_millis() far more often than useful; checking
-# too rarely risks overshooting the time budget between checks.
 _CHECKPOINT_TIME_CHECK_INTERVAL_RECORDS: Final[int] = 1_000
 
-# Minimum Lambda time (ms) that must remain when a periodic checkpoint check
-# runs. Chosen to leave enough headroom to finish writing the current chunk,
-# the schema snapshot, drift evaluation, and a watermark advance — all of
-# which run AFTER extraction stops — before the hard 900s Lambda timeout.
 _CHECKPOINT_MIN_REMAINING_MS: Final[int] = 90_000
 
 
@@ -176,9 +165,6 @@ class LambdaTimeoutWarning(Exception):  # noqa: N818 -- deliberately "Warning", 
         retry_after_seconds: float = 0.0,
     ) -> None:
         super().__init__(message)
-        # L14: how long the state machine should Wait before resuming. Zero means "resume
-        # immediately" (a record-count checkpoint); non-zero comes from a provider's Retry-After,
-        # which the rate-limit policy refuses to absorb as billed Lambda idle time.
         self.retry_after_seconds = retry_after_seconds
         self.run_id = run_id
         self.partial_run_id = partial_run_id
@@ -203,11 +189,6 @@ class LambdaTimeoutWarning(Exception):  # noqa: N818 -- deliberately "Warning", 
             "partial_run_id": self.partial_run_id,
             "reason": self.reason,
         }
-
-
-# ---------------------------------------------------------------------------
-# Protocol
-# ---------------------------------------------------------------------------
 
 
 @runtime_checkable
@@ -251,11 +232,6 @@ class RawLayerWriterProtocol(Protocol):
         ...
 
 
-# ---------------------------------------------------------------------------
-# Value objects
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class ExtractionWorkflowResult:
     """
@@ -271,14 +247,10 @@ class ExtractionWorkflowResult:
     schema_fingerprint: str
     raw_s3_prefix: str
     drift_classification: DriftClassification
-    # StrEnum — serialises as string value via dataclasses.asdict()
     transformation_blocked: bool
     started_at: str  # ISO-8601 UTC
     completed_at: str  # ISO-8601 UTC
     partial: bool = False
-    # True when watermark advance failed due to a concurrent update.
-    # Extraction data was written successfully; the step function should
-    # handle this as a recoverable partial run, not a DLQ candidate.
 
 
 @dataclass(frozen=True)
@@ -296,11 +268,6 @@ class _CheckpointInfo:
     reason: str
 
 
-# ---------------------------------------------------------------------------
-# Stage timer helper (E-2 / F-14)
-# ---------------------------------------------------------------------------
-
-
 class _StageTimer:
     """Lightweight monotonic timer for per-stage duration_ms tracking."""
 
@@ -310,11 +277,6 @@ class _StageTimer:
     def elapsed_ms(self) -> int:
         """Return elapsed milliseconds since construction (integer)."""
         return int((time.monotonic() - self._start) * 1_000)
-
-
-# ---------------------------------------------------------------------------
-# Workflow
-# ---------------------------------------------------------------------------
 
 
 class ExtractionWorkflow:
@@ -368,8 +330,6 @@ class ExtractionWorkflow:
         self._chunk_size = chunk_size
         self._lambda_context = lambda_context
 
-    # ── Public API ──────────────────────────────────────────────────────────
-
     def execute(  # noqa: C901 — see the note below on why this is not split
         self,
         is_replay: bool = False,
@@ -416,8 +376,6 @@ class ExtractionWorkflow:
         run_id = self._coordinator.run_id
         started_at = self._coordinator.started_at
 
-        # Bind run/entity context to every log line in this thread for the
-        # duration of the run (F-13).  Cleared in the finally block below.
         structlog.contextvars.bind_contextvars(
             run_id=run_id,
             source_id=source_id,
@@ -431,12 +389,6 @@ class ExtractionWorkflow:
                 error_message=f"Replaying run_id={replay_of_run_id}",
             )
 
-        # Guard: check circuit breaker before incurring any AWS costs.
-        # entity_id must be passed here to match the key record_success()/
-        # record_failure() write under below — omitting it (as this call
-        # previously did) means the guard reads a key nothing ever
-        # increments, and the circuit can never open no matter how many
-        # real failures occur.
         if self._retry_policy is not None and self._retry_policy.is_circuit_open(
             source_id, entity_id, tenant_code=self._coordinator.tenant_code
         ):
@@ -451,17 +403,14 @@ class ExtractionWorkflow:
 
         current_stage = PipelineStage.CONFIGURATION_LOAD
         try:
-            # ── Stage 1: CONFIGURATION_LOAD ─────────────────────────────────
             _t1 = _StageTimer()
             config = self._stage_load_config(source_id, entity_id)
-            # duration_ms is emitted inside _stage_load_config; override here to include timer
             self._coordinator.emit_stage(
                 stage=PipelineStage.CONFIGURATION_LOAD,
                 status=RunStatus.SUCCESS,
                 duration_ms=_t1.elapsed_ms(),
             )
 
-            # ── Stage 2: CREDENTIAL_RETRIEVAL (watermark + window) ──────────
             current_stage = PipelineStage.CREDENTIAL_RETRIEVAL
             _t2 = _StageTimer()
             watermark, lower_bound, upper_bound = self._stage_resolve_watermark(config, run_id)
@@ -473,7 +422,6 @@ class ExtractionWorkflow:
                 extraction_window_end=upper_bound,
             )
 
-            # ── Stage 3: METADATA_DISCOVERY ─────────────────────────────
             current_stage = PipelineStage.METADATA_DISCOVERY
             _t3 = _StageTimer()
             field_contract = self._stage_discover_fields(config)
@@ -483,7 +431,6 @@ class ExtractionWorkflow:
                 duration_ms=_t3.elapsed_ms(),
             )
 
-            # ── Stage 4: QUERY_BUILD ─────────────────────────────────────
             current_stage = PipelineStage.QUERY_BUILD
             _t4 = _StageTimer()
             query_contract = self._connector.build_extraction_query(
@@ -502,7 +449,6 @@ class ExtractionWorkflow:
                 duration_ms=_t4.elapsed_ms(),
             )
 
-            # ── Stage 5: EXTRACTION + RAW write ─────────────────────────────
             current_stage = PipelineStage.EXTRACTION
             _t5 = _StageTimer()
             record_count, raw_s3_prefix, checkpoint_info = self._stage_extract_and_write(
@@ -512,10 +458,6 @@ class ExtractionWorkflow:
                 run_id=run_id,
                 upper_bound=upper_bound,
             )
-            # Always SUCCESS here — the EXTRACTION stage itself did not error.
-            # A checkpoint (PERF-5) gets its own distinct RunStatus.PARTIAL
-            # audit record later via emit_checkpoint_stage(), under a
-            # distinguishable run_id, once the partial watermark is committed.
             self._coordinator.emit_stage(
                 stage=PipelineStage.EXTRACTION,
                 status=RunStatus.SUCCESS,
@@ -523,7 +465,6 @@ class ExtractionWorkflow:
                 duration_ms=_t5.elapsed_ms(),
             )
 
-            # ── Stage 6: SCHEMA_SNAPSHOT ────────────────────────────────────
             current_stage = PipelineStage.SCHEMA_SNAPSHOT
             _t6 = _StageTimer()
             snapshot = self._build_schema_snapshot(field_contract, record_count, upper_bound)
@@ -538,7 +479,6 @@ class ExtractionWorkflow:
                 duration_ms=_t6.elapsed_ms(),
             )
 
-            # ── Stage 7: SCHEMA_DRIFT_EVALUATION ────────────────────────
             current_stage = PipelineStage.SCHEMA_DRIFT_EVALUATION
             _t7 = _StageTimer()
             drift_report = self._stage_evaluate_drift(config, snapshot)
@@ -548,7 +488,6 @@ class ExtractionWorkflow:
                 duration_ms=_t7.elapsed_ms(),
             )
 
-            # ── Stage 8: RAW_WRITE (count validation + partition audit) ────
             current_stage = PipelineStage.RAW_WRITE
             self._coordinator.emit_stage(
                 stage=PipelineStage.RAW_WRITE,
@@ -559,7 +498,6 @@ class ExtractionWorkflow:
                 drift_classification=drift_report.overall_classification,
             )
 
-            # ── Stage 9: WATERMARK_UPDATE ────────────────────────────────────
             current_stage = PipelineStage.WATERMARK_UPDATE
             concurrency_partial_result = self._stage_watermark_update_or_checkpoint(
                 checkpoint_info=checkpoint_info,
@@ -579,7 +517,6 @@ class ExtractionWorkflow:
             if concurrency_partial_result is not None:
                 return concurrency_partial_result
 
-            # ── Stage 10: RUN_COMPLETION ─────────────────────────────────────
             completed_at = datetime.now(tz=UTC)
             self._coordinator.emit_stage(
                 stage=PipelineStage.RUN_COMPLETION,
@@ -639,11 +576,6 @@ class ExtractionWorkflow:
         except ResumeAfterBackoffRequired as exc:
             self._checkpoint_for_backoff(exc, source_id=source_id, entity_id=entity_id)
         except (CircuitOpenError, LambdaTimeoutWarning):
-            # LambdaTimeoutWarning (PERF-5) is a non-fatal checkpoint: the
-            # partial watermark advance and checkpoint audit record were
-            # already committed in _commit_checkpoint_and_raise(). Like
-            # CircuitOpenError, it must NOT be treated as a pipeline failure —
-            # no DLQ entry, no circuit-breaker failure count.
             raise
         except Exception as exc:
             if self._retry_policy is not None:
@@ -659,11 +591,7 @@ class ExtractionWorkflow:
             )
             raise
         finally:
-            # Always clear the structlog context vars so they do not leak into
-            # subsequent runs that reuse the same thread (e.g. Lambda container reuse).
             structlog.contextvars.clear_contextvars()
-
-    # ── Private stage methods ───────────────────────────────────────────────
 
     def _stage_load_config(self, source_id: str, entity_id: str) -> EntityExtractionConfig:
         """Load entity extraction config. Stage emission handled by execute() with duration_ms."""
@@ -734,10 +662,6 @@ class ExtractionWorkflow:
                     record_iter, config.max_records_per_lambda_run, checkpoint_holder
                 )
             else:
-                # A checkpoint's resume point is the watermark — full loads
-                # have no watermark to resume from, so the cap is not
-                # meaningful here. Ignore it rather than silently truncating
-                # a full load's output.
                 _logger.warning(
                     "extraction_checkpoint_ignored_for_full_load",
                     source_id=config.source_id,
@@ -930,9 +854,6 @@ class ExtractionWorkflow:
         try:
             self._stage_advance_watermark(watermark, config, upper_bound, run_id)
         except WatermarkConcurrencyError as wce:
-            # Another Lambda instance advanced the watermark concurrently.
-            # This is not a data-loss event; the record was written successfully.
-            # Return PARTIAL status rather than routing to the DLQ.
             _logger.warning(
                 "watermark_concurrency_conflict_partial_success",
                 run_id=run_id,
@@ -1012,16 +933,8 @@ class ExtractionWorkflow:
                 if partial_upper_bound.tzinfo is None:
                     partial_upper_bound = partial_upper_bound.replace(tzinfo=UTC)
             except ValueError:
-                # Watermark field value was not a parseable ISO-8601 timestamp
-                # (should not happen for a well-formed watermark_field, but a
-                # checkpoint must never crash on this) — fall back to the
-                # window's lower bound, the most conservative safe choice.
                 partial_upper_bound = lower_bound
         else:
-            # No record carried a watermark-field value at all — fall back to
-            # the window's lower bound rather than falsely advancing to the
-            # full upper_bound (which would incorrectly claim records beyond
-            # the checkpoint were processed).
             partial_upper_bound = lower_bound
 
         if watermark is not None and partial_upper_bound < watermark.upper_watermark:
@@ -1030,12 +943,6 @@ class ExtractionWorkflow:
         try:
             self._stage_advance_watermark(watermark, config, partial_upper_bound, run_id)
         except WatermarkConcurrencyError as wce:
-            # Another invocation already advanced the watermark past this
-            # point — the checkpoint's own partial progress is superseded,
-            # not lost. Proceed to raise LambdaTimeoutWarning regardless: the
-            # data already written to S3 for THIS run remains valid, and a
-            # resumed run will naturally pick up from whichever watermark
-            # value is currently stored (unaffected by this race).
             _logger.warning(
                 "checkpoint_watermark_concurrency_conflict",
                 run_id=run_id,
@@ -1045,8 +952,6 @@ class ExtractionWorkflow:
             )
 
         part_number = 1  # see module docstring: multi-checkpoint numbering
-        # requires threading a resume/part counter through Step Functions,
-        # which is out of scope here (documented, not guessed at).
         partial_run_id = self._coordinator.emit_checkpoint_stage(
             part_number=part_number,
             record_count=checkpoint_info.records_written,

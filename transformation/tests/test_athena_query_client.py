@@ -15,9 +15,9 @@ from transformation.athena_query_client import (
     AthenaQueryResult,
 )
 
-WORKGROUP = "EdlAnalytics"
+WORKGROUP = "datalake-analytics-dev"
 REGION = "us-east-1"
-DATABASE = "edl_analytics"
+DATABASE = "datalake_analytics_dev"
 
 
 @pytest.fixture()
@@ -26,7 +26,6 @@ def athena_client():
     with mock_aws():
         import boto3
 
-        # Create the workgroup so queries can reference it
         boto3.client("athena", region_name=REGION).create_work_group(
             Name=WORKGROUP,
             Configuration={
@@ -72,13 +71,11 @@ class TestGetQueryResults:
     def test_get_query_results_succeeded_execution(self, athena_client: AthenaQueryClient) -> None:
         result = athena_client.execute_query(query="SELECT 1", database=DATABASE)
         rows = athena_client.get_query_results(result.query_execution_id)
-        # moto returns empty result set for synthetic queries
         assert isinstance(rows, list)
 
     def test_get_query_results_unknown_execution_raises_error(
         self, athena_client: AthenaQueryClient
     ) -> None:
-        # moto may raise ClientError for unknown execution IDs
         with pytest.raises(AthenaQueryError):
             athena_client.get_query_results("nonexistent-execution-id")
 
@@ -111,7 +108,6 @@ class TestAthenaErrorPaths:
         from unittest.mock import MagicMock, patch
 
         client = self._make_client()
-        # Patch _get_execution_status to return FAILED after the first call to start
         mock_status = MagicMock()
         mock_status.return_value = {
             "QueryExecution": {
@@ -220,15 +216,14 @@ class TestDatabaseValidation:
     @pytest.mark.parametrize(
         "database",
         [
-            "edl_analytics",
-            "edl_curated",
+            "datalake_analytics_dev",
+            "datalake_curated_dev",
             "a1b2c3",
         ],
     )
     def test_valid_database_names_accepted(
         self, athena_client: AthenaQueryClient, database: str
     ) -> None:
-        # Should not raise; will proceed to Athena (or fail on workgroup for different workgroup)
         result = athena_client.execute_query(query="SELECT 1", database=database)
         assert result.state == "SUCCEEDED"
 

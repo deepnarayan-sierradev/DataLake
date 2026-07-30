@@ -49,7 +49,7 @@ deliberately no tenant-provisioning endpoint here, and a test asserts its absenc
 
 Credentials are **per connection**:
 
-`edl/tenants/{tenant_code}/connections/{connection_id}/credentials`
+`datalake/<env>/tenants/{tenant_code}/connections/{connection_id}/credentials`
 
 resolved through `connector_runtime/connection_credential_resolver.py`. Write-back uses a separate
 `...-writeback` secret so a read-only deployment cannot mutate a source.
@@ -64,15 +64,15 @@ account, so the secret path doesn't need to disambiguate environment within a si
 ### Legacy shared paths (still in place in dev until the migration runs)
 
 **Sage is the one exception** — it has an extra `{product_name}` segment because it has two
-distinct products (Intacct and X3) with separate credentials: `edl/sources/sage/{product_name}/credentials`.
+distinct products (Intacct and X3) with separate credentials: `datalake/<env>/sources/sage/{product_name}/credentials`.
 
 | Source | Secret ID | Status | Entities | Required JSON keys |
 |---|---|---|---|---|
-| Salesforce | `edl/sources/salesforce/credentials` | ✅ Connected, real data flowing | Account, Contact, Contract, Opportunity | `instance_url`, `client_id`, `client_secret` |
-| MySQL RDS | `edl/sources/mysql-rds/credentials` | ✅ Connected, real data flowing | Contracts, ContractTerms | `host`, `port`, `username`, `password`, `database` |
-| Sage Intacct | `edl/sources/sage/intacct/credentials` | 🟡 Code-complete, not connected | Customer, Vendor, AR Invoice, AP Bill | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
-| Sage X3 | `edl/sources/sage/x3/credentials` | 🟡 Code-complete, not connected | Customer, Supplier | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
-| NetSuite | `edl/sources/netsuite/credentials` | 🟡 Code-complete, not connected | Customer | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
+| Salesforce | `datalake/<env>/sources/salesforce/credentials` | ✅ Connected, real data flowing | Account, Contact, Contract, Opportunity | `instance_url`, `client_id`, `client_secret` |
+| MySQL RDS | `datalake/<env>/sources/mysql-rds/credentials` | ✅ Connected, real data flowing | Contracts, ContractTerms | `host`, `port`, `username`, `password`, `database` |
+| Sage Intacct | `datalake/<env>/sources/sage/intacct/credentials` | 🟡 Code-complete, not connected | Customer, Vendor, AR Invoice, AP Bill | `token_url`, `client_id`, `client_secret`, `base_url`, `company_id` |
+| Sage X3 | `datalake/<env>/sources/sage/x3/credentials` | 🟡 Code-complete, not connected | Customer, Supplier | `token_url`, `client_id`, `client_secret`, `base_url`, `folder` |
+| NetSuite | `datalake/<env>/sources/netsuite/credentials` | 🟡 Code-complete, not connected | Customer | `account_id`, `consumer_key`, `consumer_secret`, `token_id`, `token_secret` |
 
 The ten SOW sources (HubSpot, MaidCentral, ServMan Pro, WellSky, Housecall Pro, Dialpad,
 SeniorPlace, Google Ads, Google Analytics, Meta Ads) are implemented as declarative REST specs and

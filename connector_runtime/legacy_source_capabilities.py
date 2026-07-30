@@ -45,7 +45,6 @@ _DECLARATIONS: Final[tuple[SourceCapabilityDeclaration, ...]] = (
                 SourceCapability.RECORD_COUNT,
             }
         ),
-        # Gap 17: NetSuite's keyset paging is now an implementation of the shared interface.
         default_pagination_strategy="keyset",
         notes="Retained and proven; not on the customer's required source list.",
     ),
@@ -60,7 +59,6 @@ _DECLARATIONS: Final[tuple[SourceCapabilityDeclaration, ...]] = (
                 SourceCapability.RECORD_COUNT,
             }
         ),
-        # The only source where binlog CDC via DMS is available (DL-CONN-13).
         default_sync_strategy="log_based_cdc",
         default_pagination_strategy="keyset",
         notes="Database-direct source; binlog CDC available through DMS.",

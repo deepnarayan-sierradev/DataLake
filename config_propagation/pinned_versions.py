@@ -17,10 +17,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from config_propagation.capability import ConfigCapability
 
-# Pinned version strings come from config artefacts, never from request input (OWASP A03).
 _SAFE_VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
 
-# Sentinel that must never appear in a pinned set — its presence means pinning was bypassed.
 UNPINNED_SENTINEL: Final[str] = "latest"
 
 

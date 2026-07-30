@@ -15,7 +15,7 @@ Step Functions input schema (Parameters block in LoadServingStore state):
                                     (logging/tracing context only — not used for the config lookup)
     "entity_type":           str  — analytics-layer entity type (e.g. "company"), the actual
                                     ServingStoreConfigRepositoryClient lookup key
-    "environment":           str  — "dev" | "staging" | "prod"
+    "environment":           str  — "dev" | "uat" | "prod"
     "run_id":                str  — run_id produced by the extraction stage
     "tenant_code":           str  — tenant identity for this run
     "analytics_s3_prefix":   str  — S3 prefix of analytics records (analytics publisher output)
@@ -58,9 +58,6 @@ from typing import Any, Final
 import boto3
 import pyarrow.parquet as pq
 
-# Import every engine adapter module so its @serving_store_registry.register()
-# decorator runs before resolve() is ever called — mirrors
-# connector_runtime/extraction_pipeline_handler.py's adapter-import convention.
 import serving_store.loaders.mysql_rds_loader
 import serving_store.loaders.postgresql_loader
 import serving_store.loaders.redshift_loader
@@ -116,7 +113,7 @@ _REQUIRED_EVENT_FIELDS: Final[frozenset[str]] = frozenset(
         "analytics_s3_prefix",
     }
 )
-_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "staging", "prod"})
+_KNOWN_ENVIRONMENTS: Final[frozenset[str]] = frozenset({"dev", "uat", "prod"})
 _PARQUET_BATCH_SIZE: Final[int] = 2_000
 
 
@@ -133,11 +130,6 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     tenant_code: str = str(event["tenant_code"])
     analytics_s3_prefix: str = event["analytics_s3_prefix"]
 
-    # Migrated to `stage_execution` on 2026-07-29. This is the last stage on the critical path to
-    # the serving store, so its failure is what a freshness breach looks like — and it had no DLQ
-    # producer, leaving `EdlStageDlq-ServingStoreLoad` inert with a 900s detection budget on a queue
-    # nothing could write to. The engine-specific failure classification stays: it distinguishes a
-    # connection failure from a load failure, which the generic scaffold cannot know.
     identity = StageIdentity(
         tenant_code=tenant_code,
         source_id=source_id,
@@ -187,8 +179,6 @@ def _run_serving_store_load(
     try:
         config = config_repo.load_config(tenant_code, entity_type)
     except ServingStoreConfigNotFoundError:
-        # Alarmed at zero: a silent skip must never be mistaken for a successful load
-        # (DL-SERV-07's own observability note).
         record_platform_metric(PlatformMetric.SERVING_STORE_SKIPPED_NO_CONFIG)
         _logger.info(
             "serving_store_load_skipped_no_config",
@@ -221,8 +211,6 @@ def _run_serving_store_load(
     )
 
     if loader.supports_s3_bulk_load:
-        # Columnar/MPP engines (Redshift) load set-based via COPY straight from S3 —
-        # row batches are never materialised in the Lambda.
         result = loader.load_from_s3(
             analytics_s3_bucket,
             analytics_s3_prefix,
@@ -358,10 +346,6 @@ def _apply_row_level_security(config: Any, tenant_code: str, table_name: str) ->
         db_host=config.db_host,
         db_port=config.db_port,
     )
-    # The RLS predicate filters on scope_unit_id/brand_code, so the supporting indexes are
-    # applied in the same pass: a row-security filter on an unindexed column turns every BI query
-    # into a table scan, which is the failure §11 forbids (it bans throttling included
-    # capabilities, so the layer must be sized rather than rate-limited).
     sizing = default_sizing_profile((table_name,))
     index_statements = tuple(
         index.create_sql(engine) for index in sizing.indexes if index.table_name == table_name

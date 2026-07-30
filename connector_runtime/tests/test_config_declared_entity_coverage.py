@@ -25,7 +25,6 @@ from typing import Any
 
 import pytest
 
-# The deployed entry point, imported for its registration side effects (G2's discipline).
 import connector_runtime.extraction_pipeline_handler  # noqa: F401
 from connector_runtime.adapters.rest_api.rest_adapter_registration import (
     RestSourceParams,
@@ -55,7 +54,6 @@ def _params(source_id: str, **overrides: Any) -> RestSourceParams:
 
 class TestEveryRestSourceAcceptsAConfigDeclaredEntity:
     def test_the_registry_is_not_empty(self) -> None:
-        # Guards against the whole file passing vacuously if registration ever breaks.
         assert len(_SOURCE_IDS) >= 12
 
     @pytest.mark.parametrize("source_id", _SOURCE_IDS)
@@ -118,8 +116,6 @@ class TestStructuralTrapsNoSourceMayFallInto:
 
     @pytest.mark.parametrize("source_id", _SOURCE_IDS)
     def test_keyset_paging_always_has_a_key_to_seek_on(self, source_id: str) -> None:
-        # KeysetPagination raises at run time without one; catching it here means the
-        # failure surfaces in CI rather than on the first scheduled extraction.
         for entity in _spec(source_id).entities:
             if entity.pagination_strategy == "keyset":
                 assert entity.keyset_field, (
@@ -136,9 +132,6 @@ class TestStructuralTrapsNoSourceMayFallInto:
     def test_a_watermark_field_is_only_claimed_where_an_entity_can_filter(
         self, source_id: str
     ) -> None:
-        # A watermark on an entity whose source cannot filter incrementally advances state
-        # against an unfiltered read. Either the capability is declared, or no entity claims
-        # a watermark field.
         spec = _spec(source_id)
         claims = [e.entity_id for e in spec.entities if e.watermark_field]
         if SourceCapability.INCREMENTAL not in spec.capabilities:
@@ -199,8 +192,6 @@ class TestInheritedDefaultsMatchWhatTheSourceActuallyUses:
     def test_the_inherited_envelope_is_reachable_from_a_resolved_entity(
         self, source_id: str
     ) -> None:
-        # The end-to-end form of the assertion above: what resolve_entity_spec hands back
-        # must carry the source's envelope, not the dataclass's generic default.
         spec = _spec(source_id)
         resolved = resolve_entity_spec(spec, _params(source_id, entity_path="/v1/console-added"))
         assert resolved.records_json_path == spec.default_records_json_path

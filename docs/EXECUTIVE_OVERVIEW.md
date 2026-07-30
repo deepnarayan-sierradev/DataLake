@@ -328,9 +328,9 @@ The platform enforces a **zero-trust, need-to-know** access model. Each pipeline
 
 | Bucket | Extraction | Transformation | Entity Resolution | Analytics Serve | Governance | BI/Analytics |
 |---|---|---|---|---|---|---|
-| Raw (`{env}-edl-raw`) | **Write** | Read | ✗ | ✗ | Read (audit) | ✗ |
-| Curated (`{env}-edl-curated`) | ✗ | **Write** | Read | Read | Read (audit) | ✗ |
-| Analytics (`{env}-edl-analytics`) | ✗ | ✗ | **Write** | Read | Read (audit) | **Read (prefix-scoped)** |
+| Raw (`datalake-raw-{env}`) | **Write** | Read | ✗ | ✗ | Read (audit) | ✗ |
+| Curated (`datalake-curated-{env}`) | ✗ | **Write** | Read | Read | Read (audit) | ✗ |
+| Analytics (`datalake-analytics-{env}`) | ✗ | ✗ | **Write** | Read | Read (audit) | **Read (prefix-scoped)** |
 | Schema Snapshots | Write | Read | ✗ | ✗ | Read | ✗ |
 | Governance | ✗ | Write (lineage) | Write (lineage) | ✗ | **Write** | ✗ |
 | Mapping / Quality | ✗ | Read | ✗ | ✗ | **Write** | ✗ |
@@ -626,7 +626,7 @@ Compare: previous approach of writing a new ETL script = 2–4 weeks.
 
 | Audit question | Evidence location |
 |---|---|
-| "Who extracted this data on this date?" | DynamoDB run audit log (table: `{env}-edl-run-audit-log`) |
+| "Who extracted this data on this date?" | DynamoDB run audit log (table: `{env}-datalake-run-audit-log-dev`) |
 | "What fields were extracted?" | Schema snapshot (S3: `schemas/{source_id}/{entity_id}/{date}.json`) |
 | "Was PII masked before analytics access?" | Transformation lineage record; classification policy version logged |
 | "What changed in the source schema?" | Drift report (S3: alongside schema snapshot) |

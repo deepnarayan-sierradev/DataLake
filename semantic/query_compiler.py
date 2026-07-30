@@ -46,14 +46,11 @@ _SQL_OPERATORS: dict[str, str] = {
     "lte": "<=",
 }
 
-# Fixed internal view name the engine binds the entity's analytics dataset to.
 _ENTITY_VIEW = "entity_data"
 
-# Hard server-side row cap; every response is paginated and bounded.
 DEFAULT_ROW_LIMIT = 10_000
 MAX_ROW_LIMIT = 100_000
 
-# An IN list longer than this is a caller mistake, not a query.
 MAX_IN_LIST_VALUES = 1_000
 
 
@@ -178,11 +175,6 @@ class QueryCompiler:
         request: SemanticQueryRequest,
         *,
         granted_access_tags: frozenset[str],
-        # Non-optional in type as well as position. Making it positionally required (2026-07-28)
-        # did not close the hole: `| None` plus an early return meant a caller could still pass
-        # `None` and get tenant-wide rows with no error, no log line, and no metric — and writing
-        # `None` explicitly reads as deliberate, so review waved it through. A caller with no
-        # end-user claim now passes `unrestricted_predicate(...)`, which is audited (DL-SCOPE-14).
         scope_predicate: ScopePredicate,
         today: date | None = None,
     ) -> CompiledQuery:
@@ -214,8 +206,6 @@ class QueryCompiler:
             scope_predicate_applied=plan.scope_applied,
             referenced_columns=tuple(plan.referenced_columns),
         )
-
-    # ── Stages ────────────────────────────────────────────────────────────────
 
     def _compile_dimensions(
         self,
@@ -416,8 +406,6 @@ class QueryCompiler:
         plan.prepend_where(sql, *(scope_predicate.parameters[name] for name in ordered_names))
         plan.scope_applied = True
 
-    # ── Resolution ────────────────────────────────────────────────────────────
-
     def _entity(self, name: str) -> SemanticEntity:
         try:
             return self._model.entity(name)
@@ -438,7 +426,6 @@ class QueryCompiler:
 
     @staticmethod
     def _enforce_access(tag: str | None, granted: frozenset[str], field_name: str) -> None:
-        # OWASP A01: data-level authorization — a tagged field needs the caller to hold the tag.
         if tag is not None and tag not in granted:
             record_platform_metric(PlatformMetric.SEMANTIC_ACCESS_DENIED)
             raise AccessDeniedError(f"Access tag {tag!r} required for {field_name!r}.")
@@ -476,7 +463,6 @@ class _CompilationPlan:
 
     def prepend_where(self, clause: str, *values: Any) -> None:
         self.where_clauses.insert(0, clause)
-        # Parameters must lead too, or positional binding would misalign.
         self.parameters[0:0] = list(values)
 
     def add_join(self, join: Any, target_entity_name: str) -> str:

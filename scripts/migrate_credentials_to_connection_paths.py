@@ -1,9 +1,10 @@
 """
 Migration: move shared per-source credentials to per-connection paths (DL-SEC-05, DL-SCOPE-06).
 
-Before: one secret per connector type at `edl/sources/{source_id}/credentials`, shared by every
+Before: one secret per connector type at `datalake/<env>/sources/{source_id}/credentials`,
+shared by every
 tenant using that connector. After: one secret per connection at
-`edl/tenants/{tenant_code}/connections/{connection_id}/credentials`.
+`datalake/<env>/tenants/{tenant_code}/connections/{connection_id}/credentials`.
 
 The copy is additive — the legacy secret is left in place — because
 `ConnectionCredentialPathResolver` falls back to it with a warning while the migration is in
@@ -19,11 +20,13 @@ Dry-run by default. Values are never printed.
 from __future__ import annotations
 
 import argparse
+import os
 from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
 
+from contracts.resource_naming import secret_path
 from tenancy.source_connection import connection_credential_path
 
 
@@ -64,7 +67,6 @@ def _copy_secret(
         return "no-legacy-source"
     if dry_run:
         return "would-copy"
-    # Read and immediately write; the value is never logged, printed, or returned.
     value = secrets.get_secret_value(SecretId=legacy_id)["SecretString"]
     create_kwargs: dict[str, Any] = {
         "Name": target_id,
@@ -89,7 +91,7 @@ def main() -> None:
         description="Copy shared per-source credentials to per-connection paths (DL-SEC-05)."
     )
     parser.add_argument("--region", default="us-east-1")
-    parser.add_argument("--connection-table", default="EdlSourceConnection")
+    parser.add_argument("--connection-table", default=os.environ.get("SOURCE_CONNECTION_TABLE"))
     parser.add_argument(
         "--kms-key-id",
         default=None,
@@ -128,7 +130,7 @@ def main() -> None:
         tenant_code = str(connection["tenant_code"])
         connection_id = str(connection["connection_id"])
         source_id = str(connection.get("source_id", connection_id))
-        legacy_id = f"edl/sources/{source_id}/credentials"
+        legacy_id = secret_path("sources", source_id, "credentials")
         target_id = connection_credential_path(tenant_code, connection_id)
         outcome = _copy_secret(
             secrets,
@@ -153,8 +155,6 @@ def main() -> None:
         for legacy_id in sorted(legacy_sources):
             print(f"  - {legacy_id}")
             if not dry_run:
-                # 30-day recovery window: a wrong deletion here takes every tenant on that
-                # connector offline, so it must be recoverable.
                 secrets.delete_secret(SecretId=legacy_id, RecoveryWindowInDays=30)
     elif not dry_run:
         print(

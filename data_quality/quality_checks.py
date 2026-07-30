@@ -23,15 +23,11 @@ from data_quality.exception_repository import (
 )
 from observability.metric_recorder import record_platform_metric
 
-# A record with a date this far in the future is a source defect, not a forward booking.
 DEFAULT_FUTURE_TOLERANCE_DAYS: Final[int] = 1
 
-# Records before this are treated as epoch-sentinel corruption rather than history.
 DEFAULT_EPOCH: Final[date] = date(1990, 1, 1)
 
 
-# Each batch check's measured value maps to one catalogued metric, so the rate a check
-# computes is the rate the dashboard shows rather than a separately-derived number.
 _OUTCOME_METRICS: Final[dict[str, PlatformMetric]] = {
     "completeness": PlatformMetric.COMPLETENESS_RATE,
     "duplicate-rate": PlatformMetric.DUPLICATE_RATE,

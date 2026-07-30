@@ -99,7 +99,6 @@ class TestCorrelationId:
         assert derive_correlation_id("run-1") == "run-1"
 
     def test_replay_inherits_the_original_run_id(self) -> None:
-        # DL-OPS-07: a replay is the same logical operation, so one id spans both.
         assert derive_correlation_id("run-2", replay_of_run_id="run-1") == "run-1"
 
     def test_empty_replay_id_falls_back_to_the_run_id(self) -> None:
@@ -129,8 +128,6 @@ class TestStageIdentity:
         assert identity.metric_dimensions()["ConnectionId"] == "sf-west"
 
     def test_scope_unit_is_not_a_metric_dimension(self) -> None:
-        # Scope units are unbounded per tenant; as a CloudWatch dimension they would
-        # multiply custom-metric cost without bound.
         identity = StageIdentity(**{**_IDENTITY.__dict__, "scope_unit_id": "brand-a"})
         assert "ScopeUnitId" not in identity.metric_dimensions()
 
@@ -149,7 +146,6 @@ class TestLifecycleGuarantees:
         assert structlog.contextvars.get_contextvars() == {}
 
     def test_contextvars_are_cleared_even_when_the_body_raises(self) -> None:
-        # This is the warm-container leak that was a real, previously-fixed bug.
         execution, _ = _make_execution()
         with pytest.raises(ValueError), execution:
             raise ValueError("boom")
@@ -181,7 +177,6 @@ class TestLifecycleGuarantees:
         assert emitter.flush_count == 1
 
     def test_flush_never_raises_out_of_exit(self) -> None:
-        # Telemetry delivery failing must not turn a successful stage into a failed one.
         execution, emitter = _make_execution()
         emitter.raise_on_flush = True
         with execution:
@@ -212,8 +207,6 @@ class TestLifecycleGuarantees:
 
 class TestRecorderDraining:
     def test_a_metric_recorded_deep_in_a_module_is_delivered_by_the_stage(self) -> None:
-        # The recorder is the only path a domain module has; if the stage did not drain it,
-        # every one of those metrics would silently never arrive.
         execution, emitter = _make_execution()
         with execution:
             record_platform_metric(PlatformMetric.EMPTY_SCOPE_DENIALS, 3.0, ScopeUnitId="brand-a")
@@ -289,8 +282,6 @@ class TestHardKillWatchdog:
             assert execution._watchdog is None
 
     def test_no_watchdog_when_less_than_the_margin_remains(self) -> None:
-        # Arming a timer for a negative delay would fire immediately and record a
-        # failure for a stage that has not failed.
         execution, _ = _make_execution(
             lambda_context=_FakeLambdaContext(1_000), hard_kill_margin_ms=5_000
         )

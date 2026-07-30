@@ -59,7 +59,6 @@ class TestCapabilityParsing:
             parse_capability("../../secrets")
 
     def test_every_declared_capability_is_parseable(self) -> None:
-        # A capability the API cannot name is a capability the console cannot govern.
         for capability in ConfigCapability:
             assert parse_capability(capability.value) is capability
 
@@ -99,7 +98,6 @@ class TestReprocessRequestParams:
             self._params(window_start=date(2026, 2, 1), window_end=date(2026, 1, 1))
 
     def test_a_reprocess_must_state_a_reason(self) -> None:
-        # The reason is what makes the recomputed output explainable afterwards.
         with pytest.raises(ConfigRouteError, match="reason"):
             self._params(reason="   ")
 
@@ -199,8 +197,6 @@ class TestRouteMatching:
         assert response["args"] == ["demo", "field_mapping", "ar_invoice"]
 
     def test_rollback_route_is_a_post(self) -> None:
-        # A GET must never reach the rollback handler — reads and state changes are
-        # separated by method, not by path alone.
         read = self._match("GET", "/tenants/demo/config/field_mapping/ar_invoice/rollback")
         assert read is None or read["handler"] != "rollback"
         response = self._match("POST", "/tenants/demo/config/field_mapping/ar_invoice/rollback")
@@ -231,7 +227,6 @@ class TestRouteMatching:
         assert self._match("GET", "/tenants/demo/unknown/thing") is None
 
     def test_a_path_not_rooted_at_tenants_matches_nothing(self) -> None:
-        # Every governed read is tenant-scoped; a non-tenant path must not fall through.
         assert self._match("GET", "/admin/demo/config/effective") is None
 
     def test_the_wrong_segment_count_matches_nothing(self) -> None:
@@ -242,6 +237,5 @@ class TestRouteMatching:
         assert self.calls == []
 
     def test_there_is_no_route_that_creates_a_tenant_user_or_role(self) -> None:
-        # Identity is owned by the Identity API; this surface only consumes a verified claim.
         resources = {route.resource for route in self.routes}
         assert resources == {"config", "semantic"}

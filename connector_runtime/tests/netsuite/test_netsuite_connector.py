@@ -21,6 +21,7 @@ import pytest
 import requests_mock as requests_mock_lib
 
 import connector_runtime.adapters.netsuite.netsuite_connector as netsuite_connector_module
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from connector_runtime.adapters.netsuite.netsuite_auth_client import (
     NetSuiteAuthError,
     NetSuiteCredentialError,
@@ -47,7 +48,7 @@ _ENV = "dev"
 _REGION = "us-east-1"
 _ACCOUNT_ID = "1234567"
 _RECORD_TYPE = "customer"
-_SECRET_NAME = "edl/sources/netsuite/credentials"
+_SECRET_NAME = f"{RESOURCE_NAME_ENVIRONMENT['SECRET_PATH_PREFIX']}/sources/netsuite/credentials"
 
 _VALID_SECRET = {
     "account_id": _ACCOUNT_ID,
@@ -68,7 +69,6 @@ def _make_connector() -> NetSuiteConnector:
     mock_auth.get_auth_headers.return_value = {"Authorization": "OAuth realm=test"}
     connector._record_type = _RECORD_TYPE  # type: ignore[attr-defined]
     connector._auth = mock_auth  # type: ignore[attr-defined]
-    # Create a mock metadata adapter so discover_queryable_fields() works without HTTP.
     mock_adapter = MagicMock()
     connector._metadata_adapter = mock_adapter  # type: ignore[attr-defined]
     return connector
@@ -218,9 +218,6 @@ class TestSuiteQLOffsetPaginationCeiling:
         monkeypatch.setattr(netsuite_connector_module, "_PAGE_SIZE", 2)
         monkeypatch.setattr(netsuite_connector_module, "_MAX_SUITEQL_OFFSET", 4)
         connector = _make_connector()
-        # Every page is "full" (2 rows) and reports more data available, so
-        # offset keeps climbing: 0 -> 2 -> 4 -> 6, which exceeds the
-        # monkeypatched ceiling of 4 and must raise before the 4th request.
         full_page = [{"id": str(i)} for i in range(2)]
         requests_mock.post(_SUITEQL_URL, json={"items": full_page, "hasMore": True})
 

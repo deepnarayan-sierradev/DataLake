@@ -66,10 +66,8 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Validates Sage X3 endpoint names — same pattern as X3QueryEngine.
 _SAFE_X3_ENDPOINT_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9]{1,63}$")
 
-# ISO-8601 date/datetime pattern — used to infer "date" type from string values.
 _ISO8601_VALUE_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2}))?$"
 )
@@ -84,10 +82,6 @@ class X3FieldSchema:
     is_nullable: bool
     label: str  # Human-readable label; same as name for inferred fields
 
-
-# ---------------------------------------------------------------------------
-# Static fallback schemas for common X3 endpoints
-# ---------------------------------------------------------------------------
 
 _X3_STATIC_SCHEMAS: Final[dict[str, list[X3FieldSchema]]] = {
     "BPCUSTOMER": [
@@ -188,7 +182,6 @@ class X3MetadataClient:
         )
     """
 
-    # This client uses live sampling, supplemented by a static fallback.
     supports_live_discovery: bool = True
 
     def __init__(
@@ -268,8 +261,6 @@ class X3MetadataClient:
         """Force the next discover_fields() call to re-sample from the X3 API."""
         self._cached_fields = None
 
-    # ── Private ────────────────────────────────────────────────────────────────
-
     def _fetch_fields(self) -> list[X3FieldSchema]:
         """
         Fetch field schema via live sampling ($top=1), then fall back to the
@@ -282,9 +273,7 @@ class X3MetadataClient:
         if self._cached_fields is not None:
             return self._cached_fields
 
-        # build_auth_headers() authenticates first, which populates auth.base_url.
         headers = self._auth.build_auth_headers()
-        # Build sampling URL: {base_url}/{endpoint}?$top=1
         sample_url = f"{self._auth.base_url}/{self._endpoint}"
 
         try:
@@ -294,7 +283,6 @@ class X3MetadataClient:
                 params={"$top": "1"},
             )
         except SageObjectNotFoundError:
-            # Endpoint may not exist — check static registry before failing.
             static = _X3_STATIC_SCHEMAS.get(self._endpoint)
             if static:
                 _logger.info(
@@ -316,7 +304,6 @@ class X3MetadataClient:
         value_list: list[dict[str, Any]] = response_body.get("value", [])
 
         if value_list:
-            # Infer schema from the first record's keys.
             inferred = _infer_schema_from_record(value_list[0])
             self._cached_fields = inferred
             _logger.info(
@@ -326,7 +313,6 @@ class X3MetadataClient:
             )
             return inferred
 
-        # No records — try the static fallback.
         static = _X3_STATIC_SCHEMAS.get(self._endpoint)
         if static:
             _logger.info(
@@ -360,23 +346,16 @@ class X3MetadataClient:
         FieldMode.INCLUDE_ONLY returns only the fields listed in include_fields.
         """
         if field_mode == FieldMode.CUSTOM:
-            # X3 OData responses don't segregate standard vs custom.
             return []
 
         if field_mode == FieldMode.INCLUDE_ONLY:
             include_set = frozenset(include_fields)
             filtered = [f for f in raw_fields if f.name in include_set]
         else:
-            # ALL or STANDARD — include everything.
             filtered = list(raw_fields)
 
         exclude_set = frozenset(exclude_fields)
         return [f for f in filtered if f.name not in exclude_set]
-
-
-# ---------------------------------------------------------------------------
-# Schema inference helpers
-# ---------------------------------------------------------------------------
 
 
 def _infer_type(value: Any) -> str:

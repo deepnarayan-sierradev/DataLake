@@ -95,7 +95,7 @@ class ResolutionConfigRegistry:
     Usage::
 
         registry = ResolutionConfigRegistry(
-            s3_bucket="edl-curated-087972550871", region_name="us-east-1"
+            s3_bucket="datalake-curated-<env>-<region>", region_name="us-east-1"
         )
         config = registry.load("company", "demo")           # loads latest version
         config = registry.load("company", "demo", "v2")     # loads explicit version
@@ -110,10 +110,6 @@ class ResolutionConfigRegistry:
         self._region_name = region_name
         self._s3: Any = boto3.client("s3", region_name=region_name)
         self._cache: dict[str, ResolutionConfig] = {}
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def load(
         self,
@@ -137,8 +133,6 @@ class ResolutionConfigRegistry:
         tenant_code = validate_tenant_code(tenant_code)
 
         if pinned and "latest" in (match_rules_version, survivorship_version):
-            # A pinned stage resolving `latest` means the pinning was bypassed somewhere, which
-            # is what ConfigVersionMismatchWithinRun pages on.
             record_platform_metric(
                 PlatformMetric.CONFIG_VERSION_MISMATCH_WITHIN_RUN, 1.0, EntityType=entity_type
             )
@@ -147,7 +141,6 @@ class ResolutionConfigRegistry:
                 "'latest' for at least one version. A pinned stage must never resolve 'latest'."
             )
 
-        # Resolve "latest" pointers
         if match_rules_version == "latest" or survivorship_version == "latest":
             pointer = self._load_latest_pointer(entity_type, tenant_code)
             if match_rules_version == "latest":
@@ -158,8 +151,6 @@ class ResolutionConfigRegistry:
         cache_key = f"{tenant_code}/{entity_type}/{match_rules_version}/{survivorship_version}"
         if cache_key in self._cache:
             if not pinned:
-                # The cache is version-keyed, so a hit on a key whose `latest` pointer has
-                # since moved means a warm container is serving a superseded generation.
                 pointer = self._load_latest_pointer(entity_type, tenant_code)
                 if pointer.get("match_rules_version", match_rules_version) != match_rules_version:
                     record_platform_metric(
@@ -181,8 +172,6 @@ class ResolutionConfigRegistry:
             )
         except ResolutionConfigNotFoundError as exc:
             if pinned:
-                # Distinguishable from "never existed" so the alarm can tell a rollback
-                # or deletion apart from an unconfigured entity type.
                 record_platform_metric(
                     PlatformMetric.CONFIG_VERSION_PIN_FAILURES, 1.0, EntityType=entity_type
                 )
@@ -299,8 +288,6 @@ class ResolutionConfigRegistry:
             Body=json.dumps(
                 {
                     "match_rules_version": match_rules_version,
-                    # The survivorship pointer is untouched: rolling back match rules must not
-                    # silently change survivorship, which is a separately governed decision.
                     "survivorship_version": current.get("survivorship_version", "v1"),
                 },
                 indent=2,
@@ -328,10 +315,6 @@ class ResolutionConfigRegistry:
         for key in stale:
             del self._cache[key]
         return len(stale)
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _load_json(self, key: str) -> dict[str, Any]:
         try:
@@ -362,13 +345,7 @@ class ResolutionConfigRegistry:
         try:
             return self._load_json(key)
         except ResolutionConfigNotFoundError:
-            # No pointer yet — default to v1
             return {"match_rules_version": "v1", "survivorship_version": "v1"}
-
-
-# ---------------------------------------------------------------------------
-# Parsers — JSON dict → typed dataclass objects
-# ---------------------------------------------------------------------------
 
 
 def _parse_match_rule_set(raw: dict[str, Any]) -> MatchRuleSet:
@@ -478,7 +455,6 @@ def _parse_survivorship_policy(raw: dict[str, Any]) -> SurvivorshipPolicy:
                 )
             )
 
-        # Validate: every attribute_rule's canonical_field must be in output_fields
         if output_fields:
             for rule in attribute_rules:
                 if rule.canonical_field not in output_fields:
@@ -502,11 +478,6 @@ def _parse_survivorship_policy(raw: dict[str, Any]) -> SurvivorshipPolicy:
         raise ResolutionConfigParseError(
             f"Invalid enum value in survivorship config: {exc}"
         ) from exc
-
-
-# ---------------------------------------------------------------------------
-# Validation helpers
-# ---------------------------------------------------------------------------
 
 
 def _validate_entity_type(entity_type: str) -> None:

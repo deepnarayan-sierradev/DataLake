@@ -24,7 +24,6 @@ from connector_runtime.adapters.salesforce.salesforce_bulk_query_job_controller 
     SalesforceBulkQueryJobController,
 )
 
-# Expose the static method for unit-testing independently
 _bind_parameters = SalesforceBulkQueryJobController._bind_parameters  # type: ignore[attr-defined]
 
 _INSTANCE_URL = "https://myorg.my.salesforce.com"
@@ -50,11 +49,6 @@ def _csv_page(rows: list[dict]) -> str:
     return f"{headers}\r\n{body}\r\n"
 
 
-# ---------------------------------------------------------------------------
-# Parameter binding
-# ---------------------------------------------------------------------------
-
-
 class TestBindParameters:
     def test_substitutes_named_placeholders(self) -> None:
         soql = (
@@ -76,11 +70,6 @@ class TestBindParameters:
     def test_no_parameters_returns_unchanged(self) -> None:
         soql = "SELECT Id FROM Account"
         assert _bind_parameters(soql, {}) == soql
-
-
-# ---------------------------------------------------------------------------
-# API limit check
-# ---------------------------------------------------------------------------
 
 
 class TestApiLimitCheck:
@@ -115,11 +104,6 @@ class TestApiLimitCheck:
         records = list(controller.execute("SELECT Id, Name FROM Account", {}))
         assert len(records) == 1
         assert records[0].payload["Id"] == "001"
-
-
-# ---------------------------------------------------------------------------
-# Job lifecycle
-# ---------------------------------------------------------------------------
 
 
 class TestJobLifecycle:
@@ -182,7 +166,6 @@ class TestJobLifecycle:
             f"{_BASE_BULK}/{_JOB_ID}",
             json={"state": "JobComplete", "numberRecordsProcessed": 4},
         )
-        # Two pages
         requests_mock.get(
             f"{_BASE_BULK}/{_JOB_ID}/results",
             [
@@ -206,7 +189,6 @@ class TestJobLifecycle:
         auth = _make_auth()
         requests_mock.get(_LIMITS_URL, json={"DailyBulkApiBatches": {"Remaining": 100}})
         requests_mock.post(_BASE_BULK, json={"id": _JOB_ID})
-        # Always return InProgress — will time out
         requests_mock.get(
             f"{_BASE_BULK}/{_JOB_ID}",
             json={"state": "InProgress", "numberRecordsProcessed": 0},

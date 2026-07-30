@@ -87,7 +87,6 @@ def _resolve_columns(
         component_columns, nested = _resolve_columns(entity, component)
         columns.extend(component_columns)
         derived.extend(nested)
-    # Deduplicate while preserving declaration order so lineage output is stable.
     return tuple(dict.fromkeys(columns)), tuple(dict.fromkeys(derived))
 
 

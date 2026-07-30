@@ -5,7 +5,7 @@ Behavioural proof that a failed stage lands a message on its own DLQ (gap item 2
 This module proves the message actually arrives, because the previous state of the world was a
 `failed_stage` argument that was accepted, carried through three layers, and then discarded at the
 last step in favour of a hardcoded queue name. Every unit test of `enqueue_dlq_entry` passed
-throughout: they asserted a message reached `EdlExtractionFailureDlq`, which it did.
+throughout: they asserted a message reached `datalake-extraction-failure-dlq-dev`, which it did.
 
 So these read the queue.
 """
@@ -60,7 +60,7 @@ class TestEachStageReachesItsOwnQueue:
     def test_the_message_lands_on_the_stages_queue(self, dlq_stage: DlqStage) -> None:
         """These are the five stages that previously enqueued to nothing at all."""
         sqs = boto3.client("sqs", region_name=_REGION)
-        queue_url = sqs.create_queue(QueueName=dlq_queue_name(dlq_stage))["QueueUrl"]
+        queue_url = sqs.create_queue(QueueName=dlq_queue_name(dlq_stage, "dev"))["QueueUrl"]
 
         delivered = enqueue_stage_failure(
             _identity(dlq_stage),
@@ -77,14 +77,13 @@ class TestEachStageReachesItsOwnQueue:
         assert bodies[0]["tenant_code"] == "evive"
 
     def test_a_message_does_not_land_on_another_stages_queue(self) -> None:
-        # The defect in reverse: everything used to arrive at one queue regardless of stage.
         sqs = boto3.client("sqs", region_name=_REGION)
-        transformation = sqs.create_queue(QueueName=dlq_queue_name(DlqStage.TRANSFORMATION))[
+        transformation = sqs.create_queue(QueueName=dlq_queue_name(DlqStage.TRANSFORMATION, "dev"))[
             "QueueUrl"
         ]
-        entity_resolution = sqs.create_queue(QueueName=dlq_queue_name(DlqStage.ENTITY_RESOLUTION))[
-            "QueueUrl"
-        ]
+        entity_resolution = sqs.create_queue(
+            QueueName=dlq_queue_name(DlqStage.ENTITY_RESOLUTION, "dev")
+        )["QueueUrl"]
 
         enqueue_stage_failure(
             _identity(DlqStage.TRANSFORMATION),
@@ -101,7 +100,9 @@ class TestEachStageReachesItsOwnQueue:
 class TestTheScaffoldEnqueuesOnFailure:
     def test_an_exception_inside_the_context_produces_a_dlq_message(self) -> None:
         sqs = boto3.client("sqs", region_name=_REGION)
-        queue_url = sqs.create_queue(QueueName=dlq_queue_name(DlqStage.TRANSFORMATION))["QueueUrl"]
+        queue_url = sqs.create_queue(QueueName=dlq_queue_name(DlqStage.TRANSFORMATION, "dev"))[
+            "QueueUrl"
+        ]
 
         with pytest.raises(RuntimeError, match="stage blew up"):
             with stage_execution(
@@ -114,9 +115,10 @@ class TestTheScaffoldEnqueuesOnFailure:
         assert bodies[0]["failed_stage"] == "transformation"
 
     def test_a_successful_stage_enqueues_nothing(self) -> None:
-        # Positive control: a scaffold that always enqueued would pass the test above.
         sqs = boto3.client("sqs", region_name=_REGION)
-        queue_url = sqs.create_queue(QueueName=dlq_queue_name(DlqStage.TRANSFORMATION))["QueueUrl"]
+        queue_url = sqs.create_queue(QueueName=dlq_queue_name(DlqStage.TRANSFORMATION, "dev"))[
+            "QueueUrl"
+        ]
 
         with stage_execution(
             _identity(DlqStage.TRANSFORMATION), region_name=_REGION, lambda_context=None
@@ -126,7 +128,6 @@ class TestTheScaffoldEnqueuesOnFailure:
         assert _messages(queue_url) == []
 
     def test_a_not_replayable_stage_enqueues_nothing(self) -> None:
-        # A deletion must not be automatically replayed; the certificate is the record.
         with pytest.raises(RuntimeError):
             with stage_execution(
                 _identity(DlqStage.NOT_REPLAYABLE, stage="portability"),
@@ -134,7 +135,6 @@ class TestTheScaffoldEnqueuesOnFailure:
                 lambda_context=None,
             ):
                 raise RuntimeError("deletion failed")
-        # No queue exists for it, and no attempt was made to resolve one.
 
     def test_a_missing_queue_does_not_mask_the_original_failure(self) -> None:
         """

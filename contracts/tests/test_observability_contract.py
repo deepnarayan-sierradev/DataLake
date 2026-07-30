@@ -18,10 +18,6 @@ from contracts.observability_contract import (
     scrub_sensitive_values,
 )
 
-# ---------------------------------------------------------------------------
-# scrub_sensitive_values
-# ---------------------------------------------------------------------------
-
 
 class TestScrubSensitiveValues:
     def test_scrubs_password_equals_pattern(self) -> None:
@@ -58,11 +54,6 @@ class TestScrubSensitiveValues:
         assert "xyz" not in result
         assert "AKIAIOSFODNN7EXAMPLE" not in result
         assert result.count("[REDACTED]") >= 2
-
-
-# ---------------------------------------------------------------------------
-# StructuredLogEvent — valid construction
-# ---------------------------------------------------------------------------
 
 
 class TestStructuredLogEventValidConstruction:
@@ -113,11 +104,6 @@ class TestStructuredLogEventValidConstruction:
         assert event.duration_ms == 0
 
 
-# ---------------------------------------------------------------------------
-# StructuredLogEvent — rejection of sensitive content
-# ---------------------------------------------------------------------------
-
-
 class TestStructuredLogEventSensitiveContentRejection:
     def _base(self) -> dict[str, object]:
         return {
@@ -145,11 +131,6 @@ class TestStructuredLogEventSensitiveContentRejection:
     def test_rejects_error_classification_containing_secret(self) -> None:
         with pytest.raises(ValidationError, match="sensitive pattern"):
             StructuredLogEvent(**{**self._base(), "error_classification": "secret=leaked_here"})
-
-
-# ---------------------------------------------------------------------------
-# StructuredLogEvent — identifier format validation
-# ---------------------------------------------------------------------------
 
 
 class TestStructuredLogEventIdentifierValidation:
@@ -191,11 +172,6 @@ class TestStructuredLogEventIdentifierValidation:
         assert event.source_id == good_id
 
 
-# ---------------------------------------------------------------------------
-# StructuredLogEvent — numeric field validation
-# ---------------------------------------------------------------------------
-
-
 class TestStructuredLogEventNumericValidation:
     def _base(self) -> dict[str, object]:
         return {
@@ -219,11 +195,6 @@ class TestStructuredLogEventNumericValidation:
             StructuredLogEvent(
                 **{**self._base(), "duration_ms": 100, "retry_count": 0, "record_count": -5}
             )
-
-
-# ---------------------------------------------------------------------------
-# StructuredLogEvent — run_id enumeration prevention
-# ---------------------------------------------------------------------------
 
 
 class TestStructuredLogEventRunIdValidation:

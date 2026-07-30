@@ -6,8 +6,8 @@
 > implemented; Salesforce and MySQL RDS have real credentials in dev and have run end-to-end.
 > NetSuite is fully implemented but its Secrets Manager credential is still an empty shell —
 > never invoked in dev. The serving store (Stage 16) is fully implemented and **deployed to dev**
-> (MySQL RDS instance `edl-serving-store-mysql-dev`, the `EdlServingStoreLoader` Lambda, and the
-> `EdlServingStoreConfig` table, deployed 2026-07-24) — but no tenant/entity has been onboarded
+> (MySQL RDS instance `datalake-serving-store-mysql-dev`, the `datalake-serving-store-loader-dev` Lambda, and the
+> `datalake-serving-store-config-dev` table, deployed 2026-07-24) — but no tenant/entity has been onboarded
 > yet (the config table is empty), so the loader skips every run and the instance holds no
 > databases or tables. For exactly what's deployed and running where, see
 > `docs/PLATFORM_STATUS.md` — this document describes the pipeline's design and mechanics, not its
@@ -116,10 +116,10 @@ The Enterprise Data Lake platform ingests data from multiple source systems (Sal
 
 | Layer | Purpose | Storage | Format | Mutability |
 |---|---|---|---|---|
-| **Raw** | Exact copy of source data, no transformation | `edl-raw-{account_id}` S3 | Parquet (large_utf8 columns) | Immutable — Object Lock GOVERNANCE |
-| **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked. For incremental entities with `primary_key_field` set, each partition holds the **full current state** (SCD Type 1 merge — not just the day's delta) | `edl-curated-{account_id}` S3 | Parquet (Snappy) | Full-load entities: append-only per run_id. Incremental entities with merge: full snapshot per run_id (overwrites previous state within the partition) |
-| **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Two distinct prefixes, both tenant-prefixed (`{tenant_code}/...`): `canonical/{entity_type}/` — golden/mastered records straight from entity resolution, one Parquet file per run under a `run_id=` partition; `analytics/{entity_type}/` — the same golden records with internal entity-resolution-only fields stripped, republished by the Analytics Layer Publish stage as the BI-facing dataset | `edl-analytics-{account_id}` S3 | Parquet (Snappy) | `canonical/`: append-only, one file per `run_id`. `analytics/`: **not** append-only — partitioned only by `analytics_date=`, no `run_id`, so a second run on the same UTC day overwrites the first run's file for that day |
-| **Serving Store** | Optional operational store for low-latency API and application reads (and BI-scale analytics via Redshift). Code-complete (`serving_store/` module, five engine adapters); **deployed to dev** (MySQL RDS) but with no entity onboarded (`EdlServingStoreConfig` empty), so it holds no databases/tables yet | MySQL RDS, PostgreSQL, SQL Server, Azure SQL, or Amazon Redshift Serverless (database/schema-per-tenant; private VPC for platform-provisioned engines, BYO-DB for Azure SQL) | SQL rows | RDS engines: idempotent hash-diff row upsert (`_row_hash`/`_synced_at`). Redshift: set-based `COPY` from analytics Parquet in S3 → staging → `MERGE` (idiomatic for a columnar MPP warehouse at millions-of-rows scale). First sync per tenant/entity is a full backfill either way |
+| **Raw** | Exact copy of source data, no transformation | `datalake-raw-{account_id}` S3 | Parquet (large_utf8 columns) | Immutable — Object Lock GOVERNANCE |
+| **Curated** | Per-source standardised data with canonical field names, type-cast, quality-checked, PII masked. For incremental entities with `primary_key_field` set, each partition holds the **full current state** (SCD Type 1 merge — not just the day's delta) | `datalake-curated-{account_id}` S3 | Parquet (Snappy) | Full-load entities: append-only per run_id. Incremental entities with merge: full snapshot per run_id (overwrites previous state within the partition) |
+| **Analytics** | Consumption-optimised, Glue-catalogued datasets for Athena/BI. Two distinct prefixes, both tenant-prefixed (`{tenant_code}/...`): `canonical/{entity_type}/` — golden/mastered records straight from entity resolution, one Parquet file per run under a `run_id=` partition; `analytics/{entity_type}/` — the same golden records with internal entity-resolution-only fields stripped, republished by the Analytics Layer Publish stage as the BI-facing dataset | `datalake-analytics-{account_id}` S3 | Parquet (Snappy) | `canonical/`: append-only, one file per `run_id`. `analytics/`: **not** append-only — partitioned only by `analytics_date=`, no `run_id`, so a second run on the same UTC day overwrites the first run's file for that day |
+| **Serving Store** | Optional operational store for low-latency API and application reads (and BI-scale analytics via Redshift). Code-complete (`serving_store/` module, five engine adapters); **deployed to dev** (MySQL RDS) but with no entity onboarded (`datalake-serving-store-config-dev` empty), so it holds no databases/tables yet | MySQL RDS, PostgreSQL, SQL Server, Azure SQL, or Amazon Redshift Serverless (database/schema-per-tenant; private VPC for platform-provisioned engines, BYO-DB for Azure SQL) | SQL rows | RDS engines: idempotent hash-diff row upsert (`_row_hash`/`_synced_at`). Redshift: set-based `COPY` from analytics Parquet in S3 → staging → `MERGE` (idiomatic for a columnar MPP warehouse at millions-of-rows scale). First sync per tenant/entity is a full backfill either way |
 
 ### Multi-tenancy — the canonical isolation model
 
@@ -141,10 +141,10 @@ re-deriving its own version.
 | DynamoDB — `entity_extraction_config` | Hash key stores `tenant_scoped_key(tenant_code, connection_id)`; `_enforce_tenant_match` remains as defence in depth | **Genuinely key-level isolated** (migration applied to dev 2026-07-24) |
 | DynamoDB — `run_audit_log` | Key is `(run_id, stage)`, not tenant-keyed | App-level guard only — reads for another tenant's `run_id` return 404, not 403 |
 | DynamoDB — `source_onboarding_registry` | Key is `source_id` only | Models sources, not per-tenant state — no tenant dimension by design |
-| Secrets Manager | Per connection: `edl/tenants/{tenant_code}/connections/{connection_id}/credentials`, resolved via `ConnectionCredentialPathResolver`; write-back uses a separate `-writeback` secret with no fallback | **Isolated by path** in code. Legacy shared `edl/sources/{source_id}/credentials` is still read as a fallback *with a warning*, and dev still holds credentials only at that legacy path until `make migrate-credentials` runs — so treat dev as **not yet isolated** in practice |
+| Secrets Manager | Per connection: `datalake/<env>/tenants/{tenant_code}/connections/{connection_id}/credentials`, resolved via `ConnectionCredentialPathResolver`; write-back uses a separate `-writeback` secret with no fallback | **Isolated by path** in code. Legacy shared `datalake/<env>/sources/{source_id}/credentials` is still read as a fallback *with a warning*, and dev still holds credentials only at that legacy path until `make migrate-credentials` runs — so treat dev as **not yet isolated** in practice |
 | Scope units below `tenant_code` (brand / franchisee / location) | `tenancy/scope_predicate.py` builds the predicate; `partition_model` is `single` or `partitioned`, `IMPLICIT_SCOPE_UNIT_ID = "__tenant__"` for the degenerate case, and an **empty scope set means deny**, never "all" | App-level, fails closed; `tests/test_tenant_isolation.py::TestScopeIsolationAcrossEverySurface` parameterises it over every `ConsumptionSurface` |
 | Control-plane API | `_authorize_path_tenant` cross-checks the path's `tenant_code` against the JWT claim | App-level only, fails closed (401/403) |
-| Glue / Athena | Two shared databases (`edl_curated`, `edl_analytics`); table names prefixed `{tenant_code}_{entity_type}` | **Not isolated at all as deployed** — naming convention only. Per-tenant and per-department LF-Tags replacing the wildcard grant exist in `infrastructure/modules/lake_formation/` but are **unapplied** |
+| Glue / Athena | Two shared databases (`datalake_curated_dev`, `datalake_analytics_dev`); table names prefixed `{tenant_code}_{entity_type}` | **Not isolated at all as deployed** — naming convention only. Per-tenant and per-department LF-Tags replacing the wildcard grant exist in `infrastructure/modules/lake_formation/` but are **unapplied** |
 | Serving store | Database-per-tenant (MySQL) / schema-per-tenant (Postgres, SQL Server, Azure SQL, Redshift), enforced by the database engine's own GRANT model | **Genuinely isolated** at the credential level — see Stage 16 below for the separate network-reachability gap |
 
 Where the state machine threads tenant identity through: `infrastructure/modules/orchestration/main.tf`
@@ -176,7 +176,7 @@ EventBridge Scheduler (cron per entity)
           │
           ▼
 SQS FIFO Queue  ── absorbs burst; exactly-once per entity per tick
-  (EdlPipelineTrigger.fifo)
+  (datalake-pipeline-trigger-dev.fifo)
           │  (drains via Pipeline Trigger Lambda, reserved_concurrency=50)
           ▼
 Step Functions: START EXECUTION
@@ -276,7 +276,7 @@ Step Functions: START EXECUTION
   {Stage}Failed (Fail state)
           │
           ▼
-  SQS DLQ (EdlExtractionFailureDlq)
+  SQS DLQ (datalake-extraction-failure-dlq-dev)
           │
           ▼
   dlq_processor Lambda (event source mapping, batch_size=1)
@@ -321,7 +321,7 @@ Step Functions: START EXECUTION
 - Retries transient Lambda errors with exponential backoff (3 attempts, 10s initial, 2× backoff)
 - Terminal failures route to a per-stage `Fail` state (`ExtractionFailed`, `TransformationFailed`, `EntityResolutionFailed`, `AnalyticsPublishFailed`) and enqueue to DLQ
 - The `ExecuteExtraction` state's `Catch` block matches `LambdaTimeoutWarning` (a mid-run checkpoint) *before* the generic `States.ALL` catch-all — first match wins in ASL, so a checkpoint does **not** fall through to `ExtractionFailed`/the DLQ. It routes instead to a terminal `ExtractionCheckpointed` `Succeed` state: non-fatal, partial watermark already committed, remaining window not yet processed. Automatic resume from a checkpoint is **not yet implemented** (documented as a gap in `extraction_workflow.py`'s own module docstring) — it needs a manual re-trigger.
-- DLQ messages (`EdlExtractionFailureDlq`) are consumed by the `dlq_processor` Lambda, which writes a `RunStatus.FAILED` audit record, emits an SNS alert, and optionally auto-replays (`AUTO_REPLAY` env var, default `false`)
+- DLQ messages (`datalake-extraction-failure-dlq-dev`) are consumed by the `dlq_processor` Lambda, which writes a `RunStatus.FAILED` audit record, emits an SNS alert, and optionally auto-replays (`AUTO_REPLAY` env var, default `false`)
 
 **Branching logic:**
 
@@ -364,7 +364,7 @@ Any stage's Task fails after retries exhausted (States.ALL)?
 
 **Component:** AWS Secrets Manager  
 **Purpose:** Retrieves short-lived source credentials (OAuth tokens, API keys, DB passwords). Credentials never appear in code, environment variables, or logs.  
-**Secret path pattern:** `edl/sources/{source}/credentials`  
+**Secret path pattern:** `datalake/<env>/sources/{source}/credentials`  
 **Failure behaviour:** Raises credential error → classified as `DETERMINISTIC_INVALID_CREDENTIALS` → no retry.
 
 ---
@@ -535,11 +535,11 @@ Each survivorship policy declares an explicit `output_fields` list. Only those f
 
 **Production entry point — `GoldenRecordPublisher.from_registry()`:**
 ```python
-registry = ResolutionConfigRegistry(s3_bucket="edl-curated-087972550871", region_name="us-east-1")
+registry = ResolutionConfigRegistry(s3_bucket="datalake-curated-dev-use1", region_name="us-east-1")
 publisher = GoldenRecordPublisher.from_registry(
     registry=registry,
     entity_type="company",
-    analytics_s3_bucket="edl-analytics-087972550871",
+    analytics_s3_bucket="datalake-analytics-dev-use1",
     region_name="us-east-1",
 )
 ```
@@ -570,16 +570,16 @@ s3://{analytics-layer}/{tenant_code}/canonical/{entity_type}/match-decisions/{ru
 
 ### Stage 16 — Serving Store Load
 
-**Status:** code-complete and **deployed to dev** (2026-07-24): the `edl-serving-store-mysql-dev` MySQL RDS instance, the `EdlServingStoreLoader` Lambda, the `EdlServingStoreConfig` DynamoDB table, the loader IAM role, and the Lambda↔RDS security-group rules all exist in the dev account, and the Step Functions `LoadServingStore` state resolves to the live `Task` branch (not `Pass`). **But no tenant/entity is onboarded yet** — `EdlServingStoreConfig` is empty, so the loader hits its skip path on every run and has never created a database, table, or reader credential. The RDS instance is therefore a bare MySQL *server* with no user databases. To onboard, seed a config record with `scripts/seed_serving_store_config.py`; the next pipeline run then lazily creates the tenant database, tables, and the per-tenant reader credential. staging/prod remain un-applied (`Pass` branch). **BI reachability gap:** the instance is `publicly_accessible = false` in private subnets, so even once populated, external BI tools (Power BI, Tableau, QuickSight) need a VPC path (QuickSight VPC connection / VPN / Direct Connect / PrivateLink) — nothing provisions that today.  
+**Status:** code-complete and **deployed to dev** (2026-07-24): the `datalake-serving-store-mysql-dev` MySQL RDS instance, the `datalake-serving-store-loader-dev` Lambda, the `datalake-serving-store-config-dev` DynamoDB table, the loader IAM role, and the Lambda↔RDS security-group rules all exist in the dev account, and the Step Functions `LoadServingStore` state resolves to the live `Task` branch (not `Pass`). **But no tenant/entity is onboarded yet** — `datalake-serving-store-config-dev` is empty, so the loader hits its skip path on every run and has never created a database, table, or reader credential. The RDS instance is therefore a bare MySQL *server* with no user databases. To onboard, seed a config record with `scripts/seed_serving_store_config.py`; the next pipeline run then lazily creates the tenant database, tables, and the per-tenant reader credential. staging/prod remain un-applied (`Pass` branch). **BI reachability gap:** the instance is `publicly_accessible = false` in private subnets, so even once populated, external BI tools (Power BI, Tableau, QuickSight) need a VPC path (QuickSight VPC connection / VPN / Direct Connect / PrivateLink) — nothing provisions that today.  
 **Component:** `serving_store/serving_store_loader_handler.py`, dispatching to `serving_store/loaders/` via `ServingStoreLoaderRegistry` (`serving_store/registry.py`) — same adapter+registry pattern as `connector_runtime`'s source connectors. Each loader implements `serving_store/interfaces/loader_interface.py::ServingStoreLoaderInterface`.  
-**Engines:** `mysql_rds_loader.py`, `postgresql_loader.py`, `sqlserver_loader.py` (also serves `azure_sql` — same T-SQL dialect), and `redshift_loader.py` (Amazon Redshift Serverless — the one engine that loads set-based via S3 `COPY` rather than row upserts, and whose writer authenticates via IAM; it advertises `supports_s3_bulk_load` so the handler routes it through `load_from_s3()`). Onboarding (which tenant/entity_type pairs load, into which engine) is config-driven via `serving_store/serving_store_config_repository.py::ServingStoreConfigRepositoryClient`, backed by a new `EdlServingStoreConfig` DynamoDB table keyed by `tenant_code` + `entity_type` — the analytics-layer entity type (e.g. `company`), not a source-level `entity_id`, since one entity_type's analytics dataset can be fed by several contributing sources (e.g. `salesforce-account` + `netsuite-customer` both feed `company`).  
+**Engines:** `mysql_rds_loader.py`, `postgresql_loader.py`, `sqlserver_loader.py` (also serves `azure_sql` — same T-SQL dialect), and `redshift_loader.py` (Amazon Redshift Serverless — the one engine that loads set-based via S3 `COPY` rather than row upserts, and whose writer authenticates via IAM; it advertises `supports_s3_bulk_load` so the handler routes it through `load_from_s3()`). Onboarding (which tenant/entity_type pairs load, into which engine) is config-driven via `serving_store/serving_store_config_repository.py::ServingStoreConfigRepositoryClient`, backed by a new `datalake-serving-store-config-dev` DynamoDB table keyed by `tenant_code` + `entity_type` — the analytics-layer entity type (e.g. `company`), not a source-level `entity_id`, since one entity_type's analytics dataset can be fed by several contributing sources (e.g. `salesforce-account` + `netsuite-customer` both feed `company`).  
 **Purpose:** Loads analytics records into a relational serving database for BI tools and applications.  
 **Key properties:**
 - Table schema inferred from Parquet schema — no hardcoded DDL
 - Idempotent incremental sync via a `_row_hash`/`_synced_at` column pair; first sync per tenant/entity is an automatic full backfill, later runs only touch changed rows. RDS engines diff row-by-row in the Lambda; **Redshift** diffs set-based in SQL after a bulk `COPY` (see below)
 - All SQL parameterized — no string interpolation of column names or values; identifiers validated against safe-identifier regexes
 - Tenant isolation via the database engine's own GRANT model (not application-level filtering), since BI tools connect directly: one database per tenant for MySQL, one schema per tenant for PostgreSQL/SQL Server/Azure SQL/Redshift
-- Two credential tiers per tenant in Secrets Manager: the loader's own writer credential, and a separate read-only reader credential (`edl/serving-store/{tenant_code}/{engine}/reader-credentials`) handed to the tenant's BI-tool connection. **Redshift** has no writer *password* at all — the writer authenticates via IAM (`redshift-serverless:GetCredentials`); only the reader is a native user+password
+- Two credential tiers per tenant in Secrets Manager: the loader's own writer credential, and a separate read-only reader credential (`datalake/<env>/serving-store/{tenant_code}/{engine}/reader-credentials`) handed to the tenant's BI-tool connection. **Redshift** has no writer *password* at all — the writer authenticates via IAM (`redshift-serverless:GetCredentials`); only the reader is a native user+password
 - For the RDS engines the writer credential is the **AWS-managed RDS master secret**, which carries only `username`/`password` — **not** the endpoint. The DB host/port is infrastructure, not a rotating credential, so it is carried on the config record (`db_host`/`db_port`) and injected by `_retrieve_credentials()` when the secret omits a host. `scripts/seed_serving_store_config.py` auto-resolves both from the deployed instance's endpoint. (Redshift's custom secret already carries `host`, so nothing is injected there.)
 - Azure SQL is always tenant-supplied (BYO-DB) — Azure resources are never platform-provisioned by this AWS-based Terraform
 - **Redshift** is a columnar MPP warehouse (provisioned as Redshift Serverless), so its adapter does not do row upserts: it `COPY`s the analytics Parquet straight from S3 into a per-tenant staging table, then runs a set-based `MERGE` into the target — the idiomatic, high-throughput path for millions of rows (`supports_s3_bulk_load` seam; the handler prefers it over the row-batch path)
@@ -817,7 +817,7 @@ python scripts/seed_entity_resolution_configs.py --environment dev --entity-type
 | Watermark concurrency conflict | Concurrency | No retry | Returns `PARTIAL_SUCCESS` |
 | Mid-run Lambda timeout (checkpoint) | `LambdaTimeoutWarning` (non-fatal) | N/A — routes to terminal `ExtractionCheckpointed` Succeed state, not a retry | No DLQ — partial watermark + `'{run_id}-partN'` audit record already committed; auto-resume not implemented, needs manual re-trigger |
 
-**DLQ processing:** Messages landing in `EdlExtractionFailureDlq` are consumed by the **`dlq_processor`** Lambda (`orchestration/dlq_processor/dlq_processor_handler.py`, SQS event source mapping with `batch_size=1`). It validates the message body (Pydantic), writes a `RunStatus.FAILED` audit record to the run audit log table, emits an SNS notification to the platform alerts topic (run_id, source_id, entity_id, failure_reason), and — only if `AUTO_REPLAY=true` (default `false`) — re-invokes the Step Functions state machine to replay the failed run. With auto-replay off (the default), an operator reviews the DLQ message and replays manually per the command below.
+**DLQ processing:** Messages landing in `datalake-extraction-failure-dlq-dev` are consumed by the **`dlq_processor`** Lambda (`orchestration/dlq_processor/dlq_processor_handler.py`, SQS event source mapping with `batch_size=1`). It validates the message body (Pydantic), writes a `RunStatus.FAILED` audit record to the run audit log table, emits an SNS notification to the platform alerts topic (run_id, source_id, entity_id, failure_reason), and — only if `AUTO_REPLAY=true` (default `false`) — re-invokes the Step Functions state machine to replay the failed run. With auto-replay off (the default), an operator reviews the DLQ message and replays manually per the command below.
 
 **Replay a failed run:**
 
@@ -856,23 +856,23 @@ aws sts get-caller-identity
 
 # 2. Entity config exists in DynamoDB
 aws dynamodb get-item \
-  --table-name EdlEntityExtractionConfig \
+  --table-name datalake-entity-extraction-config-dev \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
 # 3. Field mapping published to S3
-aws s3 ls s3://edl-curated-087972550871/field-mappings/salesforce/salesforce-account/
+aws s3 ls s3://datalake-curated-dev-use1/field-mappings/salesforce/salesforce-account/
 
 # 4. Source credentials exist in Secrets Manager (pick the source you run)
 aws secretsmanager describe-secret \
-  --secret-id edl/sources/salesforce/credentials
+  --secret-id datalake/<env>/sources/salesforce/credentials
 aws secretsmanager describe-secret \
-  --secret-id edl/sources/netsuite/credentials
+  --secret-id datalake/<env>/sources/netsuite/credentials
 aws secretsmanager describe-secret \
-  --secret-id edl/sources/mysql-rds/credentials
+  --secret-id datalake/<env>/sources/mysql-rds/credentials
 
 # 5. Current watermark state
 aws dynamodb get-item \
-  --table-name EdlWatermarkRepository \
+  --table-name datalake-watermark-dev \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 ```
 
@@ -890,28 +890,28 @@ python scripts/trigger_extraction.py \
 
 ```bash
 # Raw files written
-aws s3 ls s3://edl-raw-087972550871/salesforce/salesforce-account/ --recursive
+aws s3 ls s3://datalake-raw-dev-use1/salesforce/salesforce-account/ --recursive
 
 # Watermark advanced
 aws dynamodb get-item \
-  --table-name EdlWatermarkRepository \
+  --table-name datalake-watermark-dev \
   --key '{"source_id":{"S":"salesforce"},"entity_id":{"S":"salesforce-account"}}'
 
 # Schema snapshot written — path is tenant-prefixed (default tenant: demo)
-aws s3 ls s3://edl-schema-snapshots-087972550871/demo/salesforce/salesforce-account/ --recursive
+aws s3 ls s3://datalake-schema-snapshots-dev-use1/demo/salesforce/salesforce-account/ --recursive
 
 # No breaking drift (check drift_report) — path is tenant-prefixed (default tenant: demo)
-aws s3 cp s3://edl-schema-snapshots-087972550871/demo/salesforce/salesforce-account/latest.json -
+aws s3 cp s3://datalake-schema-snapshots-dev-use1/demo/salesforce/salesforce-account/latest.json -
 ```
 
 ### Post-transformation verification
 
 ```bash
 # Curated Parquet written — path is tenant-prefixed (default tenant: demo)
-aws s3 ls s3://edl-curated-087972550871/demo/curated/customer/salesforce-account/ --recursive
+aws s3 ls s3://datalake-curated-dev-use1/demo/curated/customer/salesforce-account/ --recursive
 
 # Quality report — check is_publication_blocked=false
-aws s3 cp s3://edl-curated-087972550871/quality-reports/salesforce/salesforce-account/<run_id>/quality-report.json -
+aws s3 cp s3://datalake-curated-dev-use1/quality-reports/salesforce/salesforce-account/<run_id>/quality-report.json -
 ```
 
 ---
@@ -929,7 +929,7 @@ Before deploying to staging or prod, verify all of the following:
 - [ ] `seed_entity_resolution_configs.py` run against target environment (dry-run first)
 - [ ] `seed_entity_config.py` run against target environment (dry-run first)
 - [ ] Source credentials created in Secrets Manager for target environment
-- [ ] Sage credentials created: `edl/sources/sage/intacct/credentials` and `edl/sources/sage/x3/credentials`
+- [ ] Sage credentials created: `datalake/<env>/sources/sage/intacct/credentials` and `datalake/<env>/sources/sage/x3/credentials`
 - [ ] NAT Gateway public IPs added to Salesforce/NetSuite IP allowlists
 - [ ] CloudWatch alarms reviewed and SNS alert email set
 - [ ] DLQ URL verified accessible by replay operator role
@@ -947,21 +947,21 @@ This section maps each pipeline stage to the exact tools, AWS services, Python l
 |---|---|
 | Stage 1 — Event Scheduling | Amazon EventBridge Scheduler; Amazon SQS FIFO (pipeline trigger queue); AWS Lambda (pipeline trigger) |
 | Stage 2 — Step Functions Orchestration | AWS Step Functions (Standard / Express Workflow) |
-| Stage 3 — Configuration Load | Amazon DynamoDB (`EdlEntityExtractionConfig`) |
-| Stage 4 — Credential Retrieval | AWS Secrets Manager (`edl/sources/{source}/credentials`) |
+| Stage 3 — Configuration Load | Amazon DynamoDB (`datalake-entity-extraction-config-dev`) |
+| Stage 4 — Credential Retrieval | AWS Secrets Manager (`datalake/<env>/sources/{source}/credentials`) |
 | Stage 5 — Metadata Discovery | Source APIs (no AWS; called from Lambda/ECS over VPC) |
 | Stage 6 — Query Construction | In-process (no AWS service); ISO-8601 validated |
 | Stage 7 — Extraction | AWS Lambda (< 5 M records) or AWS ECS Fargate (≥ 5 M records); Amazon S3 (raw layer write) |
-| Stage 8 — Schema Snapshot | Amazon S3 (`edl-schema-snapshots-{account_id}`) |
+| Stage 8 — Schema Snapshot | Amazon S3 (`datalake-schema-snapshots-{account_id}`) |
 | Stage 9 — Drift Evaluation | In-process (no AWS service); writes drift report to Amazon S3 |
 | Stage 10 — Raw Layer Write | Amazon S3 (Object Lock GOVERNANCE); CloudWatch metric emit |
-| Stage 11 — Watermark Update | Amazon DynamoDB (`EdlWatermarkRepository`; conditional put) |
+| Stage 11 — Watermark Update | Amazon DynamoDB (`datalake-watermark-dev`; conditional put) |
 | Stage 12 — Transformation | AWS Lambda or AWS Glue; Amazon S3 (curated layer); AWS Glue Data Catalog |
 | Stage 13 — Entity Resolution | AWS Lambda; Amazon S3 (curated source read + analytics write) |
 | Stage 14 — Golden Record Publish | AWS Lambda; Amazon S3 (analytics layer `canonical/` prefix) |
 | Stage 15 — Analytics Layer Publish | AWS Lambda; Amazon S3 (analytics layer `analytics/` prefix, read from `canonical/`); AWS Glue Data Catalog (table + partition registration) |
 | Stage 16 — Serving Store Load | Amazon RDS (MySQL, PostgreSQL, or SQL Server; private VPC), Amazon Redshift Serverless (S3 `COPY` + IAM-auth writer), or tenant-supplied Azure SQL; AWS Secrets Manager — code-complete, not yet deployed in any environment |
-| DLQ Processing (failure path) | AWS Lambda (`dlq_processor`); Amazon SQS (`EdlExtractionFailureDlq`, event source mapping `batch_size=1`); Amazon DynamoDB (run audit log); Amazon SNS (platform alerts topic); AWS Step Functions (optional auto-replay) |
+| DLQ Processing (failure path) | AWS Lambda (`dlq_processor`); Amazon SQS (`datalake-extraction-failure-dlq-dev`, event source mapping `batch_size=1`); Amazon DynamoDB (run audit log); Amazon SNS (platform alerts topic); AWS Step Functions (optional auto-replay) |
 | All stages | Amazon CloudWatch Logs; Amazon CloudWatch Metrics; AWS X-Ray; Amazon SQS (DLQ) |
 
 ### Python Libraries by Component

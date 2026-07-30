@@ -15,6 +15,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from entity_resolution.entity_type_registry import (
     ENTITY_ID_TO_TYPE,
     ENTITY_TYPE_PK_FIELD,
@@ -25,7 +26,7 @@ from entity_resolution.entity_type_registry import (
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_TABLE = "EdlEntityTypeRegistry"
+_TABLE = RESOURCE_NAME_ENVIRONMENT["ENTITY_TYPE_REGISTRY_TABLE"]
 
 
 def _create_table() -> None:
@@ -117,10 +118,8 @@ class TestTenantRegistration:
             tenant_code="acme-corp",
         )
 
-        # "demo" tenant still sees the built-in fallback, unchanged.
         default_expected = ENTITY_ID_TO_TYPE["salesforce-account"]
         assert client.get_entity_type("salesforce-account") == default_expected
-        # "acme-corp" sees its own registration.
         acme_type = client.get_entity_type("salesforce-account", tenant_code="acme-corp")
         assert acme_type == "overridden_type"
 
@@ -224,10 +223,7 @@ class TestDeregisterEntityType:
 
         client.deregister_entity_type("acme-custom-entity", tenant_code="acme-corp")
 
-        # The entity_id#{...} item is gone (falls back for lookups keyed by entity_id)...
         assert client.get_entity_type("acme-custom-entity", tenant_code="acme-corp") is None
-        # ...but the entity_type#{...} descriptor item is untouched, since other
-        # entity_ids of "custom_widget" for this tenant may still depend on it.
         assert client.get_pk_field("custom_widget", tenant_code="acme-corp") == "widget_id"
 
 

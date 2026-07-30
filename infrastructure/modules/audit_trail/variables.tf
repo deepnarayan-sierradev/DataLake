@@ -1,5 +1,5 @@
 variable "environment" {
-  description = "Deployment environment (dev/staging/prod)."
+  description = "Deployment environment (dev/uat/prod)."
   type        = string
 }
 
@@ -65,4 +65,14 @@ variable "tags" {
   description = "Tags applied to every resource in this module."
   type        = map(string)
   default     = {}
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
+}
+
+variable "region_short" {
+  type        = string
+  description = "Short region token for globally-unique S3 bucket names (e.g. 'use1')."
 }

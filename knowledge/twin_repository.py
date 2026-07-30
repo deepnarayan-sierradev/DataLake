@@ -1,7 +1,7 @@
 """
 Twin index repository (FR-1.3 / FR-1.4).
 
-Persists the twin index in DynamoDB (table EdlTwinIndex): PK tenant_code,
+Persists the twin index in DynamoDB (table datalake-twin-index-dev): PK tenant_code,
 SK "{entity_type}#{golden_id}". Stores lifecycle stage, per-relationship
 rollups and the edge adjacency list. Tenant-partitioned from creation (PK is
 tenant_code) — no tenant_scoped_key() retrofit needed. Mastered attributes are
@@ -11,7 +11,6 @@ read as a follow-up (FR-1.4).
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import boto3
@@ -19,11 +18,11 @@ from boto3.dynamodb.conditions import Key
 
 from contracts.identifier_policy import ENTITY_TYPE_PATTERN, validate_tenant_code
 from knowledge.twin import Twin, TwinEdge
+from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
 from persistence.dynamodb_paging import DEFAULT_PAGE_SIZE, fetch_page, iter_items
 
 _logger = get_platform_logger(__name__)
-_DYNAMODB_TABLE_NAME = "EdlTwinIndex"
 
 
 def _optional_text(value: Any) -> str | None:
@@ -38,7 +37,7 @@ class TwinNotFoundError(Exception):
 class TwinRepository:
     def __init__(self, region_name: str) -> None:
         self._dynamodb = boto3.resource("dynamodb", region_name=region_name)
-        self._table_name = os.environ.get("TWIN_INDEX_TABLE") or _DYNAMODB_TABLE_NAME
+        self._table_name = require_env("TWIN_INDEX_TABLE")
         self._table = self._dynamodb.Table(self._table_name)
 
     @staticmethod
@@ -143,7 +142,5 @@ class TwinRepository:
             edges=edges,
             lifecycle_stage=str(lifecycle_stage) if lifecycle_stage is not None else None,
             rollups=rollups,
-            # Items written before DL-SCOPE-13 carry no unit; they stay invisible to a
-            # unit-scoped caller until the entity's next twin build restamps them.
             scope_unit_id=_optional_text(item.get("scope_unit_id")),
         )

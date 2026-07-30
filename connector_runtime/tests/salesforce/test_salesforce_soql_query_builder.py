@@ -46,11 +46,6 @@ def _make_contract(*names: str) -> FieldContract:
     )
 
 
-# ---------------------------------------------------------------------------
-# Query construction
-# ---------------------------------------------------------------------------
-
-
 class TestSoqlQueryConstruction:
     def test_incremental_query_has_watermark_where_clause(self) -> None:
         builder = SalesforceSoqlQueryBuilder("Account")
@@ -136,11 +131,6 @@ class TestSoqlQueryConstruction:
         )
         assert query.source_id == _SOURCE_ID
         assert query.entity_id == _ENTITY_ID
-
-
-# ---------------------------------------------------------------------------
-# Input validation (injection prevention)
-# ---------------------------------------------------------------------------
 
 
 class TestInputValidation:

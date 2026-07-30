@@ -28,18 +28,10 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Consecutive throttles after which the connector should checkpoint rather than keep waiting.
 DEFAULT_SUSTAINED_THROTTLE_LIMIT: Final[int] = 5
 
-# Upper bound on any single backoff so a hostile Retry-After cannot pin a Lambda open.
 MAX_BACKOFF_SECONDS: Final[float] = 60.0
 
-# Beyond this, the policy stops sleeping and asks the caller to checkpoint and resume (L14).
-#
-# Sleeping inside a Lambda is billed wall-clock inside a 900s budget: a provider issuing repeated
-# `Retry-After: 60` consumes the invocation doing nothing and then dies at the timeout mid-entity.
-# Ten throttling SaaS APIs across 80-100 entities per tenant makes that a systematic ceiling, not
-# an edge case. The Step Functions `Wait` state costs nothing while it waits.
 MAX_IN_LAMBDA_SLEEP_SECONDS: Final[float] = 5.0
 
 
@@ -133,7 +125,6 @@ class RateLimitPolicy(abc.ABC):
     def _back_off(self, seconds: float) -> None:
         bounded = max(0.0, min(seconds, MAX_BACKOFF_SECONDS))
         if bounded > MAX_IN_LAMBDA_SLEEP_SECONDS:
-            # Hand the wait to the state machine rather than billing for it here (L14).
             record_platform_metric(
                 PlatformMetric.RATE_LIMIT_BACKOFF_MS,
                 bounded * 1000,
@@ -146,8 +137,6 @@ class RateLimitPolicy(abc.ABC):
                 retry_after_seconds=bounded,
                 connection_id=self._connection_id,
             )
-        # Full jitter: without it, N connections throttled by the same provider window
-        # would retry in lockstep and re-trigger the same throttle.
         jittered = bounded * (0.5 + random.random() / 2)  # noqa: S311  # nosec B311 — jitter
         self.total_backoff_ms += jittered * 1000
         if jittered > 0:
@@ -283,7 +272,6 @@ class RetryAfterRateLimitPolicy(RateLimitPolicy):
         )
 
 
-# Header names providers actually use; parsed case-insensitively.
 _RETRY_AFTER_HEADERS: Final[tuple[str, ...]] = ("retry-after", "x-ratelimit-retry-after")
 _REMAINING_HEADERS: Final[tuple[str, ...]] = (
     "x-ratelimit-remaining",
@@ -295,7 +283,7 @@ _LIMIT_HEADERS: Final[tuple[str, ...]] = (
     "x-rate-limit-limit",
     "ratelimit-limit",
 )
-_STATUS_HEADERS: Final[tuple[str, ...]] = ("x-edl-response-status", "status")
+_STATUS_HEADERS: Final[tuple[str, ...]] = ("x-datalake-response-status", "status")
 
 
 def parse_rate_limit_headers(headers: Mapping[str, str]) -> RateLimitObservation:
@@ -362,11 +350,8 @@ class DocumentedRateLimit:
         return self.worst_case_issued(capacity, refill_per_second) <= self.max_requests
 
 
-# How much of the tightest documented rate is spent on sustained throughput; the remainder
-# is what leaves room for a burst without breaching the window.
 SUSTAINED_FRACTION: Final[float] = 0.7
 
-# Headroom kept under every documented window, so a co-tenant or a retry does not tip us over.
 BURST_SAFETY_FRACTION: Final[float] = 0.9
 
 
@@ -405,8 +390,6 @@ def token_bucket_within(
     )
     breached = [limit for limit in limits if not limit.permits(capacity, refill)]
     if breached:
-        # Unreachable by construction; asserted because a silent breach is a vendor
-        # relationship problem, not a test failure someone can shrug off.
         raise ValueError(
             f"Derived bucket (capacity={capacity}, refill={refill:.3f}/s) still breaches "
             f"{[(b.max_requests, b.window_seconds) for b in breached]}."
@@ -482,15 +465,10 @@ def _register_platform_policies() -> None:
     """Provider-observed defaults; a connection may override via its config."""
     rate_limit_policy_registry.register(
         "hubspot-standard",
-        # HubSpot: 110 requests / 10 s per private app token. Previously capacity=100 with
-        # a 10/s refill, which permits 200 in that same 10 s — 82% over. Derived now.
         token_bucket_within([DocumentedRateLimit(110, 10)]),
     )
     rate_limit_policy_registry.register(
         "wellsky-conservative",
-        # WellSky Personal Care states it does not explicitly throttle but asks for no more
-        # than 100 req/s and advises against batch use. Sized an order of magnitude below
-        # the stated ceiling: an unenforced request is still a request.
         RateLimitPolicySpec(RateLimitStrategy.TOKEN_BUCKET, capacity=10, refill_per_second=5.0),
     )
     rate_limit_policy_registry.register(
@@ -503,7 +481,6 @@ def _register_platform_policies() -> None:
     )
     rate_limit_policy_registry.register(
         "meta-ads-standard",
-        # Meta's ad-account budget is per app, shared across a tenant's connections.
         RateLimitPolicySpec(
             RateLimitStrategy.RETRY_AFTER,
             base_backoff_seconds=5.0,
@@ -512,25 +489,17 @@ def _register_platform_policies() -> None:
     )
     rate_limit_policy_registry.register(
         "dialpad-standard",
-        # DialPad documents 20 requests/second per company. Endpoint-specific per-minute
-        # caps sit under that global limit; the derived headroom covers the common ones.
         token_bucket_within([DocumentedRateLimit(20, 1)]),
     )
     rate_limit_policy_registry.register(
         "housecall-pro-standard",
         RateLimitPolicySpec(RateLimitStrategy.FIXED_WINDOW, max_requests=5, window_seconds=1.0),
     )
-    # MaidCentral documents "1000 requests per hour per API key" and "burst limit: 100
-    # requests per MINUTE" — the tightest budget on the platform at 0.28 req/s sustained.
-    # A capacity of 100 was the error the derivation exists to prevent: it permits 100
-    # instantly, which is 100 inside one second, not one minute.
     maid_central = token_bucket_within(
         [DocumentedRateLimit(1_000, 3_600), DocumentedRateLimit(100, 60)]
     )
     rate_limit_policy_registry.register("maid-central-hourly", maid_central)
     rate_limit_policy_registry.register(
-        # Retained so a connection still configured with the pre-rewrite policy name
-        # resolves rather than failing at build time.
         "maid-central-standard",
         maid_central,
     )

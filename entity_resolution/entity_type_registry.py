@@ -20,7 +20,6 @@ change or redeploy required.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -28,13 +27,11 @@ import boto3
 from botocore.exceptions import ClientError
 
 from contracts.identifier_policy import DEFAULT_TENANT_CODE, validate_tenant_code
+from observability.lambda_runtime import require_env
 from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# ---------------------------------------------------------------------------
-# entity_id → canonical entity type
-# ---------------------------------------------------------------------------
 
 ENTITY_ID_TO_TYPE: Final[dict[str, str]] = {
     "salesforce-account": "company",
@@ -48,23 +45,13 @@ ENTITY_ID_TO_TYPE: Final[dict[str, str]] = {
     "sage-intacct-arinvoice": "ar_invoice",  # Sage Intacct AR invoice
     "sage-intacct-apbill": "ap_bill",  # Sage Intacct AP bill
     "salesforce-opportunity": "opportunity",
-    # Deliberately its own type, not merged into "contract": Salesforce
-    # Contract and MySQL RDS Contracts share no common key, so treating them
-    # as one golden-record type would require a fuzzy name/account match that
-    # risks silently combining unrelated records. Revisit if a real shared
-    # identifier between the two systems is established.
     "salesforce-contract": "sales-contract",
     "mysql-rds-contractterms": "contract-term",
 }
 
-# ---------------------------------------------------------------------------
-# entity_type → canonical primary-key field name in curated records
-# ---------------------------------------------------------------------------
 
 ENTITY_TYPE_PK_FIELD: Final[dict[str, str]] = {
     "company": "account_id",  # Salesforce Account, NetSuite Customer,
-    #   Sage Intacct Customer, Sage X3 Customer —
-    #   each maps its native ID to account_id.
     "person": "contact_id",
     "contract": "contract_id",
     "supplier": "vendor_id",  # Sage Intacct Vendor, Sage X3 Supplier
@@ -75,11 +62,6 @@ ENTITY_TYPE_PK_FIELD: Final[dict[str, str]] = {
     "contract-term": "contract_term_id",  # MySQL RDS ContractTerms
 }
 
-# ---------------------------------------------------------------------------
-# entity_type → ordered (source_id, entity_id) pairs that contribute records
-# ---------------------------------------------------------------------------
-# Order determines S3 scanning preference for "other sources"; it does NOT
-# affect survivorship (that is controlled by SurvivorshipPolicy).
 
 ENTITY_TYPE_SOURCES: Final[dict[str, list[tuple[str, str]]]] = {
     "company": [
@@ -116,13 +98,6 @@ ENTITY_TYPE_SOURCES: Final[dict[str, list[tuple[str, str]]]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# EntityTypeRegistryClient — DynamoDB-backed, tenant-scoped (ARCH-2)
-# ---------------------------------------------------------------------------
-
-_TABLE_NAME: Final[str] = "EdlEntityTypeRegistry"
-
-
 @dataclass(frozen=True)
 class EntityTypeRecord:
     """A tenant's registration for one entity_id."""
@@ -152,7 +127,7 @@ class EntityTypeRegistryClient:
         if not environment:
             raise ValueError("environment must not be empty.")
         self._environment = environment
-        table_name = os.environ.get("ENTITY_TYPE_REGISTRY_TABLE") or _TABLE_NAME
+        table_name = require_env("ENTITY_TYPE_REGISTRY_TABLE")
         self._table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
 
     def get_entity_type(self, entity_id: str, tenant_code: str = DEFAULT_TENANT_CODE) -> str | None:

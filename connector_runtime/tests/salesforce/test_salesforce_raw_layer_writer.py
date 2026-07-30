@@ -59,11 +59,6 @@ def _create_bucket() -> None:
     s3.create_bucket(Bucket=_BUCKET)
 
 
-# ---------------------------------------------------------------------------
-# Partition path
-# ---------------------------------------------------------------------------
-
-
 class TestPartitionPath:
     @mock_aws
     def test_data_key_follows_production_partition_scheme(self) -> None:
@@ -106,11 +101,6 @@ class TestPartitionPath:
         records = _make_records({"Id": "001"})
         key = writer.write_partition(records, _SOURCE_ID, _ENTITY_ID, _RUN_ID, _SCHEMA_FP, _DATE)
         assert key.startswith(f"{_TENANT_CODE}/{_SOURCE_ID}/{_ENTITY_ID}/")
-
-
-# ---------------------------------------------------------------------------
-# Parquet output
-# ---------------------------------------------------------------------------
 
 
 class TestParquetOutput:
@@ -162,15 +152,9 @@ class TestParquetOutput:
         s3 = boto3.client("s3", region_name=_REGION)
         obj = s3.get_object(Bucket=_BUCKET, Key=key)
         pf = pq.read_metadata(BytesIO(obj["Body"].read()))
-        # All row groups should use snappy
         for rg in range(pf.num_row_groups):
             for col in range(pf.row_group(rg).num_columns):
                 assert pf.row_group(rg).column(col).compression == "SNAPPY"
-
-
-# ---------------------------------------------------------------------------
-# Metadata JSON
-# ---------------------------------------------------------------------------
 
 
 class TestMetadataJson:
@@ -206,11 +190,6 @@ class TestMetadataJson:
         s3 = boto3.client("s3", region_name=_REGION)
         meta = json.loads(s3.get_object(Bucket=_BUCKET, Key=metadata_key)["Body"].read())
         assert meta["record_count"] == n
-
-
-# ---------------------------------------------------------------------------
-# Input validation
-# ---------------------------------------------------------------------------
 
 
 class TestInputValidation:

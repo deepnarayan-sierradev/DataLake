@@ -19,7 +19,6 @@ def emitter() -> CloudWatchMetricsEmitter:
 class TestCloudWatchMetricsEmitter:
     def test_emit_records_extracted_does_not_raise(self) -> None:
         emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
-        # Should complete without error even when CloudWatch is mocked
         emitter.emit_records_extracted(
             source_id="salesforce",
             entity_id="salesforce-account",
@@ -41,7 +40,7 @@ class TestCloudWatchMetricsEmitter:
         emitter.emit_schema_drift_count(
             source_id="netsuite",
             entity_id="netsuite-customer",
-            environment="staging",
+            environment="uat",
             count=3,
         )
 
@@ -60,10 +59,7 @@ class TestCloudWatchMetricsEmitter:
         Simulate a ClientError by using an invalid endpoint.
         The emitter should log a warning and return without raising.
         """
-        # Using an invalid region to force a client error on actual call
-        # In moto context this still works — we verify via the swallow behaviour contract
         emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
-        # Should not raise regardless of internal CloudWatch failure
         emitter.emit_retry_count(
             source_id="salesforce",
             entity_id="salesforce-contact",
@@ -144,7 +140,7 @@ class TestFlushAndBuffering:
 
         emitter = CloudWatchMetricsEmitter(region_name="us-east-1")
         emitter.emit_watermark_lag_seconds(
-            source_id="ns", entity_id="ns-customer", environment="staging", lag_seconds=3600.0
+            source_id="ns", entity_id="ns-customer", environment="uat", lag_seconds=3600.0
         )
         emitter._client.put_metric_data = MagicMock(  # type: ignore[method-assign]
             side_effect=ClientError(
@@ -173,7 +169,6 @@ class TestTenantCodeDimension:
         dimensions = _dimensions_of(emitter._pending[0])
         dims = {d["Name"]: d["Value"] for d in dimensions}
         assert dims["TenantCode"] == "acme-corp"
-        # TenantCode is the FIRST dimension (most visible in console)
         assert dimensions[0]["Name"] == "TenantCode"
 
     def test_tenant_code_included_when_set_via_set_tenant_context(self) -> None:
@@ -290,7 +285,6 @@ class TestCheckLambdaTimeoutPeriodic:
 
         ctx = self._make_context(remaining_ms=300_000)  # 5 minutes
         check_lambda_timeout_periodic(ctx, min_remaining_ms=120_000, operation_name="test_op")
-        # Should not raise
 
     def test_insufficient_time_raises(self) -> None:
         from observability.lambda_runtime import check_lambda_timeout_periodic
@@ -302,7 +296,6 @@ class TestCheckLambdaTimeoutPeriodic:
     def test_none_context_is_noop(self) -> None:
         from observability.lambda_runtime import check_lambda_timeout_periodic
 
-        # Should not raise even with tight threshold
         check_lambda_timeout_periodic(None, min_remaining_ms=1_000_000, operation_name="test")
 
     def test_error_message_includes_remaining_time(self) -> None:

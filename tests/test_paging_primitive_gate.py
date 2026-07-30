@@ -74,13 +74,11 @@ class TestTheGateRejectsHandRolledPaging:
         assert "ExclusiveStartKey" in markers
 
     def test_the_keyword_form_is_rejected(self, tmp_path: Path) -> None:
-        # `ExclusiveStartKey=` as a kwarg is the same hand-rolled paging, written differently.
         assert "ExclusiveStartKey" in _markers(_KWARG_FORM, tmp_path)
 
 
 class TestPositiveControl:
     def test_a_module_using_the_primitive_is_accepted(self, tmp_path: Path) -> None:
-        # Without this, a gate that flagged every file would pass the tests above.
         assert _markers(_USES_THE_PRIMITIVE, tmp_path) == []
 
     def test_the_single_page_omission_is_not_what_this_gate_catches(self, tmp_path: Path) -> None:

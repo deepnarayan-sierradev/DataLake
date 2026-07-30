@@ -56,10 +56,6 @@ class SurvivorshipPolicy:
     policy_version: str
     attribute_rules: tuple[AttributeSurvivorshipRule, ...]
     default_strategy: SurvivorshipStrategy = SurvivorshipStrategy.FIRST_NON_NULL
-    # Explicit output schema — only these fields appear in the canonical record.
-    # System fields (golden_id, contributing_source_records, etc.) are always
-    # included by the publisher regardless of this list.
-    # Empty tuple means pass-through (union of all source fields — use only in tests).
     output_fields: tuple[str, ...] = ()
 
 
@@ -84,8 +80,6 @@ class SurvivorshipResult:
     canonical_record: dict[str, Any]
     contributing_record_ids: tuple[str, ...]
     conflict_log: tuple[ConflictResolutionEntry, ...]
-    # Maps every output field to the source_id that won for that field.
-    # Queryable directly in Athena via json_extract_scalar(field_provenance, '$.full_name').
     field_provenance: dict[str, str]
 
 
@@ -124,7 +118,6 @@ class GoldenRecordSurvivorshipPolicy:
         if not records:
             raise SurvivorshipError("Cannot resolve empty cluster")
 
-        # Collect all unique field names across all records
         all_fields = {k for r in records for k in r}
         canonical: dict[str, Any] = {}
         provenance: dict[str, str] = {}
@@ -153,7 +146,6 @@ class GoldenRecordSurvivorshipPolicy:
                 provenance[field_name] = winning_src
                 candidates_with_value = sum(1 for r in records if r.get(field_name) is not None)
                 if candidates_with_value > 1:
-                    # Only log when there was actual conflict
                     conflict_log.append(
                         ConflictResolutionEntry(
                             canonical_field=field_name,
@@ -164,8 +156,6 @@ class GoldenRecordSurvivorshipPolicy:
                         )
                     )
 
-        # Apply output schema projection: drop any field not in output_fields.
-        # System fields are excluded from the projection check — the publisher adds them.
         if self._policy.output_fields:
             canonical = {k: v for k, v in canonical.items() if k in self._policy.output_fields}
             provenance = {k: v for k, v in provenance.items() if k in self._policy.output_fields}

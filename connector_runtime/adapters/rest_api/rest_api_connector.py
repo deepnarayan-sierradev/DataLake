@@ -56,8 +56,6 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# Records read to infer the field set. One page is enough for a fingerprint and keeps
-# discovery from consuming the rate-limit budget the extraction itself needs.
 _DISCOVERY_SAMPLE_PAGES = 1
 
 
@@ -74,18 +72,12 @@ class RestApiConnector(ConnectorInterface):
         entity: RestEntitySpec | None = None,
     ) -> None:
         self._spec = spec
-        # `entity` is supplied when the configuration console declared it rather than this
-        # repo (DL-CONN-21). Falling back to the spec keeps every existing caller unchanged.
         self._entity = entity if entity is not None else spec.entity(entity_id)
         self._session = session
         self._rate_limit = rate_limit_policy
         self._connection_id = connection_id or spec.source_id
-        # Bound at query-build time for a POST-search entity; discovery falls back to the
-        # spec's static filters so a sample page is fetched with the same shape as a run.
         self._request_body: dict[str, Any] | None = None
         self.pages_fetched = 0
-
-    # ── Capability declaration ────────────────────────────────────────────────
 
     def get_capability_declaration(self) -> ConnectorCapabilities:
         capabilities = self._spec.capabilities
@@ -98,8 +90,6 @@ class RestApiConnector(ConnectorInterface):
             max_concurrent_jobs=1,
             supported_field_modes=(FieldMode.ALL, FieldMode.INCLUDE_ONLY),
         )
-
-    # ── Field discovery ───────────────────────────────────────────────────────
 
     def discover_queryable_fields(
         self,
@@ -122,8 +112,6 @@ class RestApiConnector(ConnectorInterface):
         fields = tuple(
             FieldDescriptor(
                 name=name,
-                # The raw layer stores every source value as a string; typing is the
-                # curated layer's responsibility, so discovery does not guess types.
                 data_type="string",
                 is_nullable=True,
                 is_queryable=True,
@@ -138,8 +126,6 @@ class RestApiConnector(ConnectorInterface):
             discovery_timestamp=datetime.now(UTC),
             schema_fingerprint=FieldContract.compute_fingerprint(fields),
         )
-
-    # ── Query build ───────────────────────────────────────────────────────────
 
     def build_extraction_query(
         self,
@@ -171,8 +157,6 @@ class RestApiConnector(ConnectorInterface):
         return QueryContract(
             source_id=self._spec.source_id,
             entity_id=self._entity.entity_id,
-            # The endpoint path is the query text; values stay in query_parameters and are
-            # bound by the HTTP layer, never interpolated (OWASP A03).
             query_text=self._entity.path,
             query_parameters=parameters,
             load_type=load_type,
@@ -191,9 +175,6 @@ class RestApiConnector(ConnectorInterface):
     ) -> None:
         """Bind the incremental bounds where this entity's read shape carries them."""
         if self._entity.watermark_body_field:
-            # A FHIR-style search expresses a bound as a comparator-prefixed value in the
-            # body — `{"updated": "ge2026-07-01T00:00:00"}` — with no upper-bound form, so
-            # the upper bound is deliberately not sent rather than silently mistranslated.
             if lower:
                 prefix = self._entity.watermark_comparator_prefix
                 body[self._entity.watermark_body_field] = f"{prefix}{lower}"
@@ -202,8 +183,6 @@ class RestApiConnector(ConnectorInterface):
             parameters[self._spec.watermark_lower_parameter] = lower
         if upper:
             parameters[self._spec.watermark_upper_parameter] = upper
-
-    # ── Extraction ────────────────────────────────────────────────────────────
 
     def execute_extraction(
         self, query_contract: QueryContract, run_id: str
@@ -268,7 +247,6 @@ class RestApiConnector(ConnectorInterface):
         url = working.pop("url", None)
         path = str(url) if url else self._entity.path
         if self._entity.read_method == "POST":
-            # A search-shaped read: filters travel in the body, paging in the query string.
             body = self._request_body
             if body is None:
                 body = dict(self._entity.search_body)
@@ -301,14 +279,10 @@ class RestApiConnector(ConnectorInterface):
                         names.append(str(key))
             break
         if not names:
-            # An entity with no rows yet still needs a stable, non-empty contract so the
-            # drift evaluator has something to compare against next run.
             names = [self._entity.natural_key_field]
             if self._entity.watermark_field:
                 names.append(self._entity.watermark_field)
         return names
-
-    # ── Write-back (DL-CONN-02) ───────────────────────────────────────────────
 
     def write_back(self, records: list[dict[str, Any]], writeback_session: RestHttpSession) -> int:
         """
@@ -339,11 +313,8 @@ class RestApiConnector(ConnectorInterface):
             written += 1
         return written
 
-    # ── Error classification ──────────────────────────────────────────────────
-
     def classify_extraction_error(self, exc: Exception) -> ExtractionErrorClassification:
         if isinstance(exc, SourceCapabilityUnavailableError):
-            # A vendor endpoint that does not exist yet is a configuration fact, not an outage.
             return ExtractionErrorClassification.DETERMINISTIC_INVALID_CONFIGURATION
         if isinstance(exc, TransientConnectorError | DeterministicConnectorError):
             return exc.classification
@@ -353,8 +324,6 @@ class RestApiConnector(ConnectorInterface):
         """Structural check only — a live call would consume the source's rate-limit budget."""
         try:
             self.get_capability_declaration()
-            # The resolved entity, not the spec's list: a config-declared entity is just as
-            # extractable as a declared one, and asking the spec would fail it every time.
             pagination_strategy_registry.resolve(
                 self._entity.pagination_strategy or self._spec.default_pagination_strategy,
                 self._fetch_page,

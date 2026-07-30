@@ -1,9 +1,9 @@
 variable "environment" {
-  description = "Deployment environment: dev, staging, or prod."
+  description = "Deployment environment: dev, uat, or prod."
   type        = string
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment must be one of: dev, staging, prod."
+    condition     = contains(["dev", "uat", "prod"], var.environment)
+    error_message = "environment must be one of: dev, uat, prod."
   }
 }
 
@@ -67,7 +67,7 @@ variable "multi_az" {
 }
 
 variable "deletion_protection" {
-  description = "Whether to enable RDS deletion protection. Should be true in staging/prod."
+  description = "Whether to enable RDS deletion protection. Should be true in uat/prod."
   type        = bool
   default     = true
 }
@@ -88,4 +88,9 @@ variable "performance_insights_enabled" {
   description = "Performance Insights (CKV_AWS_353). Set false only if the instance class rejects it."
   type        = bool
   default     = true
+}
+
+variable "name_prefix" {
+  type        = string
+  description = "Resource name prefix for the platform (e.g. 'datalake'). Combined with the environment to form every resource name."
 }

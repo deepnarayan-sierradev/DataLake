@@ -42,8 +42,6 @@ class Capability(NamedTuple):
     why_it_matters: str
 
 
-# Each entry is a capability a requirement claims. A method here with no production call site means
-# the requirement is not delivered, whatever the module-level gate says.
 GUARDED_CAPABILITIES: Final[tuple[Capability, ...]] = (
     Capability(
         "execute",
@@ -74,10 +72,6 @@ GUARDED_CAPABILITIES: Final[tuple[Capability, ...]] = (
     ),
 )
 
-# Capabilities that are deliberately **not** yet called from production, each with the gate that
-# tracks its adoption. Listed rather than omitted, and asserted *still* unreachable below — so when
-# one gains a caller this list goes stale and must be updated, the same discipline `WAIVERS.md`
-# applies to module waivers. An unlisted absence is an oversight; a listed one is a decision.
 PENDING_CAPABILITIES: Final[tuple[Capability, ...]] = (
     Capability(
         "tenant_scoped_session",
@@ -88,9 +82,6 @@ PENDING_CAPABILITIES: Final[tuple[Capability, ...]] = (
     ),
 )
 
-# Reachable only through the module that defines them, which is correct for a scaffold: handlers
-# reach `enqueue_stage_failure` by entering `stage_execution`, and its delivery is proven
-# behaviourally in `observability/tests/test_stage_dlq_delivery.py`.
 SCAFFOLD_INTERNAL: Final[frozenset[str]] = frozenset({"enqueue_stage_failure"})
 
 
@@ -123,7 +114,6 @@ def _callers_of(method: str) -> list[str]:
     callers: list[str] = []
     for path in _production_modules():
         source = path.read_text(encoding="utf-8")
-        # A module calling its own method proves nothing about reachability from an entry point.
         defines_it = f"def {method}(" in source
         if method in _called_names(path) and not defines_it:
             callers.append(str(path.relative_to(REPO_ROOT)))
@@ -160,13 +150,9 @@ class TestPendingCapabilitiesAreStillPending:
 
 class TestTheGateItselfCanFail:
     def test_a_method_nothing_calls_is_reported_as_uncalled(self) -> None:
-        # Positive control. Without it, a matcher that found a caller for every string would pass
-        # every test above — which is exactly how the previous call-site assertions passed.
         assert _callers_of("a_method_name_that_does_not_exist_anywhere") == []
 
     def test_a_method_defined_and_called_only_in_its_own_module_does_not_count(self) -> None:
-        # `_apply_scope` is called only inside export_service.py, so it must not read as reachable
-        # from elsewhere; reachability means a *different* module can get to it.
         assert "portability/export_service.py" not in _callers_of("_apply_scope")
 
 

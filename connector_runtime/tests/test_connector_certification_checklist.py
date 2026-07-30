@@ -40,11 +40,6 @@ def _minimal_field_contract(source_id: str, entity_id: str) -> FieldContract:
     )
 
 
-# ---------------------------------------------------------------------------
-# Minimal valid connector implementation for tests
-# ---------------------------------------------------------------------------
-
-
 class _ValidConnector(ConnectorInterface):
     """A connector that satisfies all certification requirements."""
 
@@ -187,11 +182,6 @@ class _ProhibitedNameConnector(ConnectorInterface):
         return ExtractionErrorClassification.UNKNOWN
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-
 class TestConnectorCertificationChecklist:
     def test_valid_connector_passes_all_checks(self) -> None:
         checklist = ConnectorCertificationChecklist()
@@ -239,7 +229,6 @@ class TestConnectorCertificationChecklist:
         class AccountHelperConnector(_ValidConnector):
             pass
 
-        # 'helper' is a prohibited term
         report = checklist.certify(AccountHelperConnector, source_id="account-connector")
         prohibited_check = next(c for c in report.checks if c.check_name == "no_prohibited_names")
         assert prohibited_check.passed is False

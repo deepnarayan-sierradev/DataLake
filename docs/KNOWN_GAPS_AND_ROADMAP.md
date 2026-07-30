@@ -92,7 +92,7 @@ a session through ~47 repository constructors is design-sized rather than half-d
 ### 2. ~~Secrets Manager holds one shared credential per connector type~~ (**closed in code**)
 
 Credentials are now **per connection**:
-`edl/tenants/{tenant_code}/connections/{connection_id}/credentials`, resolved through
+`datalake/<env>/tenants/{tenant_code}/connections/{connection_id}/credentials`, resolved through
 `connector_runtime/connection_credential_resolver.py::ConnectionCredentialPathResolver`. Write-back
 uses a separate `-writeback` secret with **no** legacy fallback, so a read-only deployment cannot
 mutate a source. The skipped placeholder in `tests/test_tenant_isolation.py` is gone, replaced by
@@ -129,7 +129,7 @@ private subnets only, and its security group's only inbound rule is from the loa
 security group. There is no VPN, PrivateLink, or bastion anywhere in
 `infrastructure/modules/networking/` — so as designed today, an external Power BI or Tableau
 connection cannot reach the database at all. As of 2026-07-24 the serving store's Terraform **has
-been applied in dev** (`edl-serving-store-mysql-dev`), so this is now a live gap, not a hypothetical
+been applied in dev** (`datalake-serving-store-mysql-dev`), so this is now a live gap, not a hypothetical
 one — though the dev instance is still empty (no tenant onboarded, see `docs/PLATFORM_STATUS.md`),
 so nothing needs to reach it yet. Onboarding a tenant/entity is now a first-class command
 (`scripts/seed_serving_store_config.py`), but there is still no script or API to hand a tenant its
@@ -160,8 +160,8 @@ needs the account owner to name the principals and confirm before `terraform app
 it as a side effect of another change. Original description follows.
 
 
-`infrastructure/modules/glue/main.tf` defines exactly two shared Glue databases (`edl_curated`,
-`edl_analytics`) for the whole platform. Tenant separation there is table-naming-convention only
+`infrastructure/modules/glue/main.tf` defines exactly two shared Glue databases (`datalake_curated_dev`,
+`datalake_analytics_dev`) for the whole platform. Tenant separation there is table-naming-convention only
 (`{tenant_code}_{entity_type}`) — there are no per-tenant Glue databases, no LF-Tags, no data-cell
 filters, and no `tenant_code` partition column. Three real IAM principals are currently configured
 in dev's `terraform.tfvars` (`analytics_reader_principals`) with a Lake Formation grant of
@@ -264,8 +264,8 @@ internal entity-resolution fields before writing — two complete copies residen
 
 ### 13. ~~Tenant-scoped list queries are full DynamoDB table scans~~ (**closed in code**)
 
-Tenant-keyed GSIs are declared on `EdlEntityExtractionConfig` (`tenant-entity-index`, KEYS_ONLY)
-and `EdlRunAuditLog` (`tenant-started-index`), and `list_configs_for_tenant` queries the index when
+Tenant-keyed GSIs are declared on `datalake-entity-extraction-config-dev` (`tenant-entity-index`, KEYS_ONLY)
+and `datalake-run-audit-log-dev` (`tenant-started-index`), and `list_configs_for_tenant` queries the index when
 it exists, falling back to the Scan while an environment has not applied it. **Both tables are
 deployed, so adding a GSI is a live-data change and needs explicit approval before apply.**
 Original description follows.
@@ -414,7 +414,7 @@ while the defect was live, because they asserted a message reached the extractio
 
 Producers: item 20. Consumer: `aws_lambda_event_source_mapping.dlq_processor_stage_queues` binds the
 processor to every stage queue via `for_each`, so `maxReceiveCount = 3` now counts (it only decrements
-on *receive*). Each producing role gained `sqs:SendMessage` on `EdlStageDlq-*`, and the processor
+on *receive*). Each producing role gained `sqs:SendMessage` on `datalake-<stage>-dlq-dev-*`, and the processor
 role gained receive on the stage queues plus the terminal queue.
 
 `observability/tests/test_dlq_routing_reconciliation.py` reconciles Terraform's `pipeline_stages`
@@ -423,12 +423,12 @@ in the same style as the alarm/emitter reconciliation, because an empty queue an
 write to look identical on a dashboard.
 
 Still open, and deliberately so: the processor **records and notifies; it does not re-drive.** So
-`EdlStageReplayExhausted` stays empty until an automatic replay exists. Item 24 covers the notification
+`datalake-replay-exhausted-dev` stays empty until an automatic replay exists. Item 24 covers the notification
 half.
 
 ### 22. Scheduled runs bypass the burst buffer
 
-`EdlPipelineTrigger.fifo` plus its Lambda exist to absorb simultaneous schedule fires — that is
+`datalake-pipeline-trigger-dev.fifo` plus its Lambda exist to absorb simultaneous schedule fires — that is
 their documented purpose. But `scripts/seed_schedules.py` sets the EventBridge Scheduler target to
 the **state machine ARN**, so schedules call `StartExecution` directly and the queue is fed only by
 the control-plane manual trigger route. Either point schedules at the queue or delete the queue and
@@ -481,7 +481,7 @@ is deliberate rather than incidental:
   breaks every outbound call from these functions.
 - **Log retention goes from 30/90 to 365 days everywhere**, which is a storage cost that scales with
   volume.
-- **Twelve new SQS DLQs** appear, one per Lambda module, named `EdlStageDlq-*` so the existing
+- **Twelve new SQS DLQs** appear, one per Lambda module, named `datalake-<stage>-dlq-dev-*` so the existing
   `sqs:SendMessage` grant covers them.
 
 Two things remain deliberately open rather than fixed:

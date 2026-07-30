@@ -169,8 +169,6 @@ class RetentionPolicyEnforcer:
         """
         return self._set_legal_hold(bucket, key, "OFF", version_id)
 
-    # ── Internals ─────────────────────────────────────────────────────────────
-
     def _set_legal_hold(
         self,
         bucket: str,
@@ -212,11 +210,6 @@ class RetentionPolicyEnforcer:
         return result
 
 
-# ---------------------------------------------------------------------------
-# Module-level helpers
-# ---------------------------------------------------------------------------
-
-
 def _audit_enforcement(
     s3: Any,
     governance_bucket: str,
@@ -241,7 +234,6 @@ def _audit_enforcement(
             ContentType="application/json",
         )
     except ClientError as exc:
-        # Audit write failure should never block retention enforcement
         _logger.warning("retention_audit_write_failed", error=str(exc))
 
 

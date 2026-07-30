@@ -26,7 +26,7 @@ from tenancy.tenant_session import (
     tenant_scoped_session,
 )
 
-_ROLE = "arn:aws:iam::123456789012:role/EdlTenantDataExtractionRole"
+_ROLE = "arn:aws:iam::123456789012:role/datalake-tenant-data-extraction-dev-exec"
 _REGION = "us-east-1"
 
 
@@ -110,7 +110,6 @@ class TestCachingIsPerTenant:
         assert first_credentials.access_key != second_credentials.access_key
 
     def test_credentials_near_expiry_are_refreshed(self) -> None:
-        # Two minutes left is inside the five-minute margin, so a long stage never runs past them.
         sts = _RecordingSts(expires_in=timedelta(minutes=2))
         tenant_scoped_session("evive", region_name=_REGION, role_arn=_ROLE, sts_client=sts)
         tenant_scoped_session("evive", region_name=_REGION, role_arn=_ROLE, sts_client=sts)

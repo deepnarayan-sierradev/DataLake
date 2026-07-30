@@ -46,7 +46,6 @@ _ENTITY_ID = "sage-intacct-customer"
 _BASE_URL = "https://api.intacct.com/ia/api/v1"
 _MODELS_URL = f"{_BASE_URL}/objects/{_OBJECT_PATH}"
 
-# Realistic Models API response body.
 _MODELS_RESPONSE = {
     "ia::result": {
         "object": "accounts-receivable/customer",
@@ -161,19 +160,9 @@ def _make_client(
     )
 
 
-# ---------------------------------------------------------------------------
-# Class attribute
-# ---------------------------------------------------------------------------
-
-
 class TestClassAttributes:
     def test_supports_live_discovery_is_true(self) -> None:
         assert IntacctMetadataClient.supports_live_discovery is True
-
-
-# ---------------------------------------------------------------------------
-# Constructor validation
-# ---------------------------------------------------------------------------
 
 
 class TestConstructorValidation:
@@ -198,11 +187,6 @@ class TestConstructorValidation:
         assert client is not None
 
 
-# ---------------------------------------------------------------------------
-# Field mode filtering
-# ---------------------------------------------------------------------------
-
-
 class TestFieldModeAll:
     def test_all_mode_returns_all_queryable_fields(self) -> None:
         client = _make_client()
@@ -215,7 +199,6 @@ class TestFieldModeAll:
             exclude_fields=[],
         )
         names = {f.name for f in fc.fields}
-        # key, id, name, status, nsp::CUSTOM_TIER should be included.
         assert "key" in names
         assert "id" in names
         assert "nsp::CUSTOM_TIER" in names
@@ -366,11 +349,6 @@ class TestExcludeFields:
         assert "key" in names
 
 
-# ---------------------------------------------------------------------------
-# FieldDescriptor attributes
-# ---------------------------------------------------------------------------
-
-
 class TestFieldDescriptorAttributes:
     def test_custom_field_marked_is_custom(self) -> None:
         client = _make_client()
@@ -425,11 +403,6 @@ class TestFieldDescriptorAttributes:
         assert len(fc.schema_fingerprint) == 64  # SHA-256 hex
 
 
-# ---------------------------------------------------------------------------
-# Caching
-# ---------------------------------------------------------------------------
-
-
 class TestCaching:
     def test_second_discover_fields_uses_cache(self) -> None:
         mock_http = _make_mock_http()
@@ -454,7 +427,6 @@ class TestCaching:
             include_fields=[],
             exclude_fields=[],
         )
-        # HTTP get should only be called once.
         assert mock_http.get.call_count == 1
 
     def test_invalidate_cache_triggers_refetch(self) -> None:
@@ -482,11 +454,6 @@ class TestCaching:
             exclude_fields=[],
         )
         assert mock_http.get.call_count == 2
-
-
-# ---------------------------------------------------------------------------
-# Error cases
-# ---------------------------------------------------------------------------
 
 
 class TestErrorCases:

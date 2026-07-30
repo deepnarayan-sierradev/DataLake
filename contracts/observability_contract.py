@@ -31,9 +31,6 @@ from contracts.identifier_policy import (
     STABLE_ID_PATTERN as _STABLE_ID_PATTERN,
 )
 
-# ---------------------------------------------------------------------------
-# Sensitive pattern registry — add patterns here; never suppress this check
-# ---------------------------------------------------------------------------
 _SENSITIVE_PATTERNS: Final[list[re.Pattern[str]]] = [
     re.compile(r"(?i)(password|passwd|pwd)\s*[=:]\s*\S+"),
     re.compile(r"(?i)(token|access_token|refresh_token|bearer)\s*[=:]\s*\S+"),
@@ -44,11 +41,6 @@ _SENSITIVE_PATTERNS: Final[list[re.Pattern[str]]] = [
         r"(?i)authorization:\s*.+",  # HTTP Authorization header (any scheme + credentials)
     ),
 ]
-
-
-# ---------------------------------------------------------------------------
-# Canonical enumerations
-# ---------------------------------------------------------------------------
 
 
 class PipelineStage(StrEnum):
@@ -69,7 +61,6 @@ class PipelineStage(StrEnum):
     GOLDEN_RECORD_PUBLISH = "golden_record_publish"
     ANALYTICS_PUBLISH = "analytics_publish"
     TARGET_DB_LOAD = "target_db_load"
-    # Phase 5 additions — orchestration lifecycle stages
     REPLAY_INITIATION = "replay_initiation"
     DLQ_ENQUEUE = "dlq_enqueue"
     RUN_COMPLETION = "run_completion"
@@ -85,11 +76,6 @@ class RunStatus(StrEnum):
     PARTIAL = "partial"
     RETRYING = "retrying"
     CANCELLED = "cancelled"
-
-
-# ---------------------------------------------------------------------------
-# Structured log event model
-# ---------------------------------------------------------------------------
 
 
 class StructuredLogEvent(BaseModel):
@@ -149,14 +135,12 @@ class StructuredLogEvent(BaseModel):
     )
     environment: str | None = Field(
         default=None,
-        description="Deployment environment (dev, staging, prod).",
+        description="Deployment environment (dev, uat, prod).",
     )
     emitted_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="UTC timestamp when this log event was emitted. ISO 8601.",
     )
-
-    # ── Validators ────────────────────────────────────────────────────────────
 
     @field_validator("run_id", mode="before")
     @classmethod
@@ -218,11 +202,6 @@ class StructuredLogEvent(BaseModel):
                 "Use a specific, domain-meaningful identifier instead."
             )
         return value
-
-
-# ---------------------------------------------------------------------------
-# Utility — sensitive value scrubber
-# ---------------------------------------------------------------------------
 
 
 def scrub_sensitive_values(text: str) -> str:

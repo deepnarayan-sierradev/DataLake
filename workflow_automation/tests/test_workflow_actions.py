@@ -17,6 +17,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from workflow_automation.action_registry import ActionContext, action_registry
 from workflow_automation.actions import (
     CallOutboundWebhookAction,
@@ -90,7 +91,7 @@ class _StaticSecretReader:
 
 def _create_destination_table() -> None:
     boto3.client("dynamodb", region_name=_REGION).create_table(
-        TableName="EdlWorkflowDestination",
+        TableName=RESOURCE_NAME_ENVIRONMENT["WORKFLOW_DESTINATION_TABLE"],
         KeySchema=[
             {"AttributeName": "tenant_code", "KeyType": "HASH"},
             {"AttributeName": "destination_id", "KeyType": "RANGE"},
@@ -121,7 +122,6 @@ class TestOutboundDestination:
             OutboundDestination(destination_id="crm", url="/hook", secret_arn="arn:secret")
 
     def test_a_file_url_is_refused(self) -> None:
-        # SSRF-adjacent schemes must not survive registration (OWASP A10).
         with pytest.raises(ValueError, match="absolute https"):
             OutboundDestination(
                 destination_id="crm", url="file:///etc/passwd", secret_arn="arn:secret"
@@ -223,7 +223,6 @@ class TestWriteExceptionAction:
             return "demo#rule#1"
 
     def test_the_exception_is_written_to_the_shared_dl_02_store(self) -> None:
-        # A parallel exception history would give two answers to "what is outstanding".
         repository = self._RecordingRepository()
         action = WriteExceptionAction(repository=repository)
         result = action.execute(
@@ -289,11 +288,10 @@ class TestInvokePipelineRunAction:
             )
 
     def test_the_execution_name_is_the_idempotency_key(self) -> None:
-        # Step Functions rejects a duplicate execution name, so a retry cannot double-run.
         client = _RecordingClient({"executionArn": "arn:exec"})
         action = InvokePipelineRunAction(
             region_name=_REGION,
-            state_machine_arn="arn:aws:states:us-east-1:1:stateMachine:edl",
+            state_machine_arn="arn:aws:states:us-east-1:1:stateMachine:datalake-workflow",
             sfn_client=client,
         )
         action.execute({"source_id": "salesforce", "entity_id": "account"}, _CONTEXT)
@@ -303,7 +301,7 @@ class TestInvokePipelineRunAction:
         client = _RecordingClient()
         action = InvokePipelineRunAction(
             region_name=_REGION,
-            state_machine_arn="arn:aws:states:us-east-1:1:stateMachine:edl",
+            state_machine_arn="arn:aws:states:us-east-1:1:stateMachine:datalake-workflow",
             sfn_client=client,
         )
         long_context = ActionContext(
@@ -320,7 +318,7 @@ class TestInvokePipelineRunAction:
         client = _RecordingClient()
         action = InvokePipelineRunAction(
             region_name=_REGION,
-            state_machine_arn="arn:aws:states:us-east-1:1:stateMachine:edl",
+            state_machine_arn="arn:aws:states:us-east-1:1:stateMachine:datalake-workflow",
             sfn_client=client,
         )
         action.execute({"source_id": "salesforce", "entity_id": "account"}, _CONTEXT)
@@ -331,7 +329,7 @@ class TestInvokePipelineRunAction:
     def test_describe_names_the_target_entity(self) -> None:
         action = InvokePipelineRunAction(
             region_name=_REGION,
-            state_machine_arn="arn:aws:states:us-east-1:1:stateMachine:edl",
+            state_machine_arn="arn:aws:states:us-east-1:1:stateMachine:datalake-workflow",
             sfn_client=_RecordingClient(),
         )
         assert "account" in action.describe({"entity_id": "account"})
@@ -387,7 +385,6 @@ class TestCallOutboundWebhookAction:
         assert session.posts[0]["url"] == "https://crm.example.com/hook"
 
     def test_a_payload_supplied_url_is_never_called(self) -> None:
-        # The parameter set carries no url at all; naming an unknown destination fails closed.
         action, session, _ = self._action()
         with pytest.raises(DestinationNotAllowedError):
             action.execute({"destination_id": "https://evil.example.com"}, _CONTEXT)
@@ -397,7 +394,9 @@ class TestCallOutboundWebhookAction:
         action, session, secrets = self._action()
         action.execute({"destination_id": "crm", "body": "payload"}, _CONTEXT)
         sent = session.posts[0]
-        assert sent["headers"]["X-Edl-Signature"] == sign_outbound_payload("shhh", sent["data"])
+        assert sent["headers"]["X-datalake-Signature"] == sign_outbound_payload(
+            "shhh", sent["data"]
+        )
         assert secrets.requested == ["arn:secret"]
 
     def test_the_secret_never_appears_in_the_request(self) -> None:
@@ -432,7 +431,6 @@ class TestCallOutboundWebhookAction:
 
 class TestGenerateReportAction:
     def test_report_generation_is_enqueued_for_the_enterprise_platform(self) -> None:
-        # Rendering here would duplicate EP-06's templating path.
         client = _RecordingClient()
         action = GenerateReportAction(
             region_name=_REGION, queue_url="https://sqs/reports", sqs_client=client
@@ -462,7 +460,7 @@ class TestInvokeConnectorWritebackAction:
     def test_the_writeback_payload_carries_tenant_connection_and_records(self) -> None:
         client = _RecordingClient({"StatusCode": 202})
         action = InvokeConnectorWritebackAction(
-            region_name=_REGION, function_name="edl-writeback", lambda_client=client
+            region_name=_REGION, function_name="datalake-writeback", lambda_client=client
         )
         result = action.execute(
             {
@@ -480,10 +478,9 @@ class TestInvokeConnectorWritebackAction:
         assert payload["records"] == [{"Id": "1"}]
 
     def test_a_blank_connection_id_becomes_none_not_an_empty_string(self) -> None:
-        # An empty connection_id would build a key segment that matches nothing.
         client = _RecordingClient()
         action = InvokeConnectorWritebackAction(
-            region_name=_REGION, function_name="edl-writeback", lambda_client=client
+            region_name=_REGION, function_name="datalake-writeback", lambda_client=client
         )
         action.execute({"connection_id": ""}, _CONTEXT)
         payload = json.loads(client.calls[0]["Payload"].decode("utf-8"))
@@ -491,7 +488,9 @@ class TestInvokeConnectorWritebackAction:
 
     def test_malformed_records_json_is_rejected(self) -> None:
         action = InvokeConnectorWritebackAction(
-            region_name=_REGION, function_name="edl-writeback", lambda_client=_RecordingClient()
+            region_name=_REGION,
+            function_name="datalake-writeback",
+            lambda_client=_RecordingClient(),
         )
         with pytest.raises(json.JSONDecodeError):
             action.execute({"records": "not json"}, _CONTEXT)
@@ -499,14 +498,16 @@ class TestInvokeConnectorWritebackAction:
     def test_the_invocation_is_asynchronous_so_a_slow_target_cannot_stall_the_engine(self) -> None:
         client = _RecordingClient()
         action = InvokeConnectorWritebackAction(
-            region_name=_REGION, function_name="edl-writeback", lambda_client=client
+            region_name=_REGION, function_name="datalake-writeback", lambda_client=client
         )
         action.execute({}, _CONTEXT)
         assert client.calls[0]["InvocationType"] == "Event"
 
     def test_describe_names_the_source(self) -> None:
         action = InvokeConnectorWritebackAction(
-            region_name=_REGION, function_name="edl-writeback", lambda_client=_RecordingClient()
+            region_name=_REGION,
+            function_name="datalake-writeback",
+            lambda_client=_RecordingClient(),
         )
         assert "salesforce" in action.describe({"source_id": "salesforce"})
 
@@ -525,7 +526,6 @@ class TestRegisterDefaultActions:
         assert action_registry.registered_kinds() == [ActionKind.SEND_NOTIFICATION.value]
 
     def test_registration_is_idempotent_for_a_warm_container(self) -> None:
-        # A re-import on a warm container must not raise on the already-registered kind.
         handler = SendNotificationAction(region_name=_REGION, sns_client=_RecordingClient())
         register_default_actions([handler])
         register_default_actions([handler])

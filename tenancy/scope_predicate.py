@@ -26,7 +26,6 @@ from tenancy.scope_contract import (
     validate_scope_unit_id,
 )
 
-# Physical column carrying the owning scope unit on every data layer (DL-SCOPE-09).
 SCOPE_UNIT_COLUMN: Final[str] = "scope_unit_id"
 
 
@@ -47,8 +46,6 @@ class ConsumptionSurface(StrEnum):
 class UnrestrictedScopeReason(StrEnum):
     """Why a read legitimately has no end-user claim to scope by; there are very few of these."""
 
-    # Compiling a KPI definition to check it parses and aggregates — there is no caller whose
-    # grant could scope it, because no caller is involved (DL-SEM-08).
     DEFINITION_VALIDATION = "definition_validation"
 
 
@@ -72,9 +69,6 @@ class ScopeClaims:
     tenant_code: str
     scope_unit_ids: frozenset[str] = frozenset()
     tenant_wide: bool = False
-    # Defaults to PARTITIONED, the stricter reading: only `build_scope_claims` may declare a
-    # tenant single, and only a declared-single claim is allowed the match-all implicit unit.
-    # A hand-constructed claim therefore cannot reach the widest predicate by omission.
     partition_model: PartitionModel = PartitionModel.PARTITIONED
 
     def __post_init__(self) -> None:
@@ -165,8 +159,6 @@ def build_scope_claims(
         return ScopeClaims(tenant_code=tenant_code, tenant_wide=True)
 
     if IMPLICIT_SCOPE_UNIT_ID in granted_scope_unit_ids:
-        # The sentinel is match-all by construction, so naming it against a partitioned tenant is
-        # a reach for every unit at once — rejected before any expansion.
         record_platform_metric(PlatformMetric.CROSS_SCOPE_ACCESS_ATTEMPTS, 1.0)
         raise UnknownScopeUnitError(
             f"Scope grant for partitioned tenant {tenant_code!r} names the reserved implicit "
@@ -176,8 +168,6 @@ def build_scope_claims(
     known = {u.scope_unit_id for u in (units or [])}
     unknown = {u for u in granted_scope_unit_ids if u not in known}
     if unknown:
-        # A claim naming a unit the tenant does not own is a cross-scope reach attempt,
-        # whether crafted or a stale grant. Either way it pages.
         record_platform_metric(PlatformMetric.CROSS_SCOPE_ACCESS_ATTEMPTS, len(unknown))
         raise UnknownScopeUnitError(
             f"Scope grant names units that do not exist for tenant {tenant_code!r}: "
@@ -247,8 +237,6 @@ def scope_predicate(
     record_platform_metric(PlatformMetric.ROW_LEVEL_PREDICATE_APPLIED, 1.0, Surface=surface.value)
 
     if claims.tenant_wide:
-        # Applied and audited even when it matches everything, so no surface has a
-        # code path in which the predicate is skipped.
         return ScopePredicate(
             sql=f"({column} IS NOT NULL OR {column} IS NULL)",
             parameters={},
@@ -262,22 +250,15 @@ def scope_predicate(
     in_clause = f"{column} IN ({placeholders})"
     if IMPLICIT_SCOPE_UNIT_ID in claims.scope_unit_ids:
         if claims.partition_model is not PartitionModel.SINGLE:
-            # `matches_all_rows` below is only true because a single tenant owns every row it can
-            # read. Reaching this branch with a partitioned claim would make the in-process filter
-            # match every unit while the SQL still filtered — the two would diverge silently.
             record_platform_metric(PlatformMetric.CROSS_SCOPE_ACCESS_ATTEMPTS, 1.0)
             raise UnknownScopeUnitError(
                 f"Claim for tenant {claims.tenant_code!r} carries the implicit unit but is not "
                 "declared single-partition. Build claims through build_scope_claims()."
             )
-        # Degenerate single-tenant case: rows written before scope stamping carry NULL
-        # and belong to the tenant's one implicit unit.
         return ScopePredicate(
             sql=f"({column} IS NULL OR {in_clause})",
             parameters=parameters,
             surface=surface,
             matches_all_rows=True,
         )
-    # Unattributable rows (NULL) are tenant-level and are deliberately excluded from a
-    # unit-scoped caller — fail closed, never "visible to everyone" (DL-12 D2).
     return ScopePredicate(sql=in_clause, parameters=parameters, surface=surface)

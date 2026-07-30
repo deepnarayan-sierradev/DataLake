@@ -29,12 +29,13 @@ from typing import Any, Final
 from analytics_publisher.analytics_location import latest_partition_uri
 from contracts.dlq_routing import DlqStage
 from contracts.platform_metrics import PlatformMetric
+from contracts.resource_naming import resource_name_prefix
 from observability.lambda_runtime import require_env
 from observability.metric_recorder import record_platform_metric
 from observability.stage_execution import StageIdentity, derive_correlation_id, stage_execution
 from observability.structured_logger import get_platform_logger
 from persistence.parquet_reader import iter_parquet_records
-from persistence.tenant_tables import TENANT_SCOPED_TABLES
+from persistence.tenant_tables import tenant_scoped_tables
 from portability.export_service import ExportFormat, ExportLayer, ExportService
 from tenancy.scope_predicate import (
     ConsumptionSurface,
@@ -78,16 +79,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         run_id=run_id,
         environment=environment,
         stage=_STAGE,
-        # Deliberately not replayable: automatically retrying a deletion or an export is wrong, and
-        # the deletion certificate (or the failed job record) is already the evidence. Declared
-        # rather than omitted, so a handler that simply forgot to route remains a build error.
         dlq_stage=DlqStage.NOT_REPLAYABLE,
         correlation_id=derive_correlation_id(run_id, event.get("replay_of_run_id")),
     )
 
     with stage_execution(identity, region_name=region_name, lambda_context=context):
-        # A privileged operation this system owns outright, so it is the correct producer for
-        # AdminActions — see the ownership boundary in the root CLAUDE.md.
         record_platform_metric(
             PlatformMetric.ADMIN_ACTIONS, 1.0, Capability=f"portability_{action}"
         )
@@ -227,8 +223,6 @@ def _run_deletion(
         serving_store_tenant_deleter,
     )
 
-    # Maker-checker and the typed confirmation are enforced by DeletionRequest itself; constructing
-    # it is the authorization check, which is why it happens before any deleter is built.
     request = DeletionRequest(
         tenant_code=tenant_code,
         requested_by=str(event.get("requested_by") or ""),
@@ -239,10 +233,6 @@ def _run_deletion(
     )
 
     s3 = boto3.client("s3", region_name=region_name)
-    # Every store in `DeletionStore` now has a deleter. Four did until 2026-07-29, and because the
-    # saga refuses to certify a deletion whose stores it did not cover, that meant a correctly
-    # authorised deletion *always* raised `IncompleteDeletionError` — DL-PORT-04 and SOW §24.7
-    # could not succeed. Failing loudly was the right design; the missing deleters were the defect.
     deleters = {
         DeletionStore.S3_RAW: s3_prefix_deleter(
             s3, require_env("RAW_S3_BUCKET"), DeletionStore.S3_RAW
@@ -263,7 +253,7 @@ def _run_deletion(
             s3, require_env("EXPORT_ARTEFACT_BUCKET"), DeletionStore.S3_EXPORTS
         ),
         DeletionStore.DYNAMODB_TABLES: dynamodb_tenant_item_deleter(
-            boto3.resource("dynamodb", region_name=region_name), TENANT_SCOPED_TABLES
+            boto3.resource("dynamodb", region_name=region_name), tenant_scoped_tables()
         ),
         DeletionStore.SECRETS_MANAGER: secrets_manager_tenant_deleter(
             boto3.client("secretsmanager", region_name=region_name)
@@ -274,8 +264,6 @@ def _run_deletion(
         DeletionStore.CLOUDWATCH_LOGS: cloudwatch_logs_tenant_deleter(
             boto3.client("logs", region_name=region_name), _pipeline_log_groups(environment)
         ),
-        # DL-05 is deferred, so there is no ML platform and no artefacts. Stated rather than
-        # omitted: omitting the store makes the saga refuse to certify forever.
         DeletionStore.ML_ARTEFACTS: no_artefacts_deleter(
             DeletionStore.ML_ARTEFACTS, "DL-05 ML platform is deferred; no artefacts are produced"
         ),
@@ -300,7 +288,7 @@ def _run_deletion(
 def _pipeline_log_groups(environment: str) -> tuple[str, ...]:
     """Log groups whose streams are tenant-prefixed; the groups themselves are shared."""
     return tuple(
-        f"/aws/lambda/edl-{function}-{environment}"
+        f"/aws/lambda/{resource_name_prefix()}-{function}-{environment}"
         for function in (
             "extraction",
             "transformation",

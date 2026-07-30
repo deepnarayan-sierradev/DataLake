@@ -37,7 +37,6 @@ def s3_setup():
         s3 = boto3.client("s3", region_name=REGION)
         _create_object_lock_bucket(s3, BUCKET)
         _create_object_lock_bucket(s3, GOVERNANCE_BUCKET)
-        # Put a test object
         s3.put_object(Bucket=BUCKET, Key="curated/entity/file.parquet", Body=b"data")
         yield s3
 
@@ -67,11 +66,9 @@ class TestApplyRetention:
             key="curated/entity/file.parquet",
             retention_days=90,
         )
-        # Verify an audit object was written to the governance bucket
         s3 = boto3.client("s3", region_name=REGION)
         objects = s3.list_objects_v2(Bucket=GOVERNANCE_BUCKET, Prefix="retention-audit/")
         assert objects["KeyCount"] >= 1
-        # Verify audit JSON payload
         key = objects["Contents"][0]["Key"]
         body = s3.get_object(Bucket=GOVERNANCE_BUCKET, Key=key)["Body"].read()
         payload = json.loads(body)
@@ -98,7 +95,6 @@ class TestLegalHold:
         enforcer = RetentionPolicyEnforcer(
             governance_s3_bucket=GOVERNANCE_BUCKET, region_name=REGION
         )
-        # First apply, then lift
         enforcer.apply_legal_hold(bucket=BUCKET, key="curated/entity/file.parquet")
         result = enforcer.lift_legal_hold(bucket=BUCKET, key="curated/entity/file.parquet")
         assert result.hold_status == "OFF"

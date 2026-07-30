@@ -161,13 +161,13 @@ What is **not** defined:
 
 | Store | Purpose |
 |---|---|
-| `EdlEffectiveConfig` (new) | PK `tenant_code`, SK `{capability}#{scope_id}#{entity_key}` — effective version, first-consuming run, effective-at timestamp, schema version |
-| `EdlConfigRestatement` (new) | PK `tenant_code`, SK `{capability}#{event_id}` — metrics, periods, before/after definition, actor |
-| `EdlRunAuditLog` (existing) | add the pinned `config_versions` object to the run record |
+| `datalake-effective-config-dev` (new) | PK `tenant_code`, SK `{capability}#{scope_id}#{entity_key}` — effective version, first-consuming run, effective-at timestamp, schema version |
+| `datalake-config-restatements-dev` (new) | PK `tenant_code`, SK `{capability}#{event_id}` — metrics, periods, before/after definition, actor |
+| `datalake-run-audit-log-dev` (existing) | add the pinned `config_versions` object to the run record |
 | Step Functions payload | add `config_versions` alongside the existing `tenant_code` and `entity_type` |
 | Lineage records | extend to the full pinned set, not only the two resolution versions |
 
-Reprocessing jobs reuse `EdlBackfillJob` (DL-DQ-01) with a `reprocess_reason` and the pinned target
+Reprocessing jobs reuse `datalake-backfill-jobs-dev` (DL-DQ-01) with a `reprocess_reason` and the pinned target
 configuration version — no second job store.
 
 ---

@@ -21,9 +21,10 @@ import pytest
 from moto import mock_aws
 
 import connector_runtime.api.control_plane_handler as cp
+from conftest import RESOURCE_NAME_ENVIRONMENT
 
 _REGION: Final[str] = "us-east-1"
-_TABLE: Final[str] = "EdlRunAuditLog"
+_TABLE: Final[str] = RESOURCE_NAME_ENVIRONMENT["AUDIT_LOG_TABLE"]
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +32,6 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AWS_REGION", _REGION)
     monkeypatch.setenv("PLATFORM_ENVIRONMENT", "dev")
     monkeypatch.setenv("AUDIT_LOG_TABLE", _TABLE)
-    # The presence cache is per container; a stale entry would leak between tests.
     cp._INDEX_PRESENCE.clear()
 
 
@@ -139,8 +139,6 @@ class TestIndexIsUsedWhenPresent:
 class TestFallbackWhenIndexIsAbsent:
     @mock_aws
     def test_scan_is_used_so_code_can_deploy_before_terraform(self) -> None:
-        # Deploy ordering: the Lambda ships before the GSI exists. Failing closed here would take
-        # the endpoint down rather than merely making it slow.
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         table = _create_table(dynamodb, with_index=False)
         _seed(table, "demo", 2)
@@ -187,7 +185,6 @@ class TestRunsArePagedByRunNotByAuditRow:
 
     @mock_aws
     def test_thirty_runs_of_thirteen_stages_all_appear(self) -> None:
-        # 390 audit rows. Under the old item-cap of 50 this returned about four runs.
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         table = _create_table(dynamodb, with_index=True)
         _seed_multi_stage(table, "demo", runs=30, stages=13)
@@ -204,7 +201,6 @@ class TestRunsArePagedByRunNotByAuditRow:
 
         body = json.loads(cp.lambda_handler(_event(), None)["body"])
         assert body["count"] == cp._MAX_RUNS_LISTED
-        # The rest must be reachable rather than silently dropped.
         assert body["next_token"] is not None
 
     @mock_aws
@@ -225,7 +221,6 @@ class TestRunsArePagedByRunNotByAuditRow:
 
     @mock_aws
     def test_the_last_page_advertises_no_cursor(self) -> None:
-        # Positive control: a cursor that is always present would make the test above vacuous.
         dynamodb = boto3.resource("dynamodb", region_name=_REGION)
         table = _create_table(dynamodb, with_index=True)
         _seed_multi_stage(table, "demo", runs=2, stages=3)

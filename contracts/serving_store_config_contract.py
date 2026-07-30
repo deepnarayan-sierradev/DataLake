@@ -20,11 +20,8 @@ from pydantic import BaseModel, Field, field_validator
 from contracts.identifier_policy import ENTITY_TYPE_PATTERN as _ENTITY_TYPE_PATTERN
 from contracts.identifier_policy import TENANT_CODE_PATTERN as _TENANT_CODE_PATTERN
 
-# Matches connector_runtime/adapters/mysql_rds/mysql_rds_params.py's table_name
-# pattern — same boundary-validation convention, config-contract layer.
 _SQL_IDENTIFIER_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 
-# DB endpoint hostname (RDS/Redshift endpoint) — letters, digits, dots, hyphens only.
 _DB_HOST_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,254}$")
 
 

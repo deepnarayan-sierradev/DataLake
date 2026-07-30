@@ -53,7 +53,6 @@ _ENDPOINT_SUPPLIER = "BPSUPPLIER"
 _ENDPOINT_UNKNOWN = "UNKNOWNOBJ"
 _BASE_URL = "https://x3.company.com/api/SEED"
 
-# A minimal realistic sample record for BPCUSTOMER.
 _SAMPLE_BPCUSTOMER_RECORD = {
     "BPCNUM_0": "CUST001",
     "BPCNAM_0": "Acme Corp",
@@ -85,19 +84,9 @@ def _make_client(endpoint: str = _ENDPOINT_CUSTOMER) -> X3MetadataClient:
     )
 
 
-# ---------------------------------------------------------------------------
-# Class-level attributes
-# ---------------------------------------------------------------------------
-
-
 class TestClassAttributes:
     def test_supports_live_discovery_is_true(self) -> None:
         assert X3MetadataClient.supports_live_discovery is True
-
-
-# ---------------------------------------------------------------------------
-# Live sampling
-# ---------------------------------------------------------------------------
 
 
 class TestLiveSampling:
@@ -134,7 +123,6 @@ class TestLiveSampling:
         )
 
         field_names = {f.name for f in contract.fields}
-        # @odata.etag should be excluded
         assert not any(n.startswith("@") for n in field_names)
 
     def test_schema_cached_on_second_call(self) -> None:
@@ -198,14 +186,8 @@ class TestLiveSampling:
         )
 
         call_kwargs = client._http.get.call_args
-        # The URL or params should contain $top=1
         url_or_params_str = str(call_kwargs)
         assert "$top" in url_or_params_str or "top" in url_or_params_str.lower()
-
-
-# ---------------------------------------------------------------------------
-# Type inference
-# ---------------------------------------------------------------------------
 
 
 class TestTypeInference:
@@ -262,11 +244,6 @@ class TestTypeInference:
         assert field.is_nullable is True
 
 
-# ---------------------------------------------------------------------------
-# Static fallback
-# ---------------------------------------------------------------------------
-
-
 class TestStaticFallback:
     def test_known_endpoint_empty_response_uses_static_fallback(self) -> None:
         client = _make_client(endpoint=_ENDPOINT_CUSTOMER)
@@ -282,7 +259,6 @@ class TestStaticFallback:
         )
 
         field_names = {f.name for f in contract.fields}
-        # Static BPCUSTOMER schema should be used
         assert "BPCNUM_0" in field_names
         assert "MODDAT_0" in field_names
 
@@ -357,11 +333,6 @@ class TestStaticFallback:
         assert "BPSNUM_0" in names
         assert "BPSNAM_0" in names
         assert "MODDAT_0" in names
-
-
-# ---------------------------------------------------------------------------
-# FieldMode filtering
-# ---------------------------------------------------------------------------
 
 
 class TestFieldModeFiltering:

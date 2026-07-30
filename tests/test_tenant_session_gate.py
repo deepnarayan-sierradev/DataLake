@@ -37,42 +37,35 @@ class TestTheInterlockCannotBeBypassed:
         )
 
     def test_enforce_requires_the_adoption_flag_in_terraform(self) -> None:
-        # The interlock itself: mode alone must not be sufficient.
         text = BOUNDARY_TF.read_text(encoding="utf-8")
         assert 'var.tenant_boundary_mode == "enforce" && var.tenant_session_tagging_adopted' in text
 
     def test_the_boundary_refuses_empty_resource_lists(self) -> None:
-        # Every environment left these unset, producing statements with no Resource — which IAM
-        # rejects, so the policy could never have applied while `validate` stayed green.
         text = BOUNDARY_TF.read_text(encoding="utf-8")
         assert "length(var.data_bucket_arns) > 0" in text
         assert "length(var.tenant_scoped_table_arns) > 0" in text
 
     def test_enforce_requires_a_cloudtrail_log_group(self) -> None:
-        # Otherwise the observation window that gates the flip measures nothing.
         text = BOUNDARY_TF.read_text(encoding="utf-8")
         assert 'var.cloudtrail_log_group_name != ""' in text
 
     def test_the_boundary_attaches_to_the_tagged_data_roles(self) -> None:
-        # Attaching to the shared stage roles is what made the policy unsatisfiable.
         text = BOUNDARY_TF.read_text(encoding="utf-8")
         assert 'resource "aws_iam_role" "tenant_data"' in text
         assert "sts:TagSession" in text
 
     def test_the_trust_policy_requires_the_tag_to_be_present(self) -> None:
-        # A role assumable without the tag is the untagged state under another name.
         text = BOUNDARY_TF.read_text(encoding="utf-8")
         assert "aws:RequestTag/tenant_code" in text
 
 
 class TestTheGateReportsHonestly:
     def test_the_scan_finds_the_known_remaining_work(self) -> None:
-        # A gate reporting zero while 47 sites remain would be the original defect again.
         assert len(scan()) > 0, "the scanner found nothing — verify it still detects boto3.client"
 
     def test_every_environment_declares_the_flag(self) -> None:
         states = adoption_flag_states()
-        assert set(states) == {"dev", "staging", "prod"}
+        assert set(states) == {"dev", "uat", "prod"}
         assert "unset" not in states.values(), "an unset flag is not a decision"
 
 

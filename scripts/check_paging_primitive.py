@@ -28,10 +28,8 @@ from typing import Final
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 
-# The one package allowed to implement paging. Everything else consumes it.
 PRIMITIVE_PACKAGE: Final[str] = "persistence"
 
-# Attribute and keyword names that only appear when a caller is driving paging by hand.
 PAGING_MARKERS: Final[frozenset[str]] = frozenset({"LastEvaluatedKey", "ExclusiveStartKey"})
 
 EXCLUDED_PARTS: Final[frozenset[str]] = frozenset({"tests", "__pycache__", ".venv", "dist", "pptx"})
@@ -54,8 +52,6 @@ def violations_in(path: Path) -> list[Violation]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     found: list[Violation] = []
     for node in ast.walk(tree):
-        # `ast.walk` yields nodes with no guaranteed `lineno` (ast.Module has none), so the two
-        # shapes are narrowed separately rather than reading the attribute off the union.
         if isinstance(node, ast.Constant) and node.value in PAGING_MARKERS:
             found.append(Violation(path=path, line=node.lineno, marker=str(node.value)))
         elif isinstance(node, ast.keyword) and node.arg in PAGING_MARKERS:
@@ -69,7 +65,6 @@ def main() -> int:
         relative = path.relative_to(REPO_ROOT)
         if set(relative.parts) & EXCLUDED_PARTS:
             continue
-        # `scripts/` holds one-shot migrations that predate the primitive and run standalone.
         if relative.parts[0] in {PRIMITIVE_PACKAGE, "scripts"}:
             continue
         violations.extend(violations_in(path))

@@ -37,20 +37,14 @@ from observability.structured_logger import get_platform_logger
 
 _logger = get_platform_logger(__name__)
 
-# SuiteQL record type and field name pattern.
-# NetSuite record types follow standard SQL identifier conventions.
 _IDENTIFIER_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,254}$")
 
-# ISO-8601 UTC date-time pattern used for watermark parameter validation.
-# Only these values are accepted as watermark bounds to prevent injection.
 _ISO8601_UTC_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?([+-]\d{2}:\d{2})?$"
 )
 
-# SuiteQL endpoint path (relative; host is account-specific).
 _SUITEQL_PATH: Final[str] = "/services/rest/query/v1/suiteql"
 
-# Maximum rows per SuiteQL page (NetSuite limit).
 _PAGE_SIZE: Final[int] = 1_000
 
 
@@ -130,7 +124,6 @@ class NetSuiteIncrementalQueryPlanner:
                 "watermark_field is required for INCREMENTAL load type."
             )
 
-        # Validate and extract field names from the contract.
         field_names: list[str] = []
         for descriptor in field_contract.fields:
             if not _IDENTIFIER_PATTERN.match(descriptor.name):
@@ -151,11 +144,6 @@ class NetSuiteIncrementalQueryPlanner:
                     f"watermark_field {watermark_field!r} does not match identifier pattern."
                 )
 
-        # DUP-4: the actual SELECT/FROM/WHERE assembly is shared with
-        # Salesforce SOQL and MySQL — see build_incremental_select(). SuiteQL
-        # uses no identifier quoting and ":lower_bound"/":upper_bound"
-        # placeholders, textually substituted by bind_parameters() below
-        # (SuiteQL has no server-side parameter binding).
         query_text, query_parameters, effective_watermark_field = build_incremental_select(
             field_names=field_names,
             table=self._record_type,
@@ -219,8 +207,6 @@ class NetSuiteIncrementalQueryPlanner:
                     f"Parameter {param_name!r} value {value_str!r} is not a valid "
                     "ISO-8601 datetime — will not substitute to prevent SQL injection."
                 )
-            # Use a regex word-boundary lookahead so that `:lower_bound` does not
-            # accidentally match inside `:lower_bound_extended` (prefix collision safety).
             bound = re.sub(
                 rf":{re.escape(param_name)}(?!\w)",
                 f"'{value_str}'",

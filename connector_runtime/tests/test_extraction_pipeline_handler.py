@@ -27,15 +27,12 @@ import pytest
 from connector_runtime.extraction_pipeline_handler import lambda_handler
 from orchestration.step_functions.extraction_workflow import ExtractionWorkflowResult
 
-# ---------------------------------------------------------------------------
-# Shared constants
-# ---------------------------------------------------------------------------
 _SOURCE = "salesforce"
 _ENTITY = "salesforce-account"
 _ENV = "dev"
 _REGION = "us-east-1"
 _RAW_BUCKET = "dev-raw-layer"
-_SNAPSHOT_BUCKET = "edl-schema-snapshots-087972550871"
+_SNAPSHOT_BUCKET = "datalake-schema-snapshots-dev-use1"
 
 _VALID_EVENT: dict[str, object] = {
     "source_id": _SOURCE,
@@ -73,11 +70,6 @@ def _patch_workflow() -> MagicMock:
     mock_workflow_instance.execute.return_value = _FAKE_RESULT
     mock_workflow_cls.return_value = mock_workflow_instance
     return mock_workflow_cls
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 class TestHappyPath:

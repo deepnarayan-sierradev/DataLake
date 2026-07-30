@@ -32,7 +32,6 @@ from tenancy.source_connection import SourceConnection
 
 _logger = get_platform_logger(__name__)
 
-# Above this share of unattributable rows the mapping is treated as broken (DL-DQ-14).
 DEFAULT_UNATTRIBUTED_THRESHOLD_PCT: float = 5.0
 
 
@@ -70,12 +69,9 @@ class ScopeAttributor:
     def resolve(self, record: dict[str, Any]) -> str | None:
         """Owning scope unit for one record, or None when unattributable."""
         if self._profile.partition_model is PartitionModel.SINGLE:
-            # Degenerate by construction — every row belongs to the one implicit unit.
             return IMPLICIT_SCOPE_UNIT_ID
 
         if self._connection is None:
-            # Partitioned tenant with no connection context: unattributable, which fails closed
-            # downstream rather than defaulting to the implicit unit (which would be match-all).
             return None
 
         owner = self._connection.owning_scope_unit_id()

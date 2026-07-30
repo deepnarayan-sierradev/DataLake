@@ -22,6 +22,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from conftest import RESOURCE_NAME_ENVIRONMENT
 from contracts.entity_configuration_contract import EntityExtractionConfig, LoadType
 from watermark_management.watermark_repository.watermark_repository import (
     WatermarkConcurrencyError,
@@ -32,14 +33,9 @@ from watermark_management.watermark_repository.watermark_repository import (
 
 _REGION = "us-east-1"
 _ENV = "dev"
-_TABLE = "EdlWatermarkRepository"
+_TABLE = RESOURCE_NAME_ENVIRONMENT["WATERMARK_TABLE"]
 
 _NOW = datetime(2026, 6, 11, 14, 0, 0, tzinfo=UTC)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _create_table() -> None:
@@ -87,11 +83,6 @@ def _repo() -> WatermarkRepository:
     return WatermarkRepository(environment=_ENV, region_name=_REGION)
 
 
-# ---------------------------------------------------------------------------
-# get_watermark
-# ---------------------------------------------------------------------------
-
-
 class TestGetWatermark:
     @mock_aws
     def test_returns_none_when_no_record(self) -> None:
@@ -113,11 +104,6 @@ class TestGetWatermark:
         assert record is not None
         assert record.source_id == "salesforce"
         assert record.version == 0
-
-
-# ---------------------------------------------------------------------------
-# initialise_watermark
-# ---------------------------------------------------------------------------
 
 
 class TestInitialiseWatermark:
@@ -146,14 +132,8 @@ class TestInitialiseWatermark:
         run_id_b = "run-20260611-140000000000-bbbbbbbb"
 
         repo.initialise_watermark("salesforce", "salesforce-account", _NOW, run_id_a)
-        # Second initialise should return the existing record, not overwrite
         result = repo.initialise_watermark("salesforce", "salesforce-account", _NOW, run_id_b)
         assert result.run_id == run_id_a  # Original run_id preserved
-
-
-# ---------------------------------------------------------------------------
-# advance_watermark
-# ---------------------------------------------------------------------------
 
 
 class TestAdvanceWatermark:
@@ -182,7 +162,6 @@ class TestAdvanceWatermark:
         initial = repo.initialise_watermark(
             "salesforce", "salesforce-account", _NOW, "run-20260611-140000000000-aaaa0001"
         )
-        # Simulate a failed run: reload without advancing
         reloaded = repo.get_watermark("salesforce", "salesforce-account")
         assert reloaded is not None
         assert reloaded.version == initial.version
@@ -195,24 +174,17 @@ class TestAdvanceWatermark:
         record_v0 = repo.initialise_watermark(
             "salesforce", "salesforce-account", _NOW, "run-20260611-140000000000-aaaa0001"
         )
-        # Advance once (version → 1)
         repo.advance_watermark(
             current=record_v0,
             new_upper_watermark=_NOW + timedelta(hours=1),
             run_id="run-20260611-140000000000-aaaa0002",
         )
-        # Attempt second advance with the stale v0 record → must fail
         with pytest.raises(WatermarkConcurrencyError, match="version"):
             repo.advance_watermark(
                 current=record_v0,
                 new_upper_watermark=_NOW + timedelta(hours=2),
                 run_id="run-20260611-140000000000-aaaa0003",
             )
-
-
-# ---------------------------------------------------------------------------
-# compute_extraction_window
-# ---------------------------------------------------------------------------
 
 
 class TestComputeExtractionWindow:
@@ -253,11 +225,6 @@ class TestComputeExtractionWindow:
         assert lower == _NOW - timedelta(days=config.extraction_window_days)
 
 
-# ---------------------------------------------------------------------------
-# compute_replay_window
-# ---------------------------------------------------------------------------
-
-
 class TestComputeReplayWindow:
     def test_returns_window_unchanged(self) -> None:
         start = _NOW - timedelta(days=7)
@@ -273,11 +240,6 @@ class TestComputeReplayWindow:
     def test_raises_when_start_after_end(self) -> None:
         with pytest.raises(ValueError, match="before"):
             WatermarkRepository.compute_replay_window(_NOW, _NOW - timedelta(hours=1))
-
-
-# ---------------------------------------------------------------------------
-# Serialisation
-# ---------------------------------------------------------------------------
 
 
 class TestSerialisedWatermark:
@@ -297,11 +259,6 @@ class TestSerialisedWatermark:
         assert isinstance(item["upper_watermark"], str)
         assert isinstance(item["updated_at"], str)
         assert item["version"] == 0
-
-
-# ---------------------------------------------------------------------------
-# Regression tests for fixed bugs
-# ---------------------------------------------------------------------------
 
 
 class TestAdvanceWatermarkGuard:
@@ -342,7 +299,6 @@ class TestAdvanceWatermarkGuard:
             _NOW,
             "run-20260611-140000000000-aaaa0001",
         )
-        # Advancing to the same upper_watermark (re-run of same window) is allowed.
         advanced = repo.advance_watermark(
             current=record,
             new_upper_watermark=_NOW,
@@ -359,13 +315,6 @@ class TestComputeExtractionWindowIsStatic:
         lower, upper = WatermarkRepository.compute_extraction_window(None, config, _NOW)
         assert upper == _NOW
         assert lower == datetime(1970, 1, 1, tzinfo=UTC)
-
-
-# ---------------------------------------------------------------------------
-# Additional error-path coverage: get_watermark ClientError re-raises,
-# _coerce_datetime validator branches, empty environment raises,
-# initialise_watermark race-condition branch (ConditionalCheckFailed + None)
-# ---------------------------------------------------------------------------
 
 
 @mock_aws
@@ -441,7 +390,6 @@ class TestWatermarkRepositoryErrorPaths:
 
         from botocore.exceptions import ClientError
 
-        # Initialise first
         rec = self.repo.initialise_watermark(
             "sf", "sf-account", upper_watermark=_NOW, run_id="run-init-001"
         )
@@ -484,12 +432,10 @@ class TestTenantScoping:
         repo.initialise_watermark(
             "salesforce", "salesforce-account", _NOW, "run-001", tenant_code="acme-corp"
         )
-        # Requesting under a different tenant must behave like "first run".
         other_tenant = repo.get_watermark(
             "salesforce", "salesforce-account", tenant_code="globex-eu"
         )
         assert other_tenant is None
-        # The owning tenant still sees it.
         owning_tenant = repo.get_watermark(
             "salesforce", "salesforce-account", tenant_code="acme-corp"
         )

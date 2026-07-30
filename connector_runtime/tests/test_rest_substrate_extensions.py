@@ -146,7 +146,6 @@ class TestPaginationParameterNaming:
         assert seen[1] == {"skipCount": 2, "maxResultCount": 2}
 
     def test_the_default_names_are_unchanged(self) -> None:
-        # Negative control: a source that declares nothing must behave exactly as before.
         seen = _pages_from("offset_limit", SourceRequest(entity_id="e", page_size=2), [])
         assert seen[0] == {"offset": 0, "limit": 2}
 
@@ -256,7 +255,6 @@ class TestRecordUnwrapping:
         assert response.records(("entry",), "resource") == [{"id": "1"}]
 
     def test_without_an_unwrap_field_the_envelope_is_returned_as_is(self) -> None:
-        # Negative control: unwrapping must be opt-in, not applied to every source.
         response = RestResponse(200, {"entry": [{"resource": {"id": "1"}}]}, {})
         assert response.records(("entry",)) == [{"resource": {"id": "1"}}]
 
@@ -279,7 +277,6 @@ class TestConfigDeclaredEntities:
         return _spec((RestEntitySpec(entity_id="declared", path="/v1/declared"),), **overrides)
 
     def test_a_declared_entity_still_wins_over_configuration(self) -> None:
-        # Configuration must never be able to redirect a curated endpoint somewhere else.
         resolved = resolve_entity_spec(
             self._source(),
             self._params(entity_id="declared", entity_path="/v1/somewhere-else"),
@@ -364,8 +361,6 @@ class TestConfigDeclaredEntities:
         ]
         assert connector.health_check() is True
 
-    # ── Security: configuration is a validated boundary, not an escape hatch ──
-
     @pytest.mark.parametrize(
         "path",
         [
@@ -383,19 +378,14 @@ class TestConfigDeclaredEntities:
 
     @pytest.mark.parametrize("path", ["/../../etc/passwd", "/v1/../admin", "/v1/a/../../b", "/.."])
     def test_a_parent_directory_segment_is_refused(self, path: str) -> None:
-        # `urljoin` clamps traversal at the host root so the allowlist still holds, but a
-        # config-declared path could otherwise aim a read at any endpoint on that host.
         with pytest.raises(ValueError, match="parent-directory segment"):
             resolve_entity_spec(self._source(), self._params(entity_path=path))
 
     def test_a_dot_inside_a_segment_is_still_allowed(self) -> None:
-        # Negative control: `.` is legal in a real path segment (`/v1/report.json`), so the
-        # traversal guard must reject the segment `..`, not every dot.
         resolved = resolve_entity_spec(self._source(), self._params(entity_path="/v1/report.json"))
         assert resolved.path == "/v1/report.json"
 
     def test_configuration_cannot_enable_writeback(self) -> None:
-        # Enabling a read must never be able to enable a source mutation.
         resolved = resolve_entity_spec(self._source(), self._params(entity_path="/api/v2/quotes"))
         assert resolved.writeback_path is None
         assert resolved.supports_writeback is False
@@ -442,12 +432,9 @@ class TestBareArrayResponses:
         assert response.records(()) == [{"id": "1"}, {"id": "2"}]
 
     def test_a_blank_response_yields_no_records_not_one_empty_one(self) -> None:
-        # A blank body parses to `{}`. Yielding it would write a field-less row to the raw
-        # layer and change the schema fingerprint on every empty run.
         assert RestResponse(200, {}, {}).records(()) == []
 
     def test_a_single_object_body_is_still_one_record(self) -> None:
-        # Negative control: the empty-object guard must not drop a real single-object body.
         assert RestResponse(200, {"id": "1"}, {}).records(()) == [{"id": "1"}]
 
 
@@ -485,7 +472,6 @@ class TestPostSearchReads:
             extraction_window_days=7,
         )
         assert contract.request_body == {"updated": "ge2026-07-01T00:00:00"}
-        # No upper bound: the API publishes no `le` form, so sending one would be a guess.
         assert "updated_before" not in contract.query_parameters
 
     def test_the_read_is_issued_as_a_post_with_paging_in_the_query_string(self) -> None:
@@ -511,8 +497,6 @@ class TestPostSearchReads:
         assert [r.payload for r in records] == [{"id": "1"}]
 
     def test_a_post_read_does_not_request_a_properties_projection(self) -> None:
-        # `properties` is a HubSpot-shaped GET parameter; sending it on a search body
-        # source would be an unrecognised filter, not a projection.
         connector = self._connector(_RecordingSession())
         contract = connector.build_extraction_query(
             field_contract=connector.discover_queryable_fields(
@@ -577,7 +561,6 @@ class TestRequiredRunParameters:
         assert classification.name == "DETERMINISTIC_INVALID_CONFIGURATION"
 
     def test_a_supplied_scope_passes_the_guard(self) -> None:
-        # Negative control: the guard must not block a correctly-scoped run.
         connector, contract = self._connector({"match_id": "1234"})
         assert list(connector.execute_extraction(contract, run_id="r")) == []
 
@@ -628,7 +611,6 @@ class TestSessionKeyQueryAuth:
         assert "hunter2" not in caplog.text
 
     def test_a_bearer_source_does_not_gain_a_query_credential(self) -> None:
-        # Negative control: the query credential is specific to the session-key kind.
         spec = _spec((RestEntitySpec(entity_id="c", path="/v1/c"),))
         transport = _RecordingSession()
         RestHttpSession(spec, {"access_token": "t"}, _CountingPolicy(), session=transport).get(
@@ -867,7 +849,6 @@ class TestMidRunTokenExpiry:
             session.get("/v1/c")
 
     def test_a_source_without_a_token_endpoint_does_not_retry_a_401(self) -> None:
-        # Negative control: the retry is bought by the token exchange, not by every 401.
         spec = _spec((RestEntitySpec(entity_id="c", path="/v1/c"),))
         transport = _RecordingSession([_FakeHttpResponse(401, {})])
         session = RestHttpSession(spec, {"access_token": "t"}, _CountingPolicy(), session=transport)
